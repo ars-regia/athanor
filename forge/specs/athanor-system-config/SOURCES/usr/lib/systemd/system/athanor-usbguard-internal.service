@@ -13,21 +13,22 @@ ConditionPathExists=!/var/lib/athanor/usbguard-internal.done
 
 [Service]
 Type=oneshot
-# The bound on the start (#490). systemd arms TimeoutStartSec= afresh for each command
-# (service_spawn() in src/core/service.c, systemd 258): udevadm settle ends within its own 10 s,
-# then the script has 30 s for its 10 s bound, a read in progress at the bound and the syncs. A
-# read of bConfigurationValue or of the serial waits for the device lock, which a driver probe
-# can hold; the wait is interruptible, so at the timeout SIGTERM ends the script and the greeter
-# waits about 40 s at most. A process that survived SIGKILL, in a wait the kernel does not
-# interrupt, would add TimeoutStopSec= four times (SIGTERM, SIGKILL, the final SIGTERM and
-# SIGKILL) before systemd marks the unit failed: about 60 s, a case not verified on hardware.
+# The bound on the start (#490). The script has TimeoutStartSec= for its 10 s bound, a read in
+# progress at the bound and the syncs. A read of bConfigurationValue or of the serial waits for
+# the device lock, which a driver probe can hold; the wait is interruptible, so at the timeout
+# SIGTERM ends the script and the greeter waits about 30 s at most. A process that survived
+# SIGKILL, in a wait the kernel does not interrupt, would add TimeoutStopSec= four times
+# (SIGTERM, SIGKILL, the final SIGTERM and SIGKILL, src/core/service.c of systemd 258) before
+# systemd marks the unit failed: about 50 s, a case not verified on hardware.
+# No `udevadm settle` before the script: under NoNewPrivileges= it cannot enter udev_t, SELinux
+# denies init_t udev's varlink socket, and its failure skipped the script at every boot. The
+# script waits for the devices itself, reading each until two passes agree.
 # greetd and usbguard.service are only ordered after this unit, so they start whether it
 # succeeds, fails or times out. A run that does not finish leaves no marker, and the next boot
 # reads only the devices the pending file names; a run that reads pending devices counts itself
 # first, so retries killed at every boot still end after three runs.
 TimeoutStartSec=30s
 TimeoutStopSec=5s
-ExecStartPre=/usr/bin/udevadm settle --timeout=10
 ExecStart=/usr/libexec/athanor-usbguard-internal
 StateDirectory=athanor
 ReadWritePaths=/etc/usbguard/rules.d

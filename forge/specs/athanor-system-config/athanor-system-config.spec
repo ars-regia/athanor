@@ -91,6 +91,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   holds a device lock cannot hold back the greeter indefinitely. The first run keeps the
   pending file as it sees the devices, so a first run stopped by that bound is continued at the
   ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
+  The unit no longer runs `udevadm settle` first: under NoNewPrivileges= SELinux denied it
+  udev's socket, so the unit failed at every boot before the script ran.
   A later run waits until the bound for a pending port that has not enumerated yet.
   A rules file that cannot be read fails the run and is kept as it is.
   A pending device read with no serial is recorded as such and matches only a device with

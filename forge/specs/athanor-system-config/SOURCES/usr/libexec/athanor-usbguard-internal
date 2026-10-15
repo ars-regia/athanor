@@ -147,7 +147,8 @@ devices() {
 # describe DEVICE: prints what one pass reads of the device, a value a line: idVendor,
 # idProduct, serial, bConfigurationValue, then each interface as "NAME CLASS:SUBCLASS:PROTOCOL".
 # Fails, printing why, when any of it cannot be read or the device is not configured yet.
-# `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
+# The two passes are the only wait for the bus: the unit runs no `udevadm settle`, which drains
+# the udev queue but does not wait for a device to enumerate.
 describe() {
     local dev=$1 name=${1##*/} vid pid serial='' config iface class sub proto ifaces=''
     if [[ ! -e $dev ]]; then
