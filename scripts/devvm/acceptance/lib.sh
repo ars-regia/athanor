@@ -15,11 +15,15 @@ REPO=$ACC_REGISTRY/athanor-system
 UPDATE1=(os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1)
 mkdir -p "$ACC_STATE"
 
-# The 31 GB host cannot hold the 16 GB runner guest and this 8 GB VM together.
+# The 31 GB host cannot hold the 16 GB runner guest and this 8 GB VM together. Only a job on
+# a self-hosted runner, the guest on this host, counts: jobs on GitHub's hosted runners use
+# none of its memory (maintainer, 2026-10-15). This checks the start only: a job that starts
+# later can still bring the host under memory pressure.
 guard_no_ci() {
   local busy
-  busy=$(gh api "repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/actions/runs?status=in_progress&per_page=1" --jq .total_count)
-  [[ $busy -eq 0 ]] || die "$busy workflow run(s) in progress: the dev VM must not run beside a CI job on this host"
+  busy=$(gh api "repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/actions/runners" --jq '[.runners[] | select(.busy)] | length')
+  [[ $busy =~ ^[0-9]+$ ]] || die "the runner state could not be read: '$busy'"
+  [[ $busy -eq 0 ]] || die "$busy self-hosted runner(s) busy: the dev VM must not run beside a CI job on this host"
 }
 
 wait_ssh() {
