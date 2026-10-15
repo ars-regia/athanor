@@ -52,20 +52,69 @@ class MarkdownLinksTest(unittest.TestCase):
 
 
 class PipelineWorkflowsTest(unittest.TestCase):
-    DOC = (
-        "### 3.5 Today's workflows\n\n| Workflow | Target |\n| --- | --- |\n"
-        "| `a.yml` | kept |\n| `gone.yml` | deleted |\n\n### 3.6 Next\n\n| `other.yml` | x |\n"
-    )
+    HEAD = "### 3.5 Today's {n} workflows\n\n| Workflow | Target |\n| --- | --- |\n"
+    TAIL = "\n### 3.6 Next\n\n| `c.yml` | outside the section |\n"
 
-    def test_a_missing_workflow_of_section_3_5_is_reported(self):
+    def problems(self, doc, files=("a.yml", "b.yaml")):
         with tempfile.TemporaryDirectory() as d:
-            (pathlib.Path(d) / "a.yml").write_text("")
-            problems = verify.pipeline_workflow_problems(self.DOC, pathlib.Path(d))
-        self.assertEqual(len(problems), 1)
-        self.assertIn("gone.yml", problems[0])
+            root = pathlib.Path(d)
+            (root / "workflows").mkdir()
+            for name in files + ("AGENTS.md",):
+                (root / "workflows" / name).write_text("")
+            if doc is not None:
+                (root / "doc.md").write_text(doc)
+            return verify.pipeline_workflow_problems(root / "doc.md", root / "workflows")
 
-    def test_a_missing_section_is_reported(self):
-        self.assertEqual(len(verify.pipeline_workflow_problems("# x\n", pathlib.Path("."))), 1)
+    def table(self, *names, n=None):
+        rows = "".join(f"| `{name}` | kept |\n" for name in names)
+        return self.HEAD.format(n=len(names) if n is None else n) + rows + self.TAIL
+
+    def test_a_table_that_matches_the_files_passes(self):
+        self.assertEqual(self.problems(self.table("a.yml", "b.yaml")), [])
+
+    def test_a_workflow_without_a_row_is_reported(self):
+        problems = self.problems(self.table("a.yml"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("b.yaml has no row", problems[0])
+
+    def test_a_row_without_a_workflow_is_reported(self):
+        problems = self.problems(self.table("a.yml", "b.yaml", "gone.yml"))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("names gone.yml", problems[0])
+
+    def test_a_row_listed_twice_is_reported(self):
+        problems = self.problems(self.table("a.yml", "a.yml", "b.yaml", n=3))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("a.yml twice", problems[0])
+
+    def test_a_heading_count_that_differs_from_the_rows_is_reported(self):
+        problems = self.problems(self.table("a.yml", "b.yaml", n=29))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("counts 29", problems[0])
+
+    def test_an_empty_table_fails(self):
+        problems = self.problems(self.table(n=0))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("lists no workflow file", problems[0])
+
+    def test_a_missing_section_fails(self):
+        problems = self.problems("# Pipeline\n\n| `a.yml` | kept |\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("section 3.5 not found", problems[0])
+
+    def test_a_missing_document_fails(self):
+        problems = self.problems(None)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("missing", problems[0])
+
+    def test_a_hash_line_in_a_code_fence_does_not_end_the_section(self):
+        doc = (self.HEAD.format(n=2) + "| `a.yml` | kept |\n\n```bash\n# a comment\n```\n\n"
+               "| `b.yaml` | kept |\n" + self.TAIL)
+        self.assertEqual(self.problems(doc), [])
+
+    def test_a_heading_in_a_code_fence_is_not_the_section(self):
+        doc = "```\n### 3.5 Example\n| `a.yml` | x |\n```\n" + self.table("a.yml", "b.yaml")
+        self.assertEqual(self.problems(doc), [])
 
 
 if __name__ == "__main__":

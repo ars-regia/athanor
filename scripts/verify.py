@@ -1698,10 +1698,10 @@ CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
 LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
 
-def markdown_links(text):
-    """(label, target) of every inline link outside code. Fenced blocks (``` or ~~~, closed
-    only by a run of the same character at least as long) and code spans are examples, not
-    links: a fence left open runs to the end of the file, as CommonMark has it."""
+def prose_lines(text):
+    """The lines of a Markdown text outside fenced blocks (``` or ~~~, closed only by a run of
+    the same character at least as long), with an empty line where a block closed: a fence
+    left open runs to the end of the file, as CommonMark has it."""
     prose, fence = [], None
     for line in text.splitlines():
         m = FENCE.match(line)
@@ -1714,8 +1714,14 @@ def markdown_links(text):
                 and not line.strip().lstrip(fence[0]):
             fence = None
             prose.append("")
+    return prose
+
+
+def markdown_links(text):
+    """(label, target) of every inline link outside code. Fenced blocks and code spans are
+    examples, not links."""
     # A code span never crosses a paragraph, so a stray backtick stays in its own.
-    paragraphs = "\n".join(prose).split("\n\n")
+    paragraphs = "\n".join(prose_lines(text)).split("\n\n")
     plain = "\n\n".join(CODE_SPAN.sub(" ", para) for para in paragraphs)
     return [(m.group(1), m.group(2)) for m in LINK.finditer(plain)]
 
@@ -1723,14 +1729,38 @@ def markdown_links(text):
 PIPELINE_DOC = "docs/architecture/doc_pipeline.md"
 
 
-def pipeline_workflow_problems(text, workflows):
-    """Every workflow file named in the first column of section 3.5 of doc_pipeline.md exists."""
-    section = re.search(r"^### 3\.5 .*?(?=^#{1,3} )", text + "\n# end", re.M | re.S)
-    if not section:
+def pipeline_workflow_problems(doc, workflows):
+    """The first column of section 3.5 of doc_pipeline.md names every workflow file of
+    `workflows` once and nothing else, and the count in its heading is the number of rows.
+    A missing document, section or table fails; lines in code fences are neither headings
+    nor rows."""
+    if not doc.exists():
+        return [f"{PIPELINE_DOC}: missing, section 3.5 cannot be checked against .github/workflows"]
+    heading, rows = None, []
+    for line in prose_lines(read(doc)):
+        if heading is None:
+            if line.startswith("### 3.5 "):
+                heading = line
+        elif re.match(r"#{1,3} ", line):
+            break
+        elif m := re.match(r"\| `([^`]+\.ya?ml)`", line):
+            rows.append(m.group(1))
+    if heading is None:
         return [f"{PIPELINE_DOC}: section 3.5 not found"]
-    return [f"{PIPELINE_DOC}: section 3.5 names {m.group(1)}, which is not under .github/workflows/"
-            for m in re.finditer(r"^\| `([\w.-]+\.yml)`", section.group(0), re.M)
-            if not (workflows / m.group(1)).exists()]
+    if not rows:
+        return [f"{PIPELINE_DOC}: section 3.5 lists no workflow file"]
+    files = {p.name for p in workflows.iterdir() if p.suffix in (".yml", ".yaml")}
+    problems = [f"{PIPELINE_DOC}: {name} has no row in section 3.5"
+                for name in sorted(files - set(rows))]
+    problems += [f"{PIPELINE_DOC}: section 3.5 names {name}, which is not under .github/workflows/"
+                 for name in sorted(set(rows) - files)]
+    problems += [f"{PIPELINE_DOC}: section 3.5 lists {name} twice"
+                 for name in sorted({name for name in rows if rows.count(name) > 1})]
+    count = re.search(r"\d+", heading[len("### 3.5 "):])
+    if count and int(count.group()) != len(rows):
+        problems.append(f"{PIPELINE_DOC}: the heading of section 3.5 counts {count.group()} "
+                        f"workflows, its table has {len(rows)} rows")
+    return problems
 
 
 @check("docs", "I link nella documentazione risolvono e sono portabili")
@@ -1758,10 +1788,8 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
-    pipeline = ROOT / PIPELINE_DOC
-    if pipeline.exists():
-        for problem in pipeline_workflow_problems(read(pipeline), ROOT / ".github" / "workflows"):
-            r.fail(problem)
+    for problem in pipeline_workflow_problems(ROOT / PIPELINE_DOC, ROOT / ".github" / "workflows"):
+        r.fail(problem)
     problems, graph = needs_graph()
     for problem in problems:
         r.fail(problem)
