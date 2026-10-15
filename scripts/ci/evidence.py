@@ -2,7 +2,7 @@
 """The evidence files of UD4 (docs/architecture/doc_update_delivery.md): one per gate and
 image, written by the gate, read by system/promote.sh before :stable moves.
 
-  evidence.py write --gate G --image NAME --digest D --run-id N (--verdict V | --verdict-json F) --run-url U --out DIR
+  evidence.py write --gate G --image NAME --digest D --run-id N (--verdict V | --verdict-json F...) --run-url U --out DIR
   evidence.py check --dir DIR --gate G --image NAME --digest D --run-id N
 """
 

@@ -7,9 +7,11 @@ name: Acceptance
 #
 # It is dispatched with the id of the build run whose ISO it tests, by hand or by
 # release.yml (PB13), and writes the iso-acceptance evidence of UD4 for that run's
-# athanor-system digest, on a pass and on a fail. The run itself is short. On a runner
-# with KVM the install takes about eight minutes and the job about twelve, because the
-# console ends the run as soon as it has an answer rather than waiting out a clock. What
+# athanor-system digest, on a pass and on a fail. The ISO is installed twice, one VM at a
+# time: on plain UEFI firmware, then with Secure Boot enforced. Each case is short. On a
+# runner with KVM an install takes about eight minutes and the job about twelve per case,
+# because the console ends the run as soon as it has an answer rather than waiting out a
+# clock. What
 # it produces is meant to be looked at: the console log, the verdict, and a screenshot
 # every thirty seconds of both the installer and the first boot, published as an
 # artifact. The assertion says the session started; the pictures say whether it started
@@ -37,7 +39,8 @@ permissions:
 jobs:
   install:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Setup and fetch ~10, normal case 25 (TIMEOUT 1500 s), Secure Boot case 25, report ~15 spare.
+    timeout-minutes: 75
     permissions:
       contents: read
       packages: read
@@ -94,6 +97,9 @@ jobs:
 
       - name: 🖥️ Install unattended and restart into the system
         env:
+          # The 30 GiB disk is not needed once the verdict is written, and the second case
+          # needs the space.
+          REMOVE_DISK: "1"
           TIMEOUT: "1500"
           VCPUS: "4"
           MEMORY_MIB: "6144"
@@ -116,21 +122,9 @@ jobs:
       # on the directory rather than made unconditional: a job that failed before the VM
       # ever started has nothing to convert or report, and a second error about a missing
       # file only buries the first one.
-      - name: 🖼️ Convert the screenshots
-        if: always() && (hashFiles('iso-test/*.ppm') != '' || hashFiles('iso-test-sb/*.ppm') != '')
-        run: |
-          set -euo pipefail
-          for dir in iso-test iso-test-sb; do
-            if compgen -G "${dir}/*.ppm" > /dev/null; then python3 forge/test/iso/screenshots.py "./${dir}"; fi
-          done
-
-      - name: 📋 Report
-        if: always() && (hashFiles('iso-test/verdict.md') != '' || hashFiles('iso-test-sb/verdict.md') != '')
-        run: |
-          set -euo pipefail
-          for dir in iso-test iso-test-sb; do
-            if [[ -f ${dir}/verdict.md ]]; then echo "### ${dir}"; cat "${dir}/verdict.md"; fi
-          done >> "${GITHUB_STEP_SUMMARY}"
+      - name: 📋 Convert the screenshots and report
+        if: always()
+        run: bash forge/test/iso/report.sh iso-test iso-test-sb
 
       - name: 🧾 Write the iso-acceptance evidence (UD4)
         # Pass and fail both leave evidence: promote.sh refuses a fail, and a missing file
