@@ -13,7 +13,7 @@
 #   v5   2026-09-18  1 and 2       2            rotation, second half
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
-# Usage: images.sh     (needs podman, skopeo, jq; `nix` for the cosign 3 bundle of v3b)
+# Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
@@ -33,7 +33,18 @@ printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" 
 mkdir -p "$ACC_STATE/registries.d"
 printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > "$ACC_STATE/registries.d/acceptance.yaml"
 
-podman container exists athanor-acc-registry || podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+# An existing container may be stopped (reboot, podman stop): start it, which is a no-op when it runs.
+if podman container exists athanor-acc-registry; then
+  podman start athanor-acc-registry
+else
+  podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+fi
+# Neither command waits for the registry to listen: the first push would race it.
+for _ in $(seq 30); do
+  curl -fs -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" && break
+  sleep 1
+done
+curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT"
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
