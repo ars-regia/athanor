@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The appearance keys GNOME has no key for (doc_visual_language.md, VL4; ADR-0057 (A2-20) and
+  ADR-0099). The variant, the contrast and the fixed accent are stored in the GNOME keys
+  org.gnome.desktop.interface color-scheme and accent-color and
+  org.gnome.desktop.a11y.interface high-contrast; nothing copies them here.
+-->
+<schemalist>
+  <enum id="org.athanor.desktop.appearance.AccentMode">
+    <value nick="fixed" value="0"/>
+    <value nick="wallpaper" value="1"/>
+  </enum>
+  <schema id="org.athanor.desktop.appearance" path="/org/athanor/desktop/appearance/">
+    <key name="accent-mode" enum="org.athanor.desktop.appearance.AccentMode">
+      <default>'fixed'</default>
+      <summary>Where the accent comes from</summary>
+      <description>"fixed": the preset of org.gnome.desktop.interface accent-color. "wallpaper": accent-computed, the colour taken from the wallpaper (VL3).</description>
+    </key>
+    <key name="accent-computed" type="s">
+      <default>''</default>
+      <summary>The corrected accent of the wallpaper mode</summary>
+      <description>"#rrggbb", written by the apply function of athanor-style. Empty, or not of that form, leaves the fixed accent in force.</description>
+    </key>
+  </schema>
+</schemalist>

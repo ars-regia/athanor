@@ -1,0 +1,8 @@
+# Vendor defaults of the appearance store (doc_visual_language.md, VL4; doc_session_daemons.md,
+# SD16). The GNOME keys are the store: a user's own value always wins over these.
+[org.gnome.desktop.interface]
+accent-color='purple'
+icon-theme='Adwaita'
+
+[org.gnome.desktop.wm.preferences]
+button-layout=':minimize,maximize,close'
