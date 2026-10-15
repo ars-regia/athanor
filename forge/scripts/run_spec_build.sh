@@ -27,6 +27,10 @@ fedora=$(grep -m1 -oP '^FROM \K\S*/fedora:[0-9]+@sha256:[0-9a-f]{64}' "$root/sys
     exit 1
 }
 
+# Pulled first and with retries, as dag_package.sh pulls the builder: a registry hiccup fails
+# here, not after the build.
+bash "$root/forge/scripts/retry.sh" podman pull -q "$fedora" > /dev/null
+
 home=$(podman volume create)
 trap 'podman volume rm -f "$home" > /dev/null' EXIT
 

@@ -6,6 +6,9 @@
 # the failure would only appear when the system image installs its tier, after the merge
 # (issue 460). Unversioned sonames are build_spec.sh's check_sonames, which runs first.
 #
+# A soname that only another Athanor package provides, built in another job, fails here: no
+# spec has one today, and the first that does needs a way to name it.
+#
 # Runs in the Fedora image system/Containerfile pins (run_spec_build.sh), with network for
 # the repository metadata. A metadata download or a query that fails is an error, never a pass.
 # Usage: check_rpm_sonames.sh RPM...

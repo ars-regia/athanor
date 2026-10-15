@@ -146,9 +146,11 @@ class RunSpecBuildTest(unittest.TestCase):
                 (ROOT / "system" / "Containerfile").read_text(),
                 re.M,
             ).group(1)
-            runs = [
-                line for line in log.read_text().splitlines() if line.startswith("run ")
-            ]
+            calls = log.read_text().splitlines()
+            self.assertEqual(
+                f"pull -q {pinned}", calls[0], "pulled with retries before the build"
+            )
+            runs = [line for line in calls if line.startswith("run ")]
             self.assertEqual(3, len(runs), runs)
             self.assertIn("build_spec.sh build", runs[1])
             self.assertIn(pinned, runs[2])
