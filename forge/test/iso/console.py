@@ -44,6 +44,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 from memory_case import MEMORY_PROBE, MEMORY_PROBE_WAIT
@@ -79,6 +80,7 @@ MARKERS = (
     # follows is :stable through the signature policy, or anything else.
     (b"ORIGIN_OK", "origin-stable-signed"),
     (b"ORIGIN_WRONG", "origin-wrong"),
+    (b"ORIGIN_UNREADABLE", "origin-unreadable"),
     # The guest's own answer to GREETER_PROBE below: a greeter session that is still
     # there, with the shell inside it, after it has had time to die.
     (b"GREETER_ALIVE", "greeter-alive"),
@@ -91,6 +93,19 @@ MARKERS = (
     # running after it has had time to open its window or to die trying.
     (b"SETTINGS_ALIVE", "settings-alive"),
     (b"SETTINGS_DEAD", "settings-dead"),
+    # And to MOK_PROBE: whether the certificate the installer asked shim to enrol is in
+    # MokList, and the Secure Boot state the firmware reports. ENABLED only for the exact
+    # answer: with MokSBState set, mokutil adds "SecureBoot validation is disabled in
+    # shim" below "SecureBoot enabled", and shim then checks nothing it loads.
+    # NOT_APPLICABLE: firmware without Secure Boot, where the installer requests nothing.
+    # CERT_ABSENT: the image ships no certificate, so the installer requested nothing.
+    (b"MOK_ENROLLED", "mok-enrolled"),
+    (b"MOK_CERT_ABSENT", "mok-cert-absent"),
+    (b"MOK_MISSING", "mok-missing"),
+    (b"MOK_NOT_APPLICABLE", "mok-not-applicable"),
+    (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
+    (b"SECUREBOOT_NOT_ENFORCED", "secureboot-not-enforced"),
+    (b"SECUREBOOT_DISABLED", "secureboot-disabled"),
 )
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -292,21 +307,29 @@ KARG_PROBE_WAIT = 5.0
 
 # Ask the guest which image it follows (doc_update_delivery.md UD2, ADR-0114). The
 # installer's %post records <repository>:stable through the signature policy; a system
-# that follows :latest, a run's own tag, or any reference bootc does not verify against
-# containers-policy.json answers WRONG with what it follows instead. The reference is the
-# booted deployment's, read from bootc itself, which is what every later update starts
-# from. bootc names an enforced policy `containerPolicy`; an unverified reference carries
-# `insecure` or no signature at all, so OK needs the word itself. As with the other probes
-# printf assembles the marker, so the echo of the typed line cannot pass for the answer.
+# that follows :latest, a run's own tag, or any reference not verified against
+# containers-policy.json answers WRONG with the reference it found. The reference is read
+# from the booted deployment's `.origin` file, not from `bootc status`: that command takes
+# the sysroot lock, and while another process holds it (first boot, greenboot) it prints
+# "Waiting for sysroot lock..." instead of JSON (issue 459). The `ostree=` argument of
+# /proc/cmdline names the booted deployment, `<deployment>.origin` sits beside it, and
+# `bootc switch --enforce-container-sigpolicy` writes `ostree-image-signed:` there
+# (SignatureSource::ContainerPolicy), which is what bootc reports as `containerPolicy`.
+# An origin file that cannot be read, or a command line without `ostree=`, answers
+# UNREADABLE with the `ostree=` value, so the run does not call a missing file a wrong
+# origin; a file read without a container reference follows no image and answers WRONG
+# with `none`. As with the other probes printf assembles the marker, so the echo of the
+# typed line cannot pass for the answer.
 ORIGIN_PROBE = (
-    b"o=$(printf 'collaudo\\n' | sudo -S bootc status --format=json"
-    b" | jq -r '.status.booted.image.image | \"\\(.image) \\(.signature)\"');"
-    b' case "$o" in'
-    b" *:stable\\ containerPolicy) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
-    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"$o\";;"
-    b" esac"
+    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+    b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
+    b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
+    b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
+    b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
+    b" esac; fi"
 )
-# bootc reads the deployment and the image's manifest from local storage, under sudo.
+# A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
 
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
@@ -411,6 +434,53 @@ SETTINGS_DIAGNOSTICS = (
     b"journalctl --user -b --no-pager -u " + SETTINGS_UNIT + b".service | tail -40",
     b"coredumpctl info --no-pager 2>&1 | grep -aE 'Signal|Command Line|#[0-9]+ ' | head -30",
 )
+# The installer's %post requests the enrolment of the Athanor Secure Boot certificate and
+# shows its one-time password, on virtual terminal 8 and on the serial console, then waits
+# for Enter on that terminal (doc_kernel_profile.md section 4). The console reads the
+# password from the serial line and presses Enter on the machine's keyboard, as the person
+# would after writing it down.
+MOK_PASSWORD = re.compile(rb"One-time password: ([a-z]{4}) ([a-z]{4}) ([a-z]{4}) ([a-z]{4})")
+# At the first boot shim starts MokManager on the request, straight on its menu because the
+# installer set no countdown. Each screen is recognised by its own text on the serial
+# console, which OVMF's console includes, and answered on the keyboard: Enroll MOK (second
+# entry), Continue (after View key 0), Yes (second), the password, then Reboot (first
+# entry of the menu shown once the key is enrolled). The installer's page names some of
+# these screens, so they are looked for only once the installer has finished.
+MOK_MANAGER_STEPS = (
+    (b"Enroll key from disk", ("down", "ret")),
+    (b"View key 0", ("down", "ret")),
+    (b"Enroll the key(s)?", ("down", "ret")),
+    (b"Password:", ("ret",)),
+    (b"Reboot", ("ret",)),
+)
+# MokManager draws a screen in pieces; a key pressed before it is drawn is lost.
+MOK_SETTLE = 2.0
+# Ask the installed system whether the certificate is enrolled and whether Secure Boot is
+# on. printf assembles the markers, as in the other probes. The keys in MokList are
+# exported and compared with the SHA-256 the repository pins (scripts/verify.py
+# installer), so a key under the same name is not taken for Athanor's.
+MOK_CERTIFICATE_SHA256 = (
+    (pathlib.Path(__file__).resolve().parents[3] / "system" / "secureboot-pin.sha256")
+    .read_text()
+    .split()[0]
+    .encode()
+)
+MOK_PROBE = (
+    b"if [ ! -e /usr/share/athanor/secureboot/athanor-secureboot.der ];"
+    b" then printf 'MOK_%s\\n' CERT_ABSENT;"
+    b" elif [ ! -e /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c ];"
+    b" then printf 'MOK_%s\\n' NOT_APPLICABLE;"
+    b" elif (cd \"$(mktemp -d)\" && mokutil --export && sha256sum MOK-*.der)"
+    b" | grep -q '^" + MOK_CERTIFICATE_SHA256 + b" ';"
+    b" then printf 'MOK_%s\\n' ENROLLED; else printf 'MOK_%s\\n' MISSING; fi;"
+    b" case $(mokutil --sb-state) in"
+    b" *'validation is disabled'*) printf 'SECUREBOOT_%s\\n' NOT_ENFORCED;;"
+    b" 'SecureBoot enabled') printf 'SECUREBOOT_%s\\n' ENABLED;;"
+    b" *) printf 'SECUREBOOT_%s\\n' DISABLED;;"
+    b" esac"
+)
+# A few EFI variable reads.
+MOK_PROBE_WAIT = 5.0
 # The tests drive a fake guest that answers at once and scale every wait in the login
 # path down through this; the run itself leaves it at one.
 PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
@@ -437,6 +507,9 @@ def main() -> int:
     tail = b""
     grub_done = False
     last_data = time.time()
+    mok_password = b""
+    mok_step = 0
+    mok_armed = False
 
     def note(name: str) -> None:
         if name in seen:
@@ -469,12 +542,21 @@ def main() -> int:
         script = str(pathlib.Path(__file__).with_name("monitor.py"))
         subprocess.run([sys.executable, script, monitor_path, *commands], check=True)
 
+    def press_soon(*keys: str) -> None:
+        """Press keys after MOK_SETTLE, while this loop goes on reading the serial line:
+        QEMU drops what the guest writes once the socket stops taking it, and MokManager
+        redraws whole screens. Run 2026-10-14 lost "View key 0" to a blocking wait."""
+        commands = [f"sendkey {key}" for key in keys]
+        threading.Timer(MOK_SETTLE * PACE, monitor, args=commands).start()
+
     def ask_about_the_greeter() -> None:
         """Log in over the serial and ask whether the greeter is up."""
         s.sendall(GUEST_USER + b"\n")
         time.sleep(DIAGNOSTIC_PAUSE * PACE)
         s.sendall(GUEST_PASSWORD + b"\n")
         time.sleep(DIAGNOSTIC_PAUSE * PACE)
+        ask(MOK_PROBE, MOK_PROBE_WAIT)
+        note("mok-asked")
         ask(PROFILE_PROBE, PROFILE_PROBE_WAIT)
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
@@ -552,6 +634,30 @@ def main() -> int:
         if "installed" in seen and BOOTED_FROM_CD in tail:
             note("reinstall-loop")
             break
+
+        # The installer shows the one-time password of the MOK request and waits for
+        # Enter. Once.
+        if not mok_password and (found := MOK_PASSWORD.search(ANSI.sub(b"", tail))):
+            mok_password = b"".join(found.groups())
+            note("mok-password-shown")
+            press_soon("ret")
+            tail = b""
+
+        # At the first boot MokManager asks for it: one screen at a time, in order.
+        if "kickstart-done" in seen and not mok_armed:
+            mok_armed = True
+            tail = ANSI.sub(b"", tail).rpartition(b"Athanor kickstart finished")[2]
+        if mok_armed and mok_password and mok_step < len(MOK_MANAGER_STEPS):
+            needle, keys = MOK_MANAGER_STEPS[mok_step]
+            if needle in ANSI.sub(b"", tail):
+                if needle == b"Password:":
+                    keys = (*mok_password.decode(), *keys)
+                press_soon(*keys)
+                mok_step += 1
+                note("mokmanager-shown" if mok_step == 1 else f"mokmanager-step-{mok_step}")
+                if mok_step == len(MOK_MANAGER_STEPS):
+                    note("mok-confirmed")
+                tail = b""
 
         # A login prompt on the installed system is where the questions start. Ask once,
         # then keep reading: the answers arrive as ordinary console output and land in

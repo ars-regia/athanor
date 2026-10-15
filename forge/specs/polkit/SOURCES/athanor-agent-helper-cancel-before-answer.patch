@@ -1,0 +1,63 @@
+From c320feb51c7520f231552c1579b949f8f8f46d5c Mon Sep 17 00:00:00 2001
+From: Athanor Forge <forge@athanor.os>
+Date: Wed, 14 Oct 2026 18:55:15 +0200
+Subject: [PATCH] agent helper: end without a verdict when the agent hangs up
+ before answering
+
+Cancelling the authentication dialog closes the agent's end of the helper
+connection. The socket-activated helper cannot be killed by the agent, so it
+read EOF in the PAM conversation and returned PAM_CONV_ERR; pam_unix then
+failed and system-auth ran on to pam_faillock authfail, counting the cancel
+as a failed login (polkit-org/polkit#713).
+
+When the read fails before the agent has answered any prompt of the
+transaction, end the helper instead of returning to PAM. No answer was read,
+so no password was tried. Once an answer has been read, a hang-up fails the
+conversation as before, so every tried password still reaches authfail.
+---
+ src/polkitagent/polkitagenthelper-pam.c | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/src/polkitagent/polkitagenthelper-pam.c b/src/polkitagent/polkitagenthelper-pam.c
+index 2dc4882..0e7928e 100644
+--- a/src/polkitagent/polkitagenthelper-pam.c
++++ b/src/polkitagent/polkitagenthelper-pam.c
+@@ -45,6 +45,9 @@
+ 
+ static int conversation_function (int n, const struct pam_message **msg, struct pam_response **resp, void *data);
+ 
++/* Set once the agent has sent an answer to a prompt of this PAM transaction. */
++static gboolean answered = FALSE;
++
+ static void
+ send_to_helper (const gchar *str1,
+                 const gchar *str2)
+@@ -339,7 +342,24 @@ conversation_function (int n, const struct pam_message **msg, struct pam_respons
+ 
+         conv1:
+           if (fgets (buf, sizeof buf, stdin) == NULL)
+-            goto error;
++            {
++              /* The read failed and the agent has not answered any prompt yet: it
++               * closed the connection, as it does when the user cancels the dialog. Returning
++               * PAM_CONV_ERR would let the auth stack run on to pam_faillock's authfail
++               * and count the cancel as a failed login (polkit-org/polkit#713), so end
++               * the process here, as the forked helper ended when the agent killed it.
++               * No answer was read, so no password was tried. Once an answer has been
++               * read, a hang-up fails the conversation as before and is counted.
++               * Exit status 2 is the unit's SuccessExitStatus for a failed
++               * authentication. */
++              if (!answered)
++                {
++                  fprintf (stderr, "polkit-agent-helper-1: agent closed the connection before answering, authentication cancelled\n");
++                  _exit (2);
++                }
++              goto error;
++            }
++          answered = TRUE;
+ 
+           if (strlen (buf) > 0 &&
+               buf[strlen (buf) - 1] == '\n')
+-- 
+2.56.0
+

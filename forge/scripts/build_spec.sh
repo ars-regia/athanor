@@ -69,9 +69,28 @@ build() {
     else
         rpmbuild -bb --nodeps "$SPEC_DIR"/*.spec
     fi
+    check_sonames ~/rpmbuild/RPMS/*/*.rpm
     mkdir -p /workspace/forge/RPMS
     cp ~/rpmbuild/RPMS/*/*.rpm /workspace/forge/RPMS/
     sccache --show-stats
+}
+
+# A requirement on an unversioned soname, such as libsqlite3.so()(64bit), comes from a library
+# the package was linked against without a SONAME: the binary records the file name, which no
+# Fedora package provides, and the image build fails on it long after the forge published the
+# package. A library whose real SONAME is unversioned (NSS's libnss3.so) would fail here too;
+# allow it by name if a package ever links one.
+check_sonames() {
+    local rpm requires bad=0
+    for rpm in "$@"; do
+        requires=$(rpm -qp --requires "$rpm")
+        if grep -E '^[^[:space:]()]+\.so\(' <<< "$requires"; then
+            echo "error: $(basename "$rpm") requires the unversioned sonames above:" \
+                "a library in the builder has no SONAME" >&2
+            bad=1
+        fi
+    done
+    return "$bad"
 }
 
 case $STAGE in

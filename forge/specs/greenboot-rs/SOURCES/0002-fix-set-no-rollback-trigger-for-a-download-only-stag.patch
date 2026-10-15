@@ -1,0 +1,128 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Wed, 14 Oct 2026 23:06:32 +0200
+Subject: [PATCH] fix: set no rollback trigger for a download-only staged
+ deployment
+
+bootc can stage a deployment as download-only (`bootc upgrade
+--download-only`): it stays locked and ostree-finalize-staged.service
+does not deploy it when the system goes down, so the next boot is the
+booted deployment again. greenboot-set-rollback-trigger.service did not
+look at that flag: it recorded the locked deployment's digest in
+greenboot_next_deployment_id and set fallback=1. On the next boot the
+health check found a deployment other than the expected one, took it for
+a GRUB kernel fallback and forced a rollback, so the boot after that
+started the previous deployment, older than the one that had been running
+fine.
+
+With bootc, the staged deployment has no ID when
+`status.staged.downloadOnly` is true, so no trigger is set for it. A
+deployment unlocked beforehand (`bootc upgrade --from-downloaded`) reads
+false and is handled as before, and a bootc without the field reads as
+not download-only. The rpm-ostree path is unchanged.
+---
+ src/lib/handler.rs | 84 ++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 81 insertions(+), 3 deletions(-)
+
+diff --git a/src/lib/handler.rs b/src/lib/handler.rs
+index b82cebd..d218c1e 100644
+--- a/src/lib/handler.rs
++++ b/src/lib/handler.rs
+@@ -87,9 +87,28 @@ fn get_bootc_deployment_id(key: &str) -> Option<String> {
+ 
+     let json: Value = serde_json::from_slice(&output.stdout).ok()?;
+ 
+-    json.get("status")
+-        .and_then(|s| s.get(key))
+-        .and_then(|d| d.get("image"))
++    bootc_deployment_id(&json, key)
++}
++
++/// The image digest of the deployment `key` ("booted" or "staged") in the JSON of
++/// `bootc status`. A staged deployment that bootc holds as download-only is not
++/// finalized at shutdown, so the next boot is the booted deployment again: it has
++/// no ID here, so that no rollback trigger is set for a deployment that never boots,
++/// and that boot is not taken for a GRUB fallback.
++fn bootc_deployment_id(json: &Value, key: &str) -> Option<String> {
++    let deployment = json.get("status").and_then(|s| s.get(key))?;
++    if key == "staged"
++        && deployment
++            .get("downloadOnly")
++            .and_then(Value::as_bool)
++            .unwrap_or(false)
++    {
++        log::info!("The staged deployment is download-only and will not be finalized");
++        return None;
++    }
++
++    deployment
++        .get("image")
+         .and_then(|i| i.get("imageDigest"))
+         .and_then(|d| d.as_str())
+         .map(|s| s.to_string())
+@@ -192,3 +211,62 @@ pub fn handle_motd(state: &str) -> Result<()> {
+     std::fs::write("/etc/motd.d/boot-status", format!("{state}.").as_bytes())
+         .map_err(|err| anyhow!("Error writing motd: {}", err))
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::bootc_deployment_id;
++    use serde_json::{Value, json};
++
++    fn status(download_only: Option<bool>) -> Value {
++        let mut staged = json!({
++            "image": {
++                "image": {"image": "quay.io/example/os:stable", "transport": "registry"},
++                "imageDigest": "sha256:0e59",
++            },
++        });
++        if let Some(download_only) = download_only {
++            staged["downloadOnly"] = json!(download_only);
++        }
++        json!({
++            "status": {
++                "staged": staged,
++                "booted": {"image": {"imageDigest": "sha256:b59e"}, "downloadOnly": true},
++            },
++        })
++    }
++
++    #[test]
++    fn test_staged_download_only_has_no_id() {
++        assert_eq!(bootc_deployment_id(&status(Some(true)), "staged"), None);
++    }
++
++    #[test]
++    fn test_staged_unlocked_is_its_digest() {
++        assert_eq!(
++            bootc_deployment_id(&status(Some(false)), "staged").as_deref(),
++            Some("sha256:0e59")
++        );
++    }
++
++    #[test]
++    fn test_staged_without_the_field_is_its_digest() {
++        assert_eq!(
++            bootc_deployment_id(&status(None), "staged").as_deref(),
++            Some("sha256:0e59")
++        );
++    }
++
++    #[test]
++    fn test_booted_ignores_download_only() {
++        assert_eq!(
++            bootc_deployment_id(&status(Some(true)), "booted").as_deref(),
++            Some("sha256:b59e")
++        );
++    }
++
++    #[test]
++    fn test_nothing_staged_has_no_id() {
++        let json = json!({"status": {"staged": null, "booted": {"image": {"imageDigest": "sha256:b59e"}}}});
++        assert_eq!(bootc_deployment_id(&json, "staged"), None);
++    }
++}
+-- 
+2.56.0
+

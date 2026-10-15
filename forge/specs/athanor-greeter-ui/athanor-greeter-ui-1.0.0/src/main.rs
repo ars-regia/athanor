@@ -3,6 +3,7 @@
 //! greetd starts cosmic-comp, cosmic-comp starts athanor-greeter-client, and that wrapper
 //! execs this binary inside a bubblewrap sandbox. It takes no arguments.
 
+mod accounts;
 mod auth;
 mod i18n;
 mod layer_guard;
@@ -71,6 +72,15 @@ fn main() -> glib::ExitCode {
 
     i18n::init();
 
+    // The account list is read here, while this is still the only thread: getpwent and
+    // uselocale are not thread-safe, and the read of lastlog2 is over before the window
+    // exists, never on GTK's main loop (doc_lock_and_prompts.md, LP19).
+    if let Err(err) = sandbox::ensure_single_threaded() {
+        tracing::error!(error = %err, "the account list must be read on the only thread");
+        return glib::ExitCode::FAILURE;
+    }
+    let accounts = accounts::load_system();
+
     // The workspace builds zbus on Tokio, and the greetd conversation sleeps on a Tokio
     // timer: both need a runtime that is current on this thread, or they abort with
     // "there is no reactor running" (acceptance run 34384585109). One worker is enough
@@ -89,7 +99,7 @@ fn main() -> glib::ExitCode {
     let _tokio = runtime.enter();
 
     let app = Application::builder().application_id(APP_ID).build();
-    app.connect_activate(ui::build_ui);
+    app.connect_activate(move |app| ui::build_ui(app, &accounts));
     app.run_with_args(&Vec::<String>::new())
 }
 

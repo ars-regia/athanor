@@ -1,6 +1,7 @@
 # Athanor's greenboot: the upstream release at Fedora's version, built from upstream's archive
-# with one patch of ours that adds GREENBOOT_AUTO_REBOOT, so that a failed health check marks
-# the deployment and reboots nothing (docs/architecture/doc_recovery.md, R5). Fedora's own
+# with two patches of ours: one adds GREENBOOT_AUTO_REBOOT, so that a failed health check marks
+# the deployment and reboots nothing (docs/architecture/doc_recovery.md, R5); the other sets no
+# rollback trigger for a download-only staged deployment, which a poweroff discards. Fedora's own
 # downstream changes are not carried; License, Requires, the install steps and the file lists
 # were copied from Fedora's spec, so a bump diffs them by hand. Same Name and subpackages so
 # that they replace Fedora's build instead of sitting beside it (like forge/specs/cosmic-comp).
@@ -11,7 +12,7 @@
 
 Name:           greenboot-rs
 Version:        0.16.4
-Release:        %{fedora_release}.athanor1
+Release:        %{fedora_release}.athanor2
 Summary:        Generic Health Check Framework for systemd
 # Fedora's expression, from the crates it links statically.
 License:        BSD-3-Clause AND ISC AND MIT AND Unicode-DFS-2016 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND (Unlicense OR MIT)
@@ -22,6 +23,9 @@ Source0:        https://github.com/fedora-iot/greenboot-rs/archive/refs/tags/v%{
 Source1:        Cargo.lock
 # Written for upstream, not yet submitted; drop it when a release carries it.
 Patch0:         0001-feat-add-GREENBOOT_AUTO_REBOOT-to-roll-back-without-.patch
+# Written for upstream, not yet submitted: a locked deployment of `bootc upgrade --download-only`
+# is no update that boots next, so it arms no rollback trigger (#454).
+Patch1:         0002-fix-set-no-rollback-trigger-for-a-download-only-stag.patch
 
 ExcludeArch:    %{ix86}
 
@@ -46,7 +50,8 @@ Recommends:     openssh
 %{description}
 
 This build adds GREENBOOT_AUTO_REBOOT: when it is false, a failed required health check
-rolls back to the previous deployment without rebooting.
+rolls back to the previous deployment without rebooting, and it sets no rollback trigger
+for a download-only staged deployment.
 
 %package -n %{pkgname}-default-health-checks
 Summary:        Series of optional and curated health checks
@@ -67,6 +72,13 @@ cp %{SOURCE1} Cargo.lock
 %build
 %set_build_flags
 cargo build --release --locked
+
+%check
+# The tests of the two patches: the bootc status parsing (handler) and the configuration
+# (the binary). Upstream's grub and mount tests call grub2-editenv and need a /boot mount,
+# which the builder has neither of.
+cargo test --release --locked --lib handler::tests
+cargo test --release --locked --bin greenboot
 
 %install
 mkdir -p %{buildroot}%{_libexecdir}/%{pkgname}
@@ -138,6 +150,11 @@ fi
 %{_unitdir}/greenboot-healthcheck.service.d/10-network-online.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc43.athanor2
+- Set no rollback trigger for a download-only staged deployment: a poweroff discards it, and
+  the next boot was taken for a GRUB fallback and rolled back to the previous deployment
+  (#454). %%check runs the tests of both patches.
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc43.athanor1
 - Fedora's greenboot-rs 0.16.4-0.fc43 built from the upstream archive, with the patch that
   adds GREENBOOT_AUTO_REBOOT.

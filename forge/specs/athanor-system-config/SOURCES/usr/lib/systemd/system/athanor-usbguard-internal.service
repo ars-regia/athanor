@@ -1,0 +1,38 @@
+[Unit]
+Description=Allow the USB devices connected at the first boot (internal devices)
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_disks.md
+# usbguard.service reads its rules once, when it starts, and applies them to the devices
+# present then (PresentDevicePolicy=apply-policy). Running Before= it needs no reload and
+# no second start. Before= the greeter: nobody types a PIN or looks at a camera before it.
+# It runs once: the marker in /var/lib/athanor ends it (ADR-0103 D12, DK21).
+After=systemd-udevd.service systemd-udev-trigger.service
+Before=usbguard.service greetd.service
+ConditionPathExists=!/var/lib/athanor/usbguard-internal.done
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/udevadm settle --timeout=10
+ExecStart=/usr/libexec/athanor-usbguard-internal
+StateDirectory=athanor
+ReadWritePaths=/etc/usbguard/rules.d
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateNetwork=yes
+PrivateIPC=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:59.fc43}
+Release:        %{?autorelease}%{!?autorelease:61.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -75,6 +75,8 @@ done
 %attr(0755,root,root) /usr/libexec/athanor-greeter-client
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-update
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-triggers
+%attr(0755,root,root) /usr/libexec/athanor-usbguard-internal
+/usr/lib/systemd/system/athanor-usbguard-internal.service
 %dir /usr/share/athanor-system-config/flatpak-no-triggers
 /usr/lib/systemd/system/athanor-flatpak-triggers.service
 /usr/lib/tmpfiles.d/athanor-flatpak.conf
@@ -95,6 +97,19 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-61
+- athanor-greeter-client binds /var/lib/lastlog read-only into the greeter's sandbox, so
+  that the account list puts the latest greetd sign-in first (doc_lock_and_prompts.md,
+  LP19). Nothing in it is writable; a machine without the directory skips the bind.
+
+* Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-60
+- Ships athanor-usbguard-internal.service, a root oneshot that runs once at the first boot,
+  before usbguard.service and the greeter, and writes an allow rule for each USB device then
+  connected, except those with a mass-storage interface, into
+  /etc/usbguard/rules.d/50-athanor-internal.conf (ADR-0103 D12, doc_disks.md DK21). The baseline
+  and ImplicitPolicyTarget=block do not change. A machine upgraded to this image takes the
+  snapshot at its first boot of it.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-59
 - Ships the Flathub system remote (flathub.flatpakrepo with its GPG key embedded, signature
   verification on) and athanor-flatpak-update.timer, a daily system oneshot that updates the

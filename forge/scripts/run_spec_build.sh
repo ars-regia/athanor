@@ -5,7 +5,11 @@
 #   1. with network, build_spec.sh fetch: Source files, crates and Go modules, into a podman
 #      volume mounted as the builder's HOME (/root);
 #   2. with --network=none, build_spec.sh build: rpmbuild from that volume. A build that
-#      reaches out fails here instead of downloading something no lockfile pins.
+#      reaches out fails here instead of downloading something no lockfile pins;
+#   3. with network, in the Fedora image system/Containerfile pins: check_rpm_sonames.sh
+#      resolves each versioned soname the RPMs require against the Fedora repositories the
+#      system image installs from (issue 460). The image is Fedora's small container rather
+#      than base-atomic, which a hosted runner would download again for every spec.
 #
 # Usage: run_spec_build.sh IMAGE SPEC_DIR [podman run options...]
 #   SPEC_DIR is relative to forge/ (e.g. specs/athanor-tetragon). The options, such as the DAG's
@@ -18,6 +22,14 @@ SPEC_DIR=${2:?$usage}
 shift 2
 options=("$@")
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+fedora=$(grep -m1 -oP '^FROM \K\S*/fedora:[0-9]+@sha256:[0-9a-f]{64}' "$root/system/Containerfile") || {
+    echo "run_spec_build.sh: no Fedora image digest in system/Containerfile" >&2
+    exit 1
+}
+
+# Pulled first and with retries, as dag_package.sh pulls the builder: a registry hiccup fails
+# here, not after the build.
+bash "$root/forge/scripts/retry.sh" podman pull -q "$fedora" > /dev/null
 
 home=$(podman volume create)
 trap 'podman volume rm -f "$home" > /dev/null' EXIT
@@ -27,3 +39,5 @@ podman run --rm -v "$root:/workspace" -v "$home:/root" -w /workspace/forge "${op
 podman run --rm --network=none -e CARGO_NET_OFFLINE=true -e GOPROXY=off \
     -v "$root:/workspace" -v "$home:/root" -w /workspace/forge "${options[@]}" \
     "$IMAGE" bash scripts/build_spec.sh build "$SPEC_DIR"
+podman run --rm -v "$root:/workspace:ro" -v "$home:/root:ro" -w /workspace/forge \
+    "$fedora" bash -c 'bash scripts/check_rpm_sonames.sh /root/rpmbuild/RPMS/*/*.rpm'

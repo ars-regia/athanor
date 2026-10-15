@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turns what the run recorded into a pass or a fail, and into something readable.
 
-Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS
+Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]
 
 Reads phases.txt, written by console.py, and the console log beside it. Prints a report
 on stdout, writes the same report to OUTPUT_DIR/verdict.md for the job summary, and
@@ -24,6 +24,22 @@ says which part broke:
                    desktop session is alive and steady, panel and wallpaper included
   settings         the settings application, started inside that session, is still
                    running twenty seconds later
+
+The Secure Boot enrolment the installer requests (doc_kernel_profile.md section 4) is one
+more, checked the same way:
+
+  mok              the installed system finds the Athanor certificate in MokList, so the
+                   installer's request reached MokManager, the one-time password it
+                   showed was accepted there, and shim enrolled the key; on firmware
+                   without Secure Boot the installer requests nothing, and the guest
+                   says so (mok-not-applicable); an image without the certificate fails
+                   (mok-cert-absent)
+
+and with `secure-boot`, the case run_iso_test.sh runs with SECURE_BOOT=1 on Secure Boot
+firmware, a last one:
+
+  secure-boot      the installed system reports Secure Boot enabled and enforced, so shim
+                   accepted the Azoth kernel against the certificate just enrolled
 
 The greeter is recognised from the console rather than from a screenshot, because a
 screenshot cannot tell a drawn greeter from a wallpaper. The screenshots are still kept
@@ -61,21 +77,33 @@ PROFILE_SIGNALS = ("profile-ok",)
 # leaving this unset. Without this line the gate cannot tell a root mounted with
 # compression from one mounted without it -- the desktop comes up either way.
 KARG_SIGNALS = ("karg-compress-ok", "karg-compress-not-applicable")
-# And the image the system follows: ORIGIN_OK is the guest's report that bootc's booted
-# reference is <repository>:stable verified by containers-policy.json (UD2, ADR-0114).
-# ORIGIN_WRONG fails the run by leaving this unset: an installed system on :latest, or on
-# an unverified reference, passes every other check and updates from the wrong place.
+# And the image the system follows: ORIGIN_OK is the guest's report that the booted
+# deployment's origin is <repository>:stable verified by containers-policy.json (UD2,
+# ADR-0114). ORIGIN_WRONG, and ORIGIN_UNREADABLE (no origin file read; reported apart),
+# fail the run by leaving this unset: an installed system on :latest, or on an
+# unverified reference, passes every other check and updates from the wrong place.
 ORIGIN_SIGNALS = ("origin-stable-signed",)
 # "reinstall-loop" is not a crash but it is a failure, and a distinctive one: the machine
 # booted the installer again instead of the system it had just written, so the run says
 # nothing about first boot no matter how long it is left going.
 FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
+# MOK_ENROLLED in console.py: the certificate is in MokList. MOK_NOT_APPLICABLE: firmware
+# without Secure Boot, not accepted in the Secure Boot case. MOK_MISSING and
+# MOK_CERT_ABSENT (an image without the certificate, which an ISO built from this tree
+# must carry) fail the run by leaving this unset.
+MOK_SIGNALS = ("mok-enrolled", "mok-not-applicable")
+# The guest's Secure Boot state, required to be enabled only in the Secure Boot case.
+SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-not-enforced", "secureboot-disabled")
 
 
 def main() -> int:
     out = pathlib.Path(sys.argv[1])
     greeter_wait = int(sys.argv[2])
     qemu_status = int(sys.argv[3])
+    if sys.argv[4:] not in ([], ["secure-boot"]):
+        print("usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]", file=sys.stderr)
+        return 2
+    secure_boot_required = sys.argv[4:] == ["secure-boot"]
 
     phase_file = out / "phases.txt"
     phases: dict[str, int] = {}
@@ -98,6 +126,8 @@ def main() -> int:
     session = next((s for s in SESSION_SIGNALS if s in phases), None)
     settings = next((s for s in SETTINGS_SIGNALS if s in phases), None)
     failures = [s for s in FAILURE_SIGNALS if s in phases]
+    mok = next((s for s in MOK_SIGNALS if s in phases), None)
+    secure_boot = next((s for s in SECUREBOOT_SIGNALS if s in phases), None)
 
     lines = ["## ISO acceptance test", ""]
     lines.append(f"- installer finished: {'yes' if installed else 'NO'}")
@@ -106,10 +136,23 @@ def main() -> int:
     )
     lines.append(f"- kernel profile holds: {profile if profile else 'NO'}")
     lines.append(f"- btrfs compression karg: {karg if karg else 'NO'}")
-    lines.append(f"- follows :stable, signed: {origin if origin else 'NO'}")
+    origin_text = origin or ("unreadable (origin-unreadable)" if "origin-unreadable" in phases else "NO")
+    lines.append(f"- follows :stable, signed: {origin_text}")
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
+    if mok:
+        lines.append(f"- Secure Boot certificate enrolled: {mok}")
+    elif "mok-cert-absent" in phases:
+        lines.append(
+            "- Secure Boot certificate enrolled: NO, the image ships none (mok-cert-absent)"
+        )
+    else:
+        lines.append("- Secure Boot certificate enrolled: NO")
+    lines.append(
+        f"- Secure Boot: {secure_boot if secure_boot else 'NO ANSWER'}"
+        f"{' (required: secureboot-enabled)' if secure_boot_required else ''}"
+    )
     if failures:
         lines.append(f"- guest failures seen: {', '.join(failures)}")
     lines.append(f"- console log: {log_bytes} bytes")
@@ -138,8 +181,12 @@ def main() -> int:
         "greeter": greeter is not None,
         "session": session is not None,
         "settings": settings is not None,
+        "mok": mok is not None,
         "no-guest-failure": not failures,
     }
+    if secure_boot_required:
+        checks["mok"] = mok == "mok-enrolled"
+        checks["secure-boot"] = secure_boot == "secureboot-enabled"
     ok = all(checks.values())
     lines.insert(1, f"**{'PASS' if ok else 'FAIL'}**")
     report = "\n".join(lines) + "\n"

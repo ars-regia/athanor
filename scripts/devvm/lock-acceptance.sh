@@ -27,7 +27,9 @@
 #              the agent. Fails on images built before #445 merged: polkit-agent-helper@.service
 #              could not write /run/faillock (#144).
 #   cancel     six polkit requests cancelled while the agent's dialog is open leave no failure
-#              in the tally. Fails until #447 is fixed (polkit-org/polkit#713). It cancels by
+#              in the tally. Fails on images with a polkit before 127-2.fc43.2.athanor3, which
+#              patches polkit-org/polkit#713 (#447). polkit-cancel.sh runs it in the guest in
+#              one SSH login, because every new login clears the tally. It cancels by
 #              stopping pkexec, which makes polkitd cancel the request at the agent; the
 #              dialog has no key for Cancel. Each cancel first checks that pkexec still runs
 #              and a helper instance is alive, after the 2 s of the screenshot. That shows a
@@ -182,29 +184,27 @@ finished() {
     state=$(in_session systemctl --user show -p SubState --value "$1") && [[ $state == exited || $state == failed ]]
 }
 
-# Whether the prompt still has a live helper: pkexec still runs and a polkit-agent-helper@
-# instance has not exited. The unit is Type=oneshot, so it stays `activating` while the
-# helper runs, from before pam_start to its exit. This does not show that the helper is
-# asking for the password, only that it started and has not exited; a helper whose preauth
-# failed (#144) has. The 2 s of the screenshot taken before it narrow the window.
-helper_alive() {
-    local pkexec helpers
-    pkexec=$(in_session systemctl --user show -p SubState --value "$PROMPT") &&
-        helpers=$(guest_ssh systemctl list-units --no-legend --all --state=activating "'polkit-agent-helper@*'") &&
-        [[ $pkexec == running && -n $helpers ]]
+# Whether a polkit-agent-helper@ instance runs. The unit is Type=oneshot, so it stays
+# `activating` while the helper runs, from before pam_start to its exit. The journal cannot
+# tell: the helper logs nothing before its conversation ends, and on a fresh boot
+# `journalctl -u` with the unit glob fails until an instance has logged.
+helper_running() {
+    local helpers
+    helpers=$(guest_ssh systemctl list-units --no-legend --all --state=activating "'polkit-agent-helper@*'") &&
+        [[ -n $helpers ]]
 }
 
 # Starts `pkexec true` in a transient user unit: in the user manager, outside the SSH session,
-# so polkit reaches the agent of the graphical session. Returns once the agent has opened a
-# connection to the helper socket, with the unit in PROMPT and its start in PROMPT_SINCE.
+# so polkit reaches the agent of the graphical session. Returns once the agent has started a
+# helper, with the unit in PROMPT and its start in PROMPT_SINCE.
 open_prompt() {
     unlocked || fail "the session is locked before the stage"
     PROMPT=$PKEXEC_UNIT-$RANDOM
     PROMPT_SINCE=$(guest_ssh date +%s)
     in_session systemd-run --user --unit="$PROMPT" -p RemainAfterExit=yes pkexec /usr/bin/true
-    if ! wait_until 15 helper_log "$PROMPT_SINCE" > /dev/null; then
+    if ! wait_until 15 helper_running; then
         in_session systemctl --user stop "$PROMPT"
-        fail "the agent opened no helper connection in 15 s"
+        fail "the agent started no helper in 15 s"
     fi
 }
 
@@ -223,14 +223,6 @@ authenticate() {
     [[ $status == 0 ]] || fail "pkexec exited $status; the helper logged: $(helper_log "$PROMPT_SINCE")"
 }
 
-# Sets FAILURES to the number of failures pam_faillock holds for the user: `faillock` prints
-# one row per failure, each starting with its date.
-count_failures() {
-    local out
-    out=$(guest_ssh sudo faillock --user "$USER_NAME") || fail "faillock --user $USER_NAME failed"
-    FAILURES=$(grep -c '^[0-9]' <<< "$out") || FAILURES=0
-}
-
 stage_polkit() {
     # The account phase of pam_faillock creates the tally at login (pam_faillock.c:527-560).
     guest_ssh sudo test -f "$TALLY" || fail "no $TALLY after the login"
@@ -246,27 +238,14 @@ faillock_deny() {
 }
 
 stage_cancel() {
-    local before n
+    local reason status=0
     faillock_deny
-    count_failures
-    before=$FAILURES
-    # The stage stops at the first new failure, so it adds at most one; with a margin of two
-    # below deny= no run of it can lock the account.
-    ((before < DENY - 2)) ||
-        fail "$before failures already recorded, deny = $DENY: run sudo faillock --user $USER_NAME --reset first"
-    for n in 1 2 3 4 5 6; do
-        open_prompt
-        # Cancelling before the helper asks for the password would not exercise #447, and on an
-        # image where preauth fails (#144) it would pass without a conversation.
-        shot "cancel-$n"
-        helper_alive || fail "prompt $n has no live helper; the helper logged: $(helper_log "$PROMPT_SINCE")"
-        in_session systemctl --user stop "$PROMPT"
-        sleep 2
-        count_failures
-        # Stops at the first failure, before five could lock the account for ten minutes.
-        ((FAILURES == before)) ||
-            fail "cancel $n recorded a pam_faillock failure (#447); sudo faillock --user $USER_NAME --reset clears it"
-    done
+    unlocked || fail "the session is locked before the stage"
+    reason=$(guest_ssh bash -s -- "$DENY" 6 < "$HERE/polkit-cancel.sh") || status=$?
+    # shellcheck disable=SC2016 # expanded by the guest's shell
+    guest_ssh 'tar -C "/run/user/$(id -u)/lock-acceptance" -cf - .' | tar -C "$SHOTS" -xf - ||
+        echo "note: the cancel screenshots did not arrive" >&2
+    ((status == 0)) || fail "${reason:-polkit-cancel.sh exited $status}"
 }
 
 run=("$@")

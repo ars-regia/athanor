@@ -173,6 +173,11 @@ RUN --mount=type=bind,from=tier3-repo,source=/,target=/tmp/tier3-repo \
 
 COPY forge/config/packages.json /usr/share/athanor/packages.json
 
+# The public certificate of the Athanor Secure Boot key. The installer's %post asks shim to
+# enrol it as a MOK and copies it to the ESP (doc_kernel_profile.md section 4, A2-35);
+# scripts/verify.py installer checks that this path is the one the kickstarts read.
+COPY forge/specs/azoth/keys/secureboot/athanor-secureboot.der /usr/share/athanor/secureboot/athanor-secureboot.der
+
 # UPSTREAM PACKAGES: the desktop (COSMIC), media, and CLI packages the manifest lists
 # under upstream_*. Today these are the official Fedora and RPM Fusion binaries,
 # installed here from the repositories the base image configures -- the same origin as
