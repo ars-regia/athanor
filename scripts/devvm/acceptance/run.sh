@@ -79,6 +79,8 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   polkit_pattern_selfcheck
   trap sessions_cleanup EXIT
   untunnel
+  # A run killed before its trap ran leaves the user behind: take it away first.
+  if guest_ssh getent passwd "$ACC_OTHER" > /dev/null; then remove_other; fi
   guest_ssh "sudo useradd -m -p '*' $ACC_OTHER"
   ACC_OTHER_MADE=1
   # Every call below ends at this inhibitor if it is authorised, so none can reboot the guest
