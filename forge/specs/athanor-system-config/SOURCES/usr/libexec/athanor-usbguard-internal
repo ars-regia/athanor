@@ -116,15 +116,19 @@ else
 fi
 write_pending
 
-# devices: the devices this run reads. The first run reads every device; a later one only the
-# ports still pending, so a device connected since the first run is never a candidate.
+# devices: the devices this run reads. The first run reads every device on the bus; a later
+# one every port still pending, connected yet or not, so a device connected since the first run
+# is never a candidate and a pending device still enumerating is waited for.
 devices() {
-    local dev
+    local dev port
+    if [[ $first == no ]]; then
+        for port in "${!wanted[@]}"; do
+            echo "$usb/$port"
+        done
+        return
+    fi
     for dev in "$usb"/*; do
-        [[ ${dev##*/} == *:* ]] && continue # an interface is read with its device
-        if [[ $first == yes || -v wanted[${dev##*/}] ]]; then
-            echo "$dev"
-        fi
+        [[ ${dev##*/} == *:* ]] || echo "$dev" # an interface is read with its device
     done
 }
 
@@ -134,6 +138,10 @@ devices() {
 # `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
 describe() {
     local dev=$1 name=${1##*/} vid pid serial='' config iface class sub proto ifaces=''
+    if [[ ! -e $dev ]]; then
+        echo "not connected"
+        return 1
+    fi
     { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; } || return 1
     if [[ -e $dev/serial ]]; then
         attr "$dev/serial" serial || return 1

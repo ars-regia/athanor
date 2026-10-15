@@ -91,6 +91,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   holds a device lock cannot hold back the greeter indefinitely. The first run keeps the
   pending file as it sees the devices, so a first run stopped by that bound is continued at the
   ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
+  A later run waits until the bound for a pending port that has not enumerated yet.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

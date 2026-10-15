@@ -417,6 +417,31 @@ case $(wc -l < {count}) in
         self.assertTrue(self.marker.exists())
         self.assertFalse(self.pending.exists())
 
+    def test_a_pending_device_that_enumerates_late_is_waited_for_and_admitted(self):
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        later = self.work / "later"
+        later.mkdir()
+        (self.sysfs / "1-2").rename(later / "1-2")
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 1\n1-2 058f:9540\n")
+        self.run_script(sleep=self.on_wait("", f"mv {later / '1-2'} {self.sysfs}"))
+        self.assertEqual(
+            self.written(),
+            ['allow id 058f:9540 serial "" via-port "1-2" with-interface equals { 0b:00:00 }'],
+        )
+        self.assertTrue(self.marker.exists())
+        self.assertFalse(self.pending.exists())
+
+    def test_a_pending_device_never_connected_is_waited_for_until_the_bound(self):
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 1\n1-2 058f:9540\n")
+        start = time.monotonic()
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assertGreaterEqual(time.monotonic() - start, 0.3)
+        self.assert_not_done(done, "1-2")
+        self.assertIn("<3>1-2 did not settle within 0.3 s: not connected", done.stderr)
+        self.assertEqual(self.pending.read_text(), "runs 2\n1-2 058f:9540\n")
+
     def test_a_pending_file_that_cannot_be_trusted_fails_without_a_new_snapshot(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         for body in (
