@@ -11,6 +11,14 @@ ConditionPathExists=!/var/lib/athanor/usbguard-internal.done
 
 [Service]
 Type=oneshot
+# The bound on the start (#490): udevadm settle (10 s) and the script's own bound (10 s), with
+# ten seconds for a read in progress at the bound and the syncs. A read of bConfigurationValue
+# waits for the device lock, which a driver probe can hold; the stop signal interrupts that
+# wait, so the greeter waits at most TimeoutStartSec= plus TimeoutStopSec=. greetd and
+# usbguard.service are only ordered after this unit, so they start whether it succeeds, fails
+# or times out; a run that does not finish leaves no marker and runs again at the next boot.
+TimeoutStartSec=30s
+TimeoutStopSec=5s
 ExecStartPre=/usr/bin/udevadm settle --timeout=10
 ExecStart=/usr/libexec/athanor-usbguard-internal
 StateDirectory=athanor

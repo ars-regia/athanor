@@ -16,6 +16,7 @@ time, and every attribute other than the interfaces, are not modelled.
 import fnmatch
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -139,15 +140,21 @@ class InternalSnapshot(unittest.TestCase):
             (f / "bInterfaceSubClass").write_text(sub + "\n")
             (f / "bInterfaceProtocol").write_text(proto + "\n")
 
-    def run_script(self, sync=None, sleep=None, check=True, wait_tenths=2):
+    def run_script(self, sync=None, sleep=None, check=True, wait_tenths=50):
         """Runs the script; `sync` and `sleep` are bodies of stand-ins for sync(1) and sleep(1),
-        put first on PATH."""
+        put first on PATH. A device is recorded on the second pass that reads it the same, so the
+        default bound leaves room for a slow machine; the cases that reach it set a short one."""
+        env = self.environment(sync, sleep, wait_tenths)
+        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check, timeout=30)
+
+    def environment(self, sync, sleep, wait_tenths):
         env = dict(
             os.environ,
             ATHANOR_USB_SYSFS=str(self.sysfs),
             ATHANOR_USBGUARD_RULES=str(self.rules),
             ATHANOR_USBGUARD_MARKER=str(self.marker),
             ATHANOR_USBGUARD_WAIT_TENTHS=str(wait_tenths),
+            LC_ALL="C",  # the messages bash gives in English
         )
         bin_dir = self.work / "bin"
         for name, body in (("sync", sync), ("sleep", sleep)):
@@ -157,7 +164,23 @@ class InternalSnapshot(unittest.TestCase):
                 (bin_dir / name).chmod(0o755)
         if bin_dir.exists():
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
-        return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check, timeout=30)
+        return env
+
+    def on_wait(self, *steps):
+        """A sleep(1) stand-in that runs the n-th step at the n-th wait, and nothing after."""
+        count = self.work / "waits"
+        cases = "".join(f"  {n}) {step} ;;\n" for n, step in enumerate(steps, 1))
+        return f"""echo >> {count}
+case $(wc -l < {count}) in
+{cases}esac
+"""
+
+    def assert_not_done(self, done, *unsettled):
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertFalse(self.marker.exists())
+        for name in unsettled:
+            self.assertIn(f"<3>{name} did not settle within 0.3 s: ", done.stderr)
+        self.assertIn("Not recording the snapshot as done: it runs again at the next boot.", done.stderr)
 
     def written(self):
         return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
@@ -221,21 +244,87 @@ class InternalSnapshot(unittest.TestCase):
         self.assertTrue(calls[1].startswith("rules=yes marker=no "), calls[1])
         self.assertTrue(calls[2].startswith("rules=yes marker=yes "), calls[2])
 
-    def test_a_vanished_device_is_skipped_and_the_others_are_written(self):
+    def test_a_device_that_leaves_the_bus_is_not_waited_for(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        done = self.run_script()
+        # The descriptor of 1-1 cannot be read, then the kernel removes the device from sysfs.
+        self.run_script(sleep=self.on_wait(f"rm -r {self.sysfs / '1-1'}"))
         self.assertEqual(len(self.written()), 1)
         self.assertIn("058f:9540", self.written()[0])
-        self.assertIn("Skipping 1-1", done.stderr)
         self.assertTrue(self.marker.exists())
 
-    def test_a_device_with_no_configuration_is_skipped_after_the_wait(self):
+    def test_a_descriptor_unreadable_then_readable_is_recorded(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], vanished=True)
+        self.run_script(sleep=self.on_wait(f"echo 0c45 > {self.sysfs / '1-1/idVendor'}"))
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("0c45:6a10", self.written()[0])
+        self.assertTrue(self.marker.exists())
+
+    def test_a_device_reconfigured_between_passes_is_recorded_once_it_reads_the_same_twice(self):
+        # usb_modeswitch, or a udev rule writing bConfigurationValue: configuration 1 offers mass
+        # storage; configuration 2, the modem, gains its interfaces one at a time. A pass that
+        # falls inside the change sees half of them, and the next pass reads differently.
+        self.device("1-1", "12d1", "1506", [("08", "06", "50")])
+        d = self.sysfs / "1-1"
+        iface = (
+            "mkdir {d}/1-1:2.{n} && echo {c} > {d}/1-1:2.{n}/bInterfaceClass && "
+            "echo {s} > {d}/1-1:2.{n}/bInterfaceSubClass && echo {p} > {d}/1-1:2.{n}/bInterfaceProtocol"
+        )
+        self.run_script(
+            sleep=self.on_wait(
+                f"rm -r {d}/1-1:1.0 && echo 2 > {d}/bConfigurationValue && "
+                + iface.format(d=d, n=0, c="02", s="0e", p="00"),
+                iface.format(d=d, n=1, c="0a", s="00", p="01"),
+            )
+        )
+        self.assertEqual(
+            self.written(),
+            ['allow id 12d1:1506 serial "" via-port "1-1" with-interface equals { 02:0e:00 0a:00:01 }'],
+        )
+        self.assertEqual(len((self.work / "waits").read_text().splitlines()), 3)
+        self.assertTrue(self.marker.exists())
+
+    def test_a_device_that_never_reads_the_same_twice_leaves_no_marker(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        self.device("1-2", "058f", "9540", [("0b", "00", "00")])
+        proto = self.sysfs / "1-1/1-1:1.0/bInterfaceProtocol"
+        done = self.run_script(sleep=f"echo 0$((1 - $(< {proto}))) > {proto}\n", check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: no two consecutive passes read it the same", done.stderr)
+        # The device that settled is admitted for this boot; the snapshot is taken again.
+        self.assertEqual(len(self.written()), 1)
+        self.assertIn("058f:9540", self.written()[0])
+
+    def test_a_device_with_no_configuration_at_the_bound_leaves_no_marker(self):
         self.device("1-1", "0c45", "6a10", [], configured=False)
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        done = self.run_script()
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: not configured", done.stderr)
         self.assertEqual(len(self.written()), 1)
-        self.assertIn("Skipping 0c45:6a10 on 1-1", done.stderr)
+        self.assertIn("058f:9540", self.written()[0])
+
+    def test_a_kill_while_a_read_blocks_leaves_no_marker_and_no_rules(self):
+        # A read of bConfigurationValue waits for the device lock while a driver probe holds it;
+        # a FIFO with no writer blocks the same way. The unit's start timeout then stops the run.
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/bConfigurationValue").unlink()
+        os.mkfifo(self.sysfs / "1-1/bConfigurationValue")
+        run = subprocess.Popen(
+            [LIBEXEC],
+            env=self.environment(None, None, 3),  # a run that did not block would end within 0.3 s
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run.wait(1)
+        finally:
+            os.killpg(run.pid, signal.SIGTERM)
+        self.assertEqual(run.wait(30), -signal.SIGTERM)
+        self.assertFalse(self.marker.exists())
+        self.assertEqual(list(self.work.glob("50-athanor-internal.conf*")), [])
 
     def test_the_wait_lets_a_device_finish_enumerating(self):
         self.device("1-1", "0c45", "6a10", [], configured=False)
@@ -243,7 +332,8 @@ class InternalSnapshot(unittest.TestCase):
 
         waits = self.work / "waits"
         # The script sleeps only while a device is pending: its first wait finishes the
-        # enumeration, the interface with its attributes, as sysfs shows it.
+        # enumeration, the interface with its attributes, as sysfs shows it, and the pass after
+        # the second wait reads the device as the one before it did.
         finish = f"""echo >> {waits}
 if [[ ! -e {d}/1-1:1.0 ]]; then
   mkdir {d}/pending
@@ -252,17 +342,19 @@ if [[ ! -e {d}/1-1:1.0 ]]; then
   echo 1 > {d}/bConfigurationValue
 fi
 """
-        self.run_script(sleep=finish, wait_tenths=50)
-        self.assertEqual(len(waits.read_text().splitlines()), 1)
+        self.run_script(sleep=finish)
+        self.assertEqual(len(waits.read_text().splitlines()), 2)
         self.assertEqual(len(self.written()), 1)
         self.assertIn("0c45:6a10", self.written()[0])
 
     def test_an_empty_configuration_value_is_not_configured(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
-        (self.sysfs / "1-1/bConfigurationValue").write_text("\n")
-        done = self.run_script()
+        # The kernel shows no configuration as an empty attribute, with no newline.
+        (self.sysfs / "1-1/bConfigurationValue").write_text("")
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: not configured", done.stderr)
         self.assertEqual(self.written(), [])
-        self.assertIn("not configured", done.stderr)
 
     def test_the_rules_file_is_the_renamed_temporary_file(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
@@ -272,13 +364,15 @@ fi
         self.assertEqual(str(self.rules.stat().st_ino), first)
         self.assertEqual(list(self.work.glob("50-athanor-internal.conf.*")), [])
 
-    def test_a_serial_that_cannot_be_read_skips_the_device(self):
+    def test_a_serial_that_cannot_be_read_leaves_no_marker(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         (self.sysfs / "1-1/serial").mkdir()  # reading a directory fails, as a vanished file does
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        done = self.run_script()
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("Is a directory", done.stderr)
         self.assertEqual(len(self.written()), 1)
-        self.assertIn("serial cannot be read", done.stderr)
+        self.assertIn("058f:9540", self.written()[0])
 
     def test_a_missing_serial_is_an_empty_serial(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
@@ -289,6 +383,16 @@ fi
         unit = UNIT.read_text()
         self.assertIn("Before=usbguard.service greetd.service", unit)
         self.assertIn("ConditionPathExists=!/var/lib/athanor/usbguard-internal.done", unit)
+
+    def test_unit_start_is_bounded_beyond_the_scripts_own_bound(self):
+        # udevadm settle (10 s) and the script's bound (10 s) fit within the start timeout, and
+        # greetd and usbguard.service are ordered after the unit without depending on it.
+        unit = UNIT.read_text()
+        self.assertIn("\nExecStartPre=/usr/bin/udevadm settle --timeout=10\n", unit)
+        self.assertIn("\nTimeoutStartSec=30s\nTimeoutStopSec=5s\n", unit)
+        self.assertIn("\nwait_tenths=${ATHANOR_USBGUARD_WAIT_TENTHS:-100}\n", LIBEXEC.read_text())
+        self.assertNotIn("Requires=", unit)
+        self.assertNotIn("RequiredBy=", unit)
 
 
 class BaselineUnchangedTest(unittest.TestCase):

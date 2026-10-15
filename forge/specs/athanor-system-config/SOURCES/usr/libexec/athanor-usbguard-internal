@@ -10,27 +10,21 @@ shopt -s nullglob
 usb=${ATHANOR_USB_SYSFS:-/sys/bus/usb/devices}
 rules=${ATHANOR_USBGUARD_RULES:-/etc/usbguard/rules.d/50-athanor-internal.conf}
 marker=${ATHANOR_USBGUARD_MARKER:-/var/lib/athanor/usbguard-internal.done}
-# The bound on the wait for enumeration, in tenths of a second. Ten seconds is long enough for a
-# hub and its children to be configured on the boots seen so far, and short enough not to hold
-# the greeter back for a device that never answers; such a device is logged and skipped.
+# The bound on the whole snapshot, in tenths of a second: the wait for enumeration, and the
+# passes until every device reads the same twice. Ten seconds is long enough for a hub and its
+# children to be configured on the boots seen so far, and short enough not to hold the greeter
+# back for a device that never settles. Reaching it leaves the marker unwritten (#490).
 wait_tenths=${ATHANOR_USBGUARD_WAIT_TENTHS:-100}
 
 [[ -e $marker ]] && exit 0
 
 # attr FILE VAR: reads the first line of a sysfs attribute into VAR; fails when it cannot be
-# read (the device is gone, or has no such attribute), after bash has said why on stderr.
+# read (the device is gone, or has no such attribute), after bash has said why on stdout, so
+# that describe returns the reason.
 attr() {
     local -n target=$2
     # shellcheck disable=SC2034
-    IFS= read -r target <"$1"
-}
-
-# configured DEVICE: succeeds once the device has a configuration and its interfaces exist.
-# `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
-configured() {
-    local value
-    [[ -r $1/bConfigurationValue ]] && attr "$1/bConfigurationValue" value && [[ -n $value ]] &&
-        compgen -G "$1/${1##*/}:*" >/dev/null
+    { IFS= read -r target <"$1"; } 2>&1
 }
 
 devices() {
@@ -40,48 +34,53 @@ devices() {
     done
 }
 
-tries=0
-while ((tries < wait_tenths)); do
-    pending=no
-    while read -r dev; do
-        configured "$dev" || pending=yes
-    done < <(devices)
-    [[ $pending == no ]] && break
-    sleep 0.1
-    tries=$((tries + 1))
-done
+# describe DEVICE: prints what one pass reads of the device, a value a line: idVendor,
+# idProduct, serial, bConfigurationValue, then each interface as "NAME CLASS:SUBCLASS:PROTOCOL".
+# Fails, printing why, when any of it cannot be read or the device is not configured yet.
+# `udevadm settle` only drains the udev queue; it does not wait for the bus to enumerate.
+describe() {
+    local dev=$1 name=${1##*/} vid pid serial='' config iface class sub proto ifaces=''
+    { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; } || return 1
+    if [[ -e $dev/serial ]]; then
+        attr "$dev/serial" serial || return 1
+    fi
+    # An unconfigured device has an empty bConfigurationValue, read as end of file.
+    if ! attr "$dev/bConfigurationValue" config || [[ -z $config ]]; then
+        echo "not configured"
+        return 1
+    fi
+    for iface in "$dev/$name":*; do
+        { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
+            attr "$iface/bInterfaceProtocol" proto; } || return 1
+        ifaces+="${iface##*/} $class:$sub:$proto"$'\n'
+    done
+    if [[ -z $ifaces ]]; then
+        echo "configured, with no interface yet"
+        return 1
+    fi
+    printf '%s\n' "$vid" "$pid" "$serial" "$config"
+    printf '%s' "$ifaces"
+}
 
-# device_rule DEVICE: prints the rule for the device, or fails after saying on stderr why it
-# gets none. A device that vanishes while it is read is skipped, and the others go on.
+# device_rule DEVICE DESCRIPTION: prints the rule for a device from its settled description, or
+# fails after saying on stderr why it gets none.
 device_rule() {
-    local dev=$1 name vid pid serial='' iface class sub proto ifaces='' storage=no
-    name=${dev##*/}
-    if ! { attr "$dev/idVendor" vid && attr "$dev/idProduct" pid; }; then
-        echo "<4>Skipping $name: its descriptor cannot be read." >&2
-        return 1
-    fi
-    if [[ -e $dev/serial ]] && ! attr "$dev/serial" serial; then
-        echo "<4>Skipping $vid:$pid on $name: its serial cannot be read." >&2
-        return 1
-    fi
+    local name=${1##*/} vid pid serial class ifaces='' storage=no
+    {
+        IFS= read -r vid
+        IFS= read -r pid
+        IFS= read -r serial
+        IFS= read -r _ # bConfigurationValue
+        while read -r _ class; do
+            [[ $class == 08:* ]] && storage=yes
+            ifaces+=" $class"
+        done
+    } <<<"$2"
     if [[ ! $vid =~ ^[0-9a-f]{4}$ || ! $pid =~ ^[0-9a-f]{4}$ || ! $name =~ ^[0-9A-Za-z.-]+$ ||
         ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
         echo "<4>Skipping $name: a descriptor holds characters a rule cannot carry." >&2
         return 1
     fi
-    if ! configured "$dev"; then
-        echo "<4>Skipping $vid:$pid on $name: not configured after the wait." >&2
-        return 1
-    fi
-    for iface in "$dev/$name":*; do
-        if ! { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
-            attr "$iface/bInterfaceProtocol" proto; }; then
-            echo "<4>Skipping $vid:$pid on $name: an interface cannot be read." >&2
-            return 1
-        fi
-        [[ $class == 08 ]] && storage=yes
-        ifaces+=" $class:$sub:$proto"
-    done
     if [[ $storage == yes ]]; then
         echo "<6>Not admitting $vid:$pid on $name: mass storage." >&2
         return 1
@@ -89,15 +88,44 @@ device_rule() {
     echo "allow id $vid:$pid serial \"$serial\" via-port \"$name\" with-interface equals {$ifaces }"
 }
 
+# A device is recorded only when two consecutive passes read the same description: a device
+# reconfigured between the read of bConfigurationValue and the reads of its interfaces
+# (usb_modeswitch, a udev rule, usbfs) reads differently twice and is read again. A device that
+# leaves the bus stops being listed and is not waited for.
+declare -A last=() why=() settled=()
+admitted=()
+# Microseconds of the wall clock, in any locale; the unit's start timeout is the monotonic bound.
+deadline=$((${EPOCHREALTIME//[!0-9]/} + wait_tenths * 100000))
+while :; do
+    pending=()
+    while read -r dev; do
+        [[ -v settled[$dev] ]] && continue
+        if ! desc=$(describe "$dev"); then
+            unset 'last[$dev]'
+            why[$dev]=$desc
+            pending+=("$dev")
+        elif [[ -v last[$dev] && ${last[$dev]} == "$desc" ]]; then
+            settled[$dev]=yes
+            if rule=$(device_rule "$dev" "$desc"); then
+                admitted+=("$rule")
+            fi
+        else
+            last[$dev]=$desc
+            why[$dev]="no two consecutive passes read it the same"
+            pending+=("$dev")
+        fi
+    done < <(devices)
+    ((${#pending[@]} == 0)) && break
+    ((${EPOCHREALTIME//[!0-9]/} < deadline)) || break
+    sleep 0.1
+done
+
 out=$(mktemp "$rules.XXXXXX")
 trap 'rm -f -- "$out"' EXIT
 echo "# Written once by athanor-usbguard-internal.service: the USB devices connected at the first boot." >"$out"
-
-while read -r dev; do
-    if rule=$(device_rule "$dev"); then
-        echo "$rule" >>"$out"
-    fi
-done < <(devices)
+if ((${#admitted[@]})); then
+    printf '%s\n' "${admitted[@]}" >>"$out"
+fi
 
 # Rules first, durably, then the marker: a crash between them runs the snapshot again, a crash
 # before the rules are on disk can never leave a marker for rules that are not.
@@ -106,6 +134,16 @@ sync -- "$out"
 mv -- "$out" "$rules"
 trap - EXIT
 sync -- "${rules%/*}"
+
+# A device still unsettled at the bound may be internal: the rules of the settled ones stand for
+# this boot, and the snapshot runs again at the next one rather than leave it blocked for good.
+if ((${#pending[@]})); then
+    for dev in "${pending[@]}"; do
+        echo "<3>${dev##*/} did not settle within $((wait_tenths / 10)).$((wait_tenths % 10)) s: ${why[$dev]//$'\n'/; }" >&2
+    done
+    echo "<3>Not recording the snapshot as done: it runs again at the next boot." >&2
+    exit 1
+fi
 mkdir -p -- "${marker%/*}"
 : >"$marker"
 sync -- "$marker" "${marker%/*}"

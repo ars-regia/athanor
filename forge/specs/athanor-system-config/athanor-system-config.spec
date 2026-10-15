@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:64.fc43}
+Release:        %{?autorelease}%{!?autorelease:65.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -79,6 +79,15 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
+- athanor-usbguard-internal records a USB device only when two consecutive passes read the
+  same configuration, interfaces and interface classes, so a device reconfigured while it is
+  read is read again rather than skipped (#490). A device that does not settle within the
+  ten-second bound, unreadable, unconfigured or changing, leaves the marker unwritten: the
+  settled devices are admitted for this boot and the snapshot runs again at the next one.
+  athanor-usbguard-internal.service bounds its start at 30 seconds, so a driver probe that
+  holds a device lock cannot hold back the greeter indefinitely.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-64
 - Drops the %post that copied the video and tty groups into /etc/group and added greetd to
   them (forge rule 2, #223). logind grants the greeter's session its devices through ACLs,
