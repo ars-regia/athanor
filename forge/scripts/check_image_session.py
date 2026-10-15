@@ -93,12 +93,13 @@ DBUS_SERVICES = "usr/share/dbus-1/services"
 FILE_CHOOSER = "org.freedesktop.impl.portal.FileChooser"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 SCHEMA_DIR = "/usr/share/glib-2.0/schemas"
-# What 90_athanor-appearance.gschema.override and org.athanor.desktop.appearance.gschema.xml
-# ship: (schema, key, the value gsettings prints).
+# What 90_athanor-appearance.gschema.override, 90_athanor-network.gschema.override and
+# org.athanor.desktop.appearance.gschema.xml ship: (schema, key, the value gsettings prints).
 SCHEMA_DEFAULTS = (
     ("org.gnome.desktop.interface", "accent-color", "'purple'"),
     ("org.gnome.desktop.interface", "icon-theme", "'Adwaita'"),
     ("org.athanor.desktop.appearance", "accent-mode", "'fixed'"),
+    ("org.gnome.system.wsdd", "display-mode", "'disabled'"),
 )
 
 
