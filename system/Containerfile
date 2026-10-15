@@ -89,6 +89,8 @@ ARG SOURCE_DATE_EPOCH
 # TIER 0: BEDROCK HARDWARE & KERNEL FOUNDATION
 # The tier repositories mount under /tmp: in an ostree image /mnt is a symlink to var/mnt,
 # which does not exist at build time, so podman cannot create a mount target below it.
+# The Azoth kernel's kernel-uki-virt and kernel-uki-virt-addons subpackages are left out of the
+# install: a UKI returns only with sealed composefs in 1.1 (D6, #491), and one on disk costs 69 MB.
 RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
     --mount=type=cache,dst=/var/cache --mount=type=cache,dst=/var/cache/libdnf5 \
     base_kernel=$(rpm -qa kernel kernel-core 'kernel-modules*' 'kernel-uki-virt*') && \
@@ -102,7 +104,7 @@ RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
         if rpm -q fedora-logos >/dev/null; then rpm -e --nodeps fedora-logos; fi && \
         rpm -Uvh --replacefiles --replacepkgs --nodeps "$BASE_CONFIG"; \
     fi && \
-    RPM_LIST=$(find /tmp/tier0-repo -name "*.rpm" 2>/dev/null | awk '!/systemd-standalone-|.*-free-.*\.rpm|glibc32|kernel-debug|rpm-.*\.rpm|fedora-release-|selinux-policy|athanor-base-config|-doc-|debuginfo|debugsource/ && (!/-devel-/ || /kernel-devel/)') && \
+    RPM_LIST=$(find /tmp/tier0-repo -name "*.rpm" 2>/dev/null | awk '!/systemd-standalone-|.*-free-.*\.rpm|glibc32|kernel-debug|rpm-.*\.rpm|fedora-release-|selinux-policy|athanor-base-config|-doc-|debuginfo|debugsource|kernel-uki-virt/ && (!/-devel-/ || /kernel-devel/)') && \
     if [ -n "$RPM_LIST" ]; then \
         echo "Tier 0: Installing the hardware foundation and the Azoth kernel..." && \
         dnf5 install -y --allowerasing --setopt=install_weak_deps=False --setopt=tsflags=nodocs $RPM_LIST; \
