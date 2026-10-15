@@ -29,3 +29,24 @@ ProtectKernelTunables=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/flatpak /var/tmp
 CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_SETUID CAP_SETGID
+# The network (AF_NETLINK for getaddrinfo's interface query) and local sockets (the system bus,
+# gpg-agent for the remote's signatures); no other address family.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+# A call outside the set fails with EPERM, as it already does for want of CAP_SYS_ADMIN (the
+# bubblewrap of an apply_extra), instead of killing the update.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+PrivateDevices=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# Not set: UMask=0077, which would leave the installed applications unreadable to their users;
+# ProcSubset=pid, which hides /proc/sys/kernel/random/boot_id that OSTree opens the repository
+# with; and RestrictNamespaces=, which waits on a test of apply_extra's bubblewrap (#478).
