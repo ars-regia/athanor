@@ -6,6 +6,10 @@ vmlinuz is missing.
 """
 
 import glob
+import io
+import struct
+import sys
+import tarfile
 import os
 import pathlib
 import shutil
@@ -22,6 +26,7 @@ HOST_VMLINUZ = sorted(
 )
 PODMAN = """#!/bin/sh
 case "$*" in
+*"tar -C"*) tar -cf - -C "${FAKE_ROOT:-/var/empty}" . ;;
 */bin/sh*) [ -n "$FAKE_KERNEL_PATH" ] && echo "$FAKE_KERNEL_PATH" ;;
 */bin/cat*) cat "$FAKE_VMLINUZ" ;;
 esac
@@ -135,6 +140,79 @@ class CheckImageKernel(unittest.TestCase):
         result = self.check(signed, project[2], kernel_path="")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exactly one", result.stderr)
+
+
+def fake_pe(*sections):
+    """A minimal PE image whose section table names the given sections."""
+    pe, opt = 0x80, 0xF0
+    head = b"MZ" + bytes(0x3A) + struct.pack("<I", pe) + bytes(pe - 0x40)
+    head += b"PE\0\0" + struct.pack("<HH", 0x8664, len(sections)) + bytes(12)
+    head += struct.pack("<H", opt) + bytes(2) + bytes(opt)
+    return head + b"".join(n.encode().ljust(8, b"\0") + bytes(32) for n in sections)
+
+
+class CheckImageUki(unittest.TestCase):
+    def findings(self, files):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for name, data in files.items():
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        buf.seek(0)
+        sys.path.insert(0, str(HERE.parent))
+        try:
+            import check_image_uki
+        finally:
+            sys.path.pop(0)
+        return check_image_uki.findings(buf)
+
+    def test_refuses_a_pe_with_a_linux_section_in_the_bootupd_payload(self):
+        found = self.findings(
+            {
+                "usr/lib/bootupd/updates/EFI/fedora/uki.efi": fake_pe(
+                    ".text", ".linux", ".initrd"
+                )
+            }
+        )
+        self.assertEqual(len(found), 1)
+
+    def test_accepts_shim_and_grub(self):
+        files = {
+            "usr/lib/bootupd/updates/EFI/fedora/shimx64.efi": fake_pe(
+                ".text", ".data", ".sbat"
+            ),
+            "usr/lib/bootupd/updates/EFI/fedora/grubx64.efi": fake_pe(
+                ".text", ".mods", ".sbat"
+            ),
+        }
+        self.assertEqual(self.findings(files), [])
+
+    def test_refuses_an_efi_under_efi_linux_by_name(self):
+        self.assertEqual(len(self.findings({"boot/efi/EFI/Linux/a.efi": b"x"})), 1)
+
+    def test_accepts_an_empty_boot_content(self):
+        self.assertEqual(self.findings({}), [])
+
+    def test_the_script_refuses_an_image_with_a_uki(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d, "root", "boot", "efi", "EFI", "Linux")
+            root.mkdir(parents=True)
+            (root / "a.efi").write_bytes(fake_pe(".linux"))
+            stub = pathlib.Path(d, "bin", "podman")
+            stub.parent.mkdir()
+            stub.write_text(PODMAN)
+            stub.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{stub.parent}:{os.environ['PATH']}",
+                "FAKE_ROOT": str(pathlib.Path(d, "root")),
+            }
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "image"], env=env, capture_output=True, text=True
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("UKI", result.stderr)
 
 
 if __name__ == "__main__":

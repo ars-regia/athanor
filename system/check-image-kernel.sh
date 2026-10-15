@@ -4,7 +4,8 @@
 # the Secure Boot certificate of this checkout (CN=Athanor Secure Boot Signing Key). The
 # Containerfile checks the kernel azoth-boot names; this checks the file the image ships, which
 # shim refuses ("bad shim signature") when only pesign's test certificate signed it.
-# Needs podman, openssl and sbverify (sbsigntools) on PATH. SECUREBOOT_CERT (a DER file) replaces
+# It also fails when the image carries a UKI (check_image_uki.py).
+# Needs podman, python3, openssl and sbverify (sbsigntools) on PATH. SECUREBOOT_CERT (a DER file) replaces
 # the committed certificate; the unit test uses it.
 # Usage: check-image-kernel.sh IMAGE
 set -euo pipefail
@@ -23,6 +24,13 @@ die() {
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+
+# No UKI may reach the ESP before sealed composefs (release 1.1): the bootupd payload,
+# /usr/lib/ostree-boot and /boot of the image hold none. A tar of those paths is read on the host.
+podman run --rm --network=none --entrypoint /bin/sh "$1" -c \
+    'for d in usr/lib/bootupd usr/lib/ostree-boot boot; do [ -e "/$d" ] && set -- "$@" "$d"; done
+    [ $# -eq 0 ] || tar -C / -cf - "$@"' |
+    python3 -B "$ROOT/system/check_image_uki.py" || die "$1 carries a UKI, or its boot content could not be read"
 
 path=$(podman run --rm --network=none --entrypoint /bin/sh "$1" -c \
     'set -- /usr/lib/modules/*/vmlinuz; [ $# -eq 1 ] && [ -f "$1" ] && echo "$1"') ||
