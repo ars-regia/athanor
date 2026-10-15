@@ -93,6 +93,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   ports it saw; one stopped before it read any device's ids admits nothing at the next boot.
   A later run waits until the bound for a pending port that has not enumerated yet.
   A rules file that cannot be read fails the run and is kept as it is.
+  A pending device read with no serial is recorded as such and matches only a device with
+  none; only a device never read matches by port and ids alone.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
 - %install copies the usr and etc source trees without hiding a failure (AGENTS.md,

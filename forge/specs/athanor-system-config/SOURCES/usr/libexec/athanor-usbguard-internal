@@ -47,7 +47,9 @@ put() {
 }
 
 # The pending file: a line "runs N", the runs that have read its devices, then one line for each
-# device still owed a rule, "PORT VID:PID", followed by " SERIAL" when its serial was read.
+# device still owed a rule, "PORT VID:PID", followed by " SERIAL" when its serial was read, or by
+# ' ""' when the device was read with no serial (USBGuard's serial ""). A line with neither, from
+# a device whose description was never read, matches any serial at that port and VID:PID.
 declare -A wanted=()
 runs=0
 first=yes
@@ -59,7 +61,7 @@ if [[ -e $pending ]]; then
         n=$((n + 1))
         if ((n == 1)) && [[ $line =~ ^runs\ ([1-9])$ ]]; then
             runs=${BASH_REMATCH[1]}
-        elif ((n > 1)) && [[ $line =~ ^([0-9A-Za-z.-]+)\ [0-9a-f]{4}:[0-9a-f]{4}(\ [0-9A-Za-z._:+\ -]+)?$ ]]; then
+        elif ((n > 1)) && [[ $line =~ ^([0-9A-Za-z.-]+)\ [0-9a-f]{4}:[0-9a-f]{4}(\ [0-9A-Za-z._:+\ -]+|\ \"\")?$ ]]; then
             wanted[${BASH_REMATCH[1]}]=$line
         else
             n=0
@@ -166,7 +168,7 @@ describe() {
 
 # identity DEVICE [DESCRIPTION]: prints the pending line of a device, from its description or,
 # without one, from its ids alone. Fails when they cannot be read, printing why, or when a rule
-# could not carry them; a serial a rule could not carry is left out.
+# could not carry them; a serial a rule could not carry is left out, as an unread one is.
 identity() {
     local name=${1##*/} vid pid serial=''
     if [[ -n ${2-} ]]; then
@@ -175,12 +177,16 @@ identity() {
         { attr "$1/idVendor" vid && attr "$1/idProduct" pid; } || return 1
     fi
     [[ $vid =~ ^[0-9a-f]{4}$ && $pid =~ ^[0-9a-f]{4}$ && $name =~ ^[0-9A-Za-z.-]+$ ]] || return 1
-    [[ $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]] || serial=''
+    if [[ ! $serial =~ ^[0-9A-Za-z._:+\ -]*$ ]]; then
+        serial=''
+    elif [[ -n ${2-} && -z $serial ]]; then
+        serial='""'
+    fi
     echo "$name $vid:$pid${serial:+ $serial}"
 }
 
 # matches DEVICE DESCRIPTION: succeeds when a settled device is the one its pending line names:
-# the same port and ids, and the same serial when one was recorded.
+# the same port and ids, and the same serial, or none, when the first run read it.
 matches() {
     local entry=${wanted[${1##*/}]} now
     now=$(identity "$1" "$2") || return 1

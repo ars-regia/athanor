@@ -456,6 +456,30 @@ case $(wc -l < {count}) in
         self.assertIn("<3>1-2 did not settle within 0.3 s: not connected", done.stderr)
         self.assertEqual(self.pending.read_text(), "runs 2\n1-2 058f:9540\n")
 
+    def test_a_pending_device_read_with_no_serial_admits_only_a_device_with_none(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM9")
+        self.device("1-2", "0c45", "6a10", [("0e", "01", "00")])
+        self.pending.parent.mkdir()
+        self.pending.write_text('runs 1\n1-1 0c45:6a10 ""\n1-2 0c45:6a10 ""\n')
+        done = self.run_script(check=False)
+        self.assertIn('<4>1-1 now holds a device other than the 0c45:6a10 "" of the first run', done.stderr)
+        self.assertEqual(
+            self.written(),
+            ['allow id 0c45:6a10 serial "" via-port "1-2" with-interface equals { 0e:01:00 }'],
+        )
+        self.assertEqual(self.pending.read_text(), 'runs 2\n1-1 0c45:6a10 ""\n')
+
+    def test_a_pending_device_whose_serial_was_never_read_matches_by_port_and_ids(self):
+        # The residual limit: with no description from the first run, any serial is accepted.
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM9")
+        self.pending.parent.mkdir()
+        self.pending.write_text("runs 1\n1-1 0c45:6a10\n")
+        self.run_script()
+        self.assertEqual(
+            self.written(),
+            ['allow id 0c45:6a10 serial "CAM9" via-port "1-1" with-interface equals { 0e:01:00 }'],
+        )
+
     def test_a_pending_file_that_cannot_be_trusted_fails_without_a_new_snapshot(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         for body in (
@@ -535,7 +559,8 @@ case $(wc -l < {count}) in
         )
         self.assertFalse(self.marker.exists())
         self.assertFalse(self.rules.exists())
-        self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n1-2 058f:9540\n")
+        # 1-2 was read once, with no serial, before its configuration blocked.
+        self.assertEqual(self.pending.read_text(), 'runs 1\n1-1 0c45:6a10 CAM1\n1-2 058f:9540 ""\n')
         config.unlink()
         config.write_text("1\n")
         self.device("1-4", "046d", "c52b", [("03", "01", "01")], "KBD")  # connected since
