@@ -104,21 +104,29 @@ class DeliberateRollback(unittest.TestCase):
             ["src/lib/handler.rs", "src/main.rs"],
         )
         added = added_lines(self.patch)
-        self.assertRegex(added, r"if booted_is_default\(\) == Some\(true\) \{")
-        self.assertIn('.get("rollbackQueued")', added)
-        # The stale trigger is cleared, as after a fallback made permanent.
-        self.assertIn("unset_next_deployment_id()?;", added)
-
-    def test_patch_tests_both_lookups(self):
-        added = added_lines(self.patch)
-        self.assertIn(
-            "assert_eq!(bootc_booted_is_default(&queued(json!(true))), Some(false));",
-            added,
+        # The default deployment is read in boot order, not from bootc's rollbackQueued, which
+        # compares the booted deployment with the last other one only.
+        self.assertIn('Command::new("rpm-ostree")', added)
+        self.assertNotIn("rollbackQueued", added)
+        self.assertRegex(
+            added, r"else if booted_is_default\(\) == Some\(true\) \{\s*NextBoot::DeliberateRollback"
         )
+        # The stale trigger is cleared, as after a fallback made permanent.
         self.assertRegex(
             added,
-            r"rpm_ostree_booted_is_default\(&deployments\(\[false, true\]\)\),\s*Some\(false\)",
+            r"NextBoot::DeliberateRollback => \{[\s\S]*?unset_next_deployment_id\(\)\?;\s*unset_fallback\(\)",
         )
+
+    def test_patch_tests_the_decision_and_the_boot_order(self):
+        added = added_lines(self.patch)
+        self.assertIn(
+            "assert_eq!(classify(Some(false)), NextBoot::GrubFallback);", added
+        )
+        self.assertIn("assert_eq!(classify(None), NextBoot::GrubFallback);", added)
+        self.assertIn(
+            "assert_eq!(default_is_booted(&fallback), Some(false));", added
+        )
+        self.assertIn("assert_eq!(default_is_booted(&staged), Some(true));", added)
 
 
 if __name__ == "__main__":
