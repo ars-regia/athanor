@@ -184,3 +184,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | accepted | update, build, release, security |
 | ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | accepted | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
+| ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
