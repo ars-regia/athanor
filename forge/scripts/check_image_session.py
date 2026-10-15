@@ -1,5 +1,6 @@
 #!/usr/bin/python3
-"""Fail when a system image lacks the session lock or the polkit agent that release 0.9 ships.
+"""Fail when a system image lacks the session lock, the polkit agent or the volume keys that
+release 0.9 ships.
 
 Usage: check_image_session.py [IMAGE_ROOT]
 system/check-image-session.sh runs it inside a built image (IMAGE_ROOT defaults to /).
@@ -12,7 +13,9 @@ build failure: a package dropped from packages.json, a launcher line removed, th
 no longer wanted by the session, masked, taken out of NoNewPrivileges or given another ExecStart
 by a drop-in, the helper socket not enabled or enabled without its unit file, the helper setuid
 again (polkit 126), the helper's sandbox read-only over pam_faillock's tally directory (#144,
-#445), and the root greeter daemon of CVE-2026-25704 enabled.
+#445), the settings daemon's sandbox read-only over the runtime directory where it binds the
+socket of its audio service, which leaves the volume keys dead (#144), and the root greeter
+daemon of CVE-2026-25704 enabled.
 """
 
 import os
@@ -39,6 +42,11 @@ HELPER = "usr/lib/polkit-1/polkit-agent-helper-1"
 HELPER_SOCKET = "polkit-agent-helper.socket"
 HELPER_SERVICE = "polkit-agent-helper@.service"
 TALLY_DIR = "/run/faillock"
+# cosmic-settings-daemon binds $XDG_RUNTIME_DIR/com.system76.CosmicSettings, the varlink socket
+# of its audio service; the volume keys call that service (#144).
+SETTINGS_DAEMON = "cosmic-settings-daemon.service"
+# What %t expands to in a user unit: the user's runtime directory, any user's.
+USER_RUNTIME_DIR = "/run/user/UID"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 
 
@@ -83,12 +91,12 @@ def path_list(files, key):
     return paths
 
 
-def normalised(entry):
-    """A path entry without its - and + prefixes, with %t expanded to /run (the runtime
-    directory of a system unit) and with repeated and trailing slashes removed; None for a
-    relative path, which systemd rejects and drops. Any other specifier raises ValueError:
-    this check does not expand it."""
-    path = entry.lstrip("-+").replace("%t", "/run")
+def normalised(entry, runtime):
+    """A path entry without its - and + prefixes, with %t expanded to runtime (/run for a
+    system unit, USER_RUNTIME_DIR for a user unit) and with repeated and trailing slashes
+    removed; None for a relative path, which systemd rejects and drops. Any other specifier
+    raises ValueError: this check does not expand it."""
+    path = entry.lstrip("-+").replace("%t", runtime)
     if "%" in path:
         raise ValueError(entry)
     if not path.startswith("/"):
@@ -96,12 +104,12 @@ def normalised(entry):
     return "/" + "/".join(part for part in path.split("/") if part)
 
 
-def depth_covering(entries, path):
+def depth_covering(entries, path, runtime):
     """The depth of the deepest entry that is path or one of its parents, / being 0; -1 when
     none is."""
     depths = [-1]
     for entry in entries:
-        e = normalised(entry)
+        e = normalised(entry, runtime)
         if e is None:
             continue
         if e == "/" or path == e or path.startswith(e + "/"):
@@ -109,39 +117,34 @@ def depth_covering(entries, path):
     return max(depths)
 
 
-def helper_problems(root):
-    """The helper unit as systemd loads it (/etc over /run over /usr/lib, then drop-ins) must
-    leave /run/faillock writable when it sets ProtectSystem=strict. Any InaccessiblePaths=
-    entry covering it fails, whatever its depth: systemd drops every mount below an
-    inaccessible one (namespace.c drop_inaccessible). Of the ReadWritePaths= and
-    ReadOnlyPaths= entries covering it, the deepest decides, and read-only wins a tie."""
-    units = [root / d / HELPER_SERVICE for d in SYSTEM_UNITS]
-    for d in SYSTEM_UNITS[1:]:
-        if is_masked(root / d, HELPER_SERVICE):
-            return [
-                f"{HELPER_SERVICE} is masked in /{d}: no polkit prompt can authenticate"
-            ]
-    present = [u for u in units if u.is_file()]
+def writable_problems(root, dirs, unit, path, runtime, if_masked, if_read_only):
+    """The unit as systemd loads it from dirs (a later directory over an earlier one, then the
+    drop-ins) must leave path writable when it sets ProtectSystem=strict; %t expands to
+    runtime. Any InaccessiblePaths= entry covering path fails, whatever its depth: systemd
+    drops every mount below an inaccessible one (namespace.c drop_inaccessible). Of the
+    ReadWritePaths= and ReadOnlyPaths= entries covering it, the deepest decides, and read-only
+    wins a tie. if_masked and if_read_only say what breaks."""
+    for d in dirs[1:]:
+        if is_masked(root / d, unit):
+            return [f"{unit} is masked in /{d}: {if_masked}"]
+    present = [root / d / unit for d in dirs if (root / d / unit).is_file()]
     if not present:
-        return [f"/{SYSTEM_UNITS[0]}/{HELPER_SERVICE} is missing"]
-    files = [present[-1]] + dropins(root, SYSTEM_UNITS, HELPER_SERVICE)
+        return [f"/{dirs[0]}/{unit} is missing"]
+    files = [present[-1]] + dropins(root, dirs, unit)
     if [v for f in files for v in assignments(f, "ProtectSystem")][-1:] != ["strict"]:
         return []
     try:
-        writable = depth_covering(path_list(files, "ReadWritePaths"), TALLY_DIR)
-        read_only = depth_covering(path_list(files, "ReadOnlyPaths"), TALLY_DIR)
-        hidden = depth_covering(path_list(files, "InaccessiblePaths"), TALLY_DIR)
+        writable = depth_covering(path_list(files, "ReadWritePaths"), path, runtime)
+        read_only = depth_covering(path_list(files, "ReadOnlyPaths"), path, runtime)
+        hidden = depth_covering(path_list(files, "InaccessiblePaths"), path, runtime)
     except ValueError as e:
         message = (
-            f"{HELPER_SERVICE} names the path {e} with a specifier other than %t, "
+            f"{unit} names the path {e} with a specifier other than %t, "
             "which this check does not expand"
         )
         return [message]
     if writable < 0 or read_only >= writable or hidden >= 0:
-        message = (
-            f"{HELPER_SERVICE} sets ProtectSystem=strict and leaves {TALLY_DIR} read-only: "
-            "pam_faillock fails every polkit prompt once the user has a tally (#144)"
-        )
+        message = f"{unit} sets ProtectSystem=strict and leaves {path} read-only: {if_read_only}"
         return [message]
     return []
 
@@ -187,7 +190,25 @@ def problems(root):
         found.append(
             f"/{HELPER} is setuid: the image carries polkit 126, not the forge's 127"
         )
-    found += helper_problems(root)
+    found += writable_problems(
+        root,
+        SYSTEM_UNITS,
+        HELPER_SERVICE,
+        TALLY_DIR,
+        "/run",
+        "no polkit prompt can authenticate",
+        "pam_faillock fails every polkit prompt once the user has a tally (#144)",
+    )
+    found += writable_problems(
+        root,
+        USER_UNITS,
+        SETTINGS_DAEMON,
+        USER_RUNTIME_DIR,
+        USER_RUNTIME_DIR,
+        "the volume keys do nothing",
+        "the daemon cannot bind its audio service's socket there, and the volume "
+        "keys do nothing (#144)",
+    )
     enabled = enabled_units(root)
     if HELPER_SOCKET not in enabled:
         found.append(

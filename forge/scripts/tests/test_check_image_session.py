@@ -39,6 +39,9 @@ HELPER_LIB_DROPINS = "usr/lib/systemd/system/polkit-agent-helper@.service.d"
 HELPER_ETC_DROPINS = "etc/systemd/system/polkit-agent-helper@.service.d"
 HELPER_RUN_DROPINS = "run/systemd/system/polkit-agent-helper@.service.d"
 READ_ONLY_TALLY = "leaves /run/faillock read-only"
+SETTINGS_DAEMON_UNIT = "usr/lib/systemd/user/cosmic-settings-daemon.service"
+SETTINGS_DAEMON_ETC_DROPINS = "etc/systemd/user/cosmic-settings-daemon.service.d"
+READ_ONLY_RUNTIME = "leaves /run/user/UID read-only"
 # The sandbox line of polkit 127's own helper unit that matters here.
 HELPER_UNIT_TEXT = "[Service]\nExecStart=/usr/lib/polkit-1/polkit-agent-helper-1\nProtectSystem=strict\n"
 
@@ -61,6 +64,10 @@ class ImageSession(unittest.TestCase):
         self.write(AGENT_UNIT, (USER_UNIT_SOURCES / "cosmic-osd.service").read_text())
         self.write(
             SESSION_TARGET, (USER_UNIT_SOURCES / "athanor-session.target").read_text()
+        )
+        self.write(
+            SETTINGS_DAEMON_UNIT,
+            (USER_UNIT_SOURCES / "cosmic-settings-daemon.service").read_text(),
         )
         self.write(HELPER, "")
         os.chmod(self.root / HELPER, 0o755)
@@ -403,6 +410,41 @@ class ImageSession(unittest.TestCase):
             "[Service]\nReadWritePaths=/run/faillock\nReadOnlyPaths=/run /run/faillock\n"
         )
         self.assertProblem(READ_ONLY_TALLY)
+
+    def test_a_settings_daemon_without_its_runtime_directory_fails(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_settings_daemon_drop_in_that_resets_read_write_paths_fails(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nReadWritePaths=\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_a_settings_daemon_runtime_directory_made_read_only_fails(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf", "[Service]\nReadOnlyPaths=%t\n"
+        )
+        self.assertProblem(READ_ONLY_RUNTIME)
+
+    def test_t_expands_to_the_user_runtime_directory_below_run(self):
+        self.write(
+            f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
+            "[Service]\nReadOnlyPaths=/run\n",
+        )
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_settings_daemon_without_protect_system_strict_passes(self):
+        self.edit(SETTINGS_DAEMON_UNIT, "ReadWritePaths=%t\n", "")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_a_missing_or_masked_settings_daemon_fails(self):
+        self.write("etc/systemd/user/cosmic-settings-daemon.service", "")
+        self.assertProblem("cosmic-settings-daemon.service is masked")
+        (self.root / "etc/systemd/user/cosmic-settings-daemon.service").unlink()
+        (self.root / SETTINGS_DAEMON_UNIT).unlink()
+        self.assertProblem(f"/{SETTINGS_DAEMON_UNIT} is missing")
 
     def test_an_exec_start_pre_drop_in_does_not_override_exec_start(self):
         self.write(

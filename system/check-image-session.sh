@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run by .github/workflows/call-system-image.yml on the system image. Fails when IMAGE lacks the
 # session lock or the polkit agent of release 0.9 (cosmic-greeter, cosmic-idle and cosmic-osd on
-# polkit 127's socket helper, ADR-0115), or when the root greeter daemon is enabled
+# polkit 127's socket helper, ADR-0115), when cosmic-settings-daemon's sandbox leaves the runtime
+# directory read-only (the volume keys, #144), or when the root greeter daemon is enabled
 # (forge/scripts/check_image_session.py).
 # Usage: check-image-session.sh IMAGE
 set -euo pipefail
