@@ -42,12 +42,17 @@ if [[ -z "$spec" ]]; then
 fi
 mkdir -p "$SOURCE_DIR"
 
-# Not `mapfile < <(rpmspec ...)`: a process substitution hides rpmspec's exit status.
+# Command substitutions, not `mapfile < <(...)`: a process substitution hides the exit
+# status of its command, and a spec that does not parse would read as one without sources.
 if ! expanded=$(rpmspec -P "$spec"); then
   echo "fetch_sources: rpmspec cannot parse $(basename "$spec")" >&2
   exit 1
 fi
-mapfile -t remote < <(sed -nE 's/^(Source|Patch)[0-9]*:[[:space:]]*((https?|ftp):\/\/[^[:space:]]+).*/\2/p' <<<"$expanded")
+urls=$(sed -nE 's/^(Source|Patch)[0-9]*:[[:space:]]*((https?|ftp):\/\/[^[:space:]]+).*/\2/p' <<<"$expanded")
+remote=()
+if [[ -n $urls ]]; then
+  mapfile -t remote <<<"$urls"
+fi
 
 if [[ ${#remote[@]} -eq 0 ]]; then
   echo "fetch_sources: no remote source in $(basename "$spec")"

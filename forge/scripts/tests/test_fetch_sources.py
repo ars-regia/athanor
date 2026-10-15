@@ -73,6 +73,48 @@ class FetchSources(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("checksum mismatch for a.tar.gz", r.stderr)
 
+    def test_cached_file_is_verified_too(self):
+        self.remote_spec()
+        self.manifest(hashlib.sha256(PAYLOAD).hexdigest())
+        self.out.mkdir()
+        (self.out / "a.tar.gz").write_bytes(b"tampered\n")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("checksum mismatch for a.tar.gz", r.stderr)
+
+    def test_missing_manifest_fails(self):
+        self.remote_spec()
+        r = self.run_script()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("the manifest is missing", r.stderr)
+
+    def test_source_outside_the_manifest_fails(self):
+        self.remote_spec()
+        (self.spec_dir / "SOURCES/sources.sha256").write_text(f"{'0' * 64}  other.tar.gz\n")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("a.tar.gz is not in the manifest", r.stderr)
+
+    def test_a_name_that_leaves_the_source_dir_fails(self):
+        for fragment in ("../evil", ".hidden", "dir/evil"):
+            with self.subTest(fragment=fragment):
+                self.stub("rpmspec", f"echo 'Source0: https://example.invalid/a.tar.gz#/{fragment}'\n")
+                self.manifest("0" * 64)
+                r = self.run_script()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("invalid file name", r.stderr)
+
+    def test_pin_writes_the_manifest(self):
+        self.remote_spec()
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}")
+        r = subprocess.run(
+            ["bash", str(SCRIPT), "--pin", str(self.spec_dir), str(self.out)],
+            env=env, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.spec_dir / "SOURCES/sources.sha256").read_text(),
+                         f"{hashlib.sha256(PAYLOAD).hexdigest()}  a.tar.gz\n")
+
 
 if __name__ == "__main__":
     unittest.main()
