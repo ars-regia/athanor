@@ -26,7 +26,11 @@ HOST_VMLINUZ = sorted(
 )
 PODMAN = """#!/bin/sh
 case "$*" in
-*"tar -cf"*) tar -cf - -C "${FAKE_ROOT:-/var/empty}" . ;;
+*"tar -cf"*)
+    [ -n "$FAKE_PODMAN_RC" ] && exit "$FAKE_PODMAN_RC"
+    [ -n "$FAKE_GARBAGE" ] && { echo "not a tar"; exit 0; }
+    for last; do :; done
+    exec /bin/sh -c "$(printf %s "$last" | sed "s|cd / |cd $FAKE_ROOT |")" ;;
 */bin/sh*) [ -n "$FAKE_KERNEL_PATH" ] && echo "$FAKE_KERNEL_PATH" ;;
 */bin/cat*) cat "$FAKE_VMLINUZ" ;;
 esac
@@ -219,11 +223,14 @@ class CheckImageUki(unittest.TestCase):
     def test_accepts_an_empty_boot_content(self):
         self.assertEqual(self.findings({}), [])
 
-    def test_the_script_refuses_an_image_with_a_uki(self):
+    def script(self, files=None, **extra):
+        """Run the script against a fake root holding files (path -> bytes); (result, stderr)."""
         with tempfile.TemporaryDirectory() as d:
-            root = pathlib.Path(d, "root", "boot", "efi", "EFI", "Linux")
-            root.mkdir(parents=True)
-            (root / "a.efi").write_bytes(fake_pe(".linux"))
+            root = pathlib.Path(d, "root")
+            root.mkdir()
+            for name, data in (files or {}).items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_bytes(data)
             stub = pathlib.Path(d, "bin", "podman")
             stub.parent.mkdir()
             stub.write_text(PODMAN)
@@ -231,13 +238,38 @@ class CheckImageUki(unittest.TestCase):
             env = {
                 **os.environ,
                 "PATH": f"{stub.parent}:{os.environ['PATH']}",
-                "FAKE_ROOT": str(pathlib.Path(d, "root")),
+                "FAKE_ROOT": str(root),
+                **extra,
             }
-            result = subprocess.run(
+            return subprocess.run(
                 ["bash", str(SCRIPT), "image"], env=env, capture_output=True, text=True
             )
+
+    def test_the_script_refuses_a_uki_under_the_kernel_directory(self):
+        result = self.script(
+            {"usr/lib/modules/7.0/vmlinuz-virt.efi": fake_pe(".linux")}
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("carries a UKI", result.stderr)
+
+    def test_the_script_refuses_a_uki_on_the_esp(self):
+        result = self.script({"boot/efi/EFI/Linux/a.efi": fake_pe(".linux")})
+        self.assertIn("carries a UKI", result.stderr)
+
+    def test_the_script_passes_a_clean_root_to_the_kernel_check(self):
+        result = self.script({"usr/lib/modules/7.0/other.efi": fake_pe(".text")})
+        self.assertNotIn("UKI", result.stderr)
+        self.assertNotIn("could not be read", result.stderr)
+
+    def test_the_script_names_an_unreadable_stream(self):
+        result = self.script(FAKE_GARBAGE="1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("UKI", result.stderr)
+        self.assertIn("could not be read (reader status 2)", result.stderr)
+
+    def test_the_script_names_a_failing_podman(self):
+        result = self.script(FAKE_PODMAN_RC="125")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("podman failed (status 125)", result.stderr)
 
 
 if __name__ == "__main__":

@@ -26,16 +26,16 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # No UKI may reach the ESP before sealed composefs (release 1.1): the bootupd payload,
-# /usr/lib/ostree-boot and /boot of the image hold none. A tar of those paths is read on the host.
+# /usr/lib/ostree-boot and /boot of the image hold none. plus the *.efi of /usr/lib/modules. A tar of those paths is read on the host.
 podman run --rm --network=none --entrypoint /bin/sh "$1" -c \
     'cd / && for d in usr/lib/bootupd usr/lib/ostree-boot boot; do [ -e "$d" ] && set -- "$@" "$d"; done
     set -- "$@" $(find usr/lib/modules -maxdepth 2 -name "*.efi")
     [ $# -gt 0 ] || set -- -T /dev/null
-    tar -cf - "$@"' |
-    python3 -B "$ROOT/system/check_image_uki.py" || {
+    tar -cf - "$@"' > "$WORK/boot.tar" || die "podman failed (status $?) reading the boot content of $1"
+python3 -B "$ROOT/system/check_image_uki.py" < "$WORK/boot.tar" || {
     rc=$?
     [[ $rc -eq 1 ]] && die "$1 carries a UKI"
-    die "$1: its boot content could not be read (status $rc)"
+    die "$1: the boot content could not be read (reader status $rc)"
 }
 
 path=$(podman run --rm --network=none --entrypoint /bin/sh "$1" -c \
