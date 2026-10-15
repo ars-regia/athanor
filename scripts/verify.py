@@ -1720,6 +1720,19 @@ def markdown_links(text):
     return [(m.group(1), m.group(2)) for m in LINK.finditer(plain)]
 
 
+PIPELINE_DOC = "docs/architecture/doc_pipeline.md"
+
+
+def pipeline_workflow_problems(text, workflows):
+    """Every workflow file named in the first column of section 3.5 of doc_pipeline.md exists."""
+    section = re.search(r"^### 3\.5 .*?(?=^#{1,3} )", text + "\n# end", re.M | re.S)
+    if not section:
+        return [f"{PIPELINE_DOC}: section 3.5 not found"]
+    return [f"{PIPELINE_DOC}: section 3.5 names {m.group(1)}, which is not under .github/workflows/"
+            for m in re.finditer(r"^\| `([\w.-]+\.yml)`", section.group(0), re.M)
+            if not (workflows / m.group(1)).exists()]
+
+
 @check("docs", "I link nella documentazione risolvono e sono portabili")
 def check_docs():
     r = Result()
@@ -1745,6 +1758,10 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
+    pipeline = ROOT / PIPELINE_DOC
+    if pipeline.exists():
+        for problem in pipeline_workflow_problems(read(pipeline), ROOT / ".github" / "workflows"):
+            r.fail(problem)
     problems, graph = needs_graph()
     for problem in problems:
         r.fail(problem)

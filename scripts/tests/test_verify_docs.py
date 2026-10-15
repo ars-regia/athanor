@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
@@ -48,6 +49,23 @@ class MarkdownLinksTest(unittest.TestCase):
 
     def test_the_label_is_returned(self):
         self.assertEqual(verify.markdown_links("[spec](s.md)"), [("spec", "s.md")])
+
+
+class PipelineWorkflowsTest(unittest.TestCase):
+    DOC = (
+        "### 3.5 Today's workflows\n\n| Workflow | Target |\n| --- | --- |\n"
+        "| `a.yml` | kept |\n| `gone.yml` | deleted |\n\n### 3.6 Next\n\n| `other.yml` | x |\n"
+    )
+
+    def test_a_missing_workflow_of_section_3_5_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            (pathlib.Path(d) / "a.yml").write_text("")
+            problems = verify.pipeline_workflow_problems(self.DOC, pathlib.Path(d))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("gone.yml", problems[0])
+
+    def test_a_missing_section_is_reported(self):
+        self.assertEqual(len(verify.pipeline_workflow_problems("# x\n", pathlib.Path("."))), 1)
 
 
 if __name__ == "__main__":
