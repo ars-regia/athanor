@@ -26,6 +26,13 @@ class NewInstallTest(unittest.TestCase):
             self.assertIn("services --disabled=sshd", lines, path)
             self.assertFalse([l for l in lines if l.startswith("services") and re.search(r"--enabled=\S*sshd", l)], path)
 
+    def test_every_install_path_keeps_the_image_firewall(self):
+        # Any other `firewall` line makes Anaconda run firewall-offline-cmd, which adds ssh to the
+        # default zone and leaves a local public.xml that hides the image's zone for good.
+        for path in INSTALL_PATHS:
+            lines = [l for l in active_lines(path) if l.split()[0] == "firewall"]
+            self.assertEqual(lines, ["firewall --use-system-defaults"], path)
+
 
 class ExistingMachineTest(unittest.TestCase):
     def test_no_shipped_preset_disables_sshd(self):

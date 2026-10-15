@@ -26,7 +26,9 @@
 # what left greetd enabled and dead in runs 34269959759 and 34275504878.
 xconfig --startxonboot
 
-# Remote login off, as the shipped ISO's kickstart sets it, repeated for the same reason.
+# Remote login off and the image's firewall kept, as the shipped ISO's kickstart sets them,
+# repeated for the same reason.
+firewall --use-system-defaults
 services --disabled=sshd
 
 # The whole disk, no questions. The test VM has one virtio disk and nothing to preserve.

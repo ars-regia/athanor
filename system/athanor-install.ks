@@ -31,12 +31,11 @@ ostreecontainer --url=ghcr.io/ars-regia/athanor-system:stable --transport=regist
 # creates. No user is declared here, so Anaconda asks the installer to create one.
 rootpw --lock
 
-# Anaconda's `firewall` command has no `--default`: an unknown option is a parse error,
-# so the directive it was meant to harden aborted the whole installation instead. The
-# default zone firewalld ships already refuses unsolicited inbound traffic. Remote login
-# is off on new installs (doc_software.md, decision 2): sshd is not enabled, and the ssh
-# service is not added to the firewall.
-firewall --enabled
+# Remote login is off on new installs (doc_software.md, decision 2): sshd is not enabled.
+# The firewall stays as the image ships it (ADR-0089, decision 2: public allows neither ssh nor
+# mdns). Without this, Anaconda runs `firewall-offline-cmd --enabled --service=ssh`, which writes
+# a local /etc/firewalld/zones/public.xml with ssh open; the image's preset enables firewalld.
+firewall --use-system-defaults
 services --disabled=sshd
 
 # Disk layout is the installer's choice: no clearpart/part/autopart here, so Anaconda
