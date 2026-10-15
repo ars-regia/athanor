@@ -748,6 +748,15 @@ status = "missing"
 purpose = "Initramfs generation, bootc-image-builder ISO, container build, Flatpak provisioner"
 
 [[component]]
+path = "system/secureboot"
+kind = "script tool"
+area = "kernel"
+status = "specified"
+spec = "doc_kernel_profile.md"
+item = "section 4"
+purpose = "athanor-secureboot-enroll: Secure Boot state and the guided enrolment of the Athanor certificate as a Machine Owner Key"
+
+[[component]]
 path = "system/sign-images.sh"
 kind = "script tool"
 area = "signing-update"
