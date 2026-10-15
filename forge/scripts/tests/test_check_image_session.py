@@ -7,9 +7,12 @@ the checker fails a test instead of moving the fake image with it."""
 import importlib.util
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "forge/scripts"))
@@ -972,6 +975,137 @@ class ImageSession(unittest.TestCase):
             "usr/lib/systemd/system/multi-user.target.wants",
         )
         self.assertProblem("cosmic-greeter-daemon.service is enabled")
+
+
+class SchemaStubTest(unittest.TestCase):
+    """schema_problems with stub glib-compile-schemas and gsettings first on PATH, so these run
+    on any machine."""
+
+    VALUES = {
+        "accent-color": "'purple'",
+        "icon-theme": "'Adwaita'",
+        "accent-mode": "'fixed'",
+    }
+
+    def stub(self, name, body):
+        path = self.bin / name
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.bin = pathlib.Path(tmp.name)
+        patcher = mock.patch.dict(
+            os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.stub("glib-compile-schemas", "exit 0")
+        self.stub(
+            "gsettings",
+            'case "$3" in\n'
+            + "\n".join(f'{k}) echo "{v}";;' for k, v in self.VALUES.items())
+            + "\nesac",
+        )
+
+    def test_good_schemas_give_no_finding(self):
+        self.assertEqual(mod.schema_problems("/schemas"), [])
+
+    def test_a_failed_compile_is_a_finding(self):
+        self.stub("glib-compile-schemas", "echo bad key >&2; exit 1")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 1)
+        self.assertIn(
+            "glib-compile-schemas --strict --dry-run /schemas fails", found[0]
+        )
+        self.assertIn("bad key", found[0])
+
+    def test_a_mismatched_readback_is_a_finding(self):
+        self.stub("gsettings", "echo \"'blue'\"")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 3)
+        self.assertIn("accent-color gives \"'blue'\", not 'purple'", found[0])
+
+    def test_a_failed_gsettings_is_a_finding(self):
+        self.stub("gsettings", "echo no schema >&2; exit 1")
+        found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 3)
+        self.assertIn("gives 'no schema'", found[0])
+
+    def test_a_missing_tool_is_a_finding(self):
+        (self.bin / "gsettings").unlink()
+        with mock.patch.dict(os.environ, {"PATH": str(self.bin)}):
+            found = mod.schema_problems("/schemas")
+        self.assertEqual(len(found), 1)
+        self.assertIn("gsettings cannot run in the image", found[0])
+
+
+class SchemaMainTest(unittest.TestCase):
+    def test_schemas_are_checked_only_for_the_running_image(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(mod, "problems", return_value=[]),
+            mock.patch.object(mod, "schema_problems", return_value=[]) as schemas,
+        ):
+            self.assertEqual(mod.main(["x", tmp]), 0)
+            schemas.assert_not_called()
+            self.assertEqual(mod.main(["x", "/"]), 0)
+            schemas.assert_called_once_with()
+            schemas.return_value = ["broken"]
+            self.assertEqual(mod.main(["x"]), 1)
+
+
+class SchemaTest(unittest.TestCase):
+    """schema_problems with the real glib tools, on the schemas of the host plus the shipped
+    ones; skipped where they are not installed."""
+
+    SHIPPED = SOURCES / "athanor-system-config/SOURCES/usr/share/glib-2.0/schemas"
+
+    def setUp(self):
+        if not (
+            shutil.which("glib-compile-schemas")
+            and shutil.which("gsettings")
+            and pathlib.Path("/usr/share/glib-2.0/schemas").is_dir()
+        ):
+            self.skipTest("glib tools or the base schemas are not installed")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = pathlib.Path(tmp.name)
+        base = pathlib.Path("/usr/share/glib-2.0/schemas")
+        for name in (
+            "org.gnome.desktop.enums.xml",
+            "org.gnome.desktop.interface.gschema.xml",
+            "org.gnome.desktop.wm.preferences.gschema.xml",
+        ):
+            if not (base / name).is_file():
+                self.skipTest(f"{name} is not installed")
+            shutil.copy(base / name, self.dir)
+        for f in self.SHIPPED.iterdir():
+            shutil.copy(f, self.dir)
+        self.compile()
+
+    def compile(self):
+        # What glib's transfiletriggerin does in the image; gsettings reads the compiled file.
+        subprocess.run(["glib-compile-schemas", str(self.dir)], check=True)
+
+    def test_the_shipped_schemas_pass(self):
+        self.assertEqual(mod.schema_problems(str(self.dir)), [])
+
+    def test_an_override_of_a_missing_key_fails_the_compile(self):
+        with open(self.dir / "90_athanor-appearance.gschema.override", "a") as f:
+            f.write("[org.gnome.desktop.interface]\no-such-key='x'\n")
+        found = mod.schema_problems(str(self.dir))
+        self.assertEqual(len(found), 1)
+        self.assertIn("glib-compile-schemas --strict --dry-run", found[0])
+
+    def test_a_changed_default_fails_the_readback(self):
+        override = self.dir / "90_athanor-appearance.gschema.override"
+        override.write_text(override.read_text().replace("'purple'", "'blue'"))
+        self.compile()
+        found = mod.schema_problems(str(self.dir))
+        self.assertEqual(len(found), 1)
+        self.assertIn("accent-color gives \"'blue'\", not 'purple'", found[0])
 
 
 if __name__ == "__main__":

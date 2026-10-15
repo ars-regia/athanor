@@ -162,7 +162,8 @@ jobs:
         # lost one of them builds but never locks or never authenticates. cosmic-settings-daemon
         # must be able to bind its socket in the runtime directory, or the volume keys are dead;
         # every portal backend athanor-portals.conf names must serve its interface, and
-        # FileChooser must have one, or Flatpak applications cannot open or save.
+        # FileChooser must have one, or Flatpak applications cannot open or save; and the
+        # GSettings schemas must compile strictly and read back the appearance defaults.
         run: bash system/check-image-session.sh "$(<artifacts/system-image.iid)"
 
       - name: 🥾 Check the vmlinuz of the image against the Secure Boot certificate

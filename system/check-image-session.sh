@@ -4,7 +4,8 @@
 # polkit 127's socket helper, ADR-0115), when cosmic-settings-daemon's sandbox leaves the runtime
 # directory read-only (the volume keys, #144), when athanor-portals.conf routes an interface to a
 # backend that cannot serve it or gives FileChooser none (Open and Save in Flatpak applications,
-# #144), or when the root greeter daemon is enabled
+# #144), when the root greeter daemon is enabled, or when the GSettings schemas do not compile
+# strictly or no longer read back the appearance defaults (#472)
 # (forge/scripts/check_image_session.py).
 # Usage: check-image-session.sh IMAGE
 set -euo pipefail
