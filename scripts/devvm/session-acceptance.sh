@@ -121,8 +121,16 @@ default_sink_is() { [[ $(in_session pactl get-default-sink) == "$1" ]]; }
 
 PREVIOUS_SINK=
 NULL_MODULE=
+# Runs after unload_sink. A guest without audio hardware has only WirePlumber's fallback
+# sink auto_null, which is gone while the null sink exists: setting it would fail, so the
+# choice set-default-sink stored is cleared and WirePlumber picks the default again.
 restore_sink() {
-    [[ -z $PREVIOUS_SINK ]] || in_session pactl set-default-sink "$PREVIOUS_SINK"
+    [[ -n $PREVIOUS_SINK ]] || return 0
+    if in_session pactl list short sinks | awk '{ print $2 }' | grep -qxF -- "$PREVIOUS_SINK"; then
+        in_session pactl set-default-sink "$PREVIOUS_SINK"
+    else
+        in_session pw-metadata -n default 0 default.configured.audio.sink -d
+    fi
 }
 unload_sink() {
     [[ -z $NULL_MODULE ]] || in_session pactl unload-module "$NULL_MODULE"
@@ -141,7 +149,7 @@ stage_volume() {
         fail "no system_actions file under /usr/share/cosmic names VolumeRaise"
 
     PREVIOUS_SINK=$(in_session pactl get-default-sink) || fail "pactl get-default-sink: no PulseAudio server in the session"
-    CLEANUP+=(restore_sink unload_sink)
+    CLEANUP+=(unload_sink restore_sink)
     NULL_MODULE=$(in_session pactl load-module module-null-sink "sink_name=$SINK") || fail "pactl could not load a null sink"
     in_session pactl set-default-sink "$SINK"
     wait_until 10 default_sink_is "$SINK" || fail "the default sink is not $SINK 10 s after set-default-sink"
@@ -175,7 +183,8 @@ editor_runs() {
 }
 
 # Whether the document portal lists the document under the application's directory.
-document_exported() { in_session "compgen -G '$DOCS/by-app/$APP/*/$NAME'" > /dev/null; }
+# The pattern is double-quoted for the guest, whose shell expands $DOCS's variable.
+document_exported() { in_session "compgen -G \"$DOCS/by-app/$APP/*/$NAME\"" > /dev/null; }
 
 stage_portal() {
     local flatpaks home before after
