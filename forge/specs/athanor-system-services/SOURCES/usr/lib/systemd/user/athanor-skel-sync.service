@@ -10,12 +10,13 @@ CPUWeight=50
 MemoryHigh=96M
 MemoryMax=128M
 Type=oneshot
-ExecStart=/usr/bin/bash -c 'if [ ! -f "$HOME/.config/.skel_installed" ]; then cp -n -R /etc/skel/. "$HOME/" 2>/dev/null && mkdir -p "$HOME/.config" && touch "$HOME/.config/.skel_installed"; fi'
+ExecStart=/usr/bin/bash -c 'if [ ! -f "$HOME/.config/.skel_installed" ]; then cp -n -R /etc/skel/. "$HOME/" && mkdir -p "$HOME/.config" && touch "$HOME/.config/.skel_installed"; fi'
 RemainAfterExit=yes
 
 # Extreme Sandboxing
 ProtectSystem=strict
 ProtectHome=false
+ReadWritePaths=%h
 PrivateTmp=true
 NoNewPrivileges=true
 SystemCallFilter=@system-service
@@ -28,4 +29,4 @@ RestrictSUIDSGID=true
 LockPersonality=true
 
 [Install]
-WantedBy=niri-session.target graphical-session.target
+WantedBy=graphical-session.target

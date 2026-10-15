@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        29%{?dist}
+Release:        30%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -45,6 +45,12 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-30
+- athanor-skel-sync.service: a failed copy of /etc/skel is logged and fails the unit
+  (the `2>/dev/null` that hid it is gone), ReadWritePaths=%h lets it write the home
+  that ProtectSystem=strict made read-only, and niri-session.target leaves its
+  [Install] (doc_session.md, SN13 step 1); athanor-session.target wants it.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-29
 - athanor-appearance-reset.service, a session step enabled by a user preset under
   athanor-session.target, resets at every login icon-theme 'Cosmic', font-name
