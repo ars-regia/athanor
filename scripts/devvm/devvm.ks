@@ -43,6 +43,9 @@ poweroff
 set -eu
 # Passwordless sudo for deploy.sh and ssh.sh. Development VM only, see the header.
 echo '@USER@ ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-devvm
+# ssh.sh arrives from slirp's gateway, 10.0.2.2. The public zone has no ssh (ADR-0089), so the
+# host is bound to the home zone, which keeps it (ADR-0116).
+firewall-offline-cmd --zone=home --add-source=10.0.2.2
 chmod 0440 /etc/sudoers.d/90-devvm
 if [ -c /dev/ttyS0 ]; then
     echo "Athanor devvm kickstart finished" > /dev/ttyS0

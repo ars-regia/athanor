@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        43.0.0
-Release:        18%{?dist}
+Release:        19%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -65,6 +65,7 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /etc/ssh/sshd_config.d/*
 /etc/systemd/coredump.conf.d/*
 /usr/lib/systemd/system/*
+%attr(0755,root,root) /usr/libexec/athanor-firewall-zone-migrate
 /usr/lib/tmpfiles.d/*
 /usr/lib/systemd/journald.conf.d/*
 /usr/lib/fedora-release
@@ -77,6 +78,11 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/plymouth/themes/spinner/watermark.png
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 43.0.0-19
+- Ship athanor-firewall-zone-migrate.service, a oneshot that runs once before firewalld and
+  gives back the public zone to the image where Anaconda's firewall-offline-cmd wrote it with
+  ssh (and mdns) open; a zone edited by hand is left alone (ADR-0116)
+
 * Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 43.0.0-18
 - Presets: disable rpm-ostree-countme.timer (and mask it), and unbound-anchor.timer;
   Fedora's preset enabled both. sshd.service stays enabled by Fedora's preset: new installs turn it off
