@@ -11,7 +11,7 @@ module athanor_bootc_install 1.0;
 #
 # Scope: the rule covers the whole unconfined_service_t domain, not athanor-update alone.
 # Any service in it that executes an install_exec_t file (bootc, ostree, rpm-ostree,
-# rpm-ostreed, anaconda, anaconda-yum, initial-setup; athanor-recovery runs rpm-ostree)
+# rpm-ostreed, anaconda, anaconda-yum, initial-setup)
 # enters install_t and so gains mac_admin, the one capability unconfined_service_t lacks.
 # A dedicated athanor_update_t domain would be narrower.
 require {
