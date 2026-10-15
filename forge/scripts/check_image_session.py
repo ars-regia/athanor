@@ -80,7 +80,7 @@ PORTALS_CONF_DIRS = (
 )
 PORTALS_CONF_NAMES = ("athanor-portals.conf", "cosmic-portals.conf", "portals.conf")
 # ProtectHome= values that make /run/user inaccessible or empty (systemd.exec(5)).
-HOME_HIDING = ("1", "yes", "true", "on", "tmpfs")
+HOME_HIDING = ("1", "y", "yes", "t", "true", "on", "tmpfs")
 DESKTOPS = ("athanor", "cosmic")  # XDG_CURRENT_DESKTOP=Athanor:COSMIC, lowercased
 HOME_DIRS = ("/home", "/root", "/run/user")
 PORTALS_DIR = "usr/share/xdg-desktop-portal/portals"

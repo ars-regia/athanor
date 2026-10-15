@@ -552,6 +552,13 @@ class ImageSession(unittest.TestCase):
             "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
         )
         self.assertProblem("FileChooser goes to zz, and nothing activates")
+        # Athanor comes before COSMIC in XDG_CURRENT_DESKTOP, so a file used in it wins.
+        self.write(
+            f"{PORTALS}/zzz.portal",
+            "[portal]\nDBusName=org.absent\nUseIn=Athanor\n"
+            "Interfaces=org.freedesktop.impl.portal.FileChooser;\n",
+        )
+        self.assertProblem("FileChooser goes to zzz, and nothing activates")
 
     def test_a_wildcard_that_no_portal_file_lists_fails(self):
         self.edit(
@@ -835,7 +842,7 @@ class ImageSession(unittest.TestCase):
                 (self.root / d / "cosmic-osd.service").unlink()
 
     def test_a_hiding_protect_home_makes_the_runtime_directory_unusable(self):
-        for value in ("yes", "true", "tmpfs", "on", "1"):
+        for value in ("yes", "y", "true", "t", "tmpfs", "on", "1"):
             with self.subTest(value=value):
                 self.write(
                     f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
@@ -855,6 +862,7 @@ class ImageSession(unittest.TestCase):
 
     def test_a_read_only_runtime_directory_without_strict_fails(self):
         self.edit(SETTINGS_DAEMON_UNIT, "ProtectSystem=strict", "ProtectSystem=full")
+        self.edit(SETTINGS_DAEMON_UNIT, "ProtectHome=read-only", "ProtectHome=no")
         self.write(
             f"{SETTINGS_DAEMON_ETC_DROPINS}/90-x.conf",
             "[Service]\nReadWritePaths=\nReadOnlyPaths=%t\n",
