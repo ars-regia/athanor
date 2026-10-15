@@ -21,7 +21,7 @@ consolidate them. The D3 freeze of [ADR-0103](0103-audit-5-decisions.md) was lif
 
 ## Decision
 
-Decided by the maintainer on 2026-10-15: items 1 to 3 below, as to what is decided of each. Revision 4 is approved with these three placements:
+Revision 4 is approved with three placements, which the maintainer decided on 2026-10-15: `bot-merge.yml` stays a separate entry, `fuzz.yml` joins the weekly run of `maintenance.yml`, and the rig build image is built by content hash with its pin bumped from `bots.yml`. The rest of each item below follows from those decisions or from review:
 
 1. **`bot-merge.yml` is an eighth target entry**, kept apart from `bots.yml` because it
    runs on `workflow_run`, the verdict of the checks of the pull request, and so from the
