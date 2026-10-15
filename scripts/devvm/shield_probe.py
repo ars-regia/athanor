@@ -1,4 +1,4 @@
-"""shield_probe.py: run in the guest's session by shield-acceptance.sh (stages sheet and state), as
+"""shield_probe.py: run in the guest's session by shield-acceptance.sh (stages sheet, state, actions and stale), as
 `python3 - COMMAND APP NAME < shield_probe.py`.
 
     press APP NAME     presses the showing push button called NAME through its first

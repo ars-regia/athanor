@@ -100,6 +100,16 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   comes and goes (needs `GPU_OUTPUTS=2`), and PSS within 64 MB with notifications held.
   Build both binaries first with `forge/test/shell/rig.sh build-bar` and `build-shelld`.
   Screenshots land in `.scratch/notifications-acceptance/`; look at them.
+- `shield-acceptance.sh [stage...]`: the trust shield of athanor-bar under its real unit
+  (package 2b.5), on fixed trust states from `forge/test/shell/trust_state.py` with the
+  update units masked for the run: the sheet opens and closes (`sheet`), the bar trusts the
+  state athanor-update answers with (`state`), the sheet offers "Restart to update" and
+  "Go back to the previous version" only when the state allows them (`actions`), and a
+  machine with no check for 15 days reads "Not verified yet" (`stale`). `deploy` installs a
+  locally built athanor-bar and athanor-update (`forge/test/shell/rig.sh build-bar`, and
+  `rig.sh cargo build --locked --release -p athanor-update`); without it the stages read the
+  image's. `cleanup` unmasks the units and republishes the real state.
+  Screenshots land in `.scratch/shield-acceptance/`.
 - `compositor-acceptance.sh [stage...]` deploys `cc-probe` from `.scratch/shell-rig/bin`
   (build it with `forge/test/shell/rig.sh build-compositor-client`) and checks, in the VM's
   session, the launch of package 2a (`doc_bar.md`, BR2 and BR3): an application on its own

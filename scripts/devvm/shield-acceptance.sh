@@ -10,7 +10,11 @@
 # The stale stage moves the guest's clock 15 days past the last successful check, with no
 # check since, and the shield must read "Not verified yet" (SH12, 14 days); the clock goes
 # back to the host's, and NTP as it was, before the stage ends or in the cleanup.
-# No stage presses Restart to update or Go back.
+# The actions stage opens the sheet on the downloaded and verified fixtures and checks
+# that it offers "Restart to update" only for a downloaded update and "Go back to the
+# previous version" when the state names a previous deployment (SH11, SH12; doc_shell.md
+# section 8, item 5). No stage presses them: either restarts the machine. It needs no deploy
+# stage first, and then reads the athanor-bar and athanor-update the image ships.
 # athanor-update-check.timer and athanor-update-state.service are masked for the run, so
 # nothing rewrites the fixture; cleanup unmasks them and republishes the real
 # state with athanor-update-state.service.
@@ -34,7 +38,7 @@ UPDATE_POLICY=$ROOT/forge/specs/athanor-update/SOURCES/usr/share/dbus-1/system.d
 IDLE_EXIT_SECONDS=90 # the service's 60 s idle limit, polled every 5 s, plus margin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/shield-acceptance
-STAGES=(deploy sheet state stale cleanup)
+STAGES=(deploy sheet state actions stale cleanup)
 STALE_SECONDS=$((15 * 86400))
 CLOCK_MOVED=0
 GUEST_NTP=
@@ -46,6 +50,8 @@ SETTINGS_UNIT=shield-acceptance-settings
 # The shield's three headers, and the rows only an open sheet shows: the Secure Boot row of
 # a state that was read, or why none was (shield_probe.py matches any name of a list).
 SHIELD="System image verified|Not verified yet|Update refused"
+RESTART="Restart to update"
+GO_BACK="Go back to the previous version"
 READ_ROW="Secure Boot on|Secure Boot off: this machine runs in the declared degraded mode"
 ROW=$READ_ROW
 ROW+="|No trust state yet: the first check has not run"
@@ -114,7 +120,6 @@ stage_deploy() {
     [[ -x $BIN/athanor-bar ]] || fail "no $BIN/athanor-bar: run forge/test/shell/rig.sh build-bar"
     [[ -x $UPDATE_BIN ]] ||
         fail "no $UPDATE_BIN: run forge/test/shell/rig.sh cargo build --locked --release -p athanor-update"
-    mkdir -p "$SHOTS"
     "$HERE/deploy.sh" \
         "$BIN/athanor-bar:/usr/bin/athanor-bar" \
         "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
@@ -166,6 +171,24 @@ stage_state() {
         sleep 5
         ((waited += 5))
     done
+}
+
+# SH11 and SH12 in the real session: the sheet offers each action only when the state
+# allows it. The verified fixture has a previous deployment and nothing downloaded; the
+# downloaded fixture has both.
+stage_actions() {
+    write_state verified
+    fresh_start
+    open_sheet "verified state"
+    probe showing "$GO_BACK" || fail "the sheet does not offer '$GO_BACK' on a state with a previous deployment"
+    probe hidden "$RESTART" || fail "the sheet offers '$RESTART' on a state with nothing downloaded"
+    "$HERE/screenshot.sh" "$SHOTS/actions-verified.png" > /dev/null
+    write_state downloaded
+    fresh_start
+    open_sheet "downloaded state"
+    probe showing "$RESTART" || fail "the sheet does not offer '$RESTART' on a state with a downloaded update"
+    probe showing "$GO_BACK" || fail "the sheet does not offer '$GO_BACK' beside '$RESTART'"
+    "$HERE/screenshot.sh" "$SHOTS/actions-downloaded.png" > /dev/null
 }
 
 # SH12 in the real session: with no successful check for more than 14 days the shield turns
@@ -262,6 +285,7 @@ for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} " == *" $STAGE "* ]] || die "unknown stage '$STAGE': one of ${STAGES[*]}"
 done
 trap cleanup_on_exit EXIT
+mkdir -p "$SHOTS"
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
     echo "PASS $STAGE"
