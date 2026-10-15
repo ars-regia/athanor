@@ -38,6 +38,8 @@ export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/l
 # usbguard is not running.
 /usr/bin/athanor-usbguard-hook unlock
 
-# cosmic-comp runs athanor-desktop as its client and exits when it exits. systemd-cat
-# puts the compositor's own output in the journal under "athanor-session".
-exec systemd-cat -t athanor-session cosmic-comp /usr/bin/athanor-desktop
+# cosmic-comp runs athanor-desktop as its client and exits when it exits. A command makes
+# cosmic-comp a kiosk, which loads no key bindings; --keep-shortcuts (Athanor's patch) keeps
+# them for the desktop. The greeter stays a kiosk without them. systemd-cat puts the
+# compositor's own output in the journal under "athanor-session".
+exec systemd-cat -t athanor-session cosmic-comp --keep-shortcuts /usr/bin/athanor-desktop
