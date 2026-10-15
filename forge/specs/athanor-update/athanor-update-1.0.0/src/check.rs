@@ -334,10 +334,11 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     // A queued rollback leaves the booted digest (doc_recovery.md, R5): it is held, as GoBack()
     // holds it, and nothing is downloaded, since a staged deployment would become the default
     // of the next boot in place of the return.
+    // The digest is held whatever the state of the newest-booted record.
+    let held = if status.rollback_queued { ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None }) } else { None };
     let (update, failure) = if unreadable_newest.is_some() {
-        (UpdateState::None, unreadable_newest)
+        (UpdateState::None, unreadable_newest.or(held))
     } else if status.rollback_queued {
-        let held = ctx.store.set_held(&status.booted.digest).err().map(|_| Failure { code: ErrorCode::Storage, host: None });
         settle(local_update(ctx, &status), held)
     } else if offline {
         settle(local_update(ctx, &status), None)
@@ -629,6 +630,19 @@ pub(crate) mod tests {
         std::fs::remove_file(machine.store.var.join("newest-booted")).expect("the administrator removes it");
         let state = run(&machine.ctx(&tools, 5000), false).expect("check");
         assert_eq!((state.update, state.newest_booted_build_time), (UpdateState::Downloaded, 1000));
+    }
+
+    #[test]
+    fn a_queued_rollback_holds_the_booted_digest_even_with_a_garbled_newest_booted() {
+        let machine = Machine::new("rollback-newest-garbled", &["real/k1.pub"]);
+        std::fs::write(machine.store.var.join("newest-booted"), "soon\n").expect("write");
+        let tools = Fake::booted(deployed(&digest(2), 2000)).offering(&digest(3), 3000);
+        tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+        tools.status.borrow_mut().rollback_queued = true;
+        let state = run(&machine.ctx(&tools, 5000), false).expect("a state is published");
+        assert_eq!(machine.store.held().expect("read"), Some(digest(2)));
+        assert_eq!((state.update, state.last_error), (UpdateState::None, ErrorCode::Storage));
+        assert!(!tools.called("download"));
     }
 
     #[test]

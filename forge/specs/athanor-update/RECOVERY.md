@@ -48,3 +48,5 @@ next successful check.
 booted build time of the largest possible value, so the shield shows Attention rather than
 "Check again" on a record that cannot be trusted, and nothing is offered. Remove it as root
 (`sudo rm /var/lib/athanor-update/newest-booted`); the next boot records the booted build.
+The same happens when the record cannot be written (no space left on `/var`, a read-only
+filesystem): free space on `/var` first, then remove the file if it is still unreadable.

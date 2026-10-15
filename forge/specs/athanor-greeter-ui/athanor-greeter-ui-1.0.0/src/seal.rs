@@ -12,8 +12,8 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use athanor_trust_state::{
-    state_reply, Badge, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS, STATE_METHOD,
-    UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
+    state_reply, Badge, ErrorCode, ReadError, Reason, State, UpdateState, STALE_AFTER_SECS,
+    STATE_METHOD, UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH,
 };
 
 use crate::i18n::tr;
@@ -164,6 +164,11 @@ pub fn detail(read: &Result<State, ReadError>, now: i64) -> String {
             return tr("Signed, but pinned to one build: it receives no updates")
         }
     }
+    // An unreadable record of the newest booted build is published as the largest build time:
+    // the cause is the disk, not an older version.
+    if state.last_error == ErrorCode::Storage {
+        return tr("The update state on this machine could not be read");
+    }
     if state.booted.build_time < state.newest_booted_build_time {
         return tr("This version is older than one this machine has run");
     }
@@ -179,7 +184,7 @@ pub fn detail(read: &Result<State, ReadError>, now: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_trust_state::{Deployment, ErrorCode, Policy, SecureBoot, SCHEMA};
+    use athanor_trust_state::{Deployment, Policy, SecureBoot, SCHEMA};
 
     const NOW: i64 = 1_789_725_600;
 
@@ -267,6 +272,14 @@ mod tests {
                 ..verified()
             }),
             "This version is older than one this machine has run"
+        );
+        assert_eq!(
+            detail_of(State {
+                newest_booted_build_time: i64::MAX,
+                last_error: ErrorCode::Storage,
+                ..verified()
+            }),
+            "The update state on this machine could not be read"
         );
         assert_eq!(
             detail_of(State {

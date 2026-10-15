@@ -97,15 +97,19 @@ msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
 
-#: src/seal.rs:168
+#: src/seal.rs:170
+msgid "The update state on this machine could not be read"
+msgstr "Impossibile leggere lo stato degli aggiornamenti di questa macchina"
+
+#: src/seal.rs:173
 msgid "This version is older than one this machine has run"
 msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
 
-#: src/seal.rs:174
+#: src/seal.rs:179
 msgid "No check for updates has succeeded for 14 days"
 msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 
-#: src/seal.rs:176
+#: src/seal.rs:181
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 

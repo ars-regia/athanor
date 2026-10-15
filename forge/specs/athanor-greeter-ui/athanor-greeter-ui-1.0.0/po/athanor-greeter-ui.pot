@@ -105,15 +105,19 @@ msgstr ""
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr ""
 
-#: src/seal.rs:168
+#: src/seal.rs:170
+msgid "The update state on this machine could not be read"
+msgstr ""
+
+#: src/seal.rs:173
 msgid "This version is older than one this machine has run"
 msgstr ""
 
-#: src/seal.rs:174
+#: src/seal.rs:179
 msgid "No check for updates has succeeded for 14 days"
 msgstr ""
 
-#: src/seal.rs:176
+#: src/seal.rs:181
 msgid "Signed with a key of the policy in force"
 msgstr ""
 
