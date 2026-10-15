@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        28%{?dist}
+Release:        29%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -12,9 +12,12 @@ Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
 Requires:       wayland-utils
+# athanor-appearance-reset reads and resets the GNOME appearance keys.
+Requires:       dconf bash
 
 %description
-Provides the session target, the COSMIC desktop units it gathers, and skeleton synchronization for Athanor OS.
+Provides the session target, the COSMIC desktop units it gathers, skeleton synchronization
+and the reset of the appearance values cosmic-settings-daemon wrote, for Athanor OS.
 
 %prep
 # Nothing to prep
@@ -26,17 +29,30 @@ Provides the session target, the COSMIC desktop units it gathers, and skeleton s
 mkdir -p %{buildroot}/usr/share/athanor-system-services
 mkdir -p %{buildroot}/usr/lib/systemd/user
 cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
+install -D -m 0755 %{_sourcedir}/usr/libexec/athanor-appearance-reset %{buildroot}/usr/libexec/athanor-appearance-reset
+install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-services.preset %{buildroot}/usr/lib/systemd/user-preset/80-athanor-system-services.preset
 
 %files
 %dir /usr/share/athanor-system-services
 /usr/lib/systemd/user/athanor-session.target
 /usr/lib/systemd/user/athanor-desktop.service
 /usr/lib/systemd/user/athanor-skel-sync.service
+/usr/lib/systemd/user/athanor-appearance-reset.service
+/usr/lib/systemd/user-preset/80-athanor-system-services.preset
+/usr/libexec/athanor-appearance-reset
 /usr/lib/systemd/user/cosmic-bg.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-29
+- athanor-appearance-reset.service, a session step enabled by a user preset under
+  athanor-session.target, resets at every login icon-theme 'Cosmic', font-name
+  'Open Sans' and monospace-font-name 'Noto Sans Mono' when the account holds exactly
+  those values, which cosmic-settings-daemon wrote until 1.0.1-28; any other value and
+  button-layout are kept (doc_session_daemons.md, SD16, amended 2026-10-15, #473).
+  TimeoutStartSec=15 fails it, rather than holding the bar and the dock, when dconf hangs.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-28
 - cosmic-settings-daemon runs with GSETTINGS_BACKEND=memory: its gsettings writes of
   icon-theme, font-name, monospace-font-name, button-layout, color-scheme and gtk-theme

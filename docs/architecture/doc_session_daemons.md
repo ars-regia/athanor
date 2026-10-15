@@ -50,7 +50,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 | `athanor-broker`    | `athanor-broker.service`    | headless, no GTK; a Wayland client on the main socket and the only process that creates security contexts and application units for others (SD7 to SD10) |
 | `athanor-idle`      | `athanor-idle.service`      | headless, no GTK; a Wayland client on the main socket: idle timers, blank, lock request, automatic suspend, `org.freedesktop.ScreenSaver` (SD4, SD5)     |
 | `athanor-wallpaper` | `athanor-wallpaper.service` | headless, no GTK; a Wayland client on the main socket drawing one background layer surface per output (SD6)                                              |
-| `athanor-sessiond`  | `athanor-sessiond.service`  | headless, no GTK, no Wayland connection: automount, the USBGuard notice, battery notices, headset detection, mono audio, the one-time migrations (SD11 to SD16), the notices of runtime security events (`doc_tetragon.md` TG7, TG8) |
+| `athanor-sessiond`  | `athanor-sessiond.service`  | headless, no GTK, no Wayland connection: automount, the USBGuard notice, battery notices, headset detection, mono audio, the one-time migrations (SD11 to SD16; *amended 2026-10-15 (maintainer decision, #473):* in place of a one-time migration, `athanor-sessiond` runs SD16's reset of COSMIC's appearance values at each start), the notices of runtime security events (`doc_tetragon.md` TG7, TG8) |
 
 - **One crate per program** under `forge/specs/`, each with a library of its logic, tested without a display or a bus (SH4), and a thin `main.rs`.
 - **The Wayland code of the three Wayland clients** uses `wayland-client` and `wayland-protocols` from the workspace (`Cargo.toml:101-102`) for the standard protocols, and `wayland-scanner` with the vendored XML of `wlr-layer-shell-unstable-v1` and `wlr-output-power-management-unstable-v1`, as `athanor-compositor-client` does for its protocols; no new crate. None of them names a COSMIC protocol or key, so none depends on `athanor-compositor-client` except the broker, which takes the launch path from it (SD7).
@@ -70,7 +70,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 | Headset detection on a combo jack                              | `athanor-sessiond` (SD15), dialog in `athanor-osd` (OD19)                       | this document            |
 | Varlink audio server                                           | not replaced: the profile change becomes a command of the audio model (SD15)    | this document            |
 | Mono audio (`mono_sound`) | `athanor-sessiond` applies it (SD15); the setting and its page belong to accessibility | `doc_accessibility.md` |
-| `button-layout` and `icon-theme`                               | GSettings vendor defaults and a one-time reset (SD16)                           | this document            |
+| `button-layout` and `icon-theme`                               | GSettings vendor defaults and the reset of COSMIC's values at login (SD16)      | this document            |
 | GTK CSS export, Flatpak overrides, `color-scheme`, `gtk-theme` | the apply function of `athanor-style` (VL4); no CSS export, no Flatpak override | `doc_visual_language.md` |
 | Dark and light by sunrise and sunset                           | excluded (SD21)                                                                 | this document            |
 | Low battery notices and sounds                                 | `athanor-sessiond` notices, no sounds (SD14)                                    | this document            |
@@ -212,14 +212,21 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 - `ConfirmHeadset` is admitted from `athanor-sessiond.service`'s cgroup and from its executable under `/usr`, as SD5 does (OD4, amended in section 3), and the `confirm-headphones` subcommand of OD3's `cosmic-osd` client link is removed with cosmic-settings-daemon.
 - **Mono audio.** The setting is `doc_accessibility.md`'s: its key, its default and its page (`doc_accessibility.md` AX19). `athanor-sessiond` reads it and follows its changes, and applies it as cosmic-settings-daemon 1.8.0 does: the WirePlumber `sm-settings` metadata property `node.features.audio.mono` set to `{ "value": <bool>, "save": true }` (`audio-server/src/server.rs:115-125`), and the pipewire-pulse message `pipewire-pulse:force-mono-output` to `/core` (`audio-server/src/backend.rs:1071-1080`, tag `epoch-1.8.0`, read 2026-10-05), both through the audio model. Whether both are still needed with wireplumber 0.5.14 and pipewire 1.4.11 is checked in spike S6.
 
-**SD16. One-time migrations and GNOME defaults.**
+**SD16. One-time migrations, GNOME defaults and the reset of COSMIC's appearance values.**
 
 - **Defaults** shipped as a GSettings vendor override in `athanor-system-config`: `org.gnome.desktop.interface icon-theme` `'Adwaita'` and `org.gnome.desktop.wm.preferences button-layout` `':minimize,maximize,close'`, the value the desktop shows today.
 - **At the first start of each daemon** after its step (SD22), with its schema's `migrated` false:
   - `athanor-idle` copies `com.system76.CosmicIdle` v1 from `$XDG_CONFIG_HOME/cosmic/` when present: milliseconds to seconds, `None` to 0;
   - `athanor-wallpaper` copies `com.system76.CosmicBackground` v1: a `Path` source of `all` to `picture` (the hearth's path to `"hearth"`), each `output.<name>` path to `per-output`, `same-on-all` as it is; a `Color` source becomes `"hearth"`;
-  - `athanor-sessiond` resets `icon-theme` when its value is `'Cosmic'`.
-  - It then sets `migrated`. A file that does not parse is skipped with one journal line at warning; the defaults apply. The COSMIC files are left in place.
+  - `athanor-sessiond` resets `icon-theme` when its value is `'Cosmic'`. *Amended 2026-10-15 (maintainer decision, #473):* superseded; `athanor-sessiond` has no one-time step and no `migrated` key; it runs the reset of COSMIC's appearance values below at each of its starts.
+  - It then sets `migrated` (`athanor-idle` and `athanor-wallpaper` only, as amended 2026-10-15 by maintainer decision, #473). A file that does not parse is skipped with one journal line at warning; the defaults apply. The COSMIC files are left in place.
+- **The reset of COSMIC's appearance values.** *Amended 2026-10-15 (maintainer decision, #473):* it runs at every login, not once, and covers the two fonts besides `icon-theme`.
+  - Until `athanor-sessiond` exists, `athanor-appearance-reset.service`, a oneshot user unit of `athanor-system-services` in the class of the session steps (`doc_session.md` SN6), `PartOf=graphical-session.target` and `WantedBy=athanor-session.target` by preset (SN3), runs it at every login.
+  - It resets each of these keys of `org.gnome.desktop.interface` only when the value dconf returns (its databases, never the schema's default or the vendor override) is exactly the one cosmic-settings-daemon wrote before it was put on `GSETTINGS_BACKEND=memory` (#474): `icon-theme` `'Cosmic'`, `font-name` `'Open Sans'`, `monospace-font-name` `'Noto Sans Mono'`. The vendor defaults then apply: `'Adwaita'` (above) and the fonts of `doc_visual_language.md` VL6. Any other value is the user's and is kept.
+  - `org.gnome.desktop.wm.preferences button-layout` is kept as a user value: the daemon copied the user's own COSMIC choice into it.
+  - The rule is idempotent, so it needs no `migrated` key, and none is added for `athanor-sessiond`. A failing read or reset is logged to the journal and leaves the unit failed; the login goes on.
+  - Accepted risk: a user who deliberately chooses exactly `Open Sans` as the interface font or `Noto Sans Mono` as the monospace font sees it reset at the next login.
+  - At SD22 step 3 the reset moves into `athanor-sessiond`, with the same rule at each of its starts, and the unit leaves. The reset goes through the dconf service on the bus, so SD17's "writes nothing" holds.
 
 **SD17. The daemons' own confinement.**
 
@@ -244,7 +251,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision 
 - `athanor-idle`: the timer choice from the three keys and `OnBattery`; inhibitor bookkeeping (owner leaving, cookies, suspend-only); the sequence blank, off, lock request, and its cancellation by `resumed` at every point.
 - `athanor-broker`: desktop-id resolution and the refusal of user-directory entries for policy matching; the policy merge of `/usr` and `/etc`; the proxy argument list for each class; the unit properties for each class, compared as text with BR2's tests of `unit.rs:220-280`; autostart selection against fixtures of `OnlyShowIn`, `NotShowIn`, `Hidden`, `TryExec` and `X-systemd-skip`.
 - `athanor-wallpaper`: the resolution of `"hearth"`, `per-output` and `same-on-all`; the zoom geometry; the regular-file check.
-- `athanor-sessiond`: the automount conditions against udisks fixtures (FM14's), the lock queue, the notice's offer rules (DK21), the warning-level transitions, the migrations against fixture COSMIC files.
+- `athanor-sessiond`: the automount conditions against udisks fixtures (FM14's), the lock queue, the notice's offer rules (DK21), the warning-level transitions, the migrations against fixture COSMIC files. *Amended 2026-10-15 (maintainer decision, #473):* `athanor-sessiond` has no migration; the reset of COSMIC's appearance values (SD16) is tested by the script's own tests in `athanor-system-services`.
 
 **SD20. Budgets.** Reasoned proposals, measured on the reference laptop at the gate (ST5).
 
@@ -276,7 +283,7 @@ The four together stay inside ST5's idle threshold for the shell's processes.
 
 1. **Idle.** `athanor-idle` and `org.athanor.desktop.idle`; the migration; Settings' Power page writes the schema and `athanor_compositor_client::idle` is deleted; `session_component "$$" cosmic-idle &` leaves `athanor-desktop:102`; `cosmic-idle` leaves `forge/config/packages.json:134`. Needs the lock of `doc_lock_and_prompts.md` (it reacts to logind's `Lock`) and Settings' Power page. Its gate is spike L7b of `doc_lock_and_prompts.md`: `athanor-idle` reads the schema defaults and a user's setting overrides them.
 2. **Wallpaper.** `athanor-wallpaper` and `org.athanor.desktop.background`; the migration; Settings' Wallpaper page writes the schema and `athanor_compositor_client::background` is deleted; `cosmic-bg` and its unit leave (`packages.json:127`, `athanor-session.target:23`).
-3. **Session services.** `athanor-sessiond` with battery notices (SD14) and the vendor defaults and icon reset (SD16).
+3. **Session services.** `athanor-sessiond` with battery notices (SD14) and the vendor defaults and icon reset (SD16). *Amended 2026-10-15 (maintainer decision, #473):* the reset is that of COSMIC's appearance values (SD16), at each start of `athanor-sessiond`, and `athanor-appearance-reset.service` leaves in this step.
 4. **USBGuard notice and list** (SD12, SD13). Needs `usbguard-dbus`, the `usbguard` module and the polkit rule of `doc_disks.md`, and the root policy service of LP4.
 5. **Automount** (SD11). Needs the `udisks` module of `doc_disks.md` (DK3).
 6. **Broker.** `athanor-broker`, the policy file, the bar, dock, launcher, library, control center and notification center calling it; autostart moves to it and `xdg-desktop-autostart.target` leaves the session target. Spikes S1, S2, S3 and S5 first.
@@ -317,7 +324,7 @@ Applied with the approval of this document.
   - **`doc_files.md` FM16:** D-Bus activation of `org.freedesktop.FileManager1` starts the file manager outside the broker; spike S7 of this document settles it.
   - **`doc_portal.md`, `OpenURI`:** whether applications it starts pass through the broker is spike S8 of this document; owner of any change `doc_portal.md`.
   - **`doc_control_center.md`, the dark-mode tile** that writes the COSMIC theme: covered by VL4's existing amendment; nothing owed here.
-  - **`doc_visual_language.md` VL4 and VL8:** cosmic-settings-daemon writes `icon-theme` `'Cosmic'` at every start, against VL8's Adwaita icons; SD16's vendor default and one-time reset cover it, as listed above.
+  - **`doc_visual_language.md` VL4 and VL8:** cosmic-settings-daemon writes `icon-theme` `'Cosmic'` at every start, against VL8's Adwaita icons; SD16's vendor default and one-time reset cover it, as listed above. *Amended 2026-10-15 (maintainer decision, #473):* the reset runs at every login (SD16).
 
 ## 4. Open doubts
 
@@ -384,3 +391,7 @@ Taken by the maintainer on 2026-10-08, accepting the recommendations of review b
 
 15. **Decision 15 (review batch 2, `doc_tetragon.md` decision 18, Q1). Runtime security events.** `athanor-sessiond` subscribes to `os.athanor.RuntimeEvents1` and raises the notices of `doc_tetragon.md` TG8; it needs no new filesystem access, so SD17's "reads only" holds.
 16. **Decision 16 (review batch 2, threat model Q5). A stale reference.** SD9's residual risk no longer cites the open doubt T2 of the threat model, which is decided.
+
+Taken by the maintainer on 2026-10-15 (#473):
+
+17. **COSMIC's appearance values are reset at every login, from a session step until `athanor-sessiond` exists** (SD16). `icon-theme` `'Cosmic'`, `font-name` `'Open Sans'` and `monospace-font-name` `'Noto Sans Mono'` are reset when the user's value is exactly that; `button-layout` is kept. Reason: cosmic-settings-daemon wrote them into every account until #474, and the accounts should not wait for step 3 of SD22; an exact match is idempotent and keeps every other choice, at the accepted cost of resetting a user who chose exactly one of those two fonts.

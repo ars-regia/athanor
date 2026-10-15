@@ -1,0 +1,3 @@
+# doc_session_daemons.md, SD16 (amended 2026-10-15, #473): the session step that resets
+# COSMIC's appearance values runs at every login.
+enable athanor-appearance-reset.service

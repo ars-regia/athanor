@@ -1,0 +1,38 @@
+[Unit]
+Description=Reset the appearance values cosmic-settings-daemon wrote
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_session_daemons.md
+# The keys are the shell's icons and fonts: reset them before the bar and the dock read them.
+Before=athanor-bar.service athanor-dock.service
+PartOf=graphical-session.target
+
+[Service]
+# A session step (doc_session.md, SN6): oneshot, no restart. Without RemainAfterExit= the
+# unit is inactive once it has run, so every login runs it again (doc_session_daemons.md,
+# SD16, amended 2026-10-15, #473). A failure leaves it failed and the login goes on.
+Type=oneshot
+Slice=session.slice
+ExecStart=/usr/libexec/athanor-appearance-reset
+# A dconf service that never answers fails this unit instead of holding the bar and the dock.
+TimeoutStartSec=15
+
+# The reset goes through the dconf service on the bus; the dconf client itself writes only
+# its invalidation file beneath the runtime directory.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t
+PrivateTmp=true
+NoNewPrivileges=true
+SystemCallFilter=@system-service
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=athanor-session.target
