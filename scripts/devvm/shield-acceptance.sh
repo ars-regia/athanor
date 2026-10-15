@@ -177,16 +177,18 @@ stage_stale() {
     probe showing "System image verified" ||
         fail "the shield is not 'System image verified' before the clock moves"
     GUEST_NTP=$(guest_ssh timedatectl show -p NTP --value) || fail "reading the guest's NTP setting"
-    guest_ssh "sudo timedatectl set-ntp false" || fail "timedatectl set-ntp false"
+    # Set first, so a failure of either call below still sends the cleanup to restore_clock.
     CLOCK_MOVED=1
+    guest_ssh "sudo timedatectl set-ntp false" || fail "timedatectl set-ntp false"
     guest_ssh "sudo date -s @$(($(date +%s) + STALE_SECONDS))" > /dev/null ||
         fail "moving the guest's clock 15 days ahead"
     fresh_start
-    probe showing "Not verified yet" ||
-        fail "the shield is not 'Not verified yet' 15 days after the last successful check"
-    # A state that could not be read reads "Not verified yet" too: the sheet shows it was read.
+    # Until the state is read, and when it cannot be, the shield reads "Not verified yet" too:
+    # the sheet's Secure Boot row shows the state was read, and the header is asked again after it.
     probe press "$SHIELD" > /dev/null || fail "no showing shield named any of '$SHIELD'"
     probe showing "$READ_ROW" || fail "the sheet shows no Secure Boot row: the state was not read"
+    probe showing "Not verified yet" ||
+        fail "the shield is not 'Not verified yet' 15 days after the last successful check"
     "$HERE/screenshot.sh" "$SHOTS/stale.png" > /dev/null
     restore_clock || fail "restoring the guest's clock"
     fresh_start
