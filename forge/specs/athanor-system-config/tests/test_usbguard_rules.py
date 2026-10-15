@@ -18,7 +18,6 @@ import os
 import re
 import subprocess
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 
@@ -140,8 +139,9 @@ class InternalSnapshot(unittest.TestCase):
             (f / "bInterfaceSubClass").write_text(sub + "\n")
             (f / "bInterfaceProtocol").write_text(proto + "\n")
 
-    def run_script(self, sync=None, check=True, wait_tenths=2):
-        """Runs the script; `sync` is the body of a stand-in for sync(1), put first on PATH."""
+    def run_script(self, sync=None, sleep=None, check=True, wait_tenths=2):
+        """Runs the script; `sync` and `sleep` are bodies of stand-ins for sync(1) and sleep(1),
+        put first on PATH."""
         env = dict(
             os.environ,
             ATHANOR_USB_SYSFS=str(self.sysfs),
@@ -149,11 +149,13 @@ class InternalSnapshot(unittest.TestCase):
             ATHANOR_USBGUARD_MARKER=str(self.marker),
             ATHANOR_USBGUARD_WAIT_TENTHS=str(wait_tenths),
         )
-        if sync is not None:
-            bin_dir = self.work / "bin"
-            bin_dir.mkdir(exist_ok=True)
-            (bin_dir / "sync").write_text("#!/bin/bash\n" + sync)
-            (bin_dir / "sync").chmod(0o755)
+        bin_dir = self.work / "bin"
+        for name, body in (("sync", sync), ("sleep", sleep)):
+            if body is not None:
+                bin_dir.mkdir(exist_ok=True)
+                (bin_dir / name).write_text("#!/bin/bash\n" + body)
+                (bin_dir / name).chmod(0o755)
+        if bin_dir.exists():
             env["PATH"] = f"{bin_dir}:{env['PATH']}"
         return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check, timeout=30)
 
@@ -239,17 +241,19 @@ class InternalSnapshot(unittest.TestCase):
         self.device("1-1", "0c45", "6a10", [], configured=False)
         d = self.sysfs / "1-1"
 
-        def finish():
-            (d / "bConfigurationValue").write_text("1\n")
-            f = d / "1-1:1.0"
-            f.mkdir()
-            for name, value in (("Class", "0e"), ("SubClass", "01"), ("Protocol", "00")):
-                (f / f"bInterface{name}").write_text(value + "\n")
-
-        timer = threading.Timer(0.4, finish)
-        timer.start()
-        self.addCleanup(timer.join)
-        self.run_script(wait_tenths=50)
+        waits = self.work / "waits"
+        # The script sleeps only while a device is pending: its first wait finishes the
+        # enumeration, the interface with its attributes, as sysfs shows it.
+        finish = f"""echo >> {waits}
+if [[ ! -e {d}/1-1:1.0 ]]; then
+  mkdir {d}/pending
+  for a in Class:0e SubClass:01 Protocol:00; do echo "${{a#*:}}" > "{d}/pending/bInterface${{a%:*}}"; done
+  mv {d}/pending {d}/1-1:1.0
+  echo 1 > {d}/bConfigurationValue
+fi
+"""
+        self.run_script(sleep=finish, wait_tenths=50)
+        self.assertEqual(len(waits.read_text().splitlines()), 1)
         self.assertEqual(len(self.written()), 1)
         self.assertIn("0c45:6a10", self.written()[0])
 
