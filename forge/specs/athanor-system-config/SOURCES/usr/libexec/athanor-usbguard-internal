@@ -79,10 +79,12 @@ if [[ -e $pending ]]; then
         fi
     done <"$pending" || n=0 # a file that cannot be opened
     [[ -z $line ]] || n=0  # a last line with no newline: cut short
-    # A file that cannot be trusted is never replaced by a fresh snapshot: that would admit the
-    # devices connected since the first run.
+    # A file that cannot be trusted is never replaced by a fresh snapshot, which would admit the
+    # devices connected since the first run, nor taken as the end of the snapshot: put() replaces
+    # it atomically, so an invalid one was damaged or written by something else. The unit fails
+    # at every boot, admitting nothing, until an administrator chooses.
     if ((n == 0)); then
-        echo "<3>$pending is not valid; no device is recorded. Allow the internal devices from Settings, USB devices." >&2
+        echo "<3>$pending is not valid: no device is admitted until an administrator creates $marker to end the snapshot, or removes $pending to take a new one. Allow the internal devices from Settings, USB devices." >&2
         exit 1
     fi
 fi
@@ -340,9 +342,13 @@ done
 
 # Rules first, durably, then the pending file or the marker: a crash between them reads the
 # devices again, and a rule already written is kept and never written twice. A rules file that
-# cannot be read ends the run here (set -e), before anything is replaced and without the marker.
+# cannot be read ends the run here, before anything is replaced and without the marker, at every
+# boot until an administrator makes it readable again.
 if [[ -e $rules ]]; then
-    mapfile -t lines <"$rules"
+    if ! mapfile -t lines <"$rules"; then
+        echo "<3>$rules cannot be read: no device is admitted until an administrator makes it readable again." >&2
+        exit 1
+    fi
 else
     lines=("# Written by athanor-usbguard-internal.service: the USB devices connected at its first run, admitted then or at the next boots (doc_disks.md DK21).")
 fi

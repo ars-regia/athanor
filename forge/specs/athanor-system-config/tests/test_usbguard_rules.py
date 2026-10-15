@@ -263,7 +263,10 @@ case $(wc -l < {count}) in
         done = self.run_script(check=False)
         self.rules.chmod(0o600)
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("Permission denied", done.stderr)
+        self.assertIn(
+            f"<3>{self.rules} cannot be read: no device is admitted until an administrator makes it readable again.",
+            done.stderr,
+        )
         self.assertEqual(self.rules.read_text(), earlier)
         self.assertFalse(self.marker.exists())
         self.assertTrue(self.pending.exists())  # the next boot reads the same devices again
@@ -526,7 +529,11 @@ case $(wc -l < {count}) in
                     self.pending.write_text(body)
                 done = self.run_script(check=False)
                 self.assertEqual(done.returncode, 1)
-                self.assertIn(f"<3>{self.pending} is not valid; no device is recorded.", done.stderr)
+                self.assertIn(
+                    f"<3>{self.pending} is not valid: no device is admitted until an administrator creates "
+                    f"{self.marker} to end the snapshot, or removes {self.pending} to take a new one.",
+                    done.stderr,
+                )
                 self.assertFalse(self.marker.exists())
                 self.assertFalse(self.rules.exists())
 

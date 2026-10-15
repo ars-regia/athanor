@@ -26,7 +26,10 @@ Type=oneshot
 # greetd and usbguard.service are only ordered after this unit, so they start whether it
 # succeeds, fails or times out. A run that does not finish leaves no marker, and the next boot
 # reads only the devices the pending file names; a run that reads pending devices counts itself
-# first, so retries killed at every boot still end after three runs.
+# first, so retries killed at every boot still end after three runs. Two cases are left to an
+# administrator, and the unit fails at every boot, admitting nothing, until one acts: a pending
+# file that is not valid (create the marker to end the snapshot, or remove the file to take a
+# new one), and a rules file that cannot be read (make it readable again).
 TimeoutStartSec=30s
 TimeoutStopSec=5s
 ExecStart=/usr/libexec/athanor-usbguard-internal

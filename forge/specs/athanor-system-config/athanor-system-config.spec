@@ -100,6 +100,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   record, and only a device whose serial could never be read matches by port and ids alone.
   A device whose serial a rule cannot carry is left blocked, named, and kept out of pending.
   A device that leaves the bus during the first run is named in the journal too.
+  An invalid pending file or an unreadable rules file fails the unit at every boot, admitting
+  nothing, and the journal tells the administrator how to end it.
   The bound is measured on the time since boot, which a step of the wall clock does not move.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
