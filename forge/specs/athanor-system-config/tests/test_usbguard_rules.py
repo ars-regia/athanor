@@ -240,11 +240,14 @@ class InternalSnapshot(unittest.TestCase):
         d = self.sysfs / "1-1"
 
         def finish():
-            (d / "bConfigurationValue").write_text("1\n")
-            f = d / "1-1:1.0"
+            # sysfs shows an interface with its attributes: build it aside and rename it in,
+            # or the script can see the directory before the files.
+            f = d / "pending-interface"
             f.mkdir()
             for name, value in (("Class", "0e"), ("SubClass", "01"), ("Protocol", "00")):
                 (f / f"bInterface{name}").write_text(value + "\n")
+            f.rename(d / "1-1:1.0")
+            (d / "bConfigurationValue").write_text("1\n")
 
         timer = threading.Timer(0.4, finish)
         timer.start()
