@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -10,6 +10,7 @@ Source1:        athanor_scx.te
 Source2:        athanor_nix_daemon.cil
 Source3:        athanor_nvidia_modules_load.te
 Source4:        athanor_bootc_install.te
+Source5:        athanor_systemd_pstore.te
 
 BuildArch:      noarch
 BuildRequires:  checkpolicy
@@ -17,12 +18,13 @@ BuildRequires:  checkpolicy
 %description
 Custom SELinux Type Enforcement policies for Athanor OS.
 Includes mitigations for bootupd, the scx eBPF schedulers and the NVIDIA driver's
-capability probes at module load, bootc's install_t from system services, and the Nix policy: types for the store, its
+capability probes at module load, bootc's install_t from system services, the
+directories systemd-pstore creates for a crash, and the Nix policy: types for the store, its
 state and the daemon socket, a confined nix-daemon domain and a builder domain.
 
 %prep
 %setup -q -c -T
-cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} .
+cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} %{SOURCE5} .
 
 %build
 # checkmodule compiles each .te into a CIL module (the require block resolves
@@ -30,7 +32,7 @@ cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} .
 # semodule_package step: `semodule -i module.cil` loads it as it is.
 # athanor_nix_daemon is written in CIL directly, because it declares file
 # contexts, which a .te compiled by checkmodule cannot carry.
-for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load athanor_bootc_install; do
+for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load athanor_bootc_install athanor_systemd_pstore; do
   checkmodule -M -m -C -o "${module}.cil" "${module}.te"
 done
 
@@ -40,6 +42,7 @@ install -D -m 0644 athanor_scx.cil %{buildroot}%{_datadir}/selinux/packages/atha
 install -D -m 0644 athanor_nix_daemon.cil %{buildroot}%{_datadir}/selinux/packages/athanor_nix_daemon.cil
 install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 install -D -m 0644 athanor_bootc_install.cil %{buildroot}%{_datadir}/selinux/packages/athanor_bootc_install.cil
+install -D -m 0644 athanor_systemd_pstore.cil %{buildroot}%{_datadir}/selinux/packages/athanor_systemd_pstore.cil
 
 %files
 %{_datadir}/selinux/packages/bootupd_lsblk.cil
@@ -47,8 +50,15 @@ install -D -m 0644 athanor_bootc_install.cil %{buildroot}%{_datadir}/selinux/pac
 %{_datadir}/selinux/packages/athanor_nix_daemon.cil
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 %{_datadir}/selinux/packages/athanor_bootc_install.cil
+%{_datadir}/selinux/packages/athanor_systemd_pstore.cil
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0-12
+- Add athanor_systemd_pstore: let systemd_pstore_t create directories of
+  systemd_pstore_var_lib_t. After a panic systemd-pstore makes /var/lib/systemd/pstore/<id>/
+  to assemble dmesg.txt; the mkdir was denied (#503), so the parts stayed flat. Files and
+  the other directory permissions are already granted by Fedora's policy.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0-11
 - Add athanor_bootc_install: bootc and ostree executed by athanor-update (unconfined_service_t)
   enter install_t, as they do from init_t, also under no_new_privs, and bootc's mount enters

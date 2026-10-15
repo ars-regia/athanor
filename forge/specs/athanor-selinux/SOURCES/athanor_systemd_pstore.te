@@ -1,0 +1,24 @@
+module athanor_systemd_pstore 1.0;
+
+require {
+    type systemd_pstore_t;
+    type systemd_pstore_var_lib_t;
+    class dir create;
+}
+
+# After a kernel panic systemd-pstore (src/pstore/pstore.c) moves the records out of
+# /sys/fs/pstore into /var/lib/systemd/pstore. For a dmesg record it creates the
+# directory of the crash, <id>/, with mkdir_parents() and appends the parts to
+# <id>/dmesg.txt in reverse order. Fedora's policy lets systemd_pstore_t manage files
+# and write directories of systemd_pstore_var_lib_t (manage_files_pattern) but not
+# create a directory, so mkdir was denied (#503), the parts stayed flat in
+# /var/lib/systemd/pstore and no dmesg.txt was assembled. The new directory inherits
+# systemd_pstore_var_lib_t from its parent, so creating it is the only missing
+# permission; the files inside are covered by the base rule.
+#
+# Drop this module once Fedora's selinux-policy lets systemd_pstore_t create
+# directories of systemd_pstore_var_lib_t. Not carried upstream as of rawhide on
+# 2026-10-15 (no pstore commit on policy/modules/system/systemd.te after 79f41b6c
+# "Add support for the systemd-pstore service" and c13b4261 "Allow systemd-pstore send
+# a message to syslogd over a unix domain"); selinux-policy-targeted 43.10-1 lacks it.
+allow systemd_pstore_t systemd_pstore_var_lib_t:dir create;
