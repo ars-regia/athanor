@@ -852,7 +852,7 @@ frozen (PL54), it moves only on a hand release of `main`, which also moves the s
 images' `:latest` without a marker (PL55). Those old jobs are outside this rule until
 ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
 Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
-`:stable-previous`, `:stable-<YYYYMMDD>` are written only by `promote.sh`; the ISO's
+`:stable-previous`, `:stable-<YYYYMMDD>`, `:promoted-<run_id>` are written only by `promote.sh`; the ISO's
 `:stable` only by `system/promote-iso.sh`, through `system/tag-images.sh --iso`, in the `iso`
 job of `promote-stable.yml`, after `promote.sh` and only while the system's `:stable` names
 the build the ISO installs (ADR-0114). There is one
