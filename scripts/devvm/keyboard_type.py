@@ -6,7 +6,8 @@ keyboard's would: Super reaches cosmic-comp's shortcuts and text reaches the foc
 surface. A token is text, typed with the US layout the dev VM uses, or a key named after
 an @: @super, @enter, @escape, @tab, @down, @up, @left, @right, which presses that key
 alone, or several joined by +, which presses them together (@super+shift+ctrl+right; the
-modifiers are @super, @shift, @ctrl, @alt). A key may be followed by :COUNT[:SECONDS],
+modifiers are @super, @shift, @ctrl, @alt; a lower-case letter, digit or space of the US
+layout is also a key in a chord: @ctrl+o). The media keys are @volup, @voldown and @mute. A key may be followed by :COUNT[:SECONDS],
 which holds it down for COUNT autorepeats SECONDS apart (@down:20:0.25), as a key held
 over the list does. A key followed by *COUNT:SECONDS is tapped COUNT times, SECONDS apart
 (@down*4:0.25): a selection that moves more slowly than a held key's autorepeat, which the
@@ -28,6 +29,8 @@ SHIFT = 42
 NAMED = {
     "super": 125, "shift": SHIFT, "ctrl": 29, "alt": 56, "enter": 28, "escape": 1, "tab": 15,
     "down": 108, "up": 103, "left": 105, "right": 106,
+    # KEY_MUTE, KEY_VOLUMEDOWN, KEY_VOLUMEUP of linux/input-event-codes.h.
+    "mute": 113, "voldown": 114, "volup": 115,
 }
 # Linux input event codes of the US layout: unshifted characters, then shifted ones.
 PLAIN = dict(zip("1234567890-=qwertyuiopasdfghjklzxcvbnm./ ", [
@@ -41,6 +44,11 @@ SHIFTED = {"+": 13, "*": 9, "_": 12, "#": 4, "%": 6, "&": 8, "?": 53} | {c.upper
 SETTLE_S = 1.5
 # The delay between two repeats of a held key.
 REPEAT_S = 0.03
+
+
+def key_code(name):
+    """The event code of a key named after an @, or None."""
+    return NAMED.get(name) or (PLAIN[name] if len(name) == 1 and name in PLAIN else None)
 
 
 def emit(fd, kind, code, value):
@@ -78,9 +86,10 @@ def strokes(tokens):
         if token.startswith("@"):
             name, _, rest = token[1:].partition(":")
             count, _, seconds = rest.partition(":")
-            if not all(key in NAMED for key in name.split("+")):
+            codes = [key_code(key) for key in name.split("+")]
+            if None in codes:
                 raise SystemExit(f"keyboard_type.py: no key named {token!r}")
-            yield [NAMED[key] for key in name.split("+")], int(count or 0), float(seconds or REPEAT_S), 0.0
+            yield codes, int(count or 0), float(seconds or REPEAT_S), 0.0
             continue
         for char in token:
             if char in PLAIN:
