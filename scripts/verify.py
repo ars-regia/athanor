@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -872,29 +873,54 @@ def check_installer():
 KICKSTART_SYNTAX = "F43"
 
 
+# The kickstarts that live inside another file: bootc-image-builder's TOML carries the ISO's.
+EMBEDDED_KICKSTARTS = ("system/disk_config/iso.toml",)
+
+
+def kickstart_problems(root=None):
+    """Every kickstart ksvalidator rejects for KICKSTART_SYNTAX: the .ks files of the tree and
+    the ones EMBEDDED_KICKSTARTS carry. Raises FileNotFoundError when ksvalidator is missing."""
+    root = Path(root or ROOT)
+    problems = []
+    with tempfile.TemporaryDirectory() as tmp:
+        targets = [(str(ks.relative_to(root)), ks) for ks in sorted(walk(root, ".ks"))]
+        for relative in EMBEDDED_KICKSTARTS:
+            extracted = Path(tmp) / Path(relative).with_suffix(".ks").name
+            try:
+                extracted.write_text(kickstart_text(root, relative), encoding="utf-8")
+            except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as err:
+                problems.append(f"{relative}: cannot read its kickstart ({err!r})")
+                continue
+            # ksvalidator counts lines from the start of the kickstart, not of the TOML file.
+            targets.append((f"{relative}, its kickstart contents", extracted))
+        for relative, path in targets:
+            # Without --followincludes an %include is accepted unread: collaudo.ks includes a
+            # file that exists only on the installation medium (/run/install/repo).
+            p = subprocess.run(["ksvalidator", "--version", KICKSTART_SYNTAX, str(path)],
+                               capture_output=True, text=True, timeout=60)
+            if p.returncode != 0:
+                detail = " ".join(p.stderr.split()) or " ".join(p.stdout.split())
+                problems.append(f"{relative}: {detail}")
+    return problems
+
+
 @check("kickstart", f"I kickstart sono sintassi valida per l'Anaconda di {KICKSTART_SYNTAX}")
 def check_kickstart():
     r = Result()
-
-    for ks in sorted(walk(ROOT, ".ks")):
-        # Senza --followincludes un %include viene accettato senza essere letto: è
-        # quanto serve, perché collaudo.ks ne ha uno che esiste solo sul supporto di
-        # installazione (/run/install/repo) e non nel checkout.
-        try:
-            p = subprocess.run(["ksvalidator", "--version", KICKSTART_SYNTAX, str(ks)],
-                               cwd=ROOT, capture_output=True, text=True, timeout=60)
-        except FileNotFoundError:
-            r.note("ksvalidator non installato — `dnf install pykickstart`, "
-                   "senza di lui nessuno controlla i kickstart prima dell'installazione")
-            return r
-        except Exception as e:
-            r.note(f"ksvalidator non eseguito: {e}")
-            return r
-
-        if p.returncode != 0:
-            detail = " ".join(p.stderr.split()) or " ".join(p.stdout.split())
-            r.fail(f"{rel(ks)}: {detail}")
-
+    try:
+        problems = kickstart_problems()
+    except FileNotFoundError:
+        # A workstation may lack the tool; CI installs it (scripts/ci/install-tools.sh,
+        # call-lint.yml), so there its absence means nothing was checked.
+        missing = ("ksvalidator is not installed (`dnf install pykickstart`): no kickstart is "
+                   "checked before an install")
+        (r.fail if os.environ.get("GITHUB_ACTIONS") == "true" else r.note)(missing)
+        return r
+    except (OSError, subprocess.SubprocessError) as e:
+        r.fail(f"ksvalidator did not run: {e!r}")
+        return r
+    for problem in problems:
+        r.fail(problem)
     return r
 
 
