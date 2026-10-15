@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:65.fc43}
+Release:        %{?autorelease}%{!?autorelease:66.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -38,8 +38,8 @@ Provides athanor-system-config for Athanor OS.
 
 %install
 mkdir -p %{buildroot}
-cp -a %{_sourcedir}/usr %{buildroot}/ 2>/dev/null || true
-cp -a %{_sourcedir}/etc %{buildroot}/ 2>/dev/null || true
+cp -a %{_sourcedir}/usr %{buildroot}/
+cp -a %{_sourcedir}/etc %{buildroot}/
 
 mkdir -p %{buildroot}/usr/share/athanor-system-config/flatpak-no-triggers
 mv %{buildroot}/etc/usbguard/usbguard-daemon.conf %{buildroot}/usr/share/athanor-system-config/usbguard-daemon.conf
@@ -79,7 +79,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
-* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-66
 - athanor-usbguard-internal records a USB device only when two consecutive passes read the
   same configuration, interfaces and interface classes, so a device reconfigured while it is
   read is read again rather than skipped (#490). A device that does not settle within the
@@ -89,6 +89,11 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
   marker is written and the journal names the devices left blocked.
   athanor-usbguard-internal.service bounds its start at 30 seconds, so a driver probe that
   holds a device lock cannot hold back the greeter indefinitely.
+
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-65
+- %install copies the usr and etc source trees without hiding a failure (AGENTS.md,
+  "No hidden failures", #223): both directories ship with the package, so a missing one now fails the build
+  instead of producing an RPM without them. The payload does not change.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-64
 - Drops the %post that copied the video and tty groups into /etc/group and added greetd to
