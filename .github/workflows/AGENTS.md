@@ -2,7 +2,10 @@
 
 These rules add to the root `AGENTS.md`. Every workflow, secret and variable is described
 in `docs/architecture/doc_ci.md`: `python3 scripts/verify.py ci` fails when one is missing
-there, or when the document names a workflow file that does not exist.
+there, or when the document names a workflow file that does not exist. Section 3.5 of
+`docs/architecture/doc_pipeline.md` gives every workflow file one row: a pull request that
+adds, deletes or renames one, PB12's included, edits that table in the same pull request
+(`python3 scripts/verify.py docs`).
 
 - **YAML is glue.** Logic lives in scripts under the repository (`system/*.sh`,
   `forge/scripts/`, `scripts/`); a `run:` block is a few lines that call them. Steps exchange
@@ -46,7 +49,7 @@ A push is not a test. Before committing:
 
 ```bash
 actionlint
-python3 scripts/verify.py workflows ci registry
+python3 scripts/verify.py workflows ci docs registry
 ```
 
 `verify.py workflows` runs `actionlint` only when it is on `PATH`; without it the check
