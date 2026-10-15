@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:61.fc43}
+Release:        %{?autorelease}%{!?autorelease:62.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -23,6 +23,9 @@ Requires: usbguard bolt
 Requires: cryptsetup mokutil python3 systemd
 # athanor-flatpak-update runs flatpak against the Flathub remote this package ships.
 Requires: flatpak
+# The appearance store: the GNOME schemas the vendor defaults override, and the icon theme
+# they name (doc_visual_language.md, VL4; doc_session_daemons.md, SD16).
+Requires: gsettings-desktop-schemas adwaita-icon-theme
 
 %description
 Provides athanor-system-config for Athanor OS.
@@ -89,6 +92,8 @@ done
 /usr/lib/systemd/system-preset/80-athanor-system.preset
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
 /usr/lib/environment.d/50-athanor-desktop.conf
+/usr/share/glib-2.0/schemas/org.athanor.desktop.appearance.gschema.xml
+/usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
 /usr/share/athanor-system-config/greetd.toml
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/greenboot.conf
@@ -97,6 +102,15 @@ done
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-62
+- Ships the GSettings schema org.athanor.desktop.appearance with the two keys GNOME has no
+  key for, accent-mode (fixed or wallpaper) and accent-computed (doc_visual_language.md,
+  VL4; ADR-0057, A2-20). The variant, the contrast and the fixed accent stay in the GNOME
+  keys, which are the store.
+- Ships the vendor defaults of that store as a GSettings override: accent-color purple,
+  icon-theme Adwaita and button-layout ':minimize,maximize,close' (VL4;
+  doc_session_daemons.md, SD16). Requires gsettings-desktop-schemas and adwaita-icon-theme.
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-61
 - athanor-greeter-client binds /var/lib/lastlog read-only into the greeter's sandbox, so
   that the account list puts the latest greetd sign-in first (doc_lock_and_prompts.md,
