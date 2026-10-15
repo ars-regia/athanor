@@ -13,7 +13,7 @@
 #   v5   2026-09-18  1 and 2       2            rotation, second half
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
-# Usage: images.sh     (needs podman, skopeo, jq; `nix` for the cosign 3 bundle of v3b)
+# Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
