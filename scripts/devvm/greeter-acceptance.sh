@@ -17,8 +17,8 @@
 #             nologin) and run (63893), each with the password of its name
 #   list      before any sign-in the test accounts are listed Ada, Bea, Cy, Dan; svc and run
 #             are not (item 23, first clause). Valid only before `order`.
-#   refused   bea sees PAM's expiry message and is not signed in; cy gets the ordinary
-#             failure text, not the expiry message
+#   refused   bea sees PAM's expiry message and is not signed in; cy's password reaches PAM
+#             and cy gets the ordinary failure text, the one a wrong password for dan gets
 #   order     dan, then ada, sign in at the greeter and are logged out; after a reboot the
 #             order is Ada, Dan, Bea, Cy and ada's card is the open one
 #   fallback  lastlog2.db at mode 0600: the order is Ada, Bea, Cy, Dan and the journal holds
@@ -144,7 +144,6 @@ stage_accounts() {
     done
     guest_ssh sudo chage -E 0 bea
     guest_ssh sudo passwd -l cy
-    push_probe
     # The greeter read the accounts when it started: start it again.
     guest_ssh sudo systemctl restart greetd
     wait_until 60 greeter_up ||
@@ -152,7 +151,6 @@ stage_accounts() {
 }
 
 stage_list() {
-    push_probe
     local json
     json=$(cards)
     expect_order "$json" "Ada Bea Cy Dan"
@@ -161,18 +159,34 @@ stage_list() {
     shot list
 }
 
+# The passwords PAM refused since SINCE (seconds since the epoch), as greetd logged them. A
+# failure text alone proves nothing: a greetd that refuses to create the session shows one too.
+pam_refusals() { # pam_refusals SINCE
+    guest_ssh sudo journalctl -q -u greetd --since "@$1" -o cat |
+        awk '/pam_authenticate: AUTH_ERR/ { n++ } END { print n + 0 }'
+}
+
 stage_refused() {
-    local alerts
+    local alerts ordinary since
     probe open-card Bea
     type_keys bea @enter
     alerts=$(probe alerts 20) || fail "no failure text for bea"
     grep -qi 'expired' <<< "$alerts" || fail "bea saw no expiry message: $alerts"
     ! signed_in bea || fail "bea is signed in"
     shot expired
+    # The ordinary failure text: dan's card with a wrong password.
+    since=$(guest_ssh date +%s)
+    probe open-card Dan
+    type_keys wrong-password @enter
+    ordinary=$(probe alerts 20) || fail "no failure text for dan's wrong password"
+    guest_ssh sudo faillock --user dan --reset
+    (($(pam_refusals "$since") == 1)) || fail "dan's wrong password did not reach PAM: $ordinary"
+    since=$(guest_ssh date +%s)
     probe open-card Cy
     type_keys cy @enter
     alerts=$(probe alerts 20) || fail "no failure text for cy"
-    ! grep -qiE 'expired|locked' <<< "$alerts" || fail "cy's refusal is not the ordinary text: $alerts"
+    (($(pam_refusals "$since") == 1)) || fail "cy's password did not reach PAM: $alerts"
+    [[ $alerts == "$ordinary" ]] || fail "cy's refusal '$alerts' is not the ordinary text '$ordinary'"
     ! signed_in cy || fail "cy is signed in"
     shot locked
 }
@@ -302,6 +316,9 @@ for STAGE in "${run[@]}"; do
     [[ " ${STAGES[*]} cleanup " == *" $STAGE "* ]] || fail "unknown stage: one of ${STAGES[*]} cleanup"
 done
 mkdir -p "$SHOTS"
+# Once per run, since any stage may be the first after a boot; order pushes it again after its
+# own reboot.
+push_probe
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
     echo "PASS $STAGE"
