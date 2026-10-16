@@ -278,33 +278,37 @@ stage_mandatory-mid-session() {
     guest_ssh 'sudo rm /etc/athanor/layout/50-panel.toml && sudo rmdir /etc/athanor/layout'
 }
 
-new_bar_pid() { # new_bar_pid OLD-PID: active, with a different, real MainPID
-    [[ $(in_session systemctl --user show -p ActiveState --value athanor-bar) == active ]] || return 1
+new_pid() { # new_pid UNIT OLD-PID: active, with a different, real MainPID
+    [[ $(in_session systemctl --user show -p ActiveState --value "$1") == active ]] || return 1
     local pid
-    pid=$(pid_of athanor-bar)
-    [[ $pid != "$1" && $pid != 0 ]]
+    pid=$(pid_of "$1")
+    [[ $pid != "$2" && $pid != 0 ]]
 }
 
-# SH8: a bar in a crash loop draws the vendor layout, not the user's, and not nothing.
-# bar-acceptance.sh and dock-acceptance.sh test the loop itself; this stage, what it draws.
+# SH8: a surface in a crash loop draws the vendor layout, not the user's, and not nothing.
+# bar-acceptance.sh and dock-acceptance.sh test the loop itself; this stage, what each
+# draws once it gives up.
 stage_crash-loop() {
     local since
     since=$(now)
     document preset=minimal
     applied 5 "$since" "$MINIMAL"
     login
-    since=$(now)
-    local round pid
-    for round in 1 2 3 4 5; do
-        pid=$(pid_of athanor-bar)
-        in_session systemctl --user kill --kill-whom=main -s SIGKILL athanor-bar
-        wait_until 90 new_bar_pid "$pid" || fail "round $round: no new MainPID after killing $pid"
+    local surface round pid
+    for surface in "${SURFACES[@]}"; do
+        since=$(now)
+        for round in 1 2 3 4 5; do
+            pid=$(pid_of "$surface")
+            in_session systemctl --user kill --kill-whom=main -s SIGKILL "$surface"
+            wait_until 90 new_pid "$surface" "$pid" ||
+                fail "$surface round $round: no new MainPID after killing $pid"
+        done
+        wait_until 10 in_session "journalctl --user -u $surface --since @$since -p err --no-pager -o cat |
+            grep -q 'keeps failing'" || fail "$surface: no 'keeps failing' at err priority after five kills"
+        wait_until 10 in_session "journalctl --user -u $surface --since @$since -g 'layout applied' -o cat --no-pager |
+            tail -n 1 | grep -qF 'Layout { $FLOAT }'" ||
+            fail "$surface: the give-up drew $(last_applied "$surface" "$since"), not the vendor layout"
     done
-    wait_until 10 in_session "journalctl --user -u athanor-bar --since @$since -p err --no-pager -o cat |
-        grep -q 'keeps failing'" || fail "no 'keeps failing' at err priority after five kills"
-    wait_until 10 in_session "journalctl --user -u athanor-bar --since @$since -g 'layout applied' -o cat --no-pager |
-        tail -n 1 | grep -qF 'Layout { $FLOAT }'" ||
-        fail "the give-up drew $(last_applied athanor-bar "$since"), not the vendor layout"
     shot crash-loop
 }
 
