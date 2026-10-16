@@ -167,6 +167,11 @@ fg = "acc"
 bg = ["surf", "surf2", "bar"]
 each = true
 kind = "ui"
+# A slider's highlight against its trough.
+[[pair]]
+fg = "acc"
+bg = "chip"
+kind = "ui"
 [[pair]]
 fg = "bad"
 bg = ["surf", "bar"]
