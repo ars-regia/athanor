@@ -6,6 +6,8 @@ FROM ${BASE}
 ARG REGISTRY
 ARG MARKER
 ARG GUEST_USER
+# Set for the image whose greeter does not start (doc_recovery.md, acceptance 7).
+ARG BREAK_GREETD=
 COPY rpm/ /tmp/acceptance-rpm/
 COPY keys/ /usr/share/athanor/keys/
 RUN rpm -Uvh --replacepkgs --replacefiles /tmp/acceptance-rpm/athanor-update-*.rpm && rm -rf /tmp/acceptance-rpm && \
@@ -17,5 +19,7 @@ RUN rpm -Uvh --replacepkgs --replacefiles /tmp/acceptance-rpm/athanor-update-*.r
     mkdir -p /usr/lib/systemd/system/athanor-update-check.timer.d && \
     printf '[Timer]\nOnBootSec=\nOnBootSec=2min\nOnUnitActiveSec=6h\nRandomizedDelaySec=0\n' > /usr/lib/systemd/system/athanor-update-check.timer.d/10-acceptance.conf && \
     printf '\n[initial_session]\ncommand = "/usr/bin/athanor-session"\nuser = "%s"\n' "${GUEST_USER}" >> /usr/share/athanor-system-config/greetd.toml && \
+    if [ -n "${BREAK_GREETD}" ]; then mkdir -p /usr/lib/systemd/system/greetd.service.d && \
+        printf '[Service]\nExecStart=\nExecStart=/usr/bin/false\n' > /usr/lib/systemd/system/greetd.service.d/99-acceptance-fail.conf; fi && \
     echo "${MARKER}" > /usr/share/athanor-acceptance-marker && \
     bootc container lint

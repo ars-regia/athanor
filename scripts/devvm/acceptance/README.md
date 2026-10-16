@@ -4,19 +4,31 @@ Runs section 6 of `docs/architecture/doc_update_trust.md` on the development VM 
 throwaway registry and throwaway keys. Nothing here touches the project registry or key.
 
     bash forge/scripts/build_rolling_local.sh update     # the RPM under test
-    scripts/devvm/acceptance/images.sh                   # registry, keys, ten images (about 20 min)
+    scripts/devvm/acceptance/images.sh                   # registry, keys, eleven images (about 20 min)
     scripts/devvm/reset.sh && scripts/devvm/start.sh     # a freshly installed guest
-    scripts/devvm/acceptance/run.sh                      # about 90 minutes, a dozen reboots
+    scripts/devvm/acceptance/run.sh                      # about 70 minutes, a dozen reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
 
-The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together:
-`run.sh` refuses to start while a workflow run is in progress. Do not dispatch one meanwhile.
+The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together: on a
+host where `athanor-runner.service` is active, `run.sh` refuses to start while a job is busy
+on a self-hosted runner. Do not dispatch one meanwhile.
 
 The `probes` stage (issue #312) runs `probes.py` on the finished guest: listening sockets and
 firewall zones, `systemd-analyze security` ceilings, SELinux denials since boot, PAM, sysctl,
 masked units, the trust state and one Nix build with `nix store gc`, each against
 `expectations.toml`. It fails naming the check; `run.sh probes` runs it alone. Change a line of
 the expectations only with the review of the exposure it declares.
+
+The `console` and `greenboot` stages (issue #537) run acceptance 1 and 7 of `docs/architecture/doc_recovery.md`,
+after `recover`, whose key signs the image `bad` (v7 with `greetd.service` running `/usr/bin/false`). `console`
+breaks greetd with a drop-in in `/run`, waits for `athanor-recovery.target` and reads what agetty prints above
+the login of tty1 (`agetty --show-issue`); a reboot ends with the plain banner (acceptance 5). `greenboot` applies
+`bad` and checks greenboot's mark (`rollbackQueued`, the failed `10-greetd-running.sh`), the console's message
+for a marked deployment, that nothing reboots for ten minutes, the return to the previous deployment after
+`systemctl reboot` and that three checks hold the marked digest. It runs once per guest: the digest of `bad`
+stays held afterwards, so it refuses to start again, and a second run needs `reset.sh` and a run from
+`install`. The framebuffer of tty1 is looked at by hand: the
+VM's serial console is not tty1. `greenboot` takes about 20 minutes.
 
 The `metered` stage (UT12, `doc_shell.md` section 7, item 4) marks the guest's default device
 metered with `nmcli device modify`, which changes the applied connection and not the profile on
