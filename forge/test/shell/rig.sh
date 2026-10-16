@@ -373,8 +373,7 @@ cosmic-keys)
         exit $status'
     ;;
 cosmic-preview)
-    mkdir -p "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1"
-    printf 'true' > "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    seed_scheme "$out/seed-dark" dark
     overlay=/repo/system/athanor-style/calmo/generated/cosmic
     in_rig "$(rig_image)" env RIG_DATA_OVERLAY="$overlay" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 1.0 cosmic-preview-light -- cosmic-settings appearance

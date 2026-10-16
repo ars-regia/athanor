@@ -33,7 +33,8 @@ cp /usr/share/glib-2.0/schemas/*.xml /repo/forge/specs/athanor-system-config/SOU
 glib-compile-schemas --strict "$schemas"
 export GSETTINGS_SCHEMA_DIR=$schemas
 if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
-    while read -r schema key value; do
+    # A last line without a newline is read too.
+    while read -r schema key value || [ -n "$schema" ]; do
         gsettings set "$schema" "$key" "$value"
     done < "$RIG_CONFIG_SEED.gsettings"
 fi
