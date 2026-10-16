@@ -99,8 +99,6 @@ stage_deploy() {
         "$VARIANTS:/usr/share/athanor/cosmic-variants.json" > /dev/null
     in_session systemctl --user daemon-reload
     unit cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
-    # The bar starts in stage unit; the dock already runs the image's binary.
-    in_session systemctl --user try-restart athanor-dock || fail "systemctl --user try-restart athanor-dock"
     # libpulse and its GLib main loop come with the RPM's automatic dependencies; a binary
     # deployed by hand needs them in the image already.
     local binary libraries
@@ -110,6 +108,8 @@ stage_deploy() {
             fail "libraries missing from the guest image: $(grep 'not found' <<< "$libraries")"
         fi
     done
+    # The bar starts in stage unit; a running dock still runs the binary it started with.
+    in_session systemctl --user try-restart athanor-dock || fail "systemctl --user try-restart athanor-dock"
 }
 
 stage_unit() {
