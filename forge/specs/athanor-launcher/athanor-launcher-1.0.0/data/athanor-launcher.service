@@ -35,7 +35,10 @@ MemoryMax=256M
 
 # Same as the bar: the failure record survives a stop, and "athanor" holds the launch
 # sockets of BR2 under ProtectSystem=strict.
-RuntimeDirectory=athanor-launcher athanor
+# "dconf" because the launcher reads the appearance through GSettings, which maps dconf's
+# shared-memory flag beneath %t/dconf read-write to learn that a key changed, as
+# xdg-desktop-portal-athanor.service explains; without it the launcher never sees a new scheme.
+RuntimeDirectory=athanor-launcher athanor dconf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/search/usage.json (LA3).

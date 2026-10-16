@@ -39,7 +39,11 @@ MemoryMax=144M
 # directories: "athanor" is also declared here because launch() creates %t/athanor/<random>
 # for the Wayland security context of a started application (athanor-compositor-client).
 # athanor-bar.service declares it too; both preserve it, so neither stop removes it.
-RuntimeDirectory=athanor-dock athanor
+# "dconf" because the dock reads the appearance through GSettings, which maps dconf's
+# shared-memory flag beneath %t/dconf read-write to learn that a key changed, as
+# xdg-desktop-portal-athanor.service explains; without it the dock never sees a new scheme.
+# Landlock grants the same path (main.rs).
+RuntimeDirectory=athanor-dock athanor dconf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # The favourites file, ~/.config/athanor/favorites.toml (BR7), which pinning, unpinning and

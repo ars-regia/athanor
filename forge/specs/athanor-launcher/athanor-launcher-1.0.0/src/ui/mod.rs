@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use athanor_compositor_client::{outputs, theme, Client, WindowId};
+use athanor_compositor_client::{outputs, Client, WindowId};
 use athanor_launcher::keys::{self, Command, Key};
 use athanor_launcher::list::{self, Line};
 use athanor_launcher::place;
@@ -20,7 +20,7 @@ use athanor_search::engine::Engine;
 use athanor_search::files::Files;
 use athanor_search::providers;
 use athanor_search::windows::WindowEntry;
-use athanor_style::calmo;
+use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
 
@@ -68,7 +68,6 @@ pub struct Launcher {
     pending_preview: RefCell<Option<glib::SourceId>>,
     /// Bumped by every selection, so a late window capture is dropped.
     selection: Cell<u64>,
-    watches: RefCell<Vec<gio::FileMonitor>>,
     /// A context singleton: it lives, and keeps its handler, only while held.
     apps_monitor: gio::AppInfoMonitor,
     /// False after the crash loop gave up: no search provider is called then.
@@ -83,9 +82,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
     if is_rtl() {
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
-    let cosmic = theme::read();
-    calmo::load(&display, cosmic.variant());
-    theme::load_accent(&display, &cosmic);
+    appearance::load(&display, &Appearance::read());
     let provider = gtk4::CssProvider::new();
     provider.load_from_string(CSS);
     gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -154,7 +151,6 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
             memory: RefCell::default(),
             pending_preview: RefCell::default(),
             selection: Cell::new(0),
-            watches: RefCell::default(),
             apps_monitor: gio::AppInfoMonitor::get(),
             discover_providers: !options.given_up,
         }
@@ -265,10 +261,7 @@ impl Launcher {
             }
         });
         let display = self.display.clone();
-        self.watches.borrow_mut().extend(theme::watch(move |cosmic| {
-            calmo::load(&display, cosmic.variant());
-            theme::load_accent(&display, &cosmic);
-        }));
+        appearance::watch(move |current| appearance::load(&display, &current));
     }
 
     fn monitors(&self) -> Vec<gdk::Monitor> {

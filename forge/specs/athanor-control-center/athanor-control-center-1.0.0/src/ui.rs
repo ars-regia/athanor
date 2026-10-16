@@ -7,7 +7,7 @@ use std::rc::Rc;
 use athanor_compositor_client::{outputs, theme, Client};
 use athanor_control_center::{anchor, focused_output, parse_page, Page, Side, GAP};
 use athanor_layout::loader::{Paths, Source};
-use athanor_style::calmo;
+use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 
@@ -36,7 +36,6 @@ pub struct ControlCenter {
     focused: Cell<bool>,
     content: gtk4::Box,
     panel: Rc<Panel>,
-    watches: RefCell<Vec<gtk4::gio::FileMonitor>>,
 }
 
 pub fn start(
@@ -52,9 +51,8 @@ pub fn start(
     if is_rtl() {
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
-    let cosmic = theme::read();
-    calmo::load(&display, cosmic.variant());
-    theme::load_accent(&display, &cosmic);
+    let current = Appearance::read();
+    appearance::load(&display, &current);
     let provider = gtk4::CssProvider::new();
     provider.load_from_string(CSS);
     gtk4::style_context_add_provider_for_display(
@@ -70,7 +68,7 @@ pub fn start(
         }
     };
     let panel = Panel::new(athanor_controls::bridge::services(), rfkill, hooks(client.clone()));
-    panel.set_dark(cosmic.is_dark);
+    panel.set_dark(current.dark);
     let content = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .width_request(360)
@@ -89,7 +87,6 @@ pub fn start(
         focused: Cell::new(false),
         content,
         panel,
-        watches: RefCell::default(),
     });
     let weak = Rc::downgrade(&center);
     outputs::watch(&display, move |_| {
@@ -99,16 +96,12 @@ pub fn start(
     });
     let watched = display.clone();
     let weak = Rc::downgrade(&center);
-    center
-        .watches
-        .borrow_mut()
-        .extend(theme::watch(move |cosmic| {
-            calmo::load(&watched, cosmic.variant());
-            theme::load_accent(&watched, &cosmic);
-            if let Some(center) = weak.upgrade() {
-                center.panel.set_dark(cosmic.is_dark);
-            }
-        }));
+    appearance::watch(move |current| {
+        appearance::load(&watched, &current);
+        if let Some(center) = weak.upgrade() {
+            center.panel.set_dark(current.dark);
+        }
+    });
     let weak = Rc::downgrade(&center);
     center.panel.set_closer(move || {
         if let Some(center) = weak.upgrade() {
@@ -287,7 +280,7 @@ pub fn live_layout(config: &std::path::Path) -> Source {
 }
 
 /// What the panel asks of the program: Settings through the compositor client, and the
-/// theme mode written where cosmic-settings writes it.
+/// theme mode through athanor-style's apply function (VL4).
 fn hooks(client: Option<Rc<Client>>) -> Hooks {
     Hooks {
         open_settings: Box::new(move || {
@@ -305,7 +298,9 @@ fn hooks(client: Option<Rc<Client>>) -> Hooks {
                 }
             });
         }),
-        set_dark: Box::new(theme::set_dark),
+        set_dark: Box::new(|dark| {
+            appearance::apply(|choice| choice.dark = dark, theme::write_cosmic)
+        }),
     }
 }
 

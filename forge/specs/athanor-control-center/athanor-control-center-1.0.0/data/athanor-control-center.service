@@ -35,15 +35,19 @@ MemoryMax=192M
 # directories: "athanor" is declared as the bar declares it, because launch() creates
 # %t/athanor/<random> for the Wayland security context of an application the panel starts
 # (doc_control_center.md, CC2; doc_bar.md, BR2.2).
-RuntimeDirectory=athanor-control-center athanor
+# "dconf" because the panel reads the appearance through GSettings, which maps dconf's
+# shared-memory flag beneath %t/dconf read-write to learn that a key changed, as
+# xdg-desktop-portal-athanor.service explains; without it the panel never sees a new scheme.
+RuntimeDirectory=athanor-control-center athanor dconf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/control-center: the Super+C marker, and the panel's own state.
 StateDirectory=athanor/control-center
-# The theme mode is the dark mode tile's `is_dark`; it is written while the run lasts, so
-# Landlock grants it. Super+C is bound by athanor-control-center-shortcut.service (CC9), so
-# cosmic-comp's shortcuts stay read-only here.
-ConfigurationDirectory=cosmic/com.system76.CosmicTheme.Mode/v1
+# COSMIC's theme mode and built themes, which the dark mode tile writes through the
+# appearance apply function (doc_visual_language.md, VL4); they are written while the run
+# lasts, so Landlock grants them. Super+C is bound by athanor-control-center-shortcut.service
+# (CC9), so cosmic-comp's shortcuts stay read-only here.
+ConfigurationDirectory=cosmic/com.system76.CosmicTheme.Mode/v1 cosmic/com.system76.CosmicTheme.Dark/v2 cosmic/com.system76.CosmicTheme.Light/v2
 
 ProtectSystem=strict
 ProtectHome=read-only

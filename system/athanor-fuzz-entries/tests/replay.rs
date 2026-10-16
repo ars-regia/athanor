@@ -46,7 +46,6 @@ replay_tests! {
     "shelld" shelld_image => athanor_fuzz_entries::shelld::image;
     "shelld" shelld_icon => athanor_fuzz_entries::shelld::icon;
     "gtk" compositor_shortcuts => athanor_fuzz_entries::compositor::shortcuts;
-    "gtk" compositor_theme => athanor_fuzz_entries::compositor::theme;
     "layout" layout_document => athanor_fuzz_entries::layout::document;
     "layout" layout_favorites => athanor_fuzz_entries::layout::favorites;
     "layout" trust_state => athanor_fuzz_entries::layout::trust_state;

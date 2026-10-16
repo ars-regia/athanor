@@ -33,11 +33,11 @@ use std::time::Duration;
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
 use athanor_bar::order::{self, Module};
-use athanor_compositor_client::{outputs, theme, Client, Event, Opener};
+use athanor_compositor_client::{outputs, Client, Event, Opener};
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};
-use athanor_style::calmo;
+use athanor_style::appearance::{self, Appearance};
 use athanor_unit::notify;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
@@ -180,9 +180,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     if i18n::is_rtl() {
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
-    let cosmic = theme::read();
-    calmo::load(&display, cosmic.variant());
-    theme::load_accent(&display, &cosmic);
+    appearance::load(&display, &Appearance::read());
     let layout = source.layout();
     tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
@@ -613,11 +611,7 @@ impl Bar {
             }
         }
         let display = self.display.clone();
-        let theme_watches = theme::watch(move |cosmic| {
-            calmo::load(&display, cosmic.variant());
-            theme::load_accent(&display, &cosmic);
-        });
-        self.watches.borrow_mut().extend(theme_watches);
+        appearance::watch(move |current| appearance::load(&display, &current));
 
         let weak = Rc::downgrade(self);
         glib::timeout_add_seconds_local(1, move || match weak.upgrade() {

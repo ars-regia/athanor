@@ -1,5 +1,5 @@
-//! The accessibility menu (doc_bar.md, BR3). High contrast through COSMIC's own theme keys,
-//! read back by the bar's theme watch. The screen reader through the AT-SPI bus's status.
+//! The accessibility menu (doc_bar.md, BR3). High contrast through athanor-style's apply
+//! function, read back by the bar's appearance watch. The screen reader through the AT-SPI bus's status.
 //! The magnifier, inverted colours and the colour filter through the compositor. Each row
 //! shows only when its source answers; with none, the button is hidden (SH1).
 
@@ -7,6 +7,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use athanor_compositor_client::{theme, ScreenFilter};
+use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
@@ -93,12 +94,12 @@ impl Inner {
         self.popup.button.set_visible(any);
     }
 
-    /// The high contrast switch follows COSMIC's own theme keys, not an event: read it
-    /// again whenever the popover is about to be seen.
+    /// The high contrast switch follows the appearance store, not an event: read it again
+    /// whenever the popover is about to be seen.
     fn sync_high_contrast(&self) {
         self.updating.set(true);
         self.high_contrast
-            .set_active(theme::read().is_high_contrast);
+            .set_active(Appearance::read().high_contrast);
         self.updating.set(false);
     }
 
@@ -181,7 +182,6 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     content.append(&reader_row);
     content.append(&compositor_rows);
     popup.popover.set_child(Some(&content));
-    high_contrast_row.set_visible(!theme::high_contrast_dirs().is_empty());
     reader_row.set_visible(false);
     compositor_rows.set_visible(false);
 
@@ -206,9 +206,11 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             .upgrade()
             .is_some_and(|inner| !inner.updating.get())
         {
-            if let Err(err) = theme::set_high_contrast(enabled) {
+            if let Err(err) =
+                appearance::apply(|choice| choice.high_contrast = enabled, theme::write_cosmic)
+            {
                 tracing::error!(error = %err, "cannot switch high contrast");
-                // Show what COSMIC's keys hold, once this handler has returned.
+                // Show what the store holds, once this handler has returned.
                 let weak_inner = weak_inner.clone();
                 glib::idle_add_local_once(move || {
                     if let Some(inner) = weak_inner.upgrade() {

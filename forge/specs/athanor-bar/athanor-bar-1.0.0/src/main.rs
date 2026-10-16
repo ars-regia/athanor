@@ -131,10 +131,10 @@ fn main() -> glib::ExitCode {
     }
     // The unit's ConfigurationDirectory= creates these; a run outside it, as in the rig,
     // needs them here.
-    let high_contrast_dirs = theme::high_contrast_dirs();
-    for dir in &high_contrast_dirs {
+    let cosmic_dirs = theme::theme_dirs();
+    for dir in &cosmic_dirs {
         if let Err(err) = std::fs::create_dir_all(dir) {
-            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the high contrast directory");
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the COSMIC theme directory");
         }
     }
     // The parent of the launch sockets (BR2.2), made the way launch() makes it.
@@ -149,8 +149,8 @@ fn main() -> glib::ExitCode {
     let dconf_dir = dirs.runtime.join("dconf");
     // Before GTK starts a thread. Writes only (athanor-unit::sandbox): the launch sockets, the
     // bar's own runtime directory and dconf, never the rest of the runtime directory (the
-    // compositor's and the bus's sockets); the caches, the favourites, the COSMIC high
-    // contrast keys, the first-session layout and marker, /tmp, and the DRM nodes.
+    // compositor's and the bus's sockets); the caches, the favourites, the COSMIC theme
+    // keys, the first-session layout and marker, /tmp, and the DRM nodes.
     let write: Vec<&Path> = [
         launch_dir.as_path(),
         dirs.unit_runtime.as_path(),
@@ -160,7 +160,7 @@ fn main() -> glib::ExitCode {
         Path::new("/tmp"),
     ]
     .into_iter()
-    .chain(high_contrast_dirs.iter().map(PathBuf::as_path))
+    .chain(cosmic_dirs.iter().map(PathBuf::as_path))
     .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
     let confined = sandbox::ensure_single_threaded()

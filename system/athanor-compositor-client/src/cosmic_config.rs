@@ -34,7 +34,13 @@ pub(crate) fn user_dir() -> Option<PathBuf> {
 
 /// The directory of a component's keys under a `cosmic` directory.
 pub(crate) fn component(dir: &std::path::Path, component: &str) -> PathBuf {
-    dir.join(component).join("v1")
+    versioned(dir, component, 1)
+}
+
+/// The directory of a component whose keys are at `version`: COSMIC versions each
+/// component on its own (the built themes are `v2`, spike VL-S1).
+pub(crate) fn versioned(dir: &std::path::Path, component: &str, version: u32) -> PathBuf {
+    dir.join(component).join(format!("v{version}"))
 }
 
 /// The first readable copy of a key, highest directory first.

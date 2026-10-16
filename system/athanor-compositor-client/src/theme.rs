@@ -1,314 +1,136 @@
-//! The user's COSMIC appearance, for our surfaces inside the user session (doc_shell.md,
-//! SH5): light or dark, high contrast, and the accent. The greeter never reads it: it
-//! runs before any user exists.
-//!
-//! A key that cannot be read keeps Calmo's default.
+//! The compositor's half of the appearance (doc_visual_language.md, VL4; spike VL-S1).
+//! cosmic-comp draws borders, indicators and overlays from COSMIC's built themes, so
+//! athanor-style's apply function ends by writing them here. Nothing in Athanor reads them
+//! back: the shell reads the appearance from GSettings (`athanor_style::appearance`).
 
-use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use athanor_layout::atomic::write_atomically;
-use athanor_style::calmo::Variant;
-use gtk4::{gdk, gio, prelude::*};
+use athanor_layout::atomic::{replace, sync_dir};
+use athanor_style::appearance::Appearance;
 
-use crate::cosmic_config::{self, key};
+use crate::cosmic_config;
 
-// The components `read_from` reads; public for the fuzz target, which writes where they are read.
-#[doc(hidden)]
+/// `is_dark`, at `v1`.
 pub const MODE: &str = "com.system76.CosmicTheme.Mode";
-#[doc(hidden)]
+/// The built themes, at `v2`.
 pub const DARK: &str = "com.system76.CosmicTheme.Dark";
-#[doc(hidden)]
 pub const LIGHT: &str = "com.system76.CosmicTheme.Light";
+const MODE_VERSION: u32 = 1;
+const THEME_VERSION: u32 = 2;
 
-/// The file `read_from` reads for `key` of `component` under the `cosmic` directory `dir`.
-#[doc(hidden)]
-pub fn key_path(dir: &Path, component: &str, key: &str) -> PathBuf {
-    cosmic_config::component(dir, component).join(key)
+/// athanor-calmo's built themes, written by `calmo-cosmic-theme`: mode, then contrast,
+/// then accent, then each key of the theme with its RON text.
+pub const VARIANTS: &str = "/usr/share/athanor/cosmic-variants.json";
+
+type Variants = BTreeMap<String, BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>>;
+
+/// The directories `write_cosmic` writes under the user's `cosmic` directory, for a
+/// Landlock grant. Empty without a home directory.
+pub fn theme_dirs() -> Vec<PathBuf> {
+    cosmic_config::user_dir().map_or_else(Vec::new, |user| theme_dirs_in(&user))
 }
 
-/// Calmo's ink on light accents (`ath_acc_ink` of the dark variant) and plain white.
-const DARK_INK: Rgb = Rgb {
-    red: 0x0d,
-    green: 0x11,
-    blue: 0x26,
-};
-const WHITE: Rgb = Rgb {
-    red: 0xff,
-    green: 0xff,
-    blue: 0xff,
-};
-/// WCAG 2.x, level AA, normal text.
-const MIN_CONTRAST: f64 = 4.5;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rgb {
-    pub red: u8,
-    pub green: u8,
-    pub blue: u8,
+/// The directories `write_cosmic_in` writes under `cosmic_dir`.
+pub fn theme_dirs_in(cosmic_dir: &Path) -> Vec<PathBuf> {
+    vec![
+        cosmic_config::versioned(cosmic_dir, MODE, MODE_VERSION),
+        cosmic_config::versioned(cosmic_dir, DARK, THEME_VERSION),
+        cosmic_config::versioned(cosmic_dir, LIGHT, THEME_VERSION),
+    ]
 }
 
-impl Rgb {
-    fn hex(self) -> String {
-        format!("#{:02x}{:02x}{:02x}", self.red, self.green, self.blue)
-    }
+/// Writes `appearance` into the user's COSMIC theme, from the themes athanor-calmo ships.
+/// `NotFound` without a home directory or without the themes.
+pub fn write_cosmic(appearance: &Appearance) -> io::Result<()> {
+    let user = cosmic_config::user_dir().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "no home directory for the user's cosmic configuration",
+        )
+    })?;
+    let variants = fs::read_to_string(VARIANTS)
+        .map_err(|err| io::Error::new(err.kind(), format!("{VARIANTS}: {err}")))?;
+    write_cosmic_in(&user, &variants, appearance)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CosmicTheme {
-    pub is_dark: bool,
-    pub is_high_contrast: bool,
-    /// The user's accent, when COSMIC has one on disk.
-    pub accent: Option<Rgb>,
-}
-
-impl Default for CosmicTheme {
-    /// COSMIC's own default mode is dark.
-    fn default() -> Self {
-        CosmicTheme {
-            is_dark: true,
-            is_high_contrast: false,
-            accent: None,
-        }
-    }
-}
-
-/// The theme from the user's COSMIC configuration, then the system's.
-pub fn read() -> CosmicTheme {
-    read_from(&cosmic_config::dirs())
-}
-
-/// The theme from `dirs`, each a `cosmic` configuration directory, highest first.
-pub fn read_from(dirs: &[PathBuf]) -> CosmicTheme {
-    let default = CosmicTheme::default();
-    let is_dark = key(dirs, MODE, "is_dark")
-        .and_then(|text| parse_bool(&text))
-        .unwrap_or(default.is_dark);
-    let theme = if is_dark { DARK } else { LIGHT };
-    CosmicTheme {
-        is_dark,
-        is_high_contrast: key(dirs, theme, "is_high_contrast")
-            .and_then(|text| parse_bool(&text))
-            .unwrap_or(false),
-        accent: key(dirs, theme, "accent").and_then(|text| parse_accent(&text)),
-    }
-}
-
-/// The `v1` directories of `is_high_contrast`, one per mode, under the user's `cosmic`
-/// configuration directory. Empty when there is no home directory to write it in.
-pub fn high_contrast_dirs() -> Vec<PathBuf> {
-    let Some(user) = cosmic_config::user_dir() else {
-        return Vec::new();
+/// Writes the built theme of `appearance`'s contrast and accent in both modes, so a mode
+/// switched elsewhere (cosmic-settings) keeps them, then `is_dark`. A key whose file already
+/// holds the text is left alone: cosmic-comp reloads the whole theme on every change.
+pub fn write_cosmic_in(
+    cosmic_dir: &Path,
+    variants: &str,
+    appearance: &Appearance,
+) -> io::Result<()> {
+    let variants: Variants = serde_json::from_str(variants)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let contrast = if appearance.high_contrast {
+        "high"
+    } else {
+        "normal"
     };
-    [DARK, LIGHT]
-        .into_iter()
-        .map(|component| cosmic_config::component(&user, component))
-        .collect()
+    let accent = appearance.accent.name();
+    let theme = |mode: &str| {
+        variants
+            .get(mode)
+            .and_then(|contrasts| contrasts.get(contrast))
+            .and_then(|accents| accents.get(accent))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("no built theme for {mode}, {contrast} contrast, {accent}"),
+                )
+            })
+    };
+    // Both looked up before the first write, so a missing one changes nothing.
+    let themes = [(DARK, theme("dark")?), (LIGHT, theme("light")?)];
+    for (component, theme) in themes {
+        let dir = cosmic_config::versioned(cosmic_dir, component, THEME_VERSION);
+        write_keys(
+            &dir,
+            theme
+                .iter()
+                .map(|(key, text)| (key.as_str(), text.as_str())),
+        )?;
+    }
+    let dir = cosmic_config::versioned(cosmic_dir, MODE, MODE_VERSION);
+    write_keys(&dir, [("is_dark", appearance.dark.to_string().as_str())])
 }
 
-/// Writes `is_high_contrast` for both the dark and the light mode of `cosmic_dir`, so a
-/// mode switch keeps the setting, the way cosmic-settings does.
-pub fn set_high_contrast_in(cosmic_dir: &Path, enabled: bool) -> io::Result<()> {
-    for mode in [DARK, LIGHT] {
-        let dir = cosmic_config::component(cosmic_dir, mode);
-        std::fs::create_dir_all(&dir)?;
-        write_atomically(&dir.join("is_high_contrast"), &enabled.to_string())?;
+/// Replaces the keys of one component whose file does not already hold the text, then
+/// fsyncs the directory once: the first apply writes some forty keys per theme.
+fn write_keys<'a>(
+    dir: &Path,
+    keys: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let mut written = false;
+    for (key, text) in keys {
+        if Path::new(key).file_name().and_then(|name| name.to_str()) != Some(key) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{key:?} is not a key name"),
+            ));
+        }
+        let path = dir.join(key);
+        if fs::read_to_string(&path).is_ok_and(|current| current == text) {
+            continue;
+        }
+        replace(&path, text)?;
+        written = true;
+    }
+    if written {
+        sync_dir(dir)?;
     }
     Ok(())
-}
-
-/// Writes the user's own `is_high_contrast`. `NotFound` when there is no home directory to
-/// resolve the user's `cosmic` configuration directory in.
-pub fn set_high_contrast(enabled: bool) -> io::Result<()> {
-    let user = cosmic_config::user_dir().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "no home directory for the user's cosmic configuration",
-        )
-    })?;
-    set_high_contrast_in(&user, enabled)
-}
-
-/// The `v1` directory of `is_dark` under the user's `cosmic` configuration directory; `None`
-/// without a home directory.
-pub fn mode_dir() -> Option<PathBuf> {
-    cosmic_config::user_dir().map(|user| cosmic_config::component(&user, MODE))
-}
-
-/// Writes `is_dark` under `cosmic_dir`, the key cosmic-settings writes when the person
-/// chooses light or dark; cosmic-comp and every libcosmic program follow it.
-pub fn set_dark_in(cosmic_dir: &Path, dark: bool) -> io::Result<()> {
-    let dir = cosmic_config::component(cosmic_dir, MODE);
-    std::fs::create_dir_all(&dir)?;
-    write_atomically(&dir.join("is_dark"), &dark.to_string())
-}
-
-/// Writes the user's own `is_dark`. `NotFound` when there is no home directory to resolve
-/// the user's `cosmic` configuration directory in.
-pub fn set_dark(dark: bool) -> io::Result<()> {
-    let user = cosmic_config::user_dir().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "no home directory for the user's cosmic configuration",
-        )
-    })?;
-    set_dark_in(&user, dark)
-}
-
-fn parse_bool(text: &str) -> Option<bool> {
-    text.trim().parse().ok()
-}
-
-/// The `base` colour of a COSMIC accent: `base: ( red: <0..1>, green: …, blue: …, … )`.
-fn parse_accent(text: &str) -> Option<Rgb> {
-    let start = text.find("base:")? + "base:".len();
-    let body = &text[start..];
-    let body = &body[body.find('(')? + 1..];
-    let body = &body[..body.find(')')?];
-    let channel = |name: &str| -> Option<u8> {
-        let value = body
-            .split(',')
-            .find_map(|field| field.trim().strip_prefix(name)?.trim().strip_prefix(':'))?;
-        let value: f64 = value.trim().parse().ok()?;
-        (0.0..=1.0)
-            .contains(&value)
-            .then(|| (value * 255.0).round() as u8)
-    };
-    Some(Rgb {
-        red: channel("red")?,
-        green: channel("green")?,
-        blue: channel("blue")?,
-    })
-}
-
-fn luminance(colour: Rgb) -> f64 {
-    let linear = |channel: u8| {
-        let c = f64::from(channel) / 255.0;
-        if c <= 0.03928 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linear(colour.red) + 0.7152 * linear(colour.green) + 0.0722 * linear(colour.blue)
-}
-
-fn contrast(a: Rgb, b: Rgb) -> f64 {
-    let (a, b) = (luminance(a), luminance(b));
-    (a.max(b) + 0.05) / (a.min(b) + 0.05)
-}
-
-/// The text colour on `accent`: white or Calmo's dark ink, whichever contrasts more,
-/// and only when that passes WCAG AA.
-pub fn on_accent(accent: Rgb) -> Option<Rgb> {
-    let ink = if contrast(accent, WHITE) >= contrast(accent, DARK_INK) {
-        WHITE
-    } else {
-        DARK_INK
-    };
-    (contrast(accent, ink) >= MIN_CONTRAST).then_some(ink)
-}
-
-impl CosmicTheme {
-    pub fn variant(&self) -> Variant {
-        let base = if self.is_dark {
-            Variant::Dark
-        } else {
-            Variant::Light
-        };
-        base.with_high_contrast(self.is_high_contrast)
-    }
-
-    /// The named colours that replace Calmo's accent, or `None` to keep it: in high
-    /// contrast, whose accent the contrast gate has checked, and for an accent no text
-    /// colour can be read on.
-    pub fn accent_css(&self) -> Option<String> {
-        if self.is_high_contrast {
-            return None;
-        }
-        let accent = self.accent?;
-        let Some(ink) = on_accent(accent) else {
-            tracing::warn!(accent = %accent.hex(), "no text colour passes WCAG AA on the COSMIC accent; Calmo's accent is used");
-            return None;
-        };
-        Some(format!(
-            "@define-color ath_acc {};\n@define-color ath_acc_ink {};\n",
-            accent.hex(),
-            ink.hex()
-        ))
-    }
-}
-
-thread_local! {
-    static ACCENT_PROVIDER: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
-}
-
-/// Installs the user's accent above the Calmo sheet (calmo.rs names this mechanism).
-/// Called again after a change, it replaces the accent it installed, or removes it when
-/// the theme has none any more.
-pub fn load_accent(display: &gdk::Display, theme: &CosmicTheme) {
-    let provider = theme.accent_css().map(|css| {
-        let provider = gtk4::CssProvider::new();
-        provider.load_from_string(&css);
-        provider
-    });
-    let previous = ACCENT_PROVIDER.with(|slot| slot.replace(provider.clone()));
-    if let Some(previous) = previous {
-        gtk4::style_context_remove_provider_for_display(display, &previous);
-    }
-    if let Some(provider) = provider {
-        gtk4::style_context_add_provider_for_display(
-            display,
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
-        );
-    }
-}
-
-/// Calls `on_change` with the new theme each time the user's theme keys change it. The
-/// watch lasts as long as the returned monitors. A directory that does not exist yet is
-/// watched too: GIO polls for it.
-#[must_use = "the watch stops when the monitors are dropped"]
-pub fn watch(on_change: impl Fn(CosmicTheme) + 'static) -> Vec<gio::FileMonitor> {
-    let Some(user) = cosmic_config::user_dir() else {
-        tracing::warn!("no home directory: theme changes are not followed");
-        return Vec::new();
-    };
-    let last = std::rc::Rc::new(Cell::new(read()));
-    let on_change = std::rc::Rc::new(on_change);
-    [MODE, DARK, LIGHT]
-        .into_iter()
-        .filter_map(|component| {
-            let dir = gio::File::for_path(cosmic_config::component(&user, component));
-            match dir.monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
-            {
-                Ok(monitor) => Some(monitor),
-                Err(err) => {
-                    tracing::warn!(component, "theme changes are not followed: {err}");
-                    None
-                }
-            }
-        })
-        .inspect(|monitor| {
-            let (last, on_change) = (last.clone(), on_change.clone());
-            monitor.connect_changed(move |_, _, _, _| {
-                let theme = read();
-                if last.replace(theme) != theme {
-                    on_change(theme);
-                }
-            });
-        })
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::path::Path;
-
-    const ACCENT: &str = "(\n    base: (\n        red: 0.3882353,\n        green: 0.8156863,\n        blue: 0.8745098,\n        alpha: 1.0,\n    ),\n    hover: (\n        red: 0.1,\n        green: 0.1,\n        blue: 0.1,\n        alpha: 1.0,\n    ),\n)";
+    use athanor_style::appearance::Accent;
 
     fn cosmic_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("athanor-theme-{}-{name}", std::process::id()));
@@ -317,147 +139,105 @@ mod tests {
         dir
     }
 
-    fn put(dir: &Path, component: &str, key: &str, text: &str) {
-        let path = dir.join(component).join("v1").join(key);
-        fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        fs::write(path, text).expect("write");
+    /// Two accents in both modes and contrasts; each theme names its variant.
+    fn variants() -> String {
+        let mut modes = serde_json::Map::new();
+        for mode in ["dark", "light"] {
+            let mut contrasts = serde_json::Map::new();
+            for contrast in ["normal", "high"] {
+                let mut accents = serde_json::Map::new();
+                for accent in ["purple", "teal"] {
+                    let theme = serde_json::json!({
+                        "accent": format!("{mode} {contrast} {accent}"),
+                        "is_high_contrast": (contrast == "high").to_string(),
+                    });
+                    accents.insert(accent.into(), theme);
+                }
+                contrasts.insert(contrast.into(), accents.into());
+            }
+            modes.insert(mode.into(), contrasts.into());
+        }
+        serde_json::Value::from(modes).to_string()
+    }
+
+    fn read(dir: &Path, component: &str, version: u32, key: &str) -> String {
+        fs::read_to_string(cosmic_config::versioned(dir, component, version).join(key))
+            .expect("key")
     }
 
     #[test]
-    fn nothing_readable_is_calmo_dark_without_an_accent() {
-        let theme = read_from(&[cosmic_dir("empty")]);
-        assert_eq!(theme, CosmicTheme::default());
-        assert_eq!(theme.variant(), Variant::Dark);
-        assert_eq!(theme.accent_css(), None);
+    fn both_built_themes_and_the_mode_land_where_cosmic_comp_reads_them() {
+        let dir = cosmic_dir("write");
+        let choice = Appearance {
+            dark: true,
+            high_contrast: true,
+            accent: Accent::Teal,
+            ..Appearance::default()
+        };
+        write_cosmic_in(&dir, &variants(), &choice).expect("write");
+        assert_eq!(read(&dir, MODE, 1, "is_dark"), "true");
+        assert_eq!(read(&dir, DARK, 2, "accent"), "dark high teal");
+        assert_eq!(read(&dir, LIGHT, 2, "accent"), "light high teal");
+        assert_eq!(read(&dir, LIGHT, 2, "is_high_contrast"), "true");
+        assert!(!dir.join(DARK).join("v1").exists(), "nothing under v1");
+
+        let choice = Appearance {
+            dark: false,
+            high_contrast: false,
+            ..choice
+        };
+        write_cosmic_in(&dir, &variants(), &choice).expect("write");
+        assert_eq!(read(&dir, MODE, 1, "is_dark"), "false");
+        assert_eq!(read(&dir, DARK, 2, "accent"), "dark normal teal");
+        assert_eq!(read(&dir, LIGHT, 2, "is_high_contrast"), "false");
     }
 
     #[test]
-    fn the_user_key_wins_over_the_system_key_one_key_at_a_time() {
-        let (user, system) = (cosmic_dir("user"), cosmic_dir("system"));
-        put(&user, MODE, "is_dark", "false\n");
-        put(&system, MODE, "is_dark", "true");
-        put(&system, LIGHT, "is_high_contrast", "true");
-        put(&system, LIGHT, "accent", ACCENT);
-        let theme = read_from(&[user, system]);
-        assert!(!theme.is_dark);
-        assert!(
-            theme.is_high_contrast,
-            "read from the system file: the user has none"
-        );
-        assert_eq!(
-            theme.accent,
-            Some(Rgb {
-                red: 99,
-                green: 208,
-                blue: 223
-            })
-        );
-        assert_eq!(theme.variant(), Variant::LightHc);
+    fn a_missing_variant_writes_nothing() {
+        let dir = cosmic_dir("missing");
+        let choice = Appearance {
+            accent: Accent::Slate,
+            ..Appearance::default()
+        };
+        let err = write_cosmic_in(&dir, &variants(), &choice).expect_err("no slate");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(fs::read_dir(&dir).expect("dir").count(), 0);
+        let err = write_cosmic_in(&dir, "{", &Appearance::default()).expect_err("not JSON");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
-    fn the_accent_is_the_base_colour_not_the_first_one_in_the_file() {
-        let reordered = "(\n    hover: ( red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0 ),\n    base: ( red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0 ),\n)";
-        assert_eq!(
-            parse_accent(reordered),
-            Some(Rgb {
-                red: 255,
-                green: 128,
-                blue: 0
-            })
-        );
-        assert_eq!(parse_accent("( hover: ( red: 0.1 ) )"), None);
-        assert_eq!(parse_accent("base: )( red: 0.1 )"), None, "closing before opening");
-        assert_eq!(
-            parse_accent("( base: ( red: 2.0, green: 0.0, blue: 0.0 ) )"),
-            None,
-            "out of range"
-        );
+    fn a_key_never_names_a_path() {
+        let dir = cosmic_dir("escape");
+        let escape =
+            r#"{"dark":{"normal":{"purple":{"../is_dark":"x"}}},"light":{"normal":{"purple":{}}}}"#;
+        let err = write_cosmic_in(&dir, escape, &Appearance::default()).expect_err("escape");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(!dir.join(DARK).join("is_dark").exists());
     }
 
     #[test]
-    fn text_on_the_accent_passes_wcag_aa() {
-        // Calmo's own dark accent takes Calmo's dark ink, as the stylesheets do.
-        assert_eq!(
-            on_accent(Rgb {
-                red: 0x88,
-                green: 0x98,
-                blue: 0xf7
-            }),
-            Some(DARK_INK)
-        );
-        assert_eq!(
-            on_accent(Rgb {
-                red: 0x1f,
-                green: 0x3a,
-                blue: 0x93
-            }),
-            Some(WHITE)
-        );
-        for accent in [
-            Rgb {
-                red: 0x77,
-                green: 0x77,
-                blue: 0x77,
-            },
-            Rgb {
-                red: 0xff,
-                green: 0x00,
-                blue: 0x00,
-            },
-        ] {
-            if let Some(ink) = on_accent(accent) {
-                assert!(contrast(accent, ink) >= 4.5);
+    fn the_shipped_themes_cover_every_choice() {
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../athanor-style/calmo/generated/cosmic/variants.json");
+        let shipped = fs::read_to_string(shipped).expect("variants.json");
+        let dir = cosmic_dir("shipped");
+        for dark in [false, true] {
+            for high_contrast in [false, true] {
+                for accent in Accent::ALL {
+                    let choice = Appearance {
+                        dark,
+                        high_contrast,
+                        accent,
+                        ..Appearance::default()
+                    };
+                    write_cosmic_in(&dir, &shipped, &choice).expect("write");
+                    assert_eq!(
+                        read(&dir, LIGHT, 2, "is_high_contrast"),
+                        high_contrast.to_string()
+                    );
+                }
             }
         }
-    }
-
-    #[test]
-    fn high_contrast_keeps_the_gated_calmo_accent() {
-        let theme = CosmicTheme {
-            is_dark: true,
-            is_high_contrast: true,
-            accent: Some(Rgb {
-                red: 0x1f,
-                green: 0x3a,
-                blue: 0x93,
-            }),
-        };
-        assert_eq!(theme.accent_css(), None);
-        let theme = CosmicTheme {
-            is_high_contrast: false,
-            ..theme
-        };
-        assert_eq!(
-            theme.accent_css().as_deref(),
-            Some("@define-color ath_acc #1f3a93;\n@define-color ath_acc_ink #ffffff;\n")
-        );
-    }
-
-    #[test]
-    fn set_high_contrast_in_covers_both_modes_a_switch_keeps() {
-        let dir = cosmic_dir("high-contrast");
-        let dirs = std::slice::from_ref(&dir);
-        set_high_contrast_in(&dir, true).expect("write");
-        assert!(read_from(dirs).is_high_contrast, "dark mode");
-        put(&dir, MODE, "is_dark", "false");
-        assert!(read_from(dirs).is_high_contrast, "light mode");
-        set_high_contrast_in(&dir, false).expect("write");
-        assert!(!read_from(dirs).is_high_contrast);
-    }
-
-    #[test]
-    fn the_mode_the_panel_writes_is_the_mode_read_back() {
-        let user = cosmic_dir("set-dark");
-        let system = cosmic_dir("set-dark-system");
-        put(&system, MODE, "is_dark", "true");
-        set_dark_in(&user, false).expect("write");
-        assert!(!read_from(&[user.clone(), system.clone()]).is_dark);
-        assert_eq!(
-            fs::read_to_string(user.join(MODE).join("v1").join("is_dark")).expect("key"),
-            "false"
-        );
-        set_dark_in(&user, true).expect("write");
-        assert!(read_from(&[user, system]).is_dark);
     }
 }

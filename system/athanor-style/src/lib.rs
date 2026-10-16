@@ -3,6 +3,7 @@
 //! predate the lint gate and keep their warnings silenced until recovery is re-skinned
 //! and they are deleted (doc_shell.md, SH4).
 
+pub mod appearance;
 pub mod calmo;
 
 #[allow(clippy::all, warnings)]
