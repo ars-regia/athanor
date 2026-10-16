@@ -22,10 +22,12 @@ source "$HERE/devvm.env"
 
 # virtio-vga-gl hands the guest a virgl 3D GPU rendered by the host's own GPU; both
 # backends need a GL context on the host, which gtk takes from the session and egl-headless
-# from the render node.
+# from the render node. RENDERNODE (e.g. /dev/dri/renderD128) names that node on a host with
+# two GPUs: QEMU otherwise takes the first it finds, which on a hybrid laptop can be a
+# nouveau GPU that rejects virgl's command buffers and takes QEMU down with it.
 case $DISPLAY_BACKEND in
   gtk) display=(-display "gtk,gl=on") ;;
-  egl-headless) display=(-display egl-headless -spice "addr=127.0.0.1,port=$SPICE_PORT,disable-ticketing=on") ;;
+  egl-headless) display=(-display "egl-headless${RENDERNODE:+,rendernode=$RENDERNODE}" -spice "addr=127.0.0.1,port=$SPICE_PORT,disable-ticketing=on") ;;
   *) die "DISPLAY_BACKEND must be gtk or egl-headless, not $DISPLAY_BACKEND" ;;
 esac
 

@@ -63,7 +63,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   graphical session, and the screen is then watched with a SPICE client
   (`nix profile add nixpkgs#virt-viewer`, `remote-viewer spice://127.0.0.1:5930`). `start.sh` prints the guest's OpenGL renderer (`gl_renderer.py`,
   surfaceless EGL, since the greeter runs without Xwayland): `virgl (zink ...)` is the
-  host GPU, `llvmpipe` would be software.
+  host GPU, `llvmpipe` would be software. On a host with two GPUs, `RENDERNODE` names
+  the render node egl-headless draws on (`RENDERNODE=/dev/dri/renderD128 start.sh`): a
+  hybrid laptop whose second GPU runs nouveau crashed QEMU when virgl drew on it.
 - `screenshot.sh [DEST]` saves a PNG of the logged-in session (default `./screenshot.png`).
   QEMU's `screendump` monitor command does not work with `virtio-vga-gl`
   (`Error: no surface`); the working way is `grim`, already in the image, run inside the
