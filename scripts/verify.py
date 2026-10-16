@@ -2310,6 +2310,95 @@ def check_boundary():
     return r
 
 
+# A confined process that renders on the GPU through /dev/dri needs, on the -nvidia images,
+# the NVIDIA driver's nodes and /sys/module/nvidia as well, or GTK falls back to software
+# rendering (#535). A client whose unit sets GSK_RENDERER=cairo never renders on the GPU.
+NVIDIA_NODES_FN = "fn nvidia_device_nodes("
+DRM_GRANTS = ('"/dev/dri"', "DRM_DEVICE_DIR")
+NVIDIA_GRANT = 'nvidia_device_nodes(Path::new("/dev"))'
+CAIRO_RENDERER = "GSK_RENDERER=cairo"
+DRM_BIND = re.compile(r"--dev-bind(?:-try)?\s+/dev/dri\s")
+NVIDIA_BINDS = ("--ro-bind-try /sys/module/nvidia /sys/module/nvidia",
+                "--ro-bind /dev/null /usr/bin/nvidia-modprobe")
+USR_BIND = "--ro-bind /usr /usr"
+
+
+def uncommented(text, marker):
+    """The lines of text that are not comments starting with marker."""
+    return "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith(marker))
+
+
+def nvidia_nodes_function(text):
+    """fn nvidia_device_nodes in a Rust source, up to its closing brace at column 0, or None."""
+    start = text.find(NVIDIA_NODES_FN)
+    if start < 0:
+        return None
+    end = text.find("\n}\n", start)
+    return text[start:] if end < 0 else text[start:end + 2]
+
+
+def renders_with_cairo(source):
+    """Whether a unit of the crate holding source pins GTK to the cairo renderer."""
+    for parent in source.parents:
+        if (parent / "Cargo.toml").is_file():
+            return any(CAIRO_RENDERER in read(unit)
+                       for unit in walk(parent / "data", ".service"))
+    return False
+
+
+def wrapper_problems(relative, text):
+    """A bwrap wrapper that binds /dev/dri binds the NVIDIA module and masks nvidia-modprobe,
+    and passes its extra arguments after /usr, so that the mask lands on top of it."""
+    code = uncommented(text, "#")
+    if not DRM_BIND.search(code):
+        return []
+    problems = [f"{relative}: binds /dev/dri but lacks '{bind}'"
+                for bind in NVIDIA_BINDS if bind not in code]
+    invocation = code[code.find("exec bwrap"):]
+    if '"$@"' in invocation and invocation.find('"$@"') < invocation.find(USR_BIND):
+        problems.append(f"{relative}: passes \"$@\" before '{USR_BIND}', which would cover "
+                        f"the nvidia-modprobe mask")
+    return problems
+
+
+def gpu_grant_problems(root):
+    """A Landlock ruleset that grants the DRM nodes grants the NVIDIA nodes too, through
+    copies of nvidia_device_nodes that are all the same, unless the client renders with
+    cairo; a bwrap wrapper that binds /dev/dri binds /sys/module/nvidia, which the driver
+    reads to learn its module is loaded, and masks the setuid nvidia-modprobe, which
+    no-new-privileges refuses (#535)."""
+    root = Path(root)
+    problems, copies = [], {}
+    for base in RS_DIRS:
+        for path in sorted(walk(root / base, "")):
+            relative = path.relative_to(root).as_posix()
+            if path.suffix == ".rs":
+                code = uncommented(read(path), "//")
+                if (any(grant in code for grant in DRM_GRANTS) and NVIDIA_GRANT not in code
+                        and not renders_with_cairo(path)):
+                    problems.append(f"{relative}: grants the DRM nodes to Landlock but not the "
+                                    f"NVIDIA nodes ({NVIDIA_GRANT})")
+                body = nvidia_nodes_function(code)
+                if body is not None:
+                    copies[relative] = body
+            elif not path.suffix and path.is_file():
+                text = read(path)
+                if text.startswith("#!"):
+                    problems += wrapper_problems(relative, text)
+    if len(set(copies.values())) > 1:
+        problems.append("the copies of nvidia_device_nodes differ: " + ", ".join(sorted(copies)))
+    return problems
+
+
+@check("gpu-grants", "Confined GPU clients reach the NVIDIA driver as well as /dev/dri (#535)")
+def check_gpu_grants():
+    r = Result()
+    for problem in gpu_grant_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
 # Where the pipeline names its images.
