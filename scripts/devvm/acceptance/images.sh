@@ -33,13 +33,17 @@ printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" 
 mkdir -p "$ACC_STATE/registries.d"
 printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > "$ACC_STATE/registries.d/acceptance.yaml"
 
-# An existing container may be stopped (reboot, podman stop): start it, which is a no-op when it runs.
-if podman container exists athanor-acc-registry; then
-  podman start athanor-acc-registry
-else
-  podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+# The registry runs in a user unit of its own, athanor-acc-registry: started from a run that is
+# itself a transient unit, its processes landed in that unit's cgroup and died with it (#556).
+# The container keeps the images across runs; the unit only runs it.
+podman container exists athanor-acc-registry ||
+  podman create --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+if ! systemctl --user -q is-active athanor-acc-registry; then
+  # One started outside the unit by an earlier images.sh: the unit takes it over.
+  podman stop athanor-acc-registry > /dev/null
+  systemd-run --user --quiet --collect --unit=athanor-acc-registry podman start --attach athanor-acc-registry
 fi
-# Neither command waits for the registry to listen: the first push would race it.
+# The unit does not wait for the registry to listen: the first push would race it.
 for _ in $(seq 30); do
   curl -fs -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" && break
   sleep 1
