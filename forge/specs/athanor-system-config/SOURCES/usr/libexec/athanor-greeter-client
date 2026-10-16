@@ -141,6 +141,16 @@ for node in /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia[0-9]*; do
     set -- "$@" --dev-bind-try "$node" "$node"
 done
 
+# The driver reads /sys/module/nvidia to learn that its module is loaded. Without it the
+# driver runs the setuid nvidia-modprobe, which no-new-privileges refuses (avc
+# nnp_transition xdm_t to xserver_t); EGL then finds no NVIDIA device and GTK renders in
+# software (#535). With the module visible the driver still calls nvidia-modprobe to
+# create the nodes, which already exist: the helper is masked so that it never runs.
+set -- "$@" --ro-bind-try /sys/module/nvidia /sys/module/nvidia
+if [ -e /usr/bin/nvidia-modprobe ]; then
+    set -- "$@" --ro-bind /dev/null /usr/bin/nvidia-modprobe
+fi
+
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
 # software: its bind is optional, like the udev database, the avatar and font cache
 # directories, and pam_lastlog2's database directory.
@@ -148,9 +158,10 @@ done
 # sign-in recorded there, and opens the database read-only without waiting on a lock
 # (doc_lock_and_prompts.md, LP19, D22). Without it the list follows the name order.
 # /sys is bound by the device-tree directories libdrm, udev and the GPU drivers read,
-# the set Flatpak exposes, rather than whole: a recursive read-only bind of /sys would
-# also carry efivarfs, securityfs, tracefs, bpffs, pstore and the cgroup tree, and
-# SELinux refuses xdm_t the remount that makes each of those read-only.
+# the set Flatpak exposes (plus /sys/module/nvidia, bound above), rather than whole: a
+# recursive read-only bind of /sys would also carry efivarfs, securityfs, tracefs, bpffs,
+# pstore and the cgroup tree, and SELinux refuses xdm_t the remount that makes each of
+# those read-only.
 exec bwrap \
     --unshare-all \
     --die-with-parent \

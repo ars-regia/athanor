@@ -58,6 +58,12 @@ pub fn send_request(stream: &mut UnixStream, req: &Request) -> Result<Response, 
     stream.read_exact(&mut len_buf).map_err(|e| e.to_string())?;
     let reply_len = u32::from_ne_bytes(len_buf);
     if reply_len > MAX_REPLY_BYTES {
+        // The unread body leaves the connection out of frame: a later request would read
+        // part of it as a length and could wait forever. Closing the socket makes every
+        // later request on it fail at once.
+        if let Err(err) = stream.shutdown(std::net::Shutdown::Both) {
+            tracing::warn!(error = %err, "the out-of-frame connection to greetd did not close");
+        }
         return Err(tr_with(
             "The sign-in service sent a reply of {size} bytes, too large to read",
             "size",
@@ -184,7 +190,42 @@ async fn ask_and_answer<C: Conversation>(
 /// PAM's messages by their type and never by their text, and starts `session_cmd` once
 /// greetd accepts. `password` is what was typed on an account's card; "Other user" has
 /// none, and PAM's first secret question is put to the person.
+///
+/// A login that fails cancels its session. greetd 0.10 cancels nothing on its own, not on
+/// an error and not when the connection closes cleanly, and refuses every later CreateSession
+/// while one is still under configuration: without the cancel, one wrong password would
+/// leave the greeter unable to sign anyone in until greetd restarts.
 async fn converse<C: Conversation>(
+    stream: &mut UnixStream,
+    username: &str,
+    password: Option<&str>,
+    session_cmd: String,
+    person: &C,
+) -> Result<Outcome, String> {
+    let outcome = exchange(stream, username, password, session_cmd, person).await;
+    if outcome.is_err() {
+        // greetd answers a cancel with no session under configuration with success, so
+        // this is safe whichever step failed.
+        match send_request(stream, &Request::CancelSession) {
+            Ok(Response::Success) => {}
+            Ok(Response::Error { description, .. }) => {
+                tracing::warn!(error = %description, "greetd refused to cancel the failed sign-in's session");
+            }
+            Ok(Response::AuthMessage { .. }) => {
+                tracing::warn!(
+                    "greetd answered the cancel of the failed sign-in's session with a question"
+                );
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "the failed sign-in's session could not be cancelled");
+            }
+        }
+    }
+    outcome
+}
+
+/// The exchange of `converse`, which cancels the session when this fails.
+async fn exchange<C: Conversation>(
     stream: &mut UnixStream,
     username: &str,
     password: Option<&str>,
@@ -300,6 +341,12 @@ mod tests {
         )
         .expect_err("an oversized reply must be refused");
         assert!(err.contains("too large to read"), "{err}");
+        // The body was never read, so the connection is closed rather than left out of
+        // frame: the cancel that follows a failed sign-in must fail, not wait.
+        assert!(
+            ours.write_all(b"x").is_err(),
+            "the connection stays open after an oversized reply"
+        );
     }
 
     #[test]
@@ -759,6 +806,38 @@ mod tests {
         );
         assert_eq!(requests[0]["username"], "ada");
         assert_eq!(requests[2]["username"], "bea");
+    }
+
+    #[test]
+    fn a_failed_login_cancels_its_session_before_the_next_is_created() {
+        // greetd 0.10 keeps a failed session under configuration until it is cancelled,
+        // and refuses to create another while it is: ada's wrong password must not lock
+        // bea out.
+        let person = Person::default();
+        let (result, requests) = logins(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                auth_error("authentication error: pam_authenticate: AUTH_ERR"),
+                Response::Success,
+                message(AuthMessageType::Secret, "Password: "),
+                Response::Success,
+                Response::Success,
+            ],
+            &person,
+            &[("ada", Some("wrong")), ("bea", Some(PASSWORD))],
+        );
+        assert_eq!(result, Ok(Outcome::SignedIn));
+        assert_eq!(
+            kinds(&requests),
+            [
+                "create_session",
+                "post_auth_message_response",
+                "cancel_session",
+                "create_session",
+                "post_auth_message_response",
+                "start_session"
+            ]
+        );
     }
 
     /// One "Other user" attempt with a wrong password: everything the greeter did.

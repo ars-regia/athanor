@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:68.fc43}
+Release:        %{?autorelease}%{!?autorelease:69.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -84,6 +84,11 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-69
+- athanor-greeter-client binds /sys/module/nvidia and masks nvidia-modprobe in the greeter's
+  sandbox: without the module directory the NVIDIA driver ran the setuid helper, which
+  no-new-privileges refuses, and the greeter rendered in software (#535).
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-68
 - Turn off gvfs's WS-Discovery browsing: org.gnome.system.wsdd display-mode defaults to
   disabled, so opening the Network location no longer starts wsdd listening on UDP 3702. The

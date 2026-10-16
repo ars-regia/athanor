@@ -187,3 +187,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
 | ADR-0119 | 0119 | [An upgrade does not keep ssh in the installer's public zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
+| ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | accepted | security, update, process |

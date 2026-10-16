@@ -116,7 +116,7 @@ What is available: `skopeo` 1.22 and `bootc` 1.16 are in the image; `bootc upgra
 
 **UT12. Metered connections.** The check always asks the registry for the digest and build time with `skopeo inspect --config` (UT5), which costs a manifest. It downloads unless NetworkManager's `Metered` is 1 or 3; this desktop reports 4, guessed unmetered, and downloads.
 
-**UT13. Security-class updates apply at the next shutdown** (amendment of 2026-10-06, maintainer decision A2-5 of 2026-10-05, #150). It amends UT6 and UT11 for one class of update, the security class of `doc_kernel_profile.md` D34; feature updates keep the confirmation of UT6 and `doc_shell.md` SH11.
+**UT13. Security-class updates apply at the next shutdown** (amendment of 2026-10-06, maintainer decision A2-5 of 2026-10-05, #150; it ships in release 1.0, [ADR-0120](../decisions/0120-security-class-updates-in-1-0.md), and until then every image is of the feature class). It amends UT6 and UT11 for one class of update, the security class of `doc_kernel_profile.md` D34; feature updates keep the confirmation of UT6 and `doc_shell.md` SH11.
 
 - **The decision:** an update of the security class applies at the next shutdown or reboot the user starts, with a notice and a one-step way back. Nothing reboots by itself, and the update is never forced.
 - **Superseded for this class:** SH11's rule that an update is never applied unconfirmed.
