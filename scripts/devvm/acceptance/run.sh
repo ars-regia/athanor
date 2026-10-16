@@ -366,10 +366,18 @@ expect_text() { # expect_text DESCRIPTION TEXT NEEDLE...: every NEEDLE is a fixe
 # midway reboots, so that the next run starts from a normal boot.
 console_cleanup() { reboot_guest; }
 stage_console() { # recovery items 1 and 5
-  local dropin=/run/systemd/system/greetd.service.d/50-acceptance-fail.conf text
+  local dropin=/run/systemd/system/greetd.service.d/50-acceptance-fail.conf text health
   guest_ssh test ! -e /run/athanor-recovery || die "FAIL  recovery 5: /run/athanor-recovery exists on a normal boot"
   text=$(issue_text) || die "FAIL  agetty --show-issue failed in the guest"
   ! grep -qF "The desktop did not start." <<< "$text" || die "FAIL  recovery 5: the plain banner carries the recovery message"
+  # greenboot's required check waits for greetd: breaking greetd while it runs fails the boot's
+  # health check and queues a rollback. Wait until greenboot has passed this boot.
+  for _ in $(seq 60); do
+    health=$(guest_ssh systemctl show -p ActiveState --value greenboot-healthcheck.service) || die "FAIL  recovery 1: cannot read greenboot's state"
+    [[ $health == activating || $health == inactive ]] || break
+    sleep 5
+  done
+  [[ $health == active ]] || die "FAIL  recovery 1: greenboot did not pass this boot before the stage (state $health)"
   trap console_cleanup EXIT
   printf '[Service]\nExecStart=\nExecStart=/usr/bin/false\nRestart=on-failure\nRestartSec=2s\n' |
     guest_ssh "sudo mkdir -p ${dropin%/*} && sudo tee $dropin > /dev/null"
