@@ -39,6 +39,11 @@ printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > 
 podman container exists athanor-acc-registry ||
   podman create --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
 if ! systemctl --user -q is-active athanor-acc-registry; then
+  # A unit still stopping would make systemd-run refuse the name: wait until it is gone.
+  for _ in $(seq 30); do
+    [[ $(systemctl --user show -P ActiveState athanor-acc-registry) == deactivating ]] || break
+    sleep 1
+  done
   # One started outside the unit by an earlier images.sh: the unit takes it over.
   podman stop athanor-acc-registry > /dev/null
   systemd-run --user --quiet --collect --unit=athanor-acc-registry podman start --attach athanor-acc-registry
@@ -48,7 +53,7 @@ for _ in $(seq 30); do
   curl -fs -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" && break
   sleep 1
 done
-curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT"
+curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT: journalctl --user -u athanor-acc-registry"
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 

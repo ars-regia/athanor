@@ -59,4 +59,4 @@ that carries the package. After the first pipeline run with the package, `create
 VM from that ISO and check that the state reads `media`, then `signature` after the
 migration and a restart.
 
-Clean up: `systemctl --user stop athanor-acc-registry`, `podman rm athanor-acc-registry`, `rm -rf ~/.local/share/athanor-devvm/acceptance`.
+Clean up: `systemctl --user stop athanor-acc-registry` when it is active, `podman rm athanor-acc-registry`, `rm -rf ~/.local/share/athanor-devvm/acceptance`.
