@@ -158,7 +158,11 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   `jq`, `mkfs.ext4`. OVMF is looked up in `OVMF_DIR` first, then under `/usr/share`: on an
   image-based host, such as an Athanor laptop, QEMU and the firmware can come from Nix
   (`nix profile add nixpkgs#qemu_kvm`, `OVMF_DIR=$(nix build --no-link --print-out-paths
-  nixpkgs#OVMF.fd)/FV`).
+  nixpkgs#OVMF.fd)/FV`). Nix's QEMU loads Nix's Mesa, which looks for its drivers where
+  NixOS keeps them; outside NixOS, point the user manager at that Mesa before `start.sh`:
+  `m=$(nix build --no-link --print-out-paths nixpkgs#mesa)`, then
+  `systemctl --user set-environment GBM_BACKENDS_PATH=$m/lib/gbm LIBGL_DRIVERS_PATH=$m/lib/dri
+  __EGL_VENDOR_LIBRARY_DIRS=$m/share/glvnd/egl_vendor.d`.
 
 ### Resources
 
