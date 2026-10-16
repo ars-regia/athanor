@@ -150,6 +150,24 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   copied into `$XDG_RUNTIME_DIR`) turns light, dark and light again. The window runs with
   `GSETTINGS_BACKEND=memory`, so only the portal can turn it dark; the user's value is
   restored. Log in at the greeter first.
+- `greeter-acceptance.sh [stage...]` checks items 23 and 24 of `doc_lock_and_prompts.md`
+  section 5 on the greeter itself (LP19), by typing through `keyboard_type.py` and reading
+  the greeter's AT-SPI tree as `greetd` (`greeter_probe.py`). It wants a freshly installed
+  VM at the greeter with nobody logged in, and it reboots and restarts greetd. `accounts`
+  creates `ada`, `bea` (expired), `cy` (locked), `dan`, `svc` (nologin) and `run` (uid 63893),
+  each with the password of its name; `list` and `order` read the order of the cards before
+  and after `dan` and `ada` sign in and out and the guest reboots; `fallback` sets
+  `lastlog2.db` to mode 0600 and expects the journal's one line about the name order;
+  `refused` reads PAM's expiry message for `bea` and the ordinary failure for `cy`; `timing`
+  runs 20 wrong passwords each as `nobody-here` and `dan` under "Other user", 4 at a time with
+  `faillock --user dan --reset` between, and compares the failure text and the medians of the
+  seconds to it against the interquartile range of the first (the bound is provisional until
+  the first run measures it); `hidden`, `names` and `keyboard` are item 24. The other cards
+  of the list, the VM's own user among them, are ignored. Orca is not run: the greeter has no
+  `athanor-a11y` yet, so `names` reads the cards' accessible names, which Orca would read.
+  The list is read from the AT-SPI tree, so it needs the greeter on greetd's accessibility
+  bus; the screenshots in `.scratch/greeter-acceptance/` are the only check of what is drawn.
+  `cleanup` removes the accounts and the settings the stages made, and is not part of a run.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
