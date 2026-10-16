@@ -202,7 +202,30 @@ stage_sessions() { # item 2, the other-session rule of UT6 (ADR-0103 D22, #433);
   [[ $(state .update) == downloaded ]] || die "FAIL  2: the update is no longer downloaded"
 }
 
-stage_apply() { # items 2, 3 and 14
+# doc_shell.md section 7, item 5: after the restart into the update, the notifier names the
+# running version in one notification. Its log line carries the digest and the version it named;
+# two more polls of the notifier (30 seconds each) must not announce it again.
+running_notice() { # running_notice DESCRIPTION
+  # The notifier colours its fields even in the journal; the colour codes are dropped first.
+  local digest version journal lines=''
+  digest=$(state .booted.digest)
+  version=$(state .booted.version)
+  for _ in $(seq 36); do
+    journal=$(guest_ssh sudo journalctl -q -b -o cat _SYSTEMD_USER_UNIT=athanor-update-notify.service) || die "FAIL  $1: the notifier's journal could not be read"
+    lines=$(awk '/running version announced/ { gsub(/\033\[[0-9;]*m/, ""); print }' <<< "$journal")
+    [[ -n $lines ]] && break
+    sleep 5
+  done
+  [[ -n $lines ]] || die "FAIL  $1: the notifier announced no running version in three minutes"
+  sleep 65
+  journal=$(guest_ssh sudo journalctl -q -b -o cat _SYSTEMD_USER_UNIT=athanor-update-notify.service) || die "FAIL  $1: the notifier's journal could not be read"
+  lines=$(awk '/running version announced/ { gsub(/\033\[[0-9;]*m/, ""); print }' <<< "$journal")
+  [[ $(wc -l <<< "$lines") == 1 ]] || die "FAIL  $1: announced more than once: $lines"
+  [[ $lines == *"digest=$digest version=$version" ]] || die "FAIL  $1: it named another version than $version ($digest): $lines"
+  pass "$1"
+}
+
+stage_apply() { # items 2, 3 and 14; doc_shell.md section 7, item 5
   expect_error "2: from an SSH session it asks for administrator authentication" "$(call_ssh Apply)" os.athanor.Update1.Error.NotAuthorized
   for member in "org.freedesktop.DBus.Properties GetAll s os.athanor.Update1" "org.freedesktop.DBus.Peer Ping"; do
     # shellcheck disable=SC2086  # the member and its arguments are separate words
@@ -215,6 +238,7 @@ stage_apply() { # items 2, 3 and 14
   guest_ssh sudo systemctl stop acc-inhibit.service
   request_and_reboot call_active Apply v2 "2: Apply() from the active session reboots into the new version with no password"
   pass "14: both bootc calls succeeded under the units' own hardening"
+  running_notice "doc_shell.md 7.5: after the restart one notification names the running version"
   expect "3: verified after the reboot" .verified.reason signature
   expect_error "2: with nothing downloaded it refuses" "$(call_active Apply)" os.athanor.Update1.Error.NothingDownloaded
   guest_ssh "sudo cp --remove-destination /dev/stdin /etc/containers/policy.json" <<< '{"default":[{"type":"insecureAcceptAnything"}]}'

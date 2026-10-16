@@ -80,10 +80,15 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                 if let Some(notice) = notices.due(&state, seen.as_deref()) {
                     match send(&session, &notice).await {
                         Ok((id, server)) => {
-                            if let Notice::Ready { digest } = &notice {
-                                tracing::info!(%digest, "update offered");
-                                if let Err(err) = notices::record_announced(state_dir, digest) {
-                                    tracing::warn!(%err, "the announced digest was not recorded; it is offered once per session");
+                            match &notice {
+                                Notice::Ready { digest } => {
+                                    tracing::info!(%digest, "update offered");
+                                    if let Err(err) = notices::record_announced(state_dir, digest) {
+                                        tracing::warn!(%err, "the announced digest was not recorded; it is offered once per session");
+                                    }
+                                }
+                                Notice::Running { digest, version, .. } => {
+                                    tracing::info!(%digest, version = %athanor_trust_state::display(version), "running version announced");
                                 }
                             }
                             notices.sent.insert(id, Sent { server, notice });

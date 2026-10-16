@@ -43,8 +43,12 @@ the agent (`cosmic-osd`), which ends the call as `NotAuthorized`; the agent is t
 user switch (a session of another uid stands in), a text console (SSH stands in), a prompt that
 times out (the agent's removal stands in), and a grant of the second prompt, which restarts the guest.
 
+After `apply`, the notifier's journal must hold exactly one "running version announced" line,
+naming the digest and the version the state file reports as booted (`doc_shell.md` section 7,
+item 5); two more polls must not repeat it.
+
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
-the `download` stage, the "now running" notification after `apply`, and the administrator
+the `download` stage, the "now running" notification's text after `apply`, and the administrator
 prompt that `busctl --system call os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1 GoBack`
 raises when typed in a terminal of the graphical session.
 
