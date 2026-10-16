@@ -163,12 +163,14 @@ devices() {
 }
 
 # describe DEVICE: prints what one pass reads of the device, a value a line: idVendor,
-# idProduct, serial, bConfigurationValue, then each interface as "NAME CLASS:SUBCLASS:PROTOCOL".
+# idProduct, serial, bConfigurationValue, then each interface descriptor as
+# "NUMBER.SETTING CLASS:SUBCLASS:PROTOCOL".
 # Fails, printing why, when any of it cannot be read or the device is not configured yet.
 # The two passes are the only wait for the bus: the unit runs no `udevadm settle`, which drains
 # the udev queue but does not wait for a device to enumerate.
 describe() {
-    local dev=$1 name=${1##*/} vid pid serial='' config iface class sub proto ifaces=''
+    local dev=$1 vid pid serial='' config bytes i=0 len ifaces=''
+    local -a b
     if [[ ! -e $dev ]]; then
         echo "not connected"
         return 1
@@ -182,13 +184,35 @@ describe() {
         echo "not configured"
         return 1
     fi
-    for iface in "$dev/$name":*; do
-        { attr "$iface/bInterfaceClass" class && attr "$iface/bInterfaceSubClass" sub &&
-            attr "$iface/bInterfaceProtocol" proto; } || return 1
-        ifaces+="${iface##*/} $class:$sub:$proto"$'\n'
+    # The interfaces are the list USBGuard matches with-interface against: one entry for each
+    # interface descriptor in the raw descriptors, every alternate setting and every
+    # configuration included, in their order (#567). The interface directories of sysfs show one
+    # setting of the active configuration, a list that USBGuard's never equals for a device with
+    # alternate settings, Bluetooth adapters and webcams among them.
+    bytes=$(od -An -v -tx1 -w1 -- "$dev/descriptors" 2>&1) || {
+        echo "$bytes"
+        return 1
+    }
+    mapfile -t b <<<"$bytes"
+    b=("${b[@]# }")
+    [[ -n $bytes ]] || b=()
+    # Each descriptor starts with its length and its type; an interface descriptor (type 04)
+    # holds its number, its alternate setting, then its class, subclass and protocol. One that
+    # cannot be walked is refused, not skipped: a list missing an entry USBGuard reads is a rule
+    # that never matches.
+    while ((i < ${#b[@]})); do
+        len=$((16#${b[i]}))
+        if ((len < 2 || i + len > ${#b[@]})) || [[ ${b[i + 1]} == 04 && len -lt 9 ]]; then
+            echo "malformed descriptors"
+            return 1
+        fi
+        if [[ ${b[i + 1]} == 04 ]]; then
+            ifaces+="$((16#${b[i + 2]})).$((16#${b[i + 3]})) ${b[i + 5]}:${b[i + 6]}:${b[i + 7]}"$'\n'
+        fi
+        i=$((i + len))
     done
     if [[ -z $ifaces ]]; then
-        echo "configured, with no interface yet"
+        echo "configured, with no interface descriptor yet"
         return 1
     fi
     printf '%s\n' "$vid" "$pid" "$serial" "$config"
@@ -261,7 +285,7 @@ device_rule() {
 }
 
 # A device is recorded only when two consecutive passes read the same description: a device
-# reconfigured between the read of bConfigurationValue and the reads of its interfaces
+# reconfigured between the read of bConfigurationValue and the read of its descriptors
 # (usb_modeswitch, a udev rule, usbfs) reads differently twice and is read again. A device that
 # leaves the bus stops being listed and is not waited for.
 # The first run lists each device it sees in the pending file, from its ids alone, which the
