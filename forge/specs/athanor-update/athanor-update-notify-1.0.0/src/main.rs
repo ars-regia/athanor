@@ -93,7 +93,13 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                             }
                             notices.sent.insert(id, Sent { server, notice });
                         }
-                        Err(err) => tracing::warn!(%err, "the notification was not sent"),
+                        Err(err) => {
+                            // Nothing is recorded either: the booted digest stays unseen, so a
+                            // running-version notice survives a server that starts after us.
+                            tracing::warn!(%err, "the notification was not sent; it is tried again at the next poll");
+                            notices.withdraw(&notice);
+                            continue;
+                        }
                     }
                 }
                 if seen.as_deref() != Some(state.booted.digest.as_str()) {
