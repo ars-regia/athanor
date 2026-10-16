@@ -13,6 +13,7 @@ SOURCES = HERE / "SOURCES"
 SPEC = (HERE / "athanor-selinux.spec").read_text()
 PSTORE = SOURCES / "athanor_systemd_pstore.te"
 PCSCD = SOURCES / "athanor_pcscd_cgroup.te"
+GREETER = SOURCES / "athanor_greeter_nvidia_modprobe.te"
 
 
 def rules(text):
@@ -39,6 +40,10 @@ class Modules(unittest.TestCase):
     def test_pcscd_grants_cgroup_dir_search_and_nothing_else(self):
         got = [" ".join(r.split()) for r in rules(PCSCD.read_text()) if not r.startswith("module ")]
         self.assertEqual(got, ["allow pcscd_t cgroup_t:dir { getattr search open }"])
+
+    def test_greeter_module_only_silences(self):
+        got = [" ".join(r.split()) for r in rules(GREETER.read_text()) if not r.startswith("module ")]
+        self.assertEqual(got, ["dontaudit xdm_t xserver_t:process2 { nnp_transition nosuid_transition }"])
 
     # A local aid: in CI the rpmbuild of spec-build-check.yml compiles every module.
     @unittest.skipUnless(shutil.which("checkmodule"), "checkmodule is not installed")

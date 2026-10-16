@@ -1,0 +1,24 @@
+module athanor_greeter_nvidia_modprobe 1.0;
+
+require {
+    type xdm_t;
+    type xserver_t;
+    class process2 { nnp_transition nosuid_transition };
+}
+
+# On the -nvidia images the greeter's UI, inside the bubblewrap sandbox of
+# athanor-greeter-client (no_new_privs, every mount nosuid), executes a file of
+# xserver_exec_t once when it brings up EGL: one denial per greeter start, from a child of
+# athanor-greeter-ui in the same second as its libEGL lines (#509). The greeter starts no
+# X server (cosmic-comp --no-xwayland), and the other xserver_exec_t files on the image
+# are the NVIDIA tools Fedora labels /usr/bin/nvidia.*; libnvidia-eglcore carries the path
+# /usr/bin/nvidia-modprobe, the setuid-root helper the NVIDIA libraries run to load the
+# driver and create its device nodes. Which condition makes the driver run it in the
+# greeter is not pinned: the same sandbox under a user account in unconfined_t does not.
+#
+# The refusal is the outcome the sandbox is there for. Without the transition the helper
+# runs in xdm_t, and no_new_privs has already dropped its setuid root; with it, it would
+# still hold no capability and could not create a node in the sandbox's private /dev. The
+# greeter renders either way. This silences the record and grants nothing: the transition
+# stays denied.
+dontaudit xdm_t xserver_t:process2 { nnp_transition nosuid_transition };
