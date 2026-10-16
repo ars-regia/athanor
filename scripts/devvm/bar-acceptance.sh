@@ -290,7 +290,9 @@ stage_scheme() {
     [[ $(main_pids) == "$pids" ]] || fail "the bar or the dock restarted: MainPIDs $pids, then $(main_pids)"
 }
 
-# An active window, so that the bar and the dock draw its running indicator in the accent.
+# An active window, so that the dock draws its running indicator in the accent. Only the
+# dock band is counted: on the factory float layout the bar draws nothing in the accent,
+# and its appearance watch, the same as the dock's, is the one stage scheme proves live.
 stage_accent() {
     both_running
     ACCENT_BEFORE=$(interface_key accent-color) || fail "gsettings get accent-color"
@@ -312,13 +314,13 @@ stage_accent() {
     again=$(probe near "$(shot accent-purple-again)" '#2190a4') || fail "cannot read the second purple screenshot"
     stop_window || fail "cannot stop $WINDOW_UNIT"
     echo "accent: teal pixels in the bar and dock bands: purple $purple, teal $teal, purple again $again"
-    local purple_bar purple_dock teal_bar teal_dock again_bar again_dock
-    read -r purple_bar purple_dock <<< "$purple"
-    read -r teal_bar teal_dock <<< "$teal"
-    read -r again_bar again_dock <<< "$again"
-    ((teal_bar >= purple_bar + NEAR_MIN && teal_dock >= purple_dock + NEAR_MIN)) ||
-        fail "'teal' did not add $NEAR_MIN teal pixels to both bands: $purple, then $teal"
-    ((again_bar <= teal_bar - NEAR_MIN && again_dock <= teal_dock - NEAR_MIN)) ||
+    local purple_dock teal_dock again_dock
+    read -r _ purple_dock <<< "$purple"
+    read -r _ teal_dock <<< "$teal"
+    read -r _ again_dock <<< "$again"
+    ((teal_dock >= purple_dock + NEAR_MIN)) ||
+        fail "'teal' did not add $NEAR_MIN teal pixels to the dock band: $purple, then $teal"
+    ((again_dock <= teal_dock - NEAR_MIN)) ||
         fail "'purple' did not take the teal pixels away again: $teal, then $again"
     [[ $(main_pids) == "$pids" ]] || fail "the bar or the dock restarted: MainPIDs $pids, then $(main_pids)"
 }
