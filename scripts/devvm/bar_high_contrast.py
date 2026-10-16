@@ -77,7 +77,8 @@ def showing(accessible, role, label):
     # The walk is then empty, and wait_for walks again.
     try:
         visit(accessible)
-    except GLib.Error:
+    except GLib.Error as err:
+        print(f"     the walk for {role} {label!r} read a vanished node: {err.message}", file=sys.stderr)
         return []
     return found
 
@@ -108,6 +109,14 @@ def step(name, ok):
         sys.exit(1)
 
 
+def act(node, name):
+    """Clicks `node`; a node gone since it was found fails the step instead of a traceback."""
+    try:
+        node.do_action(0)
+    except GLib.Error as err:
+        step(f"{name}: {err.message}", False)
+
+
 def main():
     app = wait_for(application, 20)
     step("athanor-bar is on the accessibility bus", app is not None)
@@ -121,7 +130,7 @@ def main():
     )
     opener = wait_for(lambda: showing(app, "button", "Accessibility"), 5)
     step("the Accessibility button shows", bool(opener))
-    opener[0].do_action(0)
+    act(opener[0], "the Accessibility button")
     # GtkSwitch reports as "check box" on at-spi2-core 2.58; older releases say "switch".
     switch = wait_for(
         lambda: (
@@ -131,17 +140,17 @@ def main():
         5,
     )
     step("the High contrast switch shows", bool(switch))
-    switch[0].do_action(0)
+    act(switch[0], "the High contrast switch")
     step(
         "high contrast on reaches the GNOME key and both built themes within 2 s",
         wait_for(keys_are(True), 2),
     )
-    switch[0].do_action(0)
+    act(switch[0], "the High contrast switch")
     step(
         "high contrast off reaches the GNOME key and both built themes within 2 s",
         wait_for(keys_are(False), 2),
     )
-    opener[0].do_action(0)
+    act(opener[0], "the Accessibility button")
 
 
 if __name__ == "__main__":
