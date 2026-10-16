@@ -160,9 +160,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   `nix profile add nixpkgs#qemu_kvm`, then
   `export OVMF_DIR=$(nix build --no-link --print-out-paths nixpkgs#OVMF.fd)/FV` in the shell
   that runs `create.sh` and `start.sh`, since both look the firmware up. Nix's QEMU loads
-  Nix's Mesa, which looks for its drivers where NixOS keeps them. Outside NixOS, `start.sh`
-  is given that Mesa through the user manager, and the manager is cleared once QEMU runs, so
-  no other user service inherits it:
+  Nix's Mesa, which looks for its drivers where NixOS keeps them. Outside NixOS, the commands
+  below hand that Mesa to QEMU through the user manager and clear it once QEMU runs, so no
+  other user service inherits it:
 
   ```sh
   m=$(nix build --no-link --print-out-paths nixpkgs#mesa)
