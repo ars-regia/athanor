@@ -1,0 +1,21 @@
+module athanor_pcscd_cgroup 1.0;
+
+require {
+    type pcscd_t;
+    type cgroup_t;
+    class dir { getattr search open };
+}
+
+# pcscd searches the root of the cgroup2 tree once for every client that connects to
+# /run/pcscd/pcscd.comm: one `opensc-tool -l` gives one denial, and a session client that
+# polls the reader list gives one every five minutes (#509). Fedora's policy denies it in
+# selinux-policy-targeted 43.10, and upstream grants it as fs_search_cgroup_dirs(pcscd_t)
+# (fedora-selinux/selinux-policy aaf559c0 "Allow pcscd_t to search cgroup", on rawhide
+# only, in no 43.x release as of 2026-10-16). This is that interface's cgroup_t rule; its
+# two others are not needed: pcscd_t already reads sysfs, and the tmpfs search serves the
+# cgroup v1 layout, which the image does not mount. Search lets pcscd resolve paths in
+# the cgroup tree, not read the files there, and pcscd.service mounts the tree read-only
+# (ProtectControlGroups=yes).
+#
+# Drop this module once the Fedora release the image is built on ships aaf559c0.
+allow pcscd_t cgroup_t:dir { getattr search open };
