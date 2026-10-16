@@ -40,6 +40,11 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
       pulseaudio-utils pulseaudio-libs-glib2 \
       qalculate localsearch tinysparql poppler-glib \
   && dnf5 clean all
+# The appearance store as the image has it (doc_visual_language.md, VL4): GNOME's schemas, and
+# dconf, whose service writes for a confined client. scene.sh adds Athanor's schema and
+# vendor defaults beside them.
+RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
+  && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
 # published one pinned by build-image.digest when that file exists: a change here takes effect

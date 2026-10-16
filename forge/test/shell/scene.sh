@@ -23,6 +23,20 @@ fi
 if [ -n "${RIG_DATA_OVERLAY:-}" ]; then
     export XDG_DATA_DIRS=$RIG_DATA_OVERLAY:/usr/local/share:/usr/share
 fi
+# The appearance store as the image compiles it: GNOME's schemas with Athanor's schema and
+# vendor defaults in one directory, so the overrides apply. A seed's sibling file
+# <seed>.gsettings holds lines of `schema key value`, set before any client starts, as the
+# user's choice would be.
+schemas=$scratch/schemas
+mkdir -p "$schemas"
+cp /usr/share/glib-2.0/schemas/*.xml /repo/forge/specs/athanor-system-config/SOURCES/usr/share/glib-2.0/schemas/* "$schemas"/
+glib-compile-schemas --strict "$schemas"
+export GSETTINGS_SCHEMA_DIR=$schemas
+if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
+    while read -r schema key value; do
+        gsettings set "$schema" "$key" "$value"
+    done < "$RIG_CONFIG_SEED.gsettings"
+fi
 export XDG_CURRENT_DESKTOP=COSMIC XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=COSMIC
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
 export TZ=UTC LC_ALL=${RIG_LOCALE:-C.UTF-8} LANG=${RIG_LOCALE:-C.UTF-8}
