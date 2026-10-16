@@ -422,9 +422,11 @@ stage_console() { # recovery items 1 and 5
 # digest of `bad` stays held afterwards, as UT6 wants (README); the digest `goback` holds
 # is another one, and the service replaces it.
 stage_greenboot() { # recovery item 7
-  local prev left boot boots text bad
+  local prev left boot boots text bad held
   bad=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:bad") || die "cannot read the digest of $REPO:bad"
-  [[ $(guest_ssh 'test ! -e /var/lib/athanor-update/held || cat /var/lib/athanor-update/held') != "$bad" ]] ||
+  held=$(guest_ssh 'test ! -e /var/lib/athanor-update/held || cat /var/lib/athanor-update/held') ||
+    die "cannot read the guest's held digest"
+  [[ $held != "$bad" ]] ||
     die "stage greenboot runs once per guest and the digest of bad is already held: reset.sh, then run.sh from install"
   prev=$(marker)
   [[ $prev != bad ]] || die "the guest is booted on bad from an earlier run: reset.sh, then run.sh from install"

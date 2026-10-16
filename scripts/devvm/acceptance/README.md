@@ -6,7 +6,7 @@ throwaway registry and throwaway keys. Nothing here touches the project registry
     bash forge/scripts/build_rolling_local.sh update     # the RPM under test
     scripts/devvm/acceptance/images.sh                   # registry, keys, eleven images (about 20 min)
     scripts/devvm/reset.sh && scripts/devvm/start.sh     # a freshly installed guest
-    scripts/devvm/acceptance/run.sh                      # about 90 minutes, a dozen reboots
+    scripts/devvm/acceptance/run.sh                      # about 70 minutes, a dozen reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
 
 The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together: on a
