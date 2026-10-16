@@ -330,11 +330,14 @@ impl Notices {
         self.cancellable = false;
     }
 
-    /// The sign-in failed. PAM's error lines are the failure's reason (`auth::refusal`),
-    /// which the failure line shows: they leave their own label, so they are not shown twice.
-    fn fail(&mut self) {
+    /// The sign-in failed with `reason`. When PAM's error lines are that reason
+    /// (`auth::refusal`), the failure line shows them: they leave their own label, so they
+    /// are not shown twice. Any other reason leaves them where they are.
+    fn fail(&mut self, reason: &str) {
         self.close_question();
-        self.error.clear();
+        if self.error.join("\n") == reason {
+            self.error.clear();
+        }
     }
 }
 
@@ -993,7 +996,7 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
                         form.status.set_visible(true);
                     }
                     Err(reason) => {
-                        form.notices.borrow_mut().fail();
+                        form.notices.borrow_mut().fail(&reason);
                         form.reset();
                         form.status.set_visible(false);
                         form.error.set_label(&tr_with(
@@ -1118,10 +1121,18 @@ mod tests {
         notices.info.push("Last login: yesterday".to_string());
         notices.error.push("Your account has expired".to_string());
         notices.ask();
-        notices.fail();
+        notices.fail("Your account has expired");
         assert!(notices.error.is_empty(), "the failure line shows them instead");
         assert_eq!(notices.info, ["Last login: yesterday"]);
         assert!(!notices.cancellable, "nothing is left to cancel");
+
+        notices.error.push("Your account has expired".to_string());
+        notices.fail("The login service refused the sign-in.");
+        assert_eq!(
+            notices.error,
+            ["Your account has expired"],
+            "a reason that is not PAM's lines leaves them on the card"
+        );
     }
 
     #[test]
