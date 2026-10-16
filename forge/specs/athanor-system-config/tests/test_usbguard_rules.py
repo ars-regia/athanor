@@ -281,12 +281,46 @@ case $(wc -l < {count}) in
         self.assertTrue(self.marker.exists())
 
     def test_malformed_descriptors_leave_the_device_pending(self):
+        good = raw_descriptors([[("0e", "01", "00")]])
+        short = bytearray(good)
+        short[27] = 8  # the interface descriptor's length, after the device and configuration
+        broken = {
+            "1-1": good[:-3],  # the last descriptor runs past the end
+            "1-2": good + b"\x07",  # a byte left over
+            "1-3": good + b"\x00\x24",  # a zero length
+            "1-4": bytes(short),
+        }
+        for port, raw in broken.items():
+            self.device(port, "0c45", "6a10", [("0e", "01", "00")])
+            (self.sysfs / port / "descriptors").write_bytes(raw)
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, *broken)
+        for port in broken:
+            self.assertIn(f"{port} did not settle within 0.3 s: malformed descriptors", done.stderr)
+        self.assertEqual(self.written(), [])
+
+    def test_unreadable_descriptors_leave_the_device_pending_with_the_reason(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
-        (self.sysfs / "1-1/descriptors").write_bytes(raw_descriptors([[("0e", "01", "00")]])[:-3])
+        (self.sysfs / "1-1/descriptors").unlink()
+        (self.sysfs / "1-1/descriptors").mkdir()
         done = self.run_script(check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
-        self.assertIn("1-1 did not settle within 0.3 s: malformed descriptors", done.stderr)
-        self.assertEqual(self.written(), [])
+        self.assertIn("1-1 did not settle within 0.3 s: od: ", done.stderr)
+
+    def test_class_specific_descriptors_are_walked_over_by_their_length(self):
+        # A UVC or audio interface is followed by class-specific descriptors of odd lengths, whose
+        # bytes may read 04 where a type would be: only the descriptors' own types count.
+        raw = bytearray(raw_descriptors([[("0e", "01", "00")]]))
+        extra = bytes([5, 0x24, 0x04, 0x04, 0x08]) + bytes([3, 0x24, 0x04])
+        raw[36:36] = extra  # after the interface descriptor, before its endpoint
+        total = int.from_bytes(raw[20:22], "little") + len(extra)
+        raw[20:22] = total.to_bytes(2, "little")
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/descriptors").write_bytes(bytes(raw))
+        self.run_script()
+        self.assertEqual(
+            self.written(), ['allow id 0c45:6a10 serial "" via-port "1-1" with-interface equals { 0e:01:00 }']
+        )
         self.assertEqual(self.rules.stat().st_mode & 0o777, 0o600)
 
     def test_no_rule_for_mass_storage(self):

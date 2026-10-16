@@ -195,15 +195,18 @@ describe() {
     }
     mapfile -t b <<<"$bytes"
     b=("${b[@]# }")
+    [[ -n $bytes ]] || b=()
     # Each descriptor starts with its length and its type; an interface descriptor (type 04)
-    # holds its number, its alternate setting, then its class, subclass and protocol.
-    while ((i + 1 < ${#b[@]})); do
+    # holds its number, its alternate setting, then its class, subclass and protocol. One that
+    # cannot be walked is refused, not skipped: a list missing an entry USBGuard reads is a rule
+    # that never matches.
+    while ((i < ${#b[@]})); do
         len=$((16#${b[i]}))
-        if ((len < 2 || i + len > ${#b[@]})); then
+        if ((len < 2 || i + len > ${#b[@]})) || [[ ${b[i + 1]} == 04 && len -lt 9 ]]; then
             echo "malformed descriptors"
             return 1
         fi
-        if [[ ${b[i + 1]} == 04 ]] && ((len >= 9)); then
+        if [[ ${b[i + 1]} == 04 ]]; then
             ifaces+="$((16#${b[i + 2]})).$((16#${b[i + 3]})) ${b[i + 5]}:${b[i + 6]}:${b[i + 7]}"$'\n'
         fi
         i=$((i + len))
