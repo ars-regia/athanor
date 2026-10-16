@@ -13,6 +13,7 @@
 #   v5   2026-09-18  1 and 2       2            rotation, second half
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
+#   bad  2026-09-21  3             3            v7 whose greetd.service runs /usr/bin/false (stage greenboot)
 # Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
@@ -56,7 +57,7 @@ build() { # build TAG CREATED KEY...
   cp "$rpm" "$context/rpm/"
   for key in "$@"; do cp "$keys/$key.pub" "$context/keys/athanor-image-${key#acc-}.pub"; done
   podman build --format docker -f "$ACC_HERE/Containerfile" -t "$REPO:$tag" \
-    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" \
+    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" --build-arg "BREAK_GREETD=${BREAK_GREETD:-}" \
     --label "org.opencontainers.image.created=${created}T10:00:00Z" --label "org.opencontainers.image.version=43.${created//-/}.0" "$context"
   rm -rf "$context"
   podman push --tls-verify=false "$REPO:$tag"
@@ -74,6 +75,7 @@ build v4 2026-09-17 acc-1 acc-2; sign v4 acc-1
 build v5 2026-09-18 acc-1 acc-2; sign v5 acc-2
 build v6 2026-09-19 acc-1 acc-2; sign v6 acc-2
 build v7 2026-09-20 acc-3; sign v7 acc-3
+BREAK_GREETD=1 build bad 2026-09-21 acc-3; sign bad acc-3
 
 # v2 goes the pipeline's way: three repositories, the digests file, sign-images.sh.
 build v2 2026-09-15 acc-1
