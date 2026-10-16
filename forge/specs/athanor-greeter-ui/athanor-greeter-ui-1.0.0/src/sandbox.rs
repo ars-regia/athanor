@@ -84,10 +84,11 @@ fn grants() -> Vec<(PathBuf, BitFlags<AccessFs>)> {
 
 /// The NVIDIA driver's nodes in `dev`, the same set athanor-greeter-client binds: the
 /// control and modeset nodes and one numbered node per GPU. The proprietary EGL stack
-/// opens them read-write next to the DRM nodes; denied, it falls back to running the
-/// setuid nvidia-modprobe, which the sandbox refuses as well, and the greeter renders
-/// without the GPU. Each node is granted by itself rather than `/dev` as a whole, and
-/// the nvidia-uvm nodes stay out: they serve CUDA only.
+/// opens them read-write next to the DRM nodes; denied, it finds no GPU and the greeter
+/// renders in software (#535). The wrapper also binds /sys/module/nvidia, without which
+/// the driver runs the setuid nvidia-modprobe that no-new-privileges refuses. Each node is
+/// granted by itself rather than `/dev` as a whole, and the nvidia-uvm nodes stay out: they
+/// serve CUDA only.
 fn nvidia_device_nodes(dev: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dev) else {
         return Vec::new();

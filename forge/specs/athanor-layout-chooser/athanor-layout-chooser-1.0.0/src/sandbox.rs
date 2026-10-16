@@ -1,7 +1,8 @@
 //! Confinement of the chooser (doc_update_trust.md binds user-side processes to restrict
 //! themselves with Landlock at start, as the greeter does). The chooser writes the user
 //! layout document, and a newer one's backup beside it; GTK and Mesa write the cache and
-//! the runtime directory; GPU rendering opens the DRM nodes read-write.
+//! the runtime directory; GPU rendering opens the DRM nodes, and on the -nvidia images the
+//! NVIDIA driver's nodes, read-write.
 
 use landlock::{
     AccessFs, BitFlags, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
@@ -40,7 +41,7 @@ pub fn apply(user_file: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// The document's directory, the cache, /tmp and the runtime directory with the write
-/// set; the DRM nodes with `WriteFile` alone.
+/// set; the DRM nodes and the NVIDIA nodes with `WriteFile` alone.
 fn grants(document_dir: &Path) -> Vec<(PathBuf, BitFlags<AccessFs>)> {
     let write_access = AccessFs::from_write(ABI::V1);
     let mut paths = vec![document_dir.to_path_buf(), PathBuf::from("/tmp")];
@@ -53,7 +54,38 @@ fn grants(document_dir: &Path) -> Vec<(PathBuf, BitFlags<AccessFs>)> {
     paths.retain(|path| path.is_absolute());
     let mut grants: Vec<_> = paths.into_iter().map(|path| (path, write_access)).collect();
     grants.push((PathBuf::from(DRM_DEVICE_DIR), AccessFs::WriteFile.into()));
+    grants.extend(
+        nvidia_device_nodes(Path::new("/dev"))
+            .into_iter()
+            .map(|node| (node, AccessFs::WriteFile.into())),
+    );
     grants
+}
+
+/// The NVIDIA driver's nodes in `dev`, as the greeter grants them (`verify.py gpu-grants`
+/// keeps the two copies equal): the control and modeset nodes and one numbered node per
+/// GPU. The proprietary EGL stack opens them read-write next to the DRM nodes; denied, it
+/// finds no GPU and GTK renders in software (#535). Each node is granted by itself rather
+/// than `/dev` as a whole, and the nvidia-uvm nodes stay out: they serve CUDA only.
+fn nvidia_device_nodes(dev: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dev) else {
+        return Vec::new();
+    };
+    let mut nodes: Vec<_> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .filter(|name| {
+            name.to_str().is_some_and(|name| match name {
+                "nvidiactl" | "nvidia-modeset" => true,
+                _ => name.strip_prefix("nvidia").is_some_and(|gpu| {
+                    !gpu.is_empty() && gpu.bytes().all(|byte| byte.is_ascii_digit())
+                }),
+            })
+        })
+        .map(|name| dev.join(name))
+        .collect();
+    nodes.sort();
+    nodes
 }
 
 /// Restricts the calling thread, and the threads it creates, to the write accesses
