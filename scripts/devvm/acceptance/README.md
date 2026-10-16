@@ -45,7 +45,9 @@ times out (the agent's removal stands in), and a grant of the second prompt, whi
 
 After `apply`, the notifier's journal must hold exactly one "running version announced" line,
 naming the digest and the version the state file reports as booted (`doc_shell.md` section 7,
-item 5); two more polls must not repeat it.
+item 5); two more polls must not repeat it. The stage then stops the check timer and waits for a check it
+already started: the check holds the store, and Apply would answer `Busy` instead of
+`NothingDownloaded` (#547).
 
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification's text after `apply`, and the administrator

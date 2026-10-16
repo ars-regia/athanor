@@ -227,6 +227,7 @@ running_notice() { # running_notice DESCRIPTION
 }
 
 stage_apply() { # items 2, 3 and 14; doc_shell.md section 7, item 5
+  local check
   expect_error "2: from an SSH session it asks for administrator authentication" "$(call_ssh Apply)" os.athanor.Update1.Error.NotAuthorized
   for member in "org.freedesktop.DBus.Properties GetAll s os.athanor.Update1" "org.freedesktop.DBus.Peer Ping"; do
     # shellcheck disable=SC2086  # the member and its arguments are separate words
@@ -241,6 +242,15 @@ stage_apply() { # items 2, 3 and 14; doc_shell.md section 7, item 5
   pass "14: both bootc calls succeeded under the units' own hardening"
   running_notice "doc_shell.md 7.5: after the restart one notification names the running version"
   expect "3: verified after the reboot" .verified.reason signature
+  # The timer's check runs two minutes after the boot and holds the store meanwhile, so a
+  # request answers Busy (#547): stop the timer and let a check it already started end.
+  guest_ssh sudo systemctl stop athanor-update-check.timer
+  for _ in $(seq 60); do
+    check=$(guest_ssh systemctl show -p ActiveState --value athanor-update-check.service) || die "FAIL  2: cannot read the check's state"
+    [[ $check == activating ]] || break
+    sleep 5
+  done
+  [[ $check != activating ]] || die "FAIL  2: the check the timer started still runs after five minutes"
   expect_error "2: with nothing downloaded it refuses" "$(call_active Apply)" os.athanor.Update1.Error.NothingDownloaded
   guest_ssh "sudo cp --remove-destination /dev/stdin /etc/containers/policy.json" <<< '{"default":[{"type":"insecureAcceptAnything"}]}'
   check_now
