@@ -35,7 +35,10 @@ MemoryMax=192M
 # directories: "athanor" is declared as the bar declares it, because launch() creates
 # %t/athanor/<random> for the Wayland security context of an application the panel starts
 # (doc_control_center.md, CC2; doc_bar.md, BR2.2).
-RuntimeDirectory=athanor-control-center athanor
+# "dconf" because the panel reads the appearance through GSettings, which maps dconf's
+# shared-memory flag beneath %t/dconf read-write to learn that a key changed, as
+# xdg-desktop-portal-athanor.service explains; without it the panel never sees a new scheme.
+RuntimeDirectory=athanor-control-center athanor dconf
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 # ~/.local/state/athanor/control-center: the Super+C marker, and the panel's own state.
