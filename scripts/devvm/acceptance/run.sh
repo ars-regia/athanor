@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 guard_no_ci
-STAGES=(install migrate metered download sessions apply refuse older goback rotate recover podman probes report)
+STAGES=(install migrate metered download sessions apply refuse older goback rotate recover console greenboot podman probes report)
 start=${1:-install}
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
@@ -358,6 +358,124 @@ stage_recover() { # item 10
   expect "10: the machine is on the new key with the old one removed" .verified.reason signature
   [[ $(guest_ssh readlink /etc/containers/policy.json) == /usr/share/athanor/containers/policy.json ]] || die "FAIL  10: the policy link was not restored"
 }
+
+# What agetty prints above the login of tty1: /etc/issue and /etc/issue.d (doc_recovery.md, R3).
+# agetty reads the attributes of its terminal even to show the issue, so SSH allocates one
+# (-tt), whose line ends carry a carriage return that the needles do not.
+issue_text() { guest_ssh -q -tt sudo agetty --show-issue < /dev/null | tr -d '\r'; }
+expect_text() { # expect_text DESCRIPTION TEXT NEEDLE...: every NEEDLE is a fixed string of TEXT
+  local needle
+  for needle in "${@:3}"; do
+    grep -qF -- "$needle" <<< "$2" || die "FAIL  $1: '$needle' is not in: $2"
+  done
+}
+
+# doc_recovery.md section 6, acceptance 1 (and 5, which the reboot at its end gives): the
+# greeter fails three times in a minute. The failing greeter is a drop-in in /run (ExecStart
+# is /usr/bin/false, restarted every 2 s); StartLimitBurst and OnFailure are the image's own.
+# Looked at by hand: the framebuffer of tty1 (the VM's serial console is not tty1).
+# The drop-in, the failed greetd and /run/athanor-recovery all live in /run: a failure
+# midway reboots, so that the next run starts from a normal boot.
+console_cleanup() { reboot_guest; }
+stage_console() { # recovery items 1 and 5
+  local dropin=/run/systemd/system/greetd.service.d/50-acceptance-fail.conf text health
+  guest_ssh test ! -e /run/athanor-recovery || die "FAIL  recovery 5: /run/athanor-recovery exists on a normal boot"
+  text=$(issue_text) || die "FAIL  agetty --show-issue failed in the guest"
+  ! grep -qF "The desktop did not start." <<< "$text" || die "FAIL  recovery 5: the plain banner carries the recovery message"
+  # greenboot's required check waits for greetd: breaking greetd while it runs fails the boot's
+  # health check and queues a rollback. Wait until greenboot has passed this boot.
+  for _ in $(seq 60); do
+    health=$(guest_ssh systemctl show -p ActiveState --value greenboot-healthcheck.service) || die "FAIL  recovery 1: cannot read greenboot's state"
+    [[ $health == activating || $health == inactive ]] || break
+    sleep 5
+  done
+  [[ $health == active ]] || die "FAIL  recovery 1: greenboot did not pass this boot before the stage (state $health)"
+  trap console_cleanup EXIT
+  printf '[Service]\nExecStart=\nExecStart=/usr/bin/false\nRestart=on-failure\nRestartSec=2s\n' |
+    guest_ssh "sudo mkdir -p ${dropin%/*} && sudo tee $dropin > /dev/null"
+  guest_ssh "sudo systemctl daemon-reload && sudo systemctl --no-block restart greetd.service"
+  # The target wants the getty without ordering against it: wait for both.
+  for _ in $(seq 45); do
+    guest_ssh 'systemctl is-active --quiet athanor-recovery.target && systemctl is-active --quiet getty@tty1.service' && break
+    sleep 2
+  done
+  guest_ssh systemctl is-active --quiet athanor-recovery.target || die "FAIL  recovery 1: athanor-recovery.target is not active 90 s after greetd failed"
+  pass "recovery 1: three failures of greetd in a minute start athanor-recovery.target"
+  guest_ssh systemctl is-active --quiet getty@tty1.service || die "FAIL  recovery 1: no getty on tty1"
+  text=$(issue_text) || die "FAIL  agetty --show-issue failed in the guest"
+  expect_text "recovery 1: tty1 has a login and, above it, the message in both languages" "$text" \
+    "The desktop did not start." "Il desktop non si è avviato." "sudo athanor-update go-back" "journalctl -b -u greetd"
+  ! grep -qF "failed its health check" <<< "$text" || die "FAIL  recovery 1: a boot that passed its health check says it failed it"
+  # The drop-in is in /run, so the reboot takes it back; the plain banner must come back too.
+  trap - EXIT
+  reboot_guest
+  guest_ssh test ! -e /run/athanor-recovery || die "FAIL  recovery 5: /run/athanor-recovery exists after the reboot"
+  text=$(issue_text) || die "FAIL  agetty --show-issue failed in the guest"
+  ! grep -qF "The desktop did not start." <<< "$text" || die "FAIL  recovery 5: the recovery message survived the reboot"
+  guest_ssh systemctl is-active --quiet greetd.service || die "FAIL  recovery 5: greetd is not active after the reboot"
+  pass "recovery 5: a normal boot shows the plain banner and /run/athanor-recovery does not exist"
+}
+
+# doc_recovery.md section 6, acceptance 7 (R5, A2-26): a deployment whose greetd.service runs
+# /usr/bin/false (the image `bad` of images.sh) is applied and booted. It is signed with the
+# key of the stage `recover`, so this stage follows it. It runs once per guest: the
+# digest of `bad` stays held afterwards, as UT6 wants (README); the digest `goback` holds
+# is another one, and the service replaces it.
+stage_greenboot() { # recovery item 7
+  local prev left boot boots text bad held
+  bad=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:bad") || die "cannot read the digest of $REPO:bad"
+  held=$(guest_ssh 'test ! -e /var/lib/athanor-update/held || cat /var/lib/athanor-update/held') ||
+    die "cannot read the guest's held digest"
+  [[ $held != "$bad" ]] ||
+    die "stage greenboot runs once per guest and the digest of bad is already held: reset.sh, then run.sh from install"
+  prev=$(marker)
+  [[ $prev != bad ]] || die "the guest is booted on bad from an earlier run: reset.sh, then run.sh from install"
+  point_stable bad
+  check_now
+  expect "recovery 7: the image whose greeter does not start is downloaded" .update downloaded
+  request_and_reboot call_root Apply bad "recovery 7: and booted"
+  left=$(state .booted.digest) || die "FAIL  recovery 7: the update service's state is unreadable after the boot"
+  # greenboot's check waits up to two minutes for greetd; the mark is the queued rollback.
+  for _ in $(seq 60); do
+    [[ $(guest_ssh sudo bootc status --format json | jq -r .status.rollbackQueued) == true ]] && break
+    sleep 5
+  done
+  [[ $(guest_ssh sudo bootc status --format json | jq -r .status.rollbackQueued) == true ]] || die "FAIL  recovery 7: the deployment was not marked (rollbackQueued) 5 minutes after the boot"
+  text=$(guest_ssh sudo journalctl -b -u greenboot-healthcheck.service -o cat --no-pager)
+  expect_text "recovery 7: greenboot's required check 10-greetd-running.sh failed and queued the rollback" "$text" \
+    "required script /etc/greenboot/check/required.d/10-greetd-running.sh failed!" \
+    "Greenboot check: greetd has failed." "Rollback successful"
+  guest_ssh systemctl is-active --quiet athanor-recovery.target || die "FAIL  recovery 7: the recovery console did not start"
+  guest_ssh systemctl is-active --quiet getty@tty1.service || die "FAIL  recovery 7: no getty on tty1"
+  text=$(issue_text) || die "FAIL  agetty --show-issue failed in the guest"
+  expect_text "recovery 7: tty1 says, in both languages, that this version failed its health check" "$text" \
+    "The desktop did not start." "Il desktop non si è avviato." "failed its health check" "non ha superato il controllo di salute" "sudo systemctl reboot"
+  ! grep -qF "sudo athanor-update go-back" <<< "$text" || die "FAIL  recovery 7: the console of a marked deployment sends the person to go-back, which would undo the queued return"
+  # The service learns of the mark from a check and holds the booted digest (UT6); the timer
+  # would run one two minutes after the boot.
+  check_now
+  [[ $(guest_ssh cat /var/lib/athanor-update/held) == "$left" ]] || die "FAIL  recovery 7: the digest of the marked deployment is not held"
+  pass "recovery 7: the marked digest is held"
+  # Nothing reboots by itself: ten minutes later it is the same boot, on the same deployment.
+  boot=$(boot_id)
+  boots=$(guest_ssh journalctl --list-boots --no-pager | wc -l) || die "FAIL  recovery 7: journalctl --list-boots failed"
+  sleep 600
+  [[ $(boot_id) == "$boot" ]] || die "FAIL  recovery 7: the guest rebooted by itself within ten minutes"
+  [[ $(guest_ssh journalctl --list-boots --no-pager | wc -l) == "$boots" ]] || die "FAIL  recovery 7: journalctl --list-boots shows a new boot"
+  [[ $(guest_ssh sudo bootc status --format json | jq -r .status.booted.image.imageDigest) == "$left" ]] || die "FAIL  recovery 7: bootc status no longer shows the marked deployment booted"
+  pass "recovery 7: ten minutes later the machine has not rebooted and the marked deployment is still booted"
+  guest_ssh sudo systemd-run --quiet --on-active=2 systemctl reboot
+  wait_reboot "$boot" || die "FAIL  recovery 7: the guest did not come back from the restart in 10 minutes"
+  [[ $(marker) == "$prev" ]] || die "FAIL  recovery 7: after the restart $(marker) is booted, expected the previous deployment $prev"
+  pass "recovery 7: after the restart the previous deployment is booted"
+  for n in 1 2 3; do
+    check_now
+    expect "recovery 7: check $n does not download the marked digest" .update held
+    [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged) == null ]] || die "FAIL  recovery 7: the marked digest was staged"
+  done
+  point_stable "$prev"
+}
+
 
 stage_podman() { # item 15
   guest_ssh 'podman pull docker.io/library/busybox:latest && podman save -o /var/tmp/acc-busybox.tar busybox && podman rmi busybox && podman load -i /var/tmp/acc-busybox.tar && printf "FROM busybox\nRUN true\n" | podman build -t acc-build - && rm /var/tmp/acc-busybox.tar'

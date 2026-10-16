@@ -13,6 +13,7 @@
 #   v5   2026-09-18  1 and 2       2            rotation, second half
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
+#   bad  2026-09-21  3             3            v7 whose greetd.service runs /usr/bin/false (stage greenboot)
 # Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
@@ -49,14 +50,15 @@ rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail 
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
 build() { # build TAG CREATED KEY...
-  local tag=$1 created=$2 context
+  local tag=$1 created=$2 context break_greetd=
+  if [[ $tag == bad ]]; then break_greetd=1; fi
   shift 2
   context=$(mktemp -d)
   mkdir "$context/rpm" "$context/keys"
   cp "$rpm" "$context/rpm/"
   for key in "$@"; do cp "$keys/$key.pub" "$context/keys/athanor-image-${key#acc-}.pub"; done
   podman build --format docker -f "$ACC_HERE/Containerfile" -t "$REPO:$tag" \
-    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" \
+    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" --build-arg "BREAK_GREETD=$break_greetd" \
     --label "org.opencontainers.image.created=${created}T10:00:00Z" --label "org.opencontainers.image.version=43.${created//-/}.0" "$context"
   rm -rf "$context"
   podman push --tls-verify=false "$REPO:$tag"
@@ -74,6 +76,7 @@ build v4 2026-09-17 acc-1 acc-2; sign v4 acc-1
 build v5 2026-09-18 acc-1 acc-2; sign v5 acc-2
 build v6 2026-09-19 acc-1 acc-2; sign v6 acc-2
 build v7 2026-09-20 acc-3; sign v7 acc-3
+build bad 2026-09-21 acc-3; sign bad acc-3
 
 # v2 goes the pipeline's way: three repositories, the digests file, sign-images.sh.
 build v2 2026-09-15 acc-1
