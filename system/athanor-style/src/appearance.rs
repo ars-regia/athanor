@@ -191,13 +191,18 @@ impl Store {
     }
 
     fn writable(&self, key: &str) -> io::Result<()> {
-        if self.schema.has_key(key) {
-            Ok(())
-        } else {
+        if !self.schema.has_key(key) {
             Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("the schema {} has no key {key}", self.schema.id()),
             ))
+        } else if !self.settings.is_writable(key) {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("the key {key} of {} is locked", self.schema.id()),
+            ))
+        } else {
+            Ok(())
         }
     }
 }
@@ -255,6 +260,12 @@ impl Stores {
             .into_iter()
             .flatten()
     }
+}
+
+/// A value `apply` writes to one key.
+enum Value<'a> {
+    Text(&'a str),
+    Flag(bool),
 }
 
 fn required<'a>(store: &'a Option<Store>, id: &str) -> io::Result<&'a Store> {
@@ -402,23 +413,67 @@ pub fn apply(
     cosmic: impl FnOnce(&Appearance) -> io::Result<()>,
 ) -> io::Result<()> {
     let stores = Stores::open();
-    let interface = required(&stores.interface, INTERFACE)?;
-    interface.set_string(
-        "color-scheme",
-        if choice.dark {
-            "prefer-dark"
-        } else {
-            "default"
-        },
-    )?;
-    interface.set_string("accent-color", choice.accent.name())?;
-    required(&stores.a11y, A11Y)?.set_boolean("high-contrast", choice.high_contrast)?;
-    let athanor = required(&stores.athanor, ATHANOR)?;
-    athanor.set_string("accent-mode", choice.accent_mode.name())?;
-    athanor.set_string(
-        "accent-computed",
-        &choice.accent_computed.map(Rgb::hex).unwrap_or_default(),
-    )?;
+    let current = stores.read();
+    let computed = choice.accent_computed.map(Rgb::hex).unwrap_or_default();
+    let scheme = if choice.dark {
+        "prefer-dark"
+    } else {
+        "default"
+    };
+    // Only the keys the choice changes: a value read as its default, such as an accent
+    // outside the table, stays as the other tool wrote it.
+    let writes = [
+        (
+            choice.dark != current.dark,
+            &stores.interface,
+            INTERFACE,
+            "color-scheme",
+            Value::Text(scheme),
+        ),
+        (
+            choice.accent != current.accent,
+            &stores.interface,
+            INTERFACE,
+            "accent-color",
+            Value::Text(choice.accent.name()),
+        ),
+        (
+            choice.high_contrast != current.high_contrast,
+            &stores.a11y,
+            A11Y,
+            "high-contrast",
+            Value::Flag(choice.high_contrast),
+        ),
+        (
+            choice.accent_mode != current.accent_mode,
+            &stores.athanor,
+            ATHANOR,
+            "accent-mode",
+            Value::Text(choice.accent_mode.name()),
+        ),
+        (
+            choice.accent_computed != current.accent_computed,
+            &stores.athanor,
+            ATHANOR,
+            "accent-computed",
+            Value::Text(&computed),
+        ),
+    ];
+    // Every key checked before the first write, so a missing or locked one changes nothing.
+    let mut checked = Vec::new();
+    for (changed, store, id, key, value) in writes {
+        if changed {
+            let store = required(store, id)?;
+            store.writable(key)?;
+            checked.push((store, key, value));
+        }
+    }
+    for (store, key, value) in checked {
+        match value {
+            Value::Text(text) => store.set_string(key, text)?,
+            Value::Flag(flag) => store.set_boolean(key, flag)?,
+        }
+    }
     gio::Settings::sync();
     if let Err(err) = cosmic(choice) {
         tracing::warn!(error = %err, "cannot write the compositor's theme keys; its borders and indicators keep the previous appearance");

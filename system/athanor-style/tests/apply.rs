@@ -64,4 +64,16 @@ fn apply_writes_the_store_then_the_compositor() {
     assert_eq!(Appearance::read(), back);
     assert_eq!(interface.string("color-scheme"), "default");
     assert_eq!(ours.string("accent-computed"), "");
+
+    // Another tool's value that reads as the default is left alone when another key changes.
+    interface
+        .set_string("color-scheme", "prefer-light")
+        .expect("color-scheme");
+    let contrast = Appearance {
+        high_contrast: true,
+        ..back
+    };
+    appearance::apply(&contrast, |_| Ok(())).expect("apply");
+    assert_eq!(interface.string("color-scheme"), "prefer-light");
+    assert_eq!(Appearance::read(), contrast);
 }
