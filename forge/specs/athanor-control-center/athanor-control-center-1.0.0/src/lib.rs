@@ -254,20 +254,19 @@ mod tests {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
         let theme = theme_dirs();
         let grants = grants(&dirs(), state, &theme, true);
-        assert_eq!(
-            paths(&grants.write),
-            [
-                "/home/u/.local/state/athanor/control-center",
-                "/run/user/1000/athanor-control-center",
-                "/run/user/1000/dconf",
-                "/run/user/1000/athanor",
-                "/home/u/.cache",
-                "/tmp",
-                "/home/u/.config/cosmic/com.system76.CosmicTheme.Mode/v1",
-                "/home/u/.config/cosmic/com.system76.CosmicTheme.Dark/v2",
-                "/home/u/.config/cosmic/com.system76.CosmicTheme.Light/v2",
-            ]
-        );
+        let mut expected = [
+            "/home/u/.local/state/athanor/control-center",
+            "/run/user/1000/athanor-control-center",
+            "/run/user/1000/dconf",
+            "/run/user/1000/athanor",
+            "/home/u/.cache",
+            "/tmp",
+        ]
+        .map(String::from)
+        .to_vec();
+        expected.extend(paths(&theme));
+        assert_eq!(theme.len(), 3, "the theme's mode and its two built variants");
+        assert_eq!(paths(&grants.write), expected);
         assert_eq!(paths(&grants.devices), ["/dev/rfkill", "/dev/dri"]);
         assert!(
             !grants
