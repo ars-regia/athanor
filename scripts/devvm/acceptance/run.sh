@@ -376,7 +376,7 @@ stage_console() { # recovery items 1 and 5
   guest_ssh "sudo systemctl daemon-reload && sudo systemctl --no-block restart greetd.service"
   # The target wants the getty without ordering against it: wait for both.
   for _ in $(seq 45); do
-    guest_ssh 'systemctl is-active --quiet athanor-recovery.target getty@tty1.service' && break
+    guest_ssh 'systemctl is-active --quiet athanor-recovery.target && systemctl is-active --quiet getty@tty1.service' && break
     sleep 2
   done
   guest_ssh systemctl is-active --quiet athanor-recovery.target || die "FAIL  recovery 1: athanor-recovery.target is not active 90 s after greetd failed"
@@ -399,10 +399,13 @@ stage_console() { # recovery items 1 and 5
 # doc_recovery.md section 6, acceptance 7 (R5, A2-26): a deployment whose greetd.service runs
 # /usr/bin/false (the image `bad` of images.sh) is applied and booted. It is signed with the
 # key of the stage `recover`, so this stage follows it. It runs once per guest: the
-# digest of `bad` stays held afterwards, as UT6 wants (README).
+# digest of `bad` stays held afterwards, as UT6 wants (README); the digest `goback` holds
+# is another one, and the service replaces it.
 stage_greenboot() { # recovery item 7
-  local prev left boot boots text
-  guest_ssh test ! -s /var/lib/athanor-update/held || die "stage greenboot runs once per guest and a digest is already held: reset.sh, then run.sh from install"
+  local prev left boot boots text bad
+  bad=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:bad") || die "cannot read the digest of $REPO:bad"
+  [[ $(guest_ssh 'test ! -e /var/lib/athanor-update/held || cat /var/lib/athanor-update/held') != "$bad" ]] ||
+    die "stage greenboot runs once per guest and the digest of bad is already held: reset.sh, then run.sh from install"
   prev=$(marker)
   [[ $prev != bad ]] || die "the guest is booted on bad from an earlier run: reset.sh, then run.sh from install"
   point_stable bad
