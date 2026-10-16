@@ -88,7 +88,9 @@ scripts/devvm/reset.sh             # back to the freshly installed system
 - `bar-acceptance.sh [stage...]`: athanor-bar under its real unit (package 2b.2):
   Type=notify, the confinement against glycin's sandbox, PSS within 64 MB, an output that
   comes and goes (needs `GPU_OUTPUTS=2`, the default), and the crash-loop fallback to the
-  vendor layout. Build the binary first with `forge/test/shell/rig.sh build-bar`.
+  vendor layout. It also deploys the dock, whose band the scheme and accent stages read, and
+  `cosmic-variants.json`. Build the binaries first with `forge/test/shell/rig.sh build-bar`
+  and `build-dock`.
 - `dock-acceptance.sh [stage...]`: athanor-dock under its real unit (package 2c):
   Type=notify, the confinement against glycin's sandbox and the favourites file, PSS within
   48 MB, a pinned entry launched from the dock behind a security context (item 8, pressed

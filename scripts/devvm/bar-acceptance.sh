@@ -10,8 +10,10 @@
 # it and hide what the VM lacks (package 2b.4), an output that comes and goes never
 # restarts the process or leaks a surface, and a crash loop falls back to the vendor
 # layout (SH8).
-# Deploys the binary, the unit and the vendor favourites from .scratch/shell-rig/bin and
-# forge/specs/athanor-bar (build the binary with forge/test/shell/rig.sh build-bar). With no
+# Deploys from .scratch/shell-rig/bin, forge/specs and system/athanor-style the bar's binary,
+# unit and vendor favourites, the dock's binary and unit (the scheme and accent stages read
+# the dock's band), and cosmic-variants.json, from which the bar writes the compositor's
+# theme (build the binaries with forge/test/shell/rig.sh build-bar and build-dock). With no
 # argument it runs every stage in order; with arguments, only those, in the order given.
 # Prints PASS <stage> or FAIL <stage>: <what was read>, and exits non-zero on the first
 # failure. Cleanup always runs on exit, through a trap, and leaves the unit as it found it:
@@ -26,6 +28,8 @@ source "$HERE/devvm.env"
 
 BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
+DOCK_DATA=$ROOT/forge/specs/athanor-dock/athanor-dock-1.0.0/data
+VARIANTS=$ROOT/system/athanor-style/calmo/generated/cosmic/variants.json
 SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
 STAGES=(deploy unit memory modules high-contrast scheme accent hotplug crash-loop cleanup)
@@ -89,16 +93,23 @@ stage_deploy() {
     "$HERE/deploy.sh" \
         "$BIN/athanor-bar:/usr/bin/athanor-bar" \
         "$DATA/athanor-bar.service:/usr/lib/systemd/user/athanor-bar.service" \
-        "$DATA/favorites.toml:/usr/share/athanor/favorites.toml" > /dev/null
+        "$DATA/favorites.toml:/usr/share/athanor/favorites.toml" \
+        "$BIN/athanor-dock:/usr/bin/athanor-dock" \
+        "$DOCK_DATA/athanor-dock.service:/usr/lib/systemd/user/athanor-dock.service" \
+        "$VARIANTS:/usr/share/athanor/cosmic-variants.json" > /dev/null
     in_session systemctl --user daemon-reload
     unit cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
+    # The bar starts in stage unit; the dock already runs the image's binary.
+    in_session systemctl --user try-restart athanor-dock || fail "systemctl --user try-restart athanor-dock"
     # libpulse and its GLib main loop come with the RPM's automatic dependencies; a binary
     # deployed by hand needs them in the image already.
-    local libraries
-    libraries=$(in_session ldd /usr/bin/athanor-bar) || fail "ldd /usr/bin/athanor-bar failed in the guest"
-    if grep -q 'not found' <<< "$libraries"; then
-        fail "libraries missing from the guest image: $(grep 'not found' <<< "$libraries")"
-    fi
+    local binary libraries
+    for binary in athanor-bar athanor-dock; do
+        libraries=$(in_session ldd /usr/bin/$binary) || fail "ldd /usr/bin/$binary failed in the guest"
+        if grep -q 'not found' <<< "$libraries"; then
+            fail "libraries missing from the guest image: $(grep 'not found' <<< "$libraries")"
+        fi
+    done
 }
 
 stage_unit() {
