@@ -32,6 +32,9 @@ mkdir -p "$schemas"
 cp /usr/share/glib-2.0/schemas/*.xml /repo/forge/specs/athanor-system-config/SOURCES/usr/share/glib-2.0/schemas/* "$schemas"/
 glib-compile-schemas --strict "$schemas"
 export GSETTINGS_SCHEMA_DIR=$schemas
+# The accent variants athanor-calmo ships: applying an appearance writes the built
+# CosmicTheme from them (system/athanor-compositor-client/src/theme.rs).
+install -D -m 0644 /repo/system/athanor-style/calmo/generated/cosmic/variants.json /usr/share/athanor/cosmic-variants.json
 if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
     while read -r schema key value; do
         gsettings set "$schema" "$key" "$value"
