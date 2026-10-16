@@ -55,10 +55,10 @@ BATCH=4
 STAGE=
 WORK=$(mktemp -d)
 # What a stage changed in the guest and must put back, even when it fails.
-MODE_CHANGED='' SETTING_WRITTEN=''
+MODE_SAVED='' SETTING_WRITTEN=''
 finish() {
     rm -rf "$WORK"
-    [[ -z $MODE_CHANGED ]] || guest_ssh sudo chmod 0644 "$LASTLOG"
+    [[ -z $MODE_SAVED ]] || guest_ssh sudo chmod "$MODE_SAVED" "$LASTLOG"
     [[ -z $SETTING_WRITTEN ]] || guest_ssh sudo rm -f "$SETTING"
 }
 trap finish EXIT
@@ -68,12 +68,16 @@ fail() { # fail WHAT-WAS-READ
     exit 1
 }
 
-# Polls COMMAND once a second until it succeeds; returns 1 after SECONDS.
+# Polls COMMAND once a second until it succeeds; returns 1 after SECONDS, printing what the
+# last attempt wrote to stderr.
 wait_until() { # wait_until SECONDS COMMAND...
     local deadline=$((SECONDS + $1))
     shift
-    until "$@" 2> /dev/null; do
-        ((SECONDS < deadline)) || return 1
+    until "$@" 2> "$WORK/wait.err"; do
+        if ((SECONDS >= deadline)); then
+            cat "$WORK/wait.err" >&2
+            return 1
+        fi
         sleep 1
     done
 }
@@ -95,12 +99,13 @@ shot() { # shot NAME: the greeter, as greetd's user, against its own compositor
     sleep 2
     # shellcheck disable=SC2016 # expanded by the guest's shell
     guest_ssh 'sudo -u greetd env XDG_RUNTIME_DIR=/run/user/$(id -u greetd) WAYLAND_DISPLAY=wayland-1 grim -' \
-        > "$SHOTS/$1.png" || echo "note: no screenshot $1 (grim refused)" >&2
+        > "$SHOTS/$1.png" || fail "no screenshot $1: grim refused"
 }
 
 greeter_up() { probe tree > /dev/null; }
 
-list_is_shown() { [[ $(cards | jq -r .list_shown) == true ]]; }
+# Reads the tree only: `cards` presses Escape when the list is not shown.
+list_is_shown() { probe tree | jq -e 'any(.[]; .name == "Accounts" and .showing)' > /dev/null; }
 
 # The cards as JSON: list, selected, open, list_shown.
 cards() { probe cards; }
@@ -118,7 +123,19 @@ expect_order() { # expect_order JSON "Ada Bea Cy Dan"
 }
 
 # The account has an active session: loginctl lists a session of its user.
-signed_in() { [[ -n $(guest_ssh loginctl list-sessions --no-legend | awk -v u="$1" '$3 == u') ]]; }
+# A failed read of the sessions fails the stage: it must not read as "not signed in".
+signed_in() {
+    local sessions
+    sessions=$(guest_ssh loginctl list-sessions --no-legend) || fail "cannot list the guest's sessions"
+    [[ -n $(awk -v u="$1" '$3 == u' <<< "$sessions") ]]
+}
+
+boot_id() { guest_ssh cat /proc/sys/kernel/random/boot_id; }
+# Succeeds once the guest answers from a boot other than BOOT.
+booted_since() { # booted_since BOOT
+    local now
+    now=$(boot_id) && [[ $now != "$1" ]]
+}
 
 # Signs in from the open greeter through the keyboard and logs out at once.
 sign_in_and_out() { # sign_in_and_out USER FULL-NAME
@@ -192,12 +209,13 @@ stage_refused() {
 }
 
 stage_order() {
-    local json
+    local json boot
     sign_in_and_out dan Dan
     sign_in_and_out ada Ada
-    guest_ssh sudo systemctl reboot || echo "note: the reboot cut the connection" >&2
-    sleep 10
-    wait_until 180 guest_ssh true || fail "no SSH 180 s after the reboot"
+    boot=$(boot_id)
+    # Two seconds ahead, so that the SSH command returns before the connection drops.
+    guest_ssh sudo systemd-run --quiet --on-active=2 systemctl reboot
+    wait_until 180 booted_since "$boot" || fail "the guest did not answer from a new boot 180 s after the reboot"
     push_probe
     wait_until 120 greeter_up || fail "no greeter 120 s after the reboot"
     json=$(cards)
@@ -208,7 +226,7 @@ stage_order() {
 
 stage_fallback() {
     local since json log lines
-    MODE_CHANGED=1
+    MODE_SAVED=$(guest_ssh sudo stat -c %a "$LASTLOG")
     guest_ssh sudo chmod 0600 "$LASTLOG"
     since=$(guest_ssh date +%s)
     guest_ssh sudo systemctl restart greetd
@@ -218,8 +236,8 @@ stage_fallback() {
     log=$(guest_ssh sudo journalctl -q -b --since "@$since" -o cat)
     mapfile -t lines < <(grep -F "the accounts follow the name order" <<< "$log")
     ((${#lines[@]} == 1)) || fail "the journal holds ${#lines[@]} lines about the name order since the restart, not one"
-    guest_ssh sudo chmod 0644 "$LASTLOG"
-    MODE_CHANGED=''
+    guest_ssh sudo chmod "$MODE_SAVED" "$LASTLOG"
+    MODE_SAVED=''
 }
 
 # Types the same sign-in failure COUNT times under "Other user", BATCH at a time, for NAME.
@@ -243,6 +261,9 @@ stage_timing() {
     probe attempts dan wrong-password 1 > /dev/null
     guest_ssh sudo faillock --user dan --reset
     [[ $(probe alerts 5) == "$alerts" ]] || fail "the failure texts differ: nobody-here '$alerts'"
+    # The second column is the password question each attempt answered.
+    [[ $(cut -f 2 "$WORK/nobody" "$WORK/dan" | sort -u | wc -l) == 1 ]] ||
+        fail "the password questions differ: $(cut -f 2 "$WORK/nobody" "$WORK/dan" | sort | uniq -c)"
     python3 -B "$HERE/greeter_probe.py" compare "$WORK/nobody" "$WORK/dan" ||
         fail "the medians of nobody-here and dan differ by more than the delay's spread"
 }
@@ -304,6 +325,9 @@ stage_keyboard() {
 stage_cleanup() {
     local name
     guest_ssh sudo rm -f "$SETTING"
+    guest_ssh sudo rm -f "$PROBE_DIR/greeter_probe.py" "$PROBE_DIR/keyboard_type.py"
+    guest_ssh sudo rmdir "$PROBE_DIR"
+    # The mode the image ships, for a run that died between the two chmods of fallback.
     guest_ssh sudo chmod 0644 "$LASTLOG"
     for name in "${ACCOUNTS[@]}" svc run; do
         guest_ssh "if getent passwd $name > /dev/null; then sudo userdel -r $name; fi"

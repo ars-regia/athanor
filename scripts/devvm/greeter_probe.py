@@ -12,8 +12,9 @@ not appear.
   open-card FULL-NAME       to the list with Escape, to the card by its first letter, Enter
   open-other                the same for "Other user"; leaves its name field showing
   alerts SECONDS            waits for a "Sign-in failed" text; prints every showing alert
-  attempts NAME PW COUNT    COUNT sign-ins through "Other user"; prints seconds from the Enter
-                            that submits the password to the failure text, one per line
+  attempts NAME PW COUNT    COUNT sign-ins through "Other user"; prints, one per line, the
+                            seconds from the Enter that submits the password to the failure
+                            text, a tab, and the name of the password question answered
   compare A B               host side: the medians of two files of seconds against A's spread
 """
 
@@ -251,19 +252,18 @@ def cmd_attempts(greeter, keys, name, password, count):
     for _ in range(count):
         open_other(greeter, keys)
         keys.type(name, "@enter")
-        greeter.wait(
+        question = greeter.wait(
             "PAM's password question",
-            lambda t: (
-                True
-                if any(n["role"] == "password text" and n["showing"] for n in t)
-                else None
+            lambda t: next(
+                (n["name"] for n in t if n["role"] == "password text" and n["showing"]),
+                None,
             ),
         )
         keys.type(password)
         start = time.monotonic()
         keys.type("@enter")
         greeter.wait("the failure text", failed, 30)
-        out.append(time.monotonic() - start)
+        out.append((time.monotonic() - start, question))
         # The failure returns to the name field, emptied.
         greeter.wait(
             "the name field after the failure", lambda t: name_field(t) or None
@@ -273,8 +273,8 @@ def cmd_attempts(greeter, keys, name, password, count):
 
 def compare(first, second):
     """The difference of the medians against the first sample's interquartile range."""
-    a = [float(x) for x in open(first).read().split()]
-    b = [float(x) for x in open(second).read().split()]
+    a = [float(line.split("\t")[0]) for line in open(first).read().splitlines()]
+    b = [float(line.split("\t")[0]) for line in open(second).read().splitlines()]
     quartiles = statistics.quantiles(a, n=4)
     spread = quartiles[2] - quartiles[0]
     gap = abs(statistics.median(a) - statistics.median(b))
@@ -341,10 +341,10 @@ def main(argv):
                     json.dumps(greeter.wait("the failure text", failed, int(argv[1])))
                 )
             case "attempts":
-                for seconds in cmd_attempts(
+                for seconds, question in cmd_attempts(
                     greeter, keys, argv[1], argv[2], int(argv[3])
                 ):
-                    print(f"{seconds:.3f}")
+                    print(f"{seconds:.3f}\t{question}")
             case _:
                 fail(f"unknown command {argv[0]!r}")
     finally:
