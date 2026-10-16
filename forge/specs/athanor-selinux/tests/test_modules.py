@@ -12,12 +12,14 @@ HERE = pathlib.Path(__file__).resolve().parents[1]
 SOURCES = HERE / "SOURCES"
 SPEC = (HERE / "athanor-selinux.spec").read_text()
 PSTORE = SOURCES / "athanor_systemd_pstore.te"
+PCSCD = SOURCES / "athanor_pcscd_cgroup.te"
 
 
 def rules(text):
-    """The statements of a .te file, comments removed."""
+    """The statements of a .te file, comments and the require block removed. The block ends
+    at the first line that starts with a closing brace: a class inside it has braces too."""
     code = re.sub(r"#[^\n]*", "", text)
-    return [s.strip() for s in re.split(r"[;]", re.sub(r"require\s*\{.*?\}", "", code, flags=re.S)) if s.strip()]
+    return [s.strip() for s in re.split(r"[;]", re.sub(r"require\s*\{.*?^\}", "", code, flags=re.S | re.M)) if s.strip()]
 
 
 class Modules(unittest.TestCase):
@@ -33,6 +35,10 @@ class Modules(unittest.TestCase):
     def test_pstore_grants_dir_create_and_nothing_else(self):
         got = [" ".join(r.split()) for r in rules(PSTORE.read_text()) if not r.startswith("module ")]
         self.assertEqual(got, ["allow systemd_pstore_t systemd_pstore_var_lib_t:dir create"])
+
+    def test_pcscd_grants_cgroup_dir_search_and_nothing_else(self):
+        got = [" ".join(r.split()) for r in rules(PCSCD.read_text()) if not r.startswith("module ")]
+        self.assertEqual(got, ["allow pcscd_t cgroup_t:dir { getattr search open }"])
 
     # A local aid: in CI the rpmbuild of spec-build-check.yml compiles every module.
     @unittest.skipUnless(shutil.which("checkmodule"), "checkmodule is not installed")
