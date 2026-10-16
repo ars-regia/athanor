@@ -285,7 +285,7 @@ device_rule() {
 }
 
 # A device is recorded only when two consecutive passes read the same description: a device
-# reconfigured between the read of bConfigurationValue and the reads of its interfaces
+# reconfigured between the read of bConfigurationValue and the read of its descriptors
 # (usb_modeswitch, a udev rule, usbfs) reads differently twice and is read again. A device that
 # leaves the bus stops being listed and is not waited for.
 # The first run lists each device it sees in the pending file, from its ids alone, which the

@@ -299,6 +299,13 @@ case $(wc -l < {count}) in
             self.assertIn(f"{port} did not settle within 0.3 s: malformed descriptors", done.stderr)
         self.assertEqual(self.written(), [])
 
+    def test_empty_descriptors_leave_the_device_pending(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/descriptors").write_bytes(b"")
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: configured, with no interface descriptor yet", done.stderr)
+
     def test_unreadable_descriptors_leave_the_device_pending_with_the_reason(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
         (self.sysfs / "1-1/descriptors").unlink()
