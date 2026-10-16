@@ -25,7 +25,8 @@ breaks greetd with a drop-in in `/run`, waits for `athanor-recovery.target` and 
 the login of tty1 (`agetty --show-issue`); a reboot ends with the plain banner (acceptance 5). `greenboot` applies
 `bad` and checks greenboot's mark (`rollbackQueued`, the failed `10-greetd-running.sh`), the console's message
 for a marked deployment, that nothing reboots for ten minutes, the return to the previous deployment after
-`systemctl reboot` and that three checks hold the marked digest. The framebuffer of tty1 is looked at by hand: the
+`systemctl reboot` and that three checks hold the marked digest. It runs once per guest: the digest of `bad`
+stays held afterwards, so a second run needs `reset.sh` and a run from `install`. The framebuffer of tty1 is looked at by hand: the
 VM's serial console is not tty1. `greenboot` takes about 20 minutes.
 
 The `metered` stage (UT12, `doc_shell.md` section 7, item 4) marks the guest's default device
