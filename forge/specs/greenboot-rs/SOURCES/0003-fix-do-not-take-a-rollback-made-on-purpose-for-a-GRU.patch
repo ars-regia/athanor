@@ -1,0 +1,217 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Fri, 16 Oct 2026 00:49:43 +0200
+Subject: [PATCH] fix: do not take a rollback made on purpose for a GRUB
+ fallback
+
+detect_grub_fallback() took any difference between
+greenboot_next_deployment_id and the booted deployment for a GRUB
+fallback. The variable is set when a new deployment is staged and
+cleared by the health check of the boot that starts it. When that check
+does not finish, because the machine goes down early, and the person
+then rolls back on purpose (`bootc rollback`), the next boot starts the
+previous deployment as the default one while the variable still names
+the deployment left. greenboot took that boot for a fallback and rolled
+back again: the rollback was undone.
+
+GRUB falls back by starting another entry than the default one: the
+counter sets default=1, and GRUB's own fallback starts the next entry
+when the default fails to load. A rollback made on purpose changes the
+default itself. The difference is now a fallback only when the booted
+deployment is not the default one, the first deployment that is not
+staged in `rpm-ostree status`, which lists bootc deployments in boot
+order too. When the booted deployment is the default, the stale
+variables are cleared and the boot is a normal one. When the default
+cannot be told, the boot is a fallback, as before, and the reason is
+logged.
+---
+ src/lib/handler.rs | 117 ++++++++++++++++++++++++++++++++++++++++++++-
+ src/main.rs        |  27 ++++++++---
+ 2 files changed, 136 insertions(+), 8 deletions(-)
+
+diff --git a/src/lib/handler.rs b/src/lib/handler.rs
+index d218c1e..add2c49 100644
+--- a/src/lib/handler.rs
++++ b/src/lib/handler.rs
+@@ -114,6 +114,72 @@ fn bootc_deployment_id(json: &Value, key: &str) -> Option<String> {
+         .map(|s| s.to_string())
+ }
+ 
++/// What the boot that `greenboot_next_deployment_id` expected turned out to be.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum NextBoot {
++    /// The expected deployment booted.
++    Expected,
++    /// GRUB started another deployment than the default one: the expected deployment failed.
++    GrubFallback,
++    /// The default deployment booted and it is not the expected one: the default changed after
++    /// the variable was set, by a rollback made on purpose before the health check of the
++    /// expected deployment had cleared it.
++    DeliberateRollback,
++}
++
++/// Classifies the boot from the expected and the booted deployment. `booted_is_default` is
++/// asked only when they differ; when it cannot tell, the boot is a fallback, as without it.
++pub fn classify_next_boot(
++    expected_id: &str,
++    booted_id: &str,
++    booted_is_default: impl FnOnce() -> Option<bool>,
++) -> NextBoot {
++    if expected_id == booted_id {
++        NextBoot::Expected
++    } else if booted_is_default() == Some(true) {
++        NextBoot::DeliberateRollback
++    } else {
++        NextBoot::GrubFallback
++    }
++}
++
++/// Whether the booted deployment is the one the bootloader starts by default, from
++/// `rpm-ostree status`, which reads the deployments of bootc systems too; None, logged,
++/// when it cannot be told.
++pub fn booted_is_default() -> Option<bool> {
++    let output = Command::new("rpm-ostree")
++        .args(["status", "--json"])
++        .output()
++        .inspect_err(|e| log::warn!("rpm-ostree status could not run: {e}"))
++        .ok()?;
++    if !output.status.success() {
++        log::warn!(
++            "rpm-ostree status failed: {}",
++            String::from_utf8_lossy(&output.stderr).trim()
++        );
++        return None;
++    }
++    let json: Value = serde_json::from_slice(&output.stdout)
++        .inspect_err(|e| log::warn!("rpm-ostree status is not JSON: {e}"))
++        .ok()?;
++    let is_default = default_is_booted(&json);
++    if is_default.is_none() {
++        log::warn!("rpm-ostree status names no default deployment");
++    }
++    is_default
++}
++
++/// rpm-ostree lists the deployments in boot order, a staged one first: the first deployment
++/// that is not staged is the bootloader's default entry, the one GRUB falls back from.
++fn default_is_booted(json: &Value) -> Option<bool> {
++    json.get("deployments")?
++        .as_array()?
++        .iter()
++        .find(|d| !d.get("staged").and_then(Value::as_bool).unwrap_or(false))?
++        .get("booted")?
++        .as_bool()
++}
++
+ fn get_rpm_ostree_deployment_id(key: &str) -> Option<String> {
+     let output = Command::new("rpm-ostree")
+         .args(["status", "--json"])
+@@ -214,7 +280,7 @@ pub fn handle_motd(state: &str) -> Result<()> {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use super::bootc_deployment_id;
++    use super::{NextBoot, bootc_deployment_id, classify_next_boot, default_is_booted};
+     use serde_json::{Value, json};
+ 
+     fn status(download_only: Option<bool>) -> Value {
+@@ -269,4 +335,53 @@ mod tests {
+         let json = json!({"status": {"staged": null, "booted": {"image": {"imageDigest": "sha256:b59e"}}}});
+         assert_eq!(bootc_deployment_id(&json, "staged"), None);
+     }
++
++    #[test]
++    fn test_the_expected_boot_asks_nothing() {
++        let asked = || panic!("the default is asked only when the deployments differ");
++        assert_eq!(
++            classify_next_boot("sha256:0e59", "sha256:0e59", asked),
++            NextBoot::Expected
++        );
++    }
++
++    #[test]
++    fn test_another_deployment_is_a_fallback_unless_it_is_the_default() {
++        let classify = |is_default| classify_next_boot("sha256:0e59", "sha256:b59e", || is_default);
++        assert_eq!(classify(Some(true)), NextBoot::DeliberateRollback);
++        assert_eq!(classify(Some(false)), NextBoot::GrubFallback);
++        assert_eq!(classify(None), NextBoot::GrubFallback);
++    }
++
++    /// `rpm-ostree status --json` with the deployments in boot order.
++    fn deployments(list: &[(&str, bool, bool)]) -> Value {
++        let list: Vec<Value> = list
++            .iter()
++            .map(|(id, staged, booted)| json!({"id": id, "staged": staged, "booted": booted}))
++            .collect();
++        json!({"deployments": list})
++    }
++
++    #[test]
++    fn test_the_default_is_the_first_deployment_not_staged() {
++        // After `bootc rollback`: the deployment left is second.
++        let deliberate = deployments(&[("old", false, true), ("new", false, false)]);
++        assert_eq!(default_is_booted(&deliberate), Some(true));
++        // GRUB fell back to the second entry, with a third deployment pinned.
++        let fallback = deployments(&[
++            ("new", false, false),
++            ("old", false, true),
++            ("pinned", false, false),
++        ]);
++        assert_eq!(default_is_booted(&fallback), Some(false));
++        // A staged deployment is listed first and is no boot entry yet.
++        let staged = deployments(&[
++            ("next", true, false),
++            ("old", false, true),
++            ("new", false, false),
++        ]);
++        assert_eq!(default_is_booted(&staged), Some(true));
++        assert_eq!(default_is_booted(&json!({"deployments": []})), None);
++        assert_eq!(default_is_booted(&json!({})), None);
++    }
+ }
+diff --git a/src/main.rs b/src/main.rs
+index 70d336e..4bc12a3 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -3,6 +3,7 @@
+ use anyhow::{Context, Result, bail};
+ use clap::{Parser, Subcommand, ValueEnum};
+ use config::{Config, File, FileFormat};
++use greenboot::{NextBoot, booted_is_default, classify_next_boot};
+ use greenboot::{
+     RollbackMode, get_boot_counter, get_fallback, get_next_deployment_id, handle_motd,
+     handle_reboot, handle_rollback, run_diagnostics, run_green, run_red, set_boot_counter,
+@@ -262,14 +263,26 @@ fn detect_grub_fallback() -> bool {
+         }
+     };
+ 
+-    if booted_id != expected_id {
+-        log::warn!(
+-            "GRUB kernel fallback detected: expected deployment {expected_id}, booted {booted_id}"
+-        );
+-        return true;
++    match classify_next_boot(&expected_id, &booted_id, booted_is_default) {
++        NextBoot::Expected => false,
++        NextBoot::GrubFallback => {
++            log::warn!(
++                "GRUB kernel fallback detected: expected deployment {expected_id}, booted {booted_id}"
++            );
++            true
++        }
++        NextBoot::DeliberateRollback => {
++            log::info!(
++                "Deployment {expected_id} was expected and the default deployment {booted_id} booted: a rollback made on purpose, not a GRUB fallback"
++            );
++            with_boot_rw(|| {
++                unset_next_deployment_id()?;
++                unset_fallback()
++            })
++            .unwrap_or_else(|e| log::error!("Failed to clear grub vars after a rollback: {e}"));
++            false
++        }
+     }
+-
+-    false
+ }
+ 
+ /// Generate appropriate MOTD message with optional fallback prefix

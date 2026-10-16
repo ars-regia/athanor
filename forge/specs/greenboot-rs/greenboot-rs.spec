@@ -1,7 +1,8 @@
 # Athanor's greenboot: the upstream release at Fedora's version, built from upstream's archive
-# with two patches of ours: one adds GREENBOOT_AUTO_REBOOT, so that a failed health check marks
-# the deployment and reboots nothing (docs/architecture/doc_recovery.md, R5); the other sets no
-# rollback trigger for a download-only staged deployment, which a poweroff discards. Fedora's own
+# with three patches of ours: one adds GREENBOOT_AUTO_REBOOT, so that a failed health check marks
+# the deployment and reboots nothing (docs/architecture/doc_recovery.md, R5); one sets no
+# rollback trigger for a download-only staged deployment, which a poweroff discards; one does
+# not take a rollback made on purpose for a GRUB fallback. Fedora's own
 # downstream changes are not carried; License, Requires, the install steps and the file lists
 # were copied from Fedora's spec, so a bump diffs them by hand. Same Name and subpackages so
 # that they replace Fedora's build instead of sitting beside it (like forge/specs/cosmic-comp).
@@ -12,7 +13,7 @@
 
 Name:           greenboot-rs
 Version:        0.16.4
-Release:        %{fedora_release}.athanor2
+Release:        %{fedora_release}.athanor3
 Summary:        Generic Health Check Framework for systemd
 # Fedora's expression, from the crates it links statically.
 License:        BSD-3-Clause AND ISC AND MIT AND Unicode-DFS-2016 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND (Unlicense OR MIT)
@@ -26,6 +27,9 @@ Patch0:         0001-feat-add-GREENBOOT_AUTO_REBOOT-to-roll-back-without-.patch
 # Written for upstream, not yet submitted: a locked deployment of `bootc upgrade --download-only`
 # is no update that boots next, so it arms no rollback trigger (#454).
 Patch1:         0002-fix-set-no-rollback-trigger-for-a-download-only-stag.patch
+# Written for upstream, not yet submitted: the boot after `bootc rollback` starts the default
+# deployment, so a trigger its health check had no time to clear is no GRUB fallback (#521).
+Patch2:         0003-fix-do-not-take-a-rollback-made-on-purpose-for-a-GRU.patch
 
 ExcludeArch:    %{ix86}
 
@@ -50,8 +54,8 @@ Recommends:     openssh
 %{description}
 
 This build adds GREENBOOT_AUTO_REBOOT: when it is false, a failed required health check
-rolls back to the previous deployment without rebooting, and it sets no rollback trigger
-for a download-only staged deployment.
+rolls back to the previous deployment without rebooting, it sets no rollback trigger
+for a download-only staged deployment, and it does not undo a rollback made on purpose.
 
 %package -n %{pkgname}-default-health-checks
 Summary:        Series of optional and curated health checks
@@ -74,7 +78,7 @@ cp %{SOURCE1} Cargo.lock
 cargo build --release --locked
 
 %check
-# The tests of the two patches: the bootc status parsing (handler) and the configuration
+# The tests of the patches: the bootc status parsing (handler) and the configuration
 # (the binary). Upstream's grub and mount tests call grub2-editenv and need a /boot mount,
 # which the builder has neither of.
 cargo test --release --locked --lib handler::tests
@@ -150,6 +154,11 @@ fi
 %{_unitdir}/greenboot-healthcheck.service.d/10-network-online.conf
 
 %changelog
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc43.athanor3
+- Do not take a rollback made on purpose for a GRUB fallback: when the health check of a new
+  deployment did not finish before `bootc rollback`, the next boot was taken for a fallback and
+  rolled back to the deployment left (#521).
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc43.athanor2
 - Set no rollback trigger for a download-only staged deployment: a poweroff discards it, and
   the next boot was taken for a GRUB fallback and rolled back to the previous deployment
