@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later
@@ -50,6 +50,10 @@ install -D -m 0644 %{sources}/usr/lib/systemd/system-preset/80-athanor-recovery.
 /usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %changelog
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- The notice unit's comment gives the real reason for the /etc/issue.d link: agetty reads
+  /run/issue.d too, and the unit writes only its own runtime directory (#560).
+
 * Wed Oct 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Enable greenboot-healthcheck.service and greenboot-set-rollback-trigger.service through
   80-athanor-recovery.preset (doc_recovery.md, R5): nothing enabled them, so no update was
