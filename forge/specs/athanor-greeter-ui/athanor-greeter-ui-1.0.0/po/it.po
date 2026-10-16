@@ -8,24 +8,32 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/auth.rs:62
+#: src/auth.rs:68
 #, rust-format
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:219
+#: src/auth.rs:263
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:250
+#: src/auth.rs:297
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:257
+#: src/auth.rs:307
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/auth.rs:270
+#: src/auth.rs:317
+msgid "Wrong password"
+msgstr "Password errata"
+
+#: src/auth.rs:319
+msgid "The login service refused the sign-in."
+msgstr "Il servizio di accesso ha rifiutato l'accesso."
+
+#: src/auth.rs:333
 msgid "The login service cannot be reached."
 msgstr "Il servizio di accesso non è raggiungibile."
 
@@ -113,7 +121,7 @@ msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui.rs:187 src/ui.rs:776 src/ui.rs:818
+#: src/ui.rs:187 src/ui.rs:783 src/ui.rs:825
 msgid "Other user"
 msgstr "Altro utente"
 
@@ -122,68 +130,68 @@ msgstr "Altro utente"
 msgid "Keyboard layout: {layout}"
 msgstr "Disposizione della tastiera: {layout}"
 
-#: src/ui.rs:565
+#: src/ui.rs:572
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:599
+#: src/ui.rs:606
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:608 src/ui.rs:613 src/ui.rs:614
+#: src/ui.rs:615 src/ui.rs:620 src/ui.rs:621
 msgid "User name"
 msgstr "Nome utente"
 
-#: src/ui.rs:627 src/ui.rs:630
+#: src/ui.rs:634 src/ui.rs:637
 msgid "Back to the list"
 msgstr "Torna all'elenco"
 
-#: src/ui.rs:636
+#: src/ui.rs:643
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:639 src/ui.rs:643
+#: src/ui.rs:646 src/ui.rs:650
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/ui.rs:770
+#: src/ui.rs:777
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:794
+#: src/ui.rs:801
 msgid "Accounts"
 msgstr "Account"
 
-#: src/ui.rs:954
+#: src/ui.rs:961
 msgid "Enter a user name of at most 256 bytes, without control characters."
 msgstr "Inserisci un nome utente di al massimo 256 byte, senza caratteri di controllo."
 
-#: src/ui.rs:970
+#: src/ui.rs:977
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:985
+#: src/ui.rs:992
 msgid "Sign-in was cancelled."
 msgstr "Accesso annullato."
 
-#: src/ui.rs:992
+#: src/ui.rs:1000
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:1028 src/ui.rs:1029
+#: src/ui.rs:1036 src/ui.rs:1037
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:1049
+#: src/ui.rs:1057
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:1055
+#: src/ui.rs:1063
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:1061
+#: src/ui.rs:1069
 msgid "Shut down"
 msgstr "Spegni"
