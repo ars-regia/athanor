@@ -170,9 +170,11 @@ timeout "$TIMEOUT" qemu-system-x86_64 \
     -device virtio-scsi-pci -device scsi-cd,drive=cd,bootindex=1 \
     -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
     -device virtio-vga \
-    -display none -serial "unix:${serial},server,nowait" \
+    -display none -serial "unix:${serial},server=on,wait=on" \
     -monitor "unix:${monitor},server,nowait" &
 qemu_pid=$!
+# The serial socket waits for the console (wait=on): GRUB draws its menu once, and a console
+# that connects after it would never type the boot commands.
 
 # The console decides how long the run lasts, not the clock. It stops as soon as it has
 # an answer: a session, a guest that broke, or a machine that has gone quiet with nothing

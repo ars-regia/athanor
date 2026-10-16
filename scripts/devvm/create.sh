@@ -38,7 +38,9 @@ echo "installing $(basename "$iso"), serial console in $work/serial.log"
 python3 "$HERE/install_console.py" "$work/serial.sock" "$work/serial.log" devvm.ks &
 console_pid=$!
 # The empty disk is first in the boot order and unbootable, so the firmware falls through
-# to the CD; -no-reboot turns any restart the installer attempts into an exit.
+# to the CD; -no-reboot turns any restart the installer attempts into an exit. wait=on holds
+# the firmware until the console is connected: GRUB draws the menu install_console.py waits
+# for only once, and a console that connects after it never types the kickstart's commands.
 qemu-system-x86_64 \
   -machine q35 -accel kvm -cpu host -smp "$CPUS" -m "$MEMORY" -no-reboot \
   -drive "if=pflash,format=raw,readonly=on,file=$code" \
@@ -48,7 +50,7 @@ qemu-system-x86_64 \
   -drive "if=none,id=cd,media=cdrom,readonly=on,file=$iso" \
   -device virtio-scsi-pci -device scsi-cd,drive=cd,bootindex=1 \
   -netdev user,id=n0 -device "virtio-net-pci,netdev=n0,$NIC_PCI_ADDR" \
-  -device virtio-vga -display none -serial "unix:$work/serial.sock,server,wait=off"
+  -device virtio-vga -display none -serial "unix:$work/serial.sock,server=on,wait=on"
 wait "$console_pid"
 grep -aq "Athanor devvm kickstart finished" "$work/serial.log" \
   || die "the install did not finish, see $work/serial.log"
