@@ -16,6 +16,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Upgrade path: remove matching temporaries older than a minute at start, if they are ever
 /// seen piling up.
 pub fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
+    replace(path, text)?;
+    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        sync_dir(dir)?;
+    }
+    Ok(())
+}
+
+/// `write_atomically` without the fsync of the directory: a writer that replaces many files
+/// of one directory calls `sync_dir` once after the last.
+pub fn replace(path: &Path, text: &str) -> io::Result<()> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let name = path
         .file_name()
@@ -48,11 +58,12 @@ pub fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
         // alone to remove.
         let _ignored = fs::remove_file(&temporary);
     }
-    written?;
-    if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        fs::File::open(dir)?.sync_all()?;
-    }
-    Ok(())
+    written
+}
+
+/// Makes the renames into `dir` survive a crash.
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
+    fs::File::open(dir)?.sync_all()
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use athanor_layout::atomic::write_atomically;
+use athanor_layout::atomic::{replace, sync_dir};
 use athanor_style::appearance::Appearance;
 
 use crate::cosmic_config;
@@ -88,28 +88,43 @@ pub fn write_cosmic_in(
     let themes = [(DARK, theme("dark")?), (LIGHT, theme("light")?)];
     for (component, theme) in themes {
         let dir = cosmic_config::versioned(cosmic_dir, component, THEME_VERSION);
-        fs::create_dir_all(&dir)?;
-        for (key, text) in theme {
-            write_key(&dir, key, text)?;
-        }
+        write_keys(
+            &dir,
+            theme
+                .iter()
+                .map(|(key, text)| (key.as_str(), text.as_str())),
+        )?;
     }
     let dir = cosmic_config::versioned(cosmic_dir, MODE, MODE_VERSION);
-    fs::create_dir_all(&dir)?;
-    write_key(&dir, "is_dark", &appearance.dark.to_string())
+    write_keys(&dir, [("is_dark", appearance.dark.to_string().as_str())])
 }
 
-fn write_key(dir: &Path, key: &str, text: &str) -> io::Result<()> {
-    if Path::new(key).file_name().and_then(|name| name.to_str()) != Some(key) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("{key:?} is not a key name"),
-        ));
+/// Replaces the keys of one component whose file does not already hold the text, then
+/// fsyncs the directory once: the first apply writes some forty keys per theme.
+fn write_keys<'a>(
+    dir: &Path,
+    keys: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let mut written = false;
+    for (key, text) in keys {
+        if Path::new(key).file_name().and_then(|name| name.to_str()) != Some(key) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{key:?} is not a key name"),
+            ));
+        }
+        let path = dir.join(key);
+        if fs::read_to_string(&path).is_ok_and(|current| current == text) {
+            continue;
+        }
+        replace(&path, text)?;
+        written = true;
     }
-    let path = dir.join(key);
-    if fs::read_to_string(&path).is_ok_and(|current| current == text) {
-        return Ok(());
+    if written {
+        sync_dir(dir)?;
     }
-    write_atomically(&path, text)
+    Ok(())
 }
 
 #[cfg(test)]
