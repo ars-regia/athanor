@@ -9,8 +9,9 @@ throwaway registry and throwaway keys. Nothing here touches the project registry
     scripts/devvm/acceptance/run.sh                      # about 90 minutes, a dozen reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
 
-The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together:
-`run.sh` refuses to start while a workflow run is in progress. Do not dispatch one meanwhile.
+The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together: on a
+host where `athanor-runner.service` is active, `run.sh` refuses to start while a job is busy
+on a self-hosted runner. Do not dispatch one meanwhile.
 
 The `probes` stage (issue #312) runs `probes.py` on the finished guest: listening sockets and
 firewall zones, `systemd-analyze security` ceilings, SELinux denials since boot, PAM, sysctl,
