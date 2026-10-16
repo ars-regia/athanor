@@ -102,13 +102,17 @@ async fn caller_session(conn: &Connection, sender: &str) -> zbus::Result<OwnedOb
 
 /// Whether a counting session other than `caller` is open. Any error is the caller's to
 /// read as "open": a class that cannot be read is never taken as one that does not count.
+/// The one exception is a session logind no longer has: it ended between `ListSessions` and
+/// the read of its class, typically an SSH login closing, and is not open.
 async fn others_open(conn: &Connection, caller: &ObjectPath<'_>) -> zbus::Result<bool> {
     let logind = Logind(conn);
     let sessions: Vec<Session> = logind.call("ListSessions", &()).await?.body().deserialize()?;
     for (_, _, _, _, path) in sessions.iter().filter(|session| session.4.as_str() != caller.as_str()) {
-        let class: String = logind.property(path, "org.freedesktop.login1.Session", "Class").await?;
-        if !UNCOUNTED_CLASSES.contains(&class.as_str()) {
-            return Ok(true);
+        match logind.property::<String>(path, "org.freedesktop.login1.Session", "Class").await {
+            Ok(class) if !UNCOUNTED_CLASSES.contains(&class.as_str()) => return Ok(true),
+            Ok(_) => {}
+            Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.DBus.Error.UnknownObject" => {}
+            Err(err) => return Err(err),
         }
     }
     Ok(false)
@@ -432,7 +436,8 @@ mod tests {
     /// a test shares this process's PID, so `GetSessionByPID` answers for the caller.
     #[derive(Clone, Default)]
     struct Seats {
-        /// Listed sessions: id and class; a class of `None` has no object to read it from.
+        /// Listed sessions: id and class; a class of `None` has no object, as for a session
+        /// that ended after `ListSessions`, and `UNREADABLE` an object whose class read fails.
         sessions: Vec<(&'static str, u32, Option<&'static str>)>,
         /// The session of the caller's process; `None` for a process of a systemd user unit.
         by_pid: Option<&'static str>,
@@ -471,11 +476,16 @@ mod tests {
 
     struct SessionObject(&'static str);
 
+    const UNREADABLE: &str = "unreadable";
+
     #[zbus::interface(name = "org.freedesktop.login1.Session")]
     impl SessionObject {
         #[zbus(property)]
-        fn class(&self) -> String {
-            self.0.into()
+        fn class(&self) -> zbus::fdo::Result<String> {
+            if self.0 == UNREADABLE {
+                return Err(zbus::fdo::Error::AccessDenied("the class cannot be read".into()));
+            }
+            Ok(self.0.into())
         }
     }
 
@@ -546,9 +556,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_session_that_ended_during_the_count_does_not_count() {
+        let ended = Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1000, None)], ..alone() };
+        assert!(!count("count-ended", ended).await, "only the caller is left");
+        let ended_then_open = Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1000, None), ("4", 1001, Some("user"))], ..alone() };
+        assert!(count("count-ended-then-open", ended_then_open).await, "the sessions after it are still counted");
+    }
+
+    #[tokio::test]
     async fn the_count_fails_closed() {
         assert!(count("count-list-fails", Seats { list_fails: true, ..alone() }).await, "ListSessions failing");
-        assert!(count("count-unreadable", Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1001, None)], ..alone() }).await, "a class that cannot be read");
+        assert!(count("count-unreadable", Seats { sessions: vec![("2", 1000, Some("user")), ("3", 1001, Some(UNREADABLE))], ..alone() }).await, "a class that cannot be read");
         assert!(count("count-undetermined", Seats { by_pid: None, ..alone() }).await, "a caller without a session");
     }
 

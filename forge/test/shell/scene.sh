@@ -36,7 +36,8 @@ export GSETTINGS_SCHEMA_DIR=$schemas
 # CosmicTheme from them (system/athanor-compositor-client/src/theme.rs).
 install -D -m 0644 /repo/system/athanor-style/calmo/generated/cosmic/variants.json /usr/share/athanor/cosmic-variants.json
 if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
-    while read -r schema key value; do
+    # A last line without a newline is read too.
+    while read -r schema key value || [ -n "$schema" ]; do
         gsettings set "$schema" "$key" "$value"
     done < "$RIG_CONFIG_SEED.gsettings"
 fi
