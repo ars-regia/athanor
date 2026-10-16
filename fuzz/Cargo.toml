@@ -107,13 +107,6 @@ test = false
 doc = false
 
 [[bin]]
-name = "compositor_theme"
-path = "fuzz_targets/compositor_theme.rs"
-required-features = ["gtk"]
-test = false
-doc = false
-
-[[bin]]
 name = "layout_document"
 path = "fuzz_targets/layout_document.rs"
 required-features = ["layout"]

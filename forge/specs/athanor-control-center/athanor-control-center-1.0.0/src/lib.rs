@@ -99,16 +99,17 @@ pub fn focused_output(activated: Option<&[String]>, outputs: &[Option<String>]) 
 pub struct Grants {
     /// Directories written below: the control center's own state, what GTK writes at start
     /// (the bar's list: its runtime directory, dconf, the cache, `/tmp`), the launch sockets,
-    /// and the directory
-    /// of the COSMIC theme mode that the dark-mode tile writes.
+    /// and the directories
+    /// of the COSMIC theme that the dark-mode tile writes.
     pub write: Vec<PathBuf>,
     /// Device nodes opened for writing.
     pub devices: Vec<PathBuf>,
 }
 
-/// `theme_mode_dir` is the user's `com.system76.CosmicTheme.Mode/v1`; `rfkill` is whether
-/// `/dev/rfkill` exists, since Landlock refuses to add a rule for a path that does not.
-pub fn grants(dirs: &Dirs, state: &Path, theme_mode_dir: Option<&Path>, rfkill: bool) -> Grants {
+/// `theme_dirs` are the user's COSMIC theme directories the appearance apply function
+/// writes; `rfkill` is whether `/dev/rfkill` exists, since Landlock refuses to add a rule
+/// for a path that does not.
+pub fn grants(dirs: &Dirs, state: &Path, theme_dirs: &[PathBuf], rfkill: bool) -> Grants {
     let mut write = vec![
         state.to_path_buf(),
         dirs.unit_runtime.clone(),
@@ -117,7 +118,7 @@ pub fn grants(dirs: &Dirs, state: &Path, theme_mode_dir: Option<&Path>, rfkill: 
         dirs.cache.clone(),
         PathBuf::from("/tmp"),
     ];
-    write.extend(theme_mode_dir.map(Path::to_path_buf));
+    write.extend_from_slice(theme_dirs);
     // /dev/rfkill is CC8's; /dev/dri is what GDK opens at start, as the bar's ruleset says.
     let mut devices = Vec::new();
     if rfkill {
@@ -242,17 +243,17 @@ mod tests {
             .collect::<Vec<_>>()
     }
 
-    /// The theme mode directory under `/home/u`, named through the compositor client, which
+    /// The theme directories under `/home/u`, named through the compositor client, which
     /// owns COSMIC's configuration names.
-    fn mode() -> String {
-        format!("/home/u/.config/cosmic/{}/v1", athanor_compositor_client::theme::MODE)
+    fn theme_dirs() -> Vec<PathBuf> {
+        athanor_compositor_client::theme::theme_dirs_in(Path::new("/home/u/.config/cosmic"))
     }
 
     #[test]
-    fn the_ruleset_grants_the_state_the_theme_mode_what_gtk_writes_and_two_devices() {
+    fn the_ruleset_grants_the_state_the_theme_what_gtk_writes_and_two_devices() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
-        let mode = mode();
-        let grants = grants(&dirs(), state, Some(Path::new(&mode)), true);
+        let theme = theme_dirs();
+        let grants = grants(&dirs(), state, &theme, true);
         assert_eq!(
             paths(&grants.write),
             [
@@ -262,7 +263,9 @@ mod tests {
                 "/run/user/1000/athanor",
                 "/home/u/.cache",
                 "/tmp",
-                mode.as_str()
+                "/home/u/.config/cosmic/com.system76.CosmicTheme.Mode/v1",
+                "/home/u/.config/cosmic/com.system76.CosmicTheme.Dark/v2",
+                "/home/u/.config/cosmic/com.system76.CosmicTheme.Light/v2",
             ]
         );
         assert_eq!(paths(&grants.devices), ["/dev/rfkill", "/dev/dri"]);
@@ -270,8 +273,8 @@ mod tests {
             !grants
                 .write
                 .iter()
-                .any(|path| path.starts_with("/home/u/.config") && path != Path::new(&mode)),
-            "no write to the configuration but the theme mode"
+                .any(|path| path.starts_with("/home/u/.config") && !theme.contains(path)),
+            "no write to the configuration but the theme"
         );
     }
 
@@ -296,10 +299,28 @@ mod tests {
         );
     }
 
+    /// The theme directories the ruleset grants are ones the unit makes writable: under
+    /// ProtectHome=read-only, only its configuration directories are.
+    #[test]
+    fn the_unit_declares_every_theme_directory_as_a_configuration_directory() {
+        let unit = include_str!("../data/athanor-control-center.service");
+        let declared: Vec<&str> = unit
+            .lines()
+            .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
+            .flat_map(str::split_whitespace)
+            .collect();
+        for dir in athanor_compositor_client::theme::theme_dirs_in(Path::new("cosmic")) {
+            assert!(
+                declared.iter().any(|name| Path::new(name) == dir),
+                "{declared:?} lacks {dir:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_machine_without_rfkill_is_granted_no_rfkill_device() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
-        let grants = grants(&dirs(), state, None, false);
+        let grants = grants(&dirs(), state, &[], false);
         assert_eq!(paths(&grants.devices), ["/dev/dri"]);
         assert_eq!(grants.write.len(), 6, "no theme directory to grant either");
     }

@@ -18,3 +18,26 @@ pub mod tray;
 /// Until the other models move (control-center plan, Task 7), the modules that name
 /// `athanor_bar::battery` keep their path.
 pub use athanor_services::battery;
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    /// The theme directories main.rs grants are ones the unit makes writable: under
+    /// ProtectHome=read-only, only its configuration directories are.
+    #[test]
+    fn the_unit_declares_every_theme_directory_as_a_configuration_directory() {
+        let unit = include_str!("../data/athanor-bar.service");
+        let declared: Vec<&str> = unit
+            .lines()
+            .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
+            .flat_map(str::split_whitespace)
+            .collect();
+        for dir in athanor_compositor_client::theme::theme_dirs_in(Path::new("cosmic")) {
+            assert!(
+                declared.iter().any(|name| Path::new(name) == dir),
+                "{declared:?} lacks {dir:?}"
+            );
+        }
+    }
+}

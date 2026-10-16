@@ -1,13 +1,15 @@
 """bar_high_contrast.py: run in the guest's session by bar-acceptance.sh (stage high-contrast).
 
 Switches high contrast on and back off through athanor-bar's accessibility menu over
-AT-SPI, as a user would, and checks that each switch reaches COSMIC's is_high_contrast key
-in both theme modes: the write happens inside the unit's confinement, so a directory the
-unit cannot write shows up here as a key that never changes. Prints one line per step and
+AT-SPI, as a user would, and checks that each switch reaches the GNOME key high-contrast and
+the built themes cosmic-comp reads in both modes (Dark/v2 and Light/v2, spike VL-S1): the
+write happens inside the unit's confinement, so a directory or a dconf path the unit cannot
+write shows up here as a key that never changes. Prints one line per step and
 exits non-zero on the first that fails.
 """
 
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,7 +21,7 @@ from gi.repository import Atspi  # noqa: E402
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 KEYS = [
-    CONFIG / "cosmic" / f"com.system76.CosmicTheme.{mode}" / "v1" / "is_high_contrast"
+    CONFIG / "cosmic" / f"com.system76.CosmicTheme.{mode}" / "v2" / "is_high_contrast"
     for mode in ("Dark", "Light")
 ]
 
@@ -75,10 +77,23 @@ def showing(accessible, role, label):
     return found
 
 
+def gnome_key():
+    return subprocess.run(
+        ["gsettings", "get", "org.gnome.desktop.a11y.interface", "high-contrast"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
 def keys_are(value):
     text = str(value).lower()
-    return lambda: all(
-        key.exists() and key.read_text(encoding="utf-8").strip() == text for key in KEYS
+    return lambda: (
+        gnome_key() == text
+        and all(
+            key.exists() and key.read_text(encoding="utf-8").strip() == text
+            for key in KEYS
+        )
     )
 
 
@@ -93,7 +108,8 @@ def main():
     step("athanor-bar is on the accessibility bus", app is not None)
     step(
         "high contrast is off before the run",
-        all(
+        gnome_key() == "false"
+        and all(
             not key.exists() or key.read_text(encoding="utf-8").strip() == "false"
             for key in KEYS
         ),
@@ -112,12 +128,12 @@ def main():
     step("the High contrast switch shows", bool(switch))
     switch[0].do_action(0)
     step(
-        "high contrast on reaches both theme modes' key within 2 s",
+        "high contrast on reaches the GNOME key and both built themes within 2 s",
         wait_for(keys_are(True), 2),
     )
     switch[0].do_action(0)
     step(
-        "high contrast off reaches both theme modes' key within 2 s",
+        "high contrast off reaches the GNOME key and both built themes within 2 s",
         wait_for(keys_are(False), 2),
     )
     opener[0].do_action(0)

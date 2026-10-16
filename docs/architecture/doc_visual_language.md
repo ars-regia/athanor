@@ -193,7 +193,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 
 ## 4. Open doubts
 
-- **VL-S1. Which `CosmicTheme` keys cosmic-comp 1.8.0 reads** for window borders, focus indicators and its own overlays, and whether it watches them live. It settles step 2. Unverified.
+- **VL-S1. Which `CosmicTheme` keys cosmic-comp 1.8.0 reads** for window borders, focus indicators and its own overlays, and whether it watches them live. It settles step 2. Settled on 2026-10-16 for cosmic-comp 1.10.0, the version in the image ([spike VL-S1](../spikes/vl-s1-cosmic-comp-theme-keys.md), #527): it reads the built themes `com.system76.CosmicTheme.Mode/v1`, `Dark/v2` and `Light/v2`, never the builders, reloads the whole theme when any of them changes, and never reads `is_high_contrast`, so high contrast reaches it as the prebuilt high-contrast themes. The apply function of VL4 writes those three components last (#518).
 - **VL-S2. GTK's scaling of `pt` and `%`** under `text-scaling-factor` in a layer-shell surface on cosmic-comp, on the reference laptop. VL6 assumes the behaviour GTK documents. Unverified.
 - **VL-S3. The OKLCH correction of VL3** on a corpus of real wallpapers (photographs, flat colours, greyscale), to tune the chroma floor and the lightness search. The values of VL3 are the starting point, not measured.
 - **VL-S4. The size of the eighteen hearth images** at the largest output the image supports; if the cost is out of proportion, the hearth is drawn at run time earlier than stage 8.

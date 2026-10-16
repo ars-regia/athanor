@@ -7,8 +7,7 @@ use athanor_layout::document::{DocumentError, Key};
 use athanor_layout::loader::{self, Paths, Resolved, UserState};
 use athanor_layout::preset::{DockKnob, PanelEdge, Preset};
 use athanor_layout::user::{self, Change};
-use athanor_compositor_client::theme;
-use athanor_style::calmo;
+use athanor_style::appearance::{self, Appearance};
 use gtk4::accessible::Relation;
 use gtk4::prelude::*;
 use gtk4::{
@@ -82,9 +81,7 @@ pub fn build_ui(app: &Application, paths: Paths) {
     window.add_css_class("athanor-layout");
 
     let display = gtk4::prelude::WidgetExt::display(&window);
-    let cosmic = theme::read();
-    calmo::load(&display, cosmic.variant());
-    theme::load_accent(&display, &cosmic);
+    appearance::load(&display, &Appearance::read());
 
     let content = GtkBox::builder()
         .orientation(Orientation::Vertical)

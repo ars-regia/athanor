@@ -118,14 +118,14 @@ fn main() -> glib::ExitCode {
         tracing::warn!(error = %err, dir = %launch.display(), "cannot create the directory of the launch sockets");
     }
     // The unit's ConfigurationDirectory= creates it; a run outside it needs it here.
-    let mode_dir = theme::mode_dir();
-    if let Some(dir) = &mode_dir {
+    let theme_dirs = theme::theme_dirs();
+    for dir in &theme_dirs {
         if let Err(err) = std::fs::create_dir_all(dir) {
-            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the theme mode directory");
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot create the COSMIC theme directory");
         }
     }
     let rfkill_present = Path::new(RFKILL).exists();
-    let granted = grants(&dirs, &state, mode_dir.as_deref(), rfkill_present);
+    let granted = grants(&dirs, &state, &theme_dirs, rfkill_present);
     let write: Vec<&std::path::Path> = granted
         .write
         .iter()

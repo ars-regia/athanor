@@ -11,12 +11,12 @@ use std::time::Duration;
 
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
-use athanor_compositor_client::{outputs, theme, Client, Event};
+use athanor_compositor_client::{outputs, Client, Event};
 use athanor_dock::placement;
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::Layout;
-use athanor_style::calmo;
+use athanor_style::appearance::{self, Appearance};
 use athanor_unit::notify;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
@@ -48,9 +48,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     if i18n::is_rtl() {
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
-    let cosmic = theme::read();
-    calmo::load(&display, cosmic.variant());
-    theme::load_accent(&display, &cosmic);
+    appearance::load(&display, &Appearance::read());
     let layout = source.layout();
     tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
@@ -189,11 +187,7 @@ impl Dock {
             }
         }
         let display = self.display.clone();
-        let theme_watches = theme::watch(move |cosmic| {
-            calmo::load(&display, cosmic.variant());
-            theme::load_accent(&display, &cosmic);
-        });
-        self.watches.borrow_mut().extend(theme_watches);
+        appearance::watch(move |current| appearance::load(&display, &current));
     }
 
     /// Editors write a file in several steps: act 250 ms after the last event.

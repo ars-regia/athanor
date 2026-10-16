@@ -12,7 +12,8 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
   window by StartupWMClass; with a second
   window its button opens the menu, whose Pin to Bar and Unpin from Bar write the
   favourites file and whose row follows the pinned state;
-- the accessibility popover offers high contrast, which writes COSMIC's is_high_contrast;
+- the accessibility popover offers high contrast, which writes the GNOME key and COSMIC's
+  built themes, and a failed write of the second leaves the switch on (VL4);
 - the power menu asks first, with Cancel focused, and calls logind only on confirmation;
 - a logind that never answers hides the action, logs it and leaves the bar running with
   the other actions still offered;
@@ -23,6 +24,7 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -219,21 +221,26 @@ def pss_kb(pid):
 
 
 def high_contrast_files():
-    config = Path(os.environ["XDG_CONFIG_HOME"])
+    cosmic = Path(os.environ["XDG_CONFIG_HOME"]) / "cosmic"
     return [
-        config / "cosmic" / "com.system76.CosmicTheme.Dark" / "v1" / "is_high_contrast",
-        config
-        / "cosmic"
-        / "com.system76.CosmicTheme.Light"
-        / "v1"
-        / "is_high_contrast",
+        cosmic / f"com.system76.CosmicTheme.{mode}" / "v2" / "is_high_contrast"
+        for mode in ("Dark", "Light")
     ]
+
+
+def high_contrast_key():
+    return subprocess.run(
+        ["gsettings", "get", "org.gnome.desktop.a11y.interface", "high-contrast"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
 
 
 def high_contrast_is(value):
     def check_now():
         text = str(value).lower()
-        return all(
+        return high_contrast_key() == text and all(
             path.exists() and path.read_text(encoding="utf-8").strip() == text
             for path in high_contrast_files()
         )
@@ -266,8 +273,6 @@ def menu_row_after(app, Atspi, opener, row):
 
 
 def main():
-    import subprocess
-
     import gi
 
     gi.require_version("Atspi", "2.0")
@@ -458,7 +463,7 @@ def main():
     if switches:
         switches[0].do_action(0)
     check(
-        "high contrast reaches both of COSMIC's theme files within 2 s",
+        "high contrast reaches the GNOME key and both built themes within 2 s",
         wait_for(high_contrast_is(True), 2),
     )
     check("the bar stays alive with high contrast on", alive(pid))
@@ -469,36 +474,42 @@ def main():
     # variant, same as every other capture in the rig.
     check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
 
-    # A regular file where Dark's v1 directory belongs makes the next write fail:
+    # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
     # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
-    # directory's inode. Dark is written first, so nothing is written (BR3).
-    dark_v1 = high_contrast_files()[0].parent
-    shutil.rmtree(dark_v1)
-    dark_v1.write_text("", encoding="utf-8")
+    # directory's inode. Dark is written first, so COSMIC's themes keep the old contrast;
+    # the store, which the shell reads, holds the choice (VL4).
+    dark_v2 = high_contrast_files()[0].parent
+    shutil.rmtree(dark_v2)
+    dark_v2.write_text("", encoding="utf-8")
     try:
         switches = labelled(app, Atspi, "check box", "High contrast")
         check(
-            "the High contrast switch is pressed with its theme directory unwritable",
+            "the High contrast switch is pressed with a theme directory unwritable",
             bool(switches) and switches[0].do_action(0),
         )
+        check(
+            "the GNOME key still turns on",
+            wait_for(lambda: high_contrast_key() == "true", 2),
+        )
 
-        def reverted():
+        def still_on():
             found = labelled(app, Atspi, "check box", "High contrast")
-            return bool(found) and not found[0].get_state_set().contains(
+            return bool(found) and found[0].get_state_set().contains(
                 Atspi.StateType.CHECKED
             )
 
         time.sleep(0.5)
+        check("the switch stays on", still_on())
         check(
-            "a failed high-contrast write puts the switch back off (BR3)",
-            wait_for(reverted, 3),
+            "Light's built theme keeps the old contrast",
+            high_contrast_files()[1].read_text(encoding="utf-8").strip() == "false",
         )
         check(
             "the failed write is logged",
             wait_for(
                 lambda: (
                     client_log.exists()
-                    and "cannot switch high contrast"
+                    and "cannot write the compositor's theme keys"
                     in client_log.read_text(encoding="utf-8", errors="replace")
                 ),
                 3,
@@ -506,8 +517,15 @@ def main():
         )
         check("the bar stays alive after the failed write", alive(pid))
     finally:
-        dark_v1.unlink()
-        dark_v1.mkdir()
+        dark_v2.unlink()
+        dark_v2.mkdir()
+    switches = labelled(app, Atspi, "check box", "High contrast")
+    if switches:
+        switches[0].do_action(0)
+    check(
+        "high contrast is switched off again, both built themes included",
+        wait_for(high_contrast_is(False), 2),
+    )
 
     check("the power menu opens", press(app, Atspi, "Power"))
     check(

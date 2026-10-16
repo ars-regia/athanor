@@ -2,7 +2,7 @@
 %global debug_package %{nil}
 Name:           athanor-calmo
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Calmo identity: COSMIC defaults, hearth wallpaper and seal icons
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -31,6 +31,9 @@ python3 -B system/athanor-style/calmo/generate.py wallpaper dark 3840 2160 calmo
 mkdir -p %{buildroot}/usr/share/athanor/cosmic-defaults/cosmic
 cp -a system/athanor-style/calmo/generated/cosmic/cosmic/. %{buildroot}/usr/share/athanor/cosmic-defaults/cosmic/
 cp -a system/athanor-style/calmo/generated/cosmic-bg/. %{buildroot}/usr/share/athanor/cosmic-defaults/cosmic/
+# Outside cosmic-defaults, which is a cosmic-config tree: the built-theme keys of each mode,
+# contrast and accent, which the appearance apply function writes (doc_visual_language.md, VL4).
+install -D -m 0644 system/athanor-style/calmo/generated/cosmic/variants.json %{buildroot}/usr/share/athanor/cosmic-variants.json
 install -D -m 0644 forge/specs/athanor-calmo/SOURCES/usr/lib/environment.d/60-athanor-cosmic-defaults.conf %{buildroot}/usr/lib/environment.d/60-athanor-cosmic-defaults.conf
 install -D -m 0644 calmo-build/hearth-light.png %{buildroot}/usr/share/backgrounds/athanor/hearth-light.png
 install -D -m 0644 calmo-build/hearth-dark.png %{buildroot}/usr/share/backgrounds/athanor/hearth-dark.png
@@ -43,12 +46,14 @@ rm -rf calmo-build
 test -z "$(find %{buildroot}/usr/share/athanor/cosmic-defaults -type d -empty)"
 test -s %{buildroot}/usr/share/athanor/cosmic-defaults/cosmic/com.system76.CosmicTheme.Light/v2/accent
 test -s %{buildroot}/usr/share/athanor/cosmic-defaults/cosmic/com.system76.CosmicBackground/v1/all
+test -s %{buildroot}/usr/share/athanor/cosmic-variants.json
 
 %transfiletriggerin -- /usr/share/icons/hicolor
 gtk4-update-icon-cache -q -t -f /usr/share/icons/hicolor
 
 %files
 /usr/share/athanor/cosmic-defaults
+/usr/share/athanor/cosmic-variants.json
 /usr/lib/environment.d/60-athanor-cosmic-defaults.conf
 /usr/share/backgrounds/athanor
 /usr/share/icons/hicolor/scalable/status/athanor-mark-symbolic.svg
@@ -57,6 +62,10 @@ gtk4-update-icon-cache -q -t -f /usr/share/icons/hicolor
 /usr/share/icons/hicolor/scalable/status/athanor-seal-blocked-symbolic.svg
 
 %changelog
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- Ship cosmic-variants.json, the built-theme keys of the nine accents in both modes and
+  both contrasts, for the appearance apply function (doc_visual_language.md, VL4)
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Point URL at the project repository
 

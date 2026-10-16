@@ -3,7 +3,9 @@
 # Package 2b.2 of docs/architecture/doc_bar.md in the dev VM's real session, under the real
 # unit file and the real user manager: the bar starts as a Type=notify unit, its
 # confinement leaves glycin's image sandbox working, it stays within its memory budget
-# (section 5, item 17), high contrast reaches COSMIC's theme from inside it (BR3),
+# (section 5, item 17), high contrast reaches the GNOME key and COSMIC's built themes from
+# inside it (BR3), a colour scheme and an accent written by gsettings restyle the bar and the
+# dock live (VL4),
 # the system modules reach NetworkManager, pipewire-pulse, BlueZ and UPower from inside
 # it and hide what the VM lacks (package 2b.4), an output that comes and goes never
 # restarts the process or leaks a surface, and a crash loop falls back to the vendor
@@ -26,7 +28,7 @@ BIN=$ROOT/.scratch/shell-rig/bin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/bar-acceptance
 PSS_LIMIT_KB=$((64 * 1024))
-STAGES=(deploy unit memory modules high-contrast hotplug crash-loop cleanup)
+STAGES=(deploy unit memory modules high-contrast scheme accent hotplug crash-loop cleanup)
 STAGE=
 STATE_BEFORE=
 CLEANED=0
@@ -128,7 +130,8 @@ stage_unit() {
     local config dir
     # shellcheck disable=SC2016 # expanded by the guest's shell
     config=$(in_session 'echo "${XDG_CONFIG_HOME:-$HOME/.config}"')
-    for dir in athanor cosmic/com.system76.CosmicTheme.Dark/v1 cosmic/com.system76.CosmicTheme.Light/v1; do
+    for dir in athanor cosmic/com.system76.CosmicTheme.Mode/v1 cosmic/com.system76.CosmicTheme.Dark/v2 \
+        cosmic/com.system76.CosmicTheme.Light/v2; do
         config_writable "$config/$dir" ||
             fail "creating and removing a file in $config/$dir failed inside the unit's own mount namespace"
     done
@@ -150,8 +153,8 @@ runtime_athanor_writable() {
 }
 
 # The same proof for the directories ConfigurationDirectory= binds read-write under
-# ProtectHome=read-only: the favourites file (BR7) and COSMIC's is_high_contrast key in
-# both theme modes (BR3). A file, not a directory, since that is what the bar writes there.
+# ProtectHome=read-only: the favourites file (BR7) and COSMIC's theme mode and built themes,
+# which the high contrast switch writes (BR3, VL4). A file, not a directory, since that is what the bar writes there.
 config_writable() { # config_writable DIR
     in_unit_namespace "touch \"$1/bar-acceptance-$$\" && rm \"$1/bar-acceptance-$$\""
 }
@@ -231,8 +234,100 @@ stage_modules() {
 stage_high-contrast() {
     [[ $(unit is-active) == active ]] || fresh_start
     in_session python3 - < "$HERE/bar_high_contrast.py" ||
-        fail "the switch did not reach COSMIC's is_high_contrast (steps above)"
+        fail "the switch did not reach the GNOME key and COSMIC's built themes (steps above)"
     [[ $(unit is-active) == active ]] || fail "not active after switching: $(unit show -p Result --value)"
+}
+
+# The appearance store drives the bar and the dock live (doc_visual_language.md VL4): a
+# key written by gsettings, as any tool may, restyles both with no restart. The screenshots
+# are read on the host (appearance_probe.py); the thresholds are estimates, so the values
+# are printed with the verdict.
+LUMA_DROP=20
+NEAR_MIN=20
+WINDOW_UNIT=bar-acceptance-window
+# shellcheck disable=SC2016 # expanded by the guest's shell
+WINDOW_PROBE='$XDG_RUNTIME_DIR/bar-acceptance-window.py'
+SCHEME_BEFORE=
+ACCENT_BEFORE=
+
+shot() { # shot NAME: a screenshot in $SHOTS; prints its path
+    "$HERE/screenshot.sh" "$SHOTS/$1.png" > /dev/null && echo "$SHOTS/$1.png"
+}
+probe() { python3 "$HERE/appearance_probe.py" "$@"; }
+interface_key() { in_session gsettings get org.gnome.desktop.interface "$1"; }
+set_interface_key() { in_session gsettings set org.gnome.desktop.interface "$1" "$2"; }
+main_pids() {
+    echo "$(unit show -p MainPID --value) $(in_session systemctl --user show -p MainPID --value athanor-dock)"
+}
+both_running() {
+    [[ $(unit is-active) == active ]] || fresh_start
+    [[ $(in_session systemctl --user is-active athanor-dock) == active ]] ||
+        fail "athanor-dock is not active: the stage reads its band of the screen"
+}
+
+stage_scheme() {
+    both_running
+    SCHEME_BEFORE=$(interface_key color-scheme) || fail "gsettings get color-scheme"
+    [[ $SCHEME_BEFORE == "'default'" ]] || fail "color-scheme is $SCHEME_BEFORE before the run, not 'default'"
+    local pids light dark again
+    pids=$(main_pids)
+    light=$(probe luma "$(shot scheme-light)") || fail "cannot read the light screenshot"
+    set_interface_key color-scheme prefer-dark || fail "gsettings set color-scheme prefer-dark"
+    sleep 2
+    dark=$(probe luma "$(shot scheme-dark)") || fail "cannot read the dark screenshot"
+    set_interface_key color-scheme default || fail "gsettings set color-scheme default"
+    sleep 2
+    again=$(probe luma "$(shot scheme-light-again)") || fail "cannot read the second light screenshot"
+    echo "scheme: mean luma of the bar and dock bands: light $light, dark $dark, light again $again"
+    local light_bar light_dock dark_bar dark_dock again_bar again_dock
+    read -r light_bar light_dock <<< "$light"
+    read -r dark_bar dark_dock <<< "$dark"
+    read -r again_bar again_dock <<< "$again"
+    ((dark_bar <= light_bar - LUMA_DROP && dark_dock <= light_dock - LUMA_DROP)) ||
+        fail "'prefer-dark' did not darken both bands by $LUMA_DROP: $light, then $dark"
+    ((again_bar >= dark_bar + LUMA_DROP && again_dock >= dark_dock + LUMA_DROP)) ||
+        fail "'default' did not lighten both bands again by $LUMA_DROP: $dark, then $again"
+    [[ $(main_pids) == "$pids" ]] || fail "the bar or the dock restarted: MainPIDs $pids, then $(main_pids)"
+}
+
+# An active window, so that the bar and the dock draw its running indicator in the accent.
+stage_accent() {
+    both_running
+    ACCENT_BEFORE=$(interface_key accent-color) || fail "gsettings get accent-color"
+    [[ $ACCENT_BEFORE == "'purple'" ]] || fail "accent-color is $ACCENT_BEFORE before the run, not the factory 'purple'"
+    [[ $(in_session systemctl --user show -p LoadState --value "$WINDOW_UNIT") != loaded ]] ||
+        fail "$WINDOW_UNIT already runs: the stage needs a window it starts"
+    in_session "cat > $WINDOW_PROBE" < "$HERE/adw_scheme.py" || fail "cannot copy adw_scheme.py to the guest"
+    in_session systemd-run --user --collect --unit="$WINDOW_UNIT" python3 -u "$WINDOW_PROBE" ||
+        fail "systemd-run adw_scheme.py"
+    sleep 3
+    local pids purple teal again
+    pids=$(main_pids)
+    purple=$(probe near "$(shot accent-purple)" '#2190a4') || fail "cannot read the purple screenshot"
+    set_interface_key accent-color teal || fail "gsettings set accent-color teal"
+    sleep 2
+    teal=$(probe near "$(shot accent-teal)" '#2190a4') || fail "cannot read the teal screenshot"
+    set_interface_key accent-color purple || fail "gsettings set accent-color purple"
+    sleep 2
+    again=$(probe near "$(shot accent-purple-again)" '#2190a4') || fail "cannot read the second purple screenshot"
+    stop_window || fail "cannot stop $WINDOW_UNIT"
+    echo "accent: teal pixels in the bar and dock bands: purple $purple, teal $teal, purple again $again"
+    local purple_bar purple_dock teal_bar teal_dock again_bar again_dock
+    read -r purple_bar purple_dock <<< "$purple"
+    read -r teal_bar teal_dock <<< "$teal"
+    read -r again_bar again_dock <<< "$again"
+    ((teal_bar >= purple_bar + NEAR_MIN && teal_dock >= purple_dock + NEAR_MIN)) ||
+        fail "'teal' did not add $NEAR_MIN teal pixels to both bands: $purple, then $teal"
+    ((again_bar <= teal_bar - NEAR_MIN && again_dock <= teal_dock - NEAR_MIN)) ||
+        fail "'purple' did not take the teal pixels away again: $teal, then $again"
+    [[ $(main_pids) == "$pids" ]] || fail "the bar or the dock restarted: MainPIDs $pids, then $(main_pids)"
+}
+
+stop_window() {
+    if [[ $(in_session systemctl --user show -p LoadState --value "$WINDOW_UNIT") == loaded ]]; then
+        in_session systemctl --user stop "$WINDOW_UNIT" || return 1
+    fi
+    in_session "rm -f $WINDOW_PROBE"
 }
 
 HEAD2=/sys/class/drm/card1-Virtual-2/status
@@ -288,6 +383,22 @@ stage_crash-loop() {
 stage_cleanup() {
     CLEANED=1
     local failed=0
+    stop_window || {
+        echo "cleanup: stopping $WINDOW_UNIT failed" >&2
+        failed=1
+    }
+    if [[ -n $SCHEME_BEFORE ]]; then
+        set_interface_key color-scheme "$SCHEME_BEFORE" || {
+            echo "cleanup: restoring color-scheme $SCHEME_BEFORE failed" >&2
+            failed=1
+        }
+    fi
+    if [[ -n $ACCENT_BEFORE ]]; then
+        set_interface_key accent-color "$ACCENT_BEFORE" || {
+            echo "cleanup: restoring accent-color $ACCENT_BEFORE failed" >&2
+            failed=1
+        }
+    fi
     if guest_ssh "test -e $HEAD2"; then
         second_head detect || {
             echo "cleanup: restoring $HEAD2 to detect failed" >&2
