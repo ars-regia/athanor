@@ -403,17 +403,21 @@ pub fn watch(on_change: impl Fn(Appearance) + 'static) {
     last.set(stores.read());
 }
 
-/// Writes `choice` to the store, in VL4's order: the GNOME keys, then
-/// `org.athanor.desktop.appearance`, then the compositor's keys through `cosmic`
-/// (athanor-compositor-client's `theme::write_cosmic`, the only code that knows COSMIC).
+/// Applies `change` to the appearance the store holds and writes the result, in VL4's
+/// order: the GNOME keys, then `org.athanor.desktop.appearance`, then the compositor's keys
+/// through `cosmic` (athanor-compositor-client's `theme::write_cosmic`, the only code that
+/// knows COSMIC). The change is applied to the store's values read here, so a key another
+/// process changed since the caller last read it is not written back.
 /// A failure of the last step is logged and leaves the result `Ok`: the shell reads the
 /// store, and only cosmic-comp's borders and indicators lag.
 pub fn apply(
-    choice: &Appearance,
+    change: impl FnOnce(&mut Appearance),
     cosmic: impl FnOnce(&Appearance) -> io::Result<()>,
 ) -> io::Result<()> {
     let stores = Stores::open();
     let current = stores.read();
+    let mut choice = current;
+    change(&mut choice);
     let computed = choice.accent_computed.map(Rgb::hex).unwrap_or_default();
     let scheme = if choice.dark {
         "prefer-dark"
@@ -475,7 +479,7 @@ pub fn apply(
         }
     }
     gio::Settings::sync();
-    if let Err(err) = cosmic(choice) {
+    if let Err(err) = cosmic(&choice) {
         tracing::warn!(error = %err, "cannot write the compositor's theme keys; its borders and indicators keep the previous appearance");
     }
     Ok(())

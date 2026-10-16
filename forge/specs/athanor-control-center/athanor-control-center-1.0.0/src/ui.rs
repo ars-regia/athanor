@@ -299,11 +299,7 @@ fn hooks(client: Option<Rc<Client>>) -> Hooks {
             });
         }),
         set_dark: Box::new(|dark| {
-            let choice = Appearance {
-                dark,
-                ..Appearance::read()
-            };
-            appearance::apply(&choice, theme::write_cosmic)
+            appearance::apply(|choice| choice.dark = dark, theme::write_cosmic)
         }),
     }
 }

@@ -40,10 +40,13 @@ fn apply_writes_the_store_then_the_compositor() {
         accent_computed: Rgb::from_hex("#336699"),
     };
     let seen = Cell::new(None);
-    appearance::apply(&choice, |written| {
-        seen.set(Some((*written, Appearance::read())));
-        Ok(())
-    })
+    appearance::apply(
+        |current| *current = choice,
+        |written| {
+            seen.set(Some((*written, Appearance::read())));
+            Ok(())
+        },
+    )
     .expect("apply");
     assert_eq!(
         seen.get(),
@@ -60,7 +63,11 @@ fn apply_writes_the_store_then_the_compositor() {
 
     // The compositor's failure leaves the store written and the result Ok.
     let back = Appearance::default();
-    appearance::apply(&back, |_| Err(io::Error::other("no cosmic"))).expect("apply");
+    appearance::apply(
+        |current| *current = back,
+        |_| Err(io::Error::other("no cosmic")),
+    )
+    .expect("apply");
     assert_eq!(Appearance::read(), back);
     assert_eq!(interface.string("color-scheme"), "default");
     assert_eq!(ours.string("accent-computed"), "");
@@ -73,7 +80,21 @@ fn apply_writes_the_store_then_the_compositor() {
         high_contrast: true,
         ..back
     };
-    appearance::apply(&contrast, |_| Ok(())).expect("apply");
+    appearance::apply(|current| current.high_contrast = true, |_| Ok(())).expect("apply");
     assert_eq!(interface.string("color-scheme"), "prefer-light");
     assert_eq!(Appearance::read(), contrast);
+
+    // The change lands on the store's values, not on a copy the caller read earlier: a
+    // scheme another process wrote in between is kept.
+    let stale = Appearance::read();
+    interface
+        .set_string("color-scheme", "prefer-dark")
+        .expect("color-scheme");
+    appearance::apply(
+        |current| current.high_contrast = !stale.high_contrast,
+        |_| Ok(()),
+    )
+    .expect("apply");
+    assert_eq!(interface.string("color-scheme"), "prefer-dark");
+    assert!(!Appearance::read().high_contrast);
 }

@@ -206,11 +206,9 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             .upgrade()
             .is_some_and(|inner| !inner.updating.get())
         {
-            let choice = Appearance {
-                high_contrast: enabled,
-                ..Appearance::read()
-            };
-            if let Err(err) = appearance::apply(&choice, theme::write_cosmic) {
+            if let Err(err) =
+                appearance::apply(|choice| choice.high_contrast = enabled, theme::write_cosmic)
+            {
                 tracing::error!(error = %err, "cannot switch high contrast");
                 // Show what the store holds, once this handler has returned.
                 let weak_inner = weak_inner.clone();
