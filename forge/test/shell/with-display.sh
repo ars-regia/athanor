@@ -13,6 +13,9 @@ export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_H
 # The test accessibility backend needs no bus, and records the names and relations that the
 # page tests read back.
 export GTK_A11Y=test ATHANOR_REQUIRE_DISPLAY=1
+# Settings from the schemas' defaults, in memory: the rig has dconf, whose backend would read
+# the caller's database and leave a dconf directory here.
+export GSETTINGS_BACKEND=memory
 
 log=$XDG_RUNTIME_DIR/sway.log
 # An empty configuration: sway.conf starts the scene's session, which a test does not want.
