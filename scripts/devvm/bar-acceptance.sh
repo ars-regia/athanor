@@ -75,9 +75,9 @@ fresh_start() {
     if loaded athanor-bar; then
         unit stop || fail "systemctl --user stop athanor-bar"
     fi
-    if unit_failed; then
-        unit reset-failed || fail "systemctl --user reset-failed athanor-bar"
-    fi
+    # reset-failed also zeroes the start rate counter, which the earlier stages' starts fill:
+    # without it a stage that restarts the bar several times hits start-limit-hit.
+    unit reset-failed || fail "systemctl --user reset-failed athanor-bar"
     clear_failures || fail "cannot clear the crash-loop record"
     unit start || fail "systemctl --user start athanor-bar: $(unit show -p Result --value)"
 }
