@@ -49,6 +49,6 @@ The maintainer chose to place UT13 in 1.0 (2026-10-16).
 
 - `docs/operations/release-1.0.md` gains a row for UT13, and its 1.0 release point names it.
 - `doc_shell.md` section 7, item 4, says that the security class applies from 1.0.
-- UT13 in `doc_update_trust.md`, SH11's amendment in `doc_shell.md`, and items 6 and 7 of the shield sheet in `doc_bar.md` (BR8) name ADR-0120.
+- UT13 in `doc_update_trust.md`, SH11's amendment in `doc_shell.md`, items 6 and 7 of the shield sheet in `doc_bar.md` (BR8), the A2-5 amendments of `doc_first_run.md` and the summary in `docs/compliance/README.md` name ADR-0120.
 - `docs/compliance/annex-i-mapping.md` rows (c), (2) and (8) stay "Partial" until 1.0, and row (c) says that until then every update waits for the person's confirmation.
 - A security fix released before 1.0 reaches a machine only when its person confirms the restart.
