@@ -29,7 +29,8 @@ The coordinated vulnerability disclosure policy is [`.github/SECURITY.md`](../..
   GitHub Release with a signed evidence bundle (ADR-0081, decision 3; doc_pipeline.md PL35,
   PL42).
 - Security updates are automatic by default, with a time-limited postpone and an opt-out
-  that carries a warning (ADR-0082).
+  that carries a warning (ADR-0082), from release 1.0 (ADR-0120); until then every update
+  waits for the person's confirmation.
 - Full wipe (LUKS crypto-erase) comes after 1.0; the gap is recorded in
   [annex-i-mapping.md](annex-i-mapping.md) (ADR-0081, decision 4).
 

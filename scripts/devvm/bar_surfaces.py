@@ -3,7 +3,9 @@ dock-acceptance.sh (stage hotplug), as `python3 - APP < bar_surfaces.py`.
 
 Counts the APP application's (athanor-bar by default) AT-SPI windows that are showing and have at least
 one child: one per output APP currently draws on. The window a departed output's
-surface leaves behind stays in the accessibility tree but empty, so it is not counted.
+surface leaves behind stays in the accessibility tree but empty, so it is not counted,
+and neither is the bar's notification card, a window of its own that holds an alert (#551).
+The panel with the shield's popover open holds an alert too: count with no popover open.
 Prints one integer and exits 0.
 """
 
@@ -12,7 +14,7 @@ import sys
 import gi
 
 gi.require_version("Atspi", "2.0")
-from gi.repository import Atspi  # noqa: E402
+from gi.repository import Atspi, GLib  # noqa: E402
 
 
 def application(name):
@@ -24,6 +26,25 @@ def application(name):
     return None
 
 
+# GTK exports AccessibleRole::Alert as NOTIFICATION; older AT-SPI names it ALERT.
+ALERT_ROLES = {Atspi.Role.ALERT, Atspi.Role.NOTIFICATION}
+
+
+def holds_alert(node):
+    """Whether `node` or a node under it is an alert. A node that vanishes during the walk
+    is not one: a card that closes meanwhile leaves its window counted, and the caller's
+    wait counts again."""
+    try:
+        if node.get_role() in ALERT_ROLES:
+            return True
+        children = [
+            node.get_child_at_index(index) for index in range(node.get_child_count())
+        ]
+    except GLib.Error:
+        return False
+    return any(child is not None and holds_alert(child) for child in children)
+
+
 def populated_windows(app):
     count = 0
     for index in range(app.get_child_count()):
@@ -32,6 +53,7 @@ def populated_windows(app):
             window is not None
             and window.get_state_set().contains(Atspi.StateType.SHOWING)
             and window.get_child_count() > 0
+            and not holds_alert(window)
         ):
             count += 1
     return count

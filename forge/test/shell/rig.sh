@@ -143,14 +143,25 @@ seed_layout() { # seed_layout <dir> <preset> <panel> <dock or ->
 
 # The seed of a bar case: the layout document, two keyboard layouts so the input source
 # shows, one favourite the rig has installed, and COSMIC's mode (SH5).
+seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp, and the
+    # GNOME colour scheme, which the shell reads (doc_visual_language.md, VL4); scene.sh sets
+    # the second from <dir>.gsettings
+    mkdir -p "$1/cosmic/com.system76.CosmicTheme.Mode/v1"
+    if [ "$2" = dark ]; then printf true; else printf false; fi \
+        > "$1/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    if [ "$2" = dark ]; then
+        echo "org.gnome.desktop.interface color-scheme prefer-dark"
+    else
+        echo "org.gnome.desktop.interface color-scheme default"
+    fi > "$1.gsettings"
+}
+
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     seed_layout "$1" "$2" "$3" "$4"
-    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicTheme.Mode/v1" \
-        "$1/cosmic/com.system76.CosmicAppletTime/v1"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicAppletTime/v1"
     printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
         > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
-    if [ "$5" = dark ]; then printf true; else printf false; fi \
-        > "$1/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    seed_scheme "$1" "$5"
     # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
     # switch to 12 hours by locale.
     printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
@@ -183,10 +194,7 @@ capture_chooser() {
         msgfmt -o /out/locale/chooser/rtl.mo /out/chooser-pseudo-rtl.po'
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
-        # The chooser follows COSMIC's mode (SH5): seed it as COSMIC Settings would.
-        mkdir -p "$out/seed-$tag/cosmic/com.system76.CosmicTheme.Mode/v1"
-        if [ "$variant" = dark ]; then printf true; else printf false; fi \
-            > "$out/seed-$tag/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+        seed_scheme "$out/seed-$tag" "$variant"
         override=()
         if [ "$catalog" != - ]; then
             override=(ATHANOR_I18N_CATALOG="/out/locale/chooser/$catalog")
@@ -365,8 +373,7 @@ cosmic-keys)
         exit $status'
     ;;
 cosmic-preview)
-    mkdir -p "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1"
-    printf 'true' > "$out/seed-dark/cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"
+    seed_scheme "$out/seed-dark" dark
     overlay=/repo/system/athanor-style/calmo/generated/cosmic
     in_rig "$(rig_image)" env RIG_DATA_OVERLAY="$overlay" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 1.0 cosmic-preview-light -- cosmic-settings appearance
