@@ -70,6 +70,13 @@ Not run, because it needs a machine: greetd failing three times and the target s
 
 Not run for R5 (added on 2026-10-06): nothing. Greenboot's activation on the shipped image, its order against R1, and a return to the previous deployment are all unverified. Approved on 2026-10-08 with this verification as a declared debt: acceptance 1 and 7 run on the development VM before 1.0 (review batch 2, Q2).
 
+Run on 2026-10-16 (#537), on the development VM of the reference laptop, by the stages `console` and
+`greenboot` of `scripts/devvm/acceptance/run.sh`: greetd failing three times starts the target and the getty
+of tty1 with the message; a reboot brings the plain banner back; greenboot's required check fails on an image
+whose greetd does not start and queues the previous deployment; nothing reboots for ten minutes; the restart
+boots the previous deployment, and three checks hold the marked digest. Still by hand: the framebuffer of
+tty1, which is not the VM's serial console.
+
 ## 6. Acceptance, on the dev VM
 
 1. Make the greeter fail three times in a minute. `tty1` shows a login and, above it, the message in both languages.
