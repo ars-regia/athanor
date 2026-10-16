@@ -221,6 +221,7 @@ running_notice() { # running_notice DESCRIPTION
   journal=$(guest_ssh sudo journalctl -q -b -o cat _SYSTEMD_USER_UNIT=athanor-update-notify.service) || die "FAIL  $1: the notifier's journal could not be read"
   lines=$(awk '/running version announced/ { gsub(/\033\[[0-9;]*m/, ""); print }' <<< "$journal")
   [[ $(wc -l <<< "$lines") == 1 ]] || die "FAIL  $1: announced more than once: $lines"
+  # images.sh labels plain versions (43.<date>.0), which the notifier's display() leaves as they are.
   [[ $lines == *"digest=$digest version=$version" ]] || die "FAIL  $1: it named another version than $version ($digest): $lines"
   pass "$1"
 }

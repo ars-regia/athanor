@@ -42,6 +42,17 @@ async fn send(session: &Connection, notice: &Notice) -> zbus::Result<(u32, Strin
     Ok((reply.body().deserialize::<u32>()?, owner))
 }
 
+/// Whether `send` failed because no notification server owns its name, before or during the call.
+fn server_absent(err: &zbus::Error) -> bool {
+    match err {
+        zbus::Error::FDO(err) => matches!(**err, zbus::fdo::Error::NameHasNoOwner(_) | zbus::fdo::Error::ServiceUnknown(_)),
+        zbus::Error::MethodError(name, _, _) => {
+            matches!(name.as_str(), "org.freedesktop.DBus.Error.NameHasNoOwner" | "org.freedesktop.DBus.Error.ServiceUnknown")
+        }
+        _ => false,
+    }
+}
+
 async fn request(system: &Connection, request: Request) {
     let method = match request {
         Request::Apply => "Apply",
@@ -59,6 +70,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
     let mut notices = Notices::new(notices::announced(state_dir));
     let mut poll = tokio::time::interval(POLL);
     let mut unreadable: Option<athanor_trust_state::ReadError> = None;
+    let mut serverless = false;
     loop {
         tokio::select! {
             _ = poll.tick() => {
@@ -80,6 +92,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                 if let Some(notice) = notices.due(&state, seen.as_deref()) {
                     match send(&session, &notice).await {
                         Ok((id, server)) => {
+                            serverless = false;
                             match &notice {
                                 Notice::Ready { digest } => {
                                     tracing::info!(%digest, "update offered");
@@ -93,13 +106,19 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                             }
                             notices.sent.insert(id, Sent { server, notice });
                         }
-                        Err(err) => {
-                            // Nothing is recorded either: the booted digest stays unseen, so a
-                            // running-version notice survives a server that starts after us.
-                            tracing::warn!(%err, "the notification was not sent; it is tried again at the next poll");
+                        Err(err) if server_absent(&err) => {
+                            // The server starts after us at login: the notice waits for it, and
+                            // nothing is recorded, so the booted digest stays unseen and a
+                            // running-version notice survives. Only absence is retried: a server
+                            // that answers with an error may have shown the notice already.
+                            if !serverless {
+                                tracing::warn!(%err, "no notification server yet; the notice is sent when one appears");
+                                serverless = true;
+                            }
                             notices.withdraw(&notice);
                             continue;
                         }
+                        Err(err) => tracing::warn!(%err, "the notification was not sent"),
                     }
                 }
                 if seen.as_deref() != Some(state.booted.digest.as_str()) {
@@ -147,5 +166,19 @@ fn main() -> ExitCode {
             tracing::error!(%err, "the session or system bus is not reachable");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::server_absent;
+
+    #[test]
+    fn only_a_missing_server_is_absent() {
+        // `GetNameOwner` fails through `fdo::Error`, which `?` turns into `zbus::Error::FDO`.
+        assert!(server_absent(&zbus::fdo::Error::NameHasNoOwner("no owner".into()).into()));
+        assert!(server_absent(&zbus::fdo::Error::ServiceUnknown("gone".into()).into()));
+        assert!(!server_absent(&zbus::fdo::Error::Failed("the server refused".into()).into()));
+        assert!(!server_absent(&zbus::Error::InputOutput(std::io::Error::other("timed out").into())));
     }
 }
