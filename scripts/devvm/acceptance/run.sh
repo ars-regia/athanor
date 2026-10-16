@@ -348,7 +348,9 @@ stage_recover() { # item 10
 }
 
 # What agetty prints above the login of tty1: /etc/issue and /etc/issue.d (doc_recovery.md, R3).
-issue_text() { guest_ssh sudo agetty --show-issue; }
+# agetty reads the attributes of its terminal even to show the issue, so SSH allocates one
+# (-tt), whose line ends carry a carriage return that the needles do not.
+issue_text() { guest_ssh -q -tt sudo agetty --show-issue < /dev/null | tr -d '\r'; }
 expect_text() { # expect_text DESCRIPTION TEXT NEEDLE...: every NEEDLE is a fixed string of TEXT
   local needle
   for needle in "${@:3}"; do
