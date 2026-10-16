@@ -243,14 +243,16 @@ stage_apply() { # items 2, 3 and 14; doc_shell.md section 7, item 5
   running_notice "doc_shell.md 7.5: after the restart one notification names the running version"
   expect "3: verified after the reboot" .verified.reason signature
   # The timer's check runs two minutes after the boot and holds the store meanwhile, so a
-  # request answers Busy (#547): stop the timer and let a check it already started end.
+  # request answers Busy (#547): stop the timer and let a check it already started, or queued
+  # before the stop, end.
   guest_ssh sudo systemctl stop athanor-update-check.timer
   for _ in $(seq 60); do
-    check=$(guest_ssh systemctl show -p ActiveState --value athanor-update-check.service) || die "FAIL  2: cannot read the check's state"
-    [[ $check == activating ]] || break
+    check=$(guest_ssh 'systemctl show -p ActiveState --value athanor-update-check.service && systemctl list-jobs --no-legend athanor-update-check.service') ||
+      die "FAIL  2: cannot read the check's state"
+    [[ $check == activating* || $check == *athanor-update-check* ]] || break
     sleep 5
   done
-  [[ $check != activating ]] || die "FAIL  2: the check the timer started still runs after five minutes"
+  [[ $check != activating* && $check != *athanor-update-check* ]] || die "FAIL  2: the check the timer started still runs after five minutes"
   expect_error "2: with nothing downloaded it refuses" "$(call_active Apply)" os.athanor.Update1.Error.NothingDownloaded
   guest_ssh "sudo cp --remove-destination /dev/stdin /etc/containers/policy.json" <<< '{"default":[{"type":"insecureAcceptAnything"}]}'
   check_now
