@@ -3,7 +3,8 @@ dock-acceptance.sh (stage hotplug), as `python3 - APP < bar_surfaces.py`.
 
 Counts the APP application's (athanor-bar by default) AT-SPI windows that are showing and have at least
 one child: one per output APP currently draws on. The window a departed output's
-surface leaves behind stays in the accessibility tree but empty, so it is not counted.
+surface leaves behind stays in the accessibility tree but empty, so it is not counted,
+and neither is the bar's notification card, a window of its own that holds an alert (#551).
 Prints one integer and exits 0.
 """
 
@@ -24,6 +25,15 @@ def application(name):
     return None
 
 
+def holds_alert(node):
+    if node.get_role() == Atspi.Role.ALERT:
+        return True
+    children = (
+        node.get_child_at_index(index) for index in range(node.get_child_count())
+    )
+    return any(child is not None and holds_alert(child) for child in children)
+
+
 def populated_windows(app):
     count = 0
     for index in range(app.get_child_count()):
@@ -32,6 +42,7 @@ def populated_windows(app):
             window is not None
             and window.get_state_set().contains(Atspi.StateType.SHOWING)
             and window.get_child_count() > 0
+            and not holds_alert(window)
         ):
             count += 1
     return count
