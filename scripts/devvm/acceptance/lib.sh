@@ -18,9 +18,11 @@ mkdir -p "$ACC_STATE"
 # The 31 GB host cannot hold the 16 GB runner guest and this 8 GB VM together. Only a job on
 # a self-hosted runner, the guest on this host, counts: jobs on GitHub's hosted runners use
 # none of its memory (maintainer, 2026-10-15). This checks the start only: a job that starts
-# later can still bring the host under memory pressure.
+# later can still bring the host under memory pressure. A host without the runner unit, such
+# as a laptop, runs no runner guest, and the check does not apply there.
 guard_no_ci() {
   local busy
+  systemctl is-active --quiet athanor-runner.service || return 0
   busy=$(gh api "repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/actions/runners" --jq '[.runners[] | select(.busy)] | length')
   [[ $busy =~ ^[0-9]+$ ]] || die "the runner state could not be read: '$busy'"
   [[ $busy -eq 0 ]] || die "$busy self-hosted runner(s) busy: the dev VM must not run beside a CI job on this host"
