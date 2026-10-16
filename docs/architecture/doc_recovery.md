@@ -4,6 +4,8 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 **Amendment of 2026-10-06** (maintainer decision A2-8 of 2026-10-05, specification audit 2, #150): greenboot is the one automatic fallback, owned by this document, enabled by preset and ordered before R1 (R5). Revision 1's text is otherwise unchanged.
 
+**Correction of 2026-10-16** (maintainer decision, #560): R3 said that agetty does not read `/run/issue.d` while `/etc/issue` exists. `agetty --show-issue` on the image (util-linux 2.41.5) reads it. R3 now gives the reason that holds for the link in `/etc/issue.d`; the design is unchanged.
+
 ## 1. Context
 
 When the desktop does not start, greetd fails and systemd stops restarting it after three failures in a minute (`StartLimitBurst=3`, `StartLimitIntervalSec=60s`). The package `athanor-recovery` hooks that failure with `OnFailure=athanor-recovery.target`. Until 2026-09-30 the target started a graphical kiosk, `athanor-recovery-ui`, on cosmic-comp, whose button ran `rpm-ostree rollback`.
@@ -23,7 +25,7 @@ The kiosk could not do what it offered, and read in the code (not run) it failed
 
 **R2. The way back is `GoBack()`, from `sudo athanor-update go-back`.** The command is a client of `os.athanor.Update1`. The service asks polkit for `os.athanor.update.rollback`, which is `auth_admin` from every kind of session (`doc_update_trust.md`, UT6 and acceptance 5 of GoBack), runs `bootc rollback`, holds the digest it left and restarts. Run through `sudo` the caller is root, and polkit authorises a root subject without an agent, so nothing has to authenticate the person a second time on a console that has no agent. Any other user is told to use `sudo`.
 
-**R3. The message is in place before the login prints its banner, and only after a recovery.** It is in English and Italian and names `sudo athanor-update go-back` and `journalctl -b -u greetd`. agetty prints `/etc/issue.d/*.issue` and does not read `/run/issue.d` while `/etc/issue` exists (measured with util-linux 2.39). So `tmpfiles.d` declares `/etc/issue.d/50-athanor-recovery.issue` as a link to `/run/athanor-recovery/recovery.issue`, and `athanor-recovery-notice.service` writes that file. At every boot but a recovery the link points at nothing, and agetty passes over it: the banner is the plain one.
+**R3. The message is in place before the login prints its banner, and only after a recovery.** It is in English and Italian and names `sudo athanor-update go-back` and `journalctl -b -u greetd`. agetty prints `/etc/issue.d/*.issue`, and `/run/issue.d/*.issue` too (util-linux 2.41.5, measured with `agetty --show-issue` on 2026-10-16; an earlier revision said it did not, #560). The notice unit runs under `ProtectSystem=strict` and writes only its own runtime directory, which no other writer shares. So `tmpfiles.d` declares `/etc/issue.d/50-athanor-recovery.issue` as a link to `/run/athanor-recovery/recovery.issue`, and `athanor-recovery-notice.service` writes that file. At every boot but a recovery the link points at nothing, and agetty passes over it: the banner is the plain one.
 
 **R4. The kiosk is retired.** Decided on 2026-10-08 (review batch 2, Q5): its source in `forge/specs/athanor-recovery/athanor-recovery-1.0.0` and the legacy glass theme of `athanor-style` are deleted, since ADR-0073 retires components without a role and git history keeps them; option B of section 3, if it comes, is written from scratch. The deletion is removed by a follow-up change, not by this one. Until then the source stays out of the workspace (`exclude`, as `athanor-settings-rs` and the others) and out of the image. The package ships no binary and no `athanor-recovery` user; a machine that already has the user keeps it. `athanor-style` still carries a legacy glass theme "kept only because athanor-recovery still loads it"; with the kiosk out of the workspace nothing loads it, and it goes in the same follow-up change.
 
@@ -66,9 +68,16 @@ Questions on R5 raised by the audit of this amendment (2026-10-06); the second a
 
 Run: the tests above; `agetty --show-issue` in a pseudo-terminal with the shipped link and message, and with the link dangling (the banner is unchanged); `systemd-tmpfiles --create` on the shipped file; and, in the source of polkit, the special case that authorises uid 0.
 
-Not run, because it needs a machine: greetd failing three times and the target starting the getty (greetd declares `Conflicts=getty@tty1.service`, and the order of the two stops and starts was reasoned, not seen); `sudo athanor-update go-back` against the real service, `bootc rollback` and the restart; that a member of `wheel` can read `journalctl -b -u greetd`; the appearance of the message on a real console.
+Not run, because it needs a machine (the run of 2026-10-16 below has since covered greetd failing three times, the target starting the getty, the text agetty prints above the tty1 login read over SSH with `agetty --show-issue`, and, in the stage `goback`, the return through the service as root): greetd failing three times and the target starting the getty (greetd declares `Conflicts=getty@tty1.service`, and the order of the two stops and starts was reasoned, not seen); `sudo athanor-update go-back` against the real service, `bootc rollback` and the restart; that a member of `wheel` can read `journalctl -b -u greetd`; the appearance of the message on a real console.
 
-Not run for R5 (added on 2026-10-06): nothing. Greenboot's activation on the shipped image, its order against R1, and a return to the previous deployment are all unverified. Approved on 2026-10-08 with this verification as a declared debt: acceptance 1 and 7 run on the development VM before 1.0 (review batch 2, Q2).
+Not run for R5 (added on 2026-10-06), until the run of 2026-10-16 below paid this debt: Greenboot's activation on the shipped image, its order against R1, and a return to the previous deployment were unverified. Approved on 2026-10-08 with this verification as a declared debt: acceptance 1 and 7 run on the development VM before 1.0 (review batch 2, Q2).
+
+Run on 2026-10-16 (#537), on the development VM of the reference laptop, by the stages `console` and
+`greenboot` of `scripts/devvm/acceptance/run.sh`: greetd failing three times starts the target and the getty
+of tty1 with the message; a reboot brings the plain banner back; greenboot's required check fails on an image
+whose greetd does not start and queues the previous deployment; nothing reboots for ten minutes; the restart
+boots the previous deployment, and three checks hold the marked digest. Still by hand: the framebuffer of
+tty1, which is not the VM's serial console.
 
 ## 6. Acceptance, on the dev VM
 

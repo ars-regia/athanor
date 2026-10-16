@@ -13,6 +13,7 @@
 #   v5   2026-09-18  1 and 2       2            rotation, second half
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
+#   bad  2026-09-21  3             3            v7 whose greetd.service runs /usr/bin/false (stage greenboot)
 # Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
@@ -33,30 +34,40 @@ printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" 
 mkdir -p "$ACC_STATE/registries.d"
 printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > "$ACC_STATE/registries.d/acceptance.yaml"
 
-# An existing container may be stopped (reboot, podman stop): start it, which is a no-op when it runs.
-if podman container exists athanor-acc-registry; then
-  podman start athanor-acc-registry
-else
-  podman run -d --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+# The registry runs in a user unit of its own, athanor-acc-registry: started from a run that is
+# itself a transient unit, its processes landed in that unit's cgroup and died with it (#556).
+# The container keeps the images across runs; the unit only runs it.
+podman container exists athanor-acc-registry ||
+  podman create --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+if ! systemctl --user -q is-active athanor-acc-registry; then
+  # A unit still stopping would make systemd-run refuse the name: wait until it is gone.
+  for _ in $(seq 30); do
+    [[ $(systemctl --user show -P ActiveState athanor-acc-registry) == deactivating ]] || break
+    sleep 1
+  done
+  # One started outside the unit by an earlier images.sh: the unit takes it over.
+  podman stop athanor-acc-registry > /dev/null
+  systemd-run --user --quiet --collect --unit=athanor-acc-registry podman start --attach athanor-acc-registry
 fi
-# Neither command waits for the registry to listen: the first push would race it.
+# The unit does not wait for the registry to listen: the first push would race it.
 for _ in $(seq 30); do
   curl -fs -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" && break
   sleep 1
 done
-curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT"
+curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT: journalctl --user -u athanor-acc-registry"
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
 build() { # build TAG CREATED KEY...
-  local tag=$1 created=$2 context
+  local tag=$1 created=$2 context break_greetd=
+  if [[ $tag == bad ]]; then break_greetd=1; fi
   shift 2
   context=$(mktemp -d)
   mkdir "$context/rpm" "$context/keys"
   cp "$rpm" "$context/rpm/"
   for key in "$@"; do cp "$keys/$key.pub" "$context/keys/athanor-image-${key#acc-}.pub"; done
   podman build --format docker -f "$ACC_HERE/Containerfile" -t "$REPO:$tag" \
-    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" \
+    --build-arg "BASE=$ACC_BASE" --build-arg "REGISTRY=$ACC_REGISTRY" --build-arg "MARKER=$tag" --build-arg "GUEST_USER=$GUEST_USER" --build-arg "BREAK_GREETD=$break_greetd" \
     --label "org.opencontainers.image.created=${created}T10:00:00Z" --label "org.opencontainers.image.version=43.${created//-/}.0" "$context"
   rm -rf "$context"
   podman push --tls-verify=false "$REPO:$tag"
@@ -74,6 +85,7 @@ build v4 2026-09-17 acc-1 acc-2; sign v4 acc-1
 build v5 2026-09-18 acc-1 acc-2; sign v5 acc-2
 build v6 2026-09-19 acc-1 acc-2; sign v6 acc-2
 build v7 2026-09-20 acc-3; sign v7 acc-3
+build bad 2026-09-21 acc-3; sign bad acc-3
 
 # v2 goes the pipeline's way: three repositories, the digests file, sign-images.sh.
 build v2 2026-09-15 acc-1
