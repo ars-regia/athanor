@@ -31,7 +31,8 @@ truncate -s 8M "$work/ks.img"
 mkfs.ext4 -q -L ATHANORKS -d "$work/ks" "$work/ks.img"
 
 code=$(ovmf_code)
-cp "${code/OVMF_CODE/OVMF_VARS}" "$work/vars.fd"
+# install, not cp: a read-only source (the Nix store) would give a read-only copy.
+install -m 0644 "${code/OVMF_CODE/OVMF_VARS}" "$work/vars.fd"
 qemu-img create -q -f qcow2 "$work/base.qcow2" "${DISK_GIB}G"
 
 echo "installing $(basename "$iso"), serial console in $work/serial.log"
