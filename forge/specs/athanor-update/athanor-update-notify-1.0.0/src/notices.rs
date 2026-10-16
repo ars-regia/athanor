@@ -60,6 +60,15 @@ impl Notices {
         self.offered.insert(downloaded.digest.clone()).then(|| Notice::Ready { digest: downloaded.digest.clone() })
     }
 
+    /// A notice that could not be sent, typically before the session's notification server
+    /// has started: it is due again at the next poll instead of being lost.
+    pub fn withdraw(&mut self, notice: &Notice) {
+        self.offered.remove(&match notice {
+            Notice::Ready { digest } => digest.clone(),
+            Notice::Running { digest, .. } => format!("running {digest}"),
+        });
+    }
+
     /// The request an `ActionInvoked(id, action)` from `sender` stands for. Any session
     /// process can emit that signal, and a forged one would summon the administrator prompt
     /// of `GoBack()` out of nowhere: only the server that took the notification, and only an
@@ -186,6 +195,19 @@ mod tests {
         assert!(matches!(notices.due(&booted, Some("sha256:a")), Some(Notice::Running { .. })));
         assert_eq!(notices.due(&booted, Some("sha256:a")), None);
         assert_eq!(notices.due(&booted, Some("sha256:b")), None);
+    }
+
+    #[test]
+    fn a_withdrawn_notice_is_due_again() {
+        let mut notices = Notices::default();
+        let booted = state("sha256:b", None, UpdateState::None);
+        let running = notices.due(&booted, Some("sha256:a")).expect("a new deployment");
+        notices.withdraw(&running);
+        assert_eq!(notices.due(&booted, Some("sha256:a")), Some(running));
+        let downloaded = state("sha256:a", Some("sha256:c"), UpdateState::Downloaded);
+        let ready = notices.due(&downloaded, Some("sha256:a")).expect("a downloaded update");
+        notices.withdraw(&ready);
+        assert_eq!(notices.due(&downloaded, Some("sha256:a")), Some(ready));
     }
 
     #[test]
