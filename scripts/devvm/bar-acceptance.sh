@@ -269,24 +269,25 @@ stage_scheme() {
     both_running
     SCHEME_BEFORE=$(interface_key color-scheme) || fail "gsettings get color-scheme"
     [[ $SCHEME_BEFORE == "'default'" ]] || fail "color-scheme is $SCHEME_BEFORE before the run, not 'default'"
-    local pids light dark again
+    local pids light dark again darker lighter
     pids=$(main_pids)
-    light=$(probe luma "$(shot scheme-light)") || fail "cannot read the light screenshot"
+    light=$(shot scheme-light) || fail "cannot take the light screenshot"
     set_interface_key color-scheme prefer-dark || fail "gsettings set color-scheme prefer-dark"
     sleep 2
-    dark=$(probe luma "$(shot scheme-dark)") || fail "cannot read the dark screenshot"
+    dark=$(shot scheme-dark) || fail "cannot take the dark screenshot"
     set_interface_key color-scheme default || fail "gsettings set color-scheme default"
     sleep 2
-    again=$(probe luma "$(shot scheme-light-again)") || fail "cannot read the second light screenshot"
-    echo "scheme: mean luma of the bar and dock bands: light $light, dark $dark, light again $again"
-    local light_bar light_dock dark_bar dark_dock again_bar again_dock
-    read -r light_bar light_dock <<< "$light"
-    read -r dark_bar dark_dock <<< "$dark"
-    read -r again_bar again_dock <<< "$again"
-    ((dark_bar <= light_bar - LUMA_DROP && dark_dock <= light_dock - LUMA_DROP)) ||
-        fail "'prefer-dark' did not darken both bands by $LUMA_DROP: $light, then $dark"
-    ((again_bar >= dark_bar + LUMA_DROP && again_dock >= dark_dock + LUMA_DROP)) ||
-        fail "'default' did not lighten both bands again by $LUMA_DROP: $dark, then $again"
+    again=$(shot scheme-light-again) || fail "cannot take the second light screenshot"
+    darker=$(probe drop "$light" "$dark") || fail "cannot compare the light and dark screenshots"
+    lighter=$(probe drop "$again" "$dark") || fail "cannot compare the dark and second light screenshots"
+    echo "scheme: mean luma drop of the changed pixels in the bar and dock bands: to dark $darker, from light again to dark $lighter"
+    local darker_bar darker_dock lighter_bar lighter_dock
+    read -r darker_bar darker_dock <<< "$darker"
+    read -r lighter_bar lighter_dock <<< "$lighter"
+    ((darker_bar >= LUMA_DROP && darker_dock >= LUMA_DROP)) ||
+        fail "'prefer-dark' did not darken both bands by $LUMA_DROP: $darker"
+    ((lighter_bar >= LUMA_DROP && lighter_dock >= LUMA_DROP)) ||
+        fail "'default' did not lighten both bands again by $LUMA_DROP: $lighter"
     [[ $(main_pids) == "$pids" ]] || fail "the bar or the dock restarted: MainPIDs $pids, then $(main_pids)"
 }
 
