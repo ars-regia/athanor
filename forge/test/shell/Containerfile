@@ -42,8 +42,10 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
   && dnf5 clean all
 # The appearance store as the image has it (doc_visual_language.md, VL4): GNOME's schemas, and
 # dconf, whose service writes for a confined client. scene.sh adds Athanor's schema and
-# vendor defaults beside them.
+# vendor defaults beside them. The font GNOME's schemas name, Adwaita Sans 11, and its
+# monospace sibling are the image's system fonts (doc_visual_language.md, VL6).
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
+      adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
