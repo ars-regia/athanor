@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- Cancel a session whose login failed before the next one is created: greetd 0.10 keeps a
+  failed session configured when the connection closes cleanly, and refused every later
+  login with "a session is already being configured" (#540).
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Requires libsqlite3.so.0, the soname of Fedora's sqlite-libs. Release 6 was linked against
   the builder's sqlite, which had no SONAME, and required libsqlite3.so, which no package
