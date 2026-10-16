@@ -186,4 +186,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
-| ADR-0119 | 0119 | [An upgrade closes ssh in the public firewall zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
+| ADR-0119 | 0119 | [An upgrade does not keep ssh in the installer's public zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
