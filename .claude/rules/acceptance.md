@@ -13,5 +13,5 @@ paths:
 - Install test files with `install -m 0644`, not `cp /dev/stdin`. Why: the latter creates mode 0600.
 - Before deleting a test directory, grep the workflows and `rig.sh` for its `unittest discover -s` path. Why: discovery of a missing directory fails the job.
 - Select the ISO test kickstart from GRUB's command line (`c`), not by editing the menu entry. Why: the full-screen editor wraps at the serial width and boots garbage.
-- Use `-serial unix:...,server,nowait`, not `-serial file:`, and prefix commands typed on the serial console with spaces. Why: a file serial is write-only, and the console drops the first characters after heavy output.
+- Use `-serial unix:...,server=on,wait=on`, not `-serial file:`, and prefix commands typed on the serial console with spaces. Why: a file serial is write-only, GRUB draws the menu a console waits for only once, so a console that connects late misses it (2026-10-16), and the console drops the first characters after heavy output.
 - After a reboot request, wait for a new `boot_id`, never a fixed sleep. Why: a sleep races slow boots in both directions.
