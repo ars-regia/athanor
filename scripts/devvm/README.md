@@ -156,13 +156,22 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   `DISK_GIB` of disk.
 - Needs `qemu-system-x86_64` with the virtio-gpu-gl device, `qemu-img`, OVMF, `skopeo`,
   `jq`, `mkfs.ext4`. OVMF is looked up in `OVMF_DIR` first, then under `/usr/share`: on an
-  image-based host, such as an Athanor laptop, QEMU and the firmware can come from Nix
-  (`nix profile add nixpkgs#qemu_kvm`, `OVMF_DIR=$(nix build --no-link --print-out-paths
-  nixpkgs#OVMF.fd)/FV`). Nix's QEMU loads Nix's Mesa, which looks for its drivers where
-  NixOS keeps them; outside NixOS, point the user manager at that Mesa before `start.sh`:
-  `m=$(nix build --no-link --print-out-paths nixpkgs#mesa)`, then
-  `systemctl --user set-environment GBM_BACKENDS_PATH=$m/lib/gbm LIBGL_DRIVERS_PATH=$m/lib/dri
-  __EGL_VENDOR_LIBRARY_DIRS=$m/share/glvnd/egl_vendor.d`.
+  image-based host, such as an Athanor laptop, QEMU and the firmware can come from Nix:
+  `nix profile add nixpkgs#qemu_kvm`, then
+  `export OVMF_DIR=$(nix build --no-link --print-out-paths nixpkgs#OVMF.fd)/FV` in the shell
+  that runs `create.sh` and `start.sh`, since both look the firmware up. Nix's QEMU loads
+  Nix's Mesa, which looks for its drivers where NixOS keeps them. Outside NixOS, `start.sh`
+  is given that Mesa through the user manager, and the manager is cleared once QEMU runs, so
+  no other user service inherits it:
+
+  ```sh
+  m=$(nix build --no-link --print-out-paths nixpkgs#mesa)
+  vars=(GBM_BACKENDS_PATH=$m/lib/gbm LIBGL_DRIVERS_PATH=$m/lib/dri
+    __EGL_VENDOR_LIBRARY_DIRS=$m/share/glvnd/egl_vendor.d)
+  systemctl --user set-environment "${vars[@]}"
+  scripts/devvm/start.sh
+  systemctl --user unset-environment "${vars[@]%%=*}"
+  ```
 
 ### Resources
 
