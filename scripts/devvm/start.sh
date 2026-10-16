@@ -66,7 +66,7 @@ echo "up: ssh.sh, or ssh -p $SSH_PORT $GUEST_USER@127.0.0.1"
 # shellcheck disable=SC2016 # expanded by the guest's shell
 guest_ssh 'dir=${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/com.system76.CosmicIdle/v1 &&
   mkdir -p "$dir" && for key in screen_off_time suspend_on_ac_time suspend_on_battery_time; do
-    printf None > "$dir/$key"; done' || die "cannot turn off the guest's idle timers"
+    printf None > "$dir/$key" || exit 1; done' || die "cannot turn off the guest's idle timers"
 
 # The render node is what a compositor needs; the renderer says whether the guest really
 # draws on the host GPU (virgl) or fell back to software (llvmpipe).
