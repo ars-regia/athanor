@@ -17,6 +17,9 @@ scratch=$(mktemp -d)
 export XDG_CONFIG_HOME=$scratch/config XDG_DATA_HOME=$scratch/data XDG_CACHE_HOME=$scratch/cache XDG_STATE_HOME=$scratch/state
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 export HOME=$scratch
+# dbus-run-session started the bus before these: without them the dconf service it
+# activates writes under /root, where no client of the scene reads.
+dbus-update-activation-environment HOME XDG_CONFIG_HOME
 if [ -n "${RIG_CONFIG_SEED:-}" ]; then
     cp -r "$RIG_CONFIG_SEED"/. "$XDG_CONFIG_HOME"/
 fi
