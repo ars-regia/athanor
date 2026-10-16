@@ -155,7 +155,10 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   is in `${XDG_DATA_HOME:-~/.local/share}/athanor-devvm`: about 6 GB of ISO and up to
   `DISK_GIB` of disk.
 - Needs `qemu-system-x86_64` with the virtio-gpu-gl device, `qemu-img`, OVMF, `skopeo`,
-  `jq`, `mkfs.ext4`.
+  `jq`, `mkfs.ext4`. OVMF is looked up in `OVMF_DIR` first, then under `/usr/share`: on an
+  image-based host, such as an Athanor laptop, QEMU and the firmware can come from Nix
+  (`nix profile add nixpkgs#qemu_kvm`, `OVMF_DIR=$(nix build --no-link --print-out-paths
+  nixpkgs#OVMF.fd)/FV`).
 
 ### Resources
 
