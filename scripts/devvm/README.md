@@ -23,7 +23,7 @@ talks to the host's session bus and user services, not to an Athanor session.
 
 ```sh
 scripts/devvm/create.sh            # once: fetch the newest ISO (5 GB), install it unattended (~5 min)
-scripts/devvm/start.sh             # boot (~20 s to SSH), report the guest GL renderer
+scripts/devvm/start.sh             # boot (~20 s to SSH), report the guest GL renderer, turn off the idle timers
 scripts/devvm/ssh.sh               # a shell; ssh.sh CMD runs CMD
 scripts/devvm/deploy.sh --restart-session \
   target/release/athanor-bar:/usr/bin/athanor-bar
