@@ -13,7 +13,7 @@ here ran on a booted image: the findings are from source.
 | Input | Reference |
 | --- | --- |
 | cosmic-comp | tarball `epoch-1.10.0` of `Source0`; references below are `cosmic-comp:<path>:<line>` |
-| Athanor patches | `0001-shell-focus-Reconcile-focus-when-a-layer-surface-cha.patch`, `0002-build-Take-the-commit-hash-from-GIT_HASH-when-it-is-.patch`: focus reconciliation and build metadata; neither touches `src/theme.rs` or drawing code |
+| Athanor patches | `0001-shell-focus-Reconcile-focus-when-a-layer-surface-cha.patch`, `0002-build-Take-the-commit-hash-from-GIT_HASH-when-it-is-.patch`, `0003-main-Add-keep-shortcuts-to-keep-the-key-bindings-wit.patch` (#510, after `41224381`; it touches `src/lib.rs` and `src/state.rs`): focus reconciliation, build metadata and the key bindings; none touches `src/theme.rs`, the theme or drawing code |
 | libcosmic (cosmic-theme, cosmic-config) | **not the exact locked revision**, see section 5: commit `60ad2cc4c33d7500aba557cd9150e6938d72d5a1`, the last one before the tag time; references are `libcosmic:<path>:<line>` |
 | cosmic-settings, cosmic-settings-daemon | tag `epoch-1.9.0` of each (1.10.0 of these was not fetched); references are `settings:` and `daemon:` |
 | Athanor's own side | `system/athanor-compositor-client/src/theme.rs`, `src/cosmic_config.rs`; `forge/specs/athanor-calmo/athanor-calmo.spec` |
@@ -58,6 +58,7 @@ Colours are then taken from the selected built theme as follows.
 | Resize and swap indicators (the label chips), stack tab selection, window menu highlight | `accent.base`, `accent.on`, `accent_text` (falls back to `accent.base`), `palette.neutral_5` | `src/shell/element/resize_indicator.rs:269,279-280,318,328-329`; `swap_indicator.rs:110,120-121`; `stack/tab.rs:31,37,65-66`; `src/shell/grabs/menu/mod.rs:441,502`; `libcosmic:theme.rs:497-499` |
 | Corner radii of overlays | `corner_radii` through `radius_s()`, `radius_0()` | `swap_indicator.rs:71,124`; `grabs/menu/mod.rs:99` |
 | Window decoration shadow | `is_dark` | `src/shell/element/window.rs:471` |
+| Border of an unfocused window or stack, menu and zoom backgrounds, text on them | `bg_divider()`, `background`, `on_bg_color()`: none depends on the accent; in high contrast they change with the whole built theme of answer 3 | `src/shell/element/window.rs:531,546-549`; `stack.rs:832`; `src/shell/grabs/menu/mod.rs`; `src/shell/zoom.rs`; `src/utils/iced/mod.rs` |
 | Blur and transparency | `frosted`, `frosted_windows`, `frosted_system_interface`, `alpha_map`, container backgrounds | `window.rs:208,380`, `swap_indicator.rs:35`, `resize_indicator.rs:52` |
 | Group colours of tiling (grouping overlay) | none: the constants `GROUP_COLOR`, `ACTIVE_GROUP_COLOR` | `src/shell/layout/tiling/mod.rs:4536,4902` |
 
