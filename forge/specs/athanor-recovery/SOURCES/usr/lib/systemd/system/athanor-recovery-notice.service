@@ -3,8 +3,9 @@ Description=Say at the console that the desktop did not start
 # agetty prints /etc/issue.d/*.issue in its banner, so the message has to be in place before
 # the getty starts. /etc/issue.d/50-athanor-recovery.issue is a link that tmpfiles declares
 # to the file this unit writes: at every boot but a recovery the link points at nothing, and
-# agetty passes over it (measured with util-linux 2.39, `agetty --show-issue`). agetty does
-# not read /run/issue.d while /etc/issue exists, which is why the message is not put there.
+# agetty passes over it (measured with `agetty --show-issue`). agetty reads /run/issue.d as
+# well (util-linux 2.41.5, #560); the link keeps the unit's writes to its own runtime directory
+# under ProtectSystem=strict, instead of a directory other writers share.
 Before=getty@tty1.service
 # The message depends on whether greenboot has queued the previous deployment after a failed
 # health check (doc_recovery.md, R5), so it is written once greenboot is done.
