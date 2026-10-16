@@ -37,7 +37,7 @@ The maintainer chose to place UT13 in 1.0 (2026-10-16).
 
 ## Decision
 
-1. The security class of UT13 ships in release 1.0. It covers PB4b's `class` and `advisories` fields and PB10, and is tracked in #543. `release-1.0.md` gains a row for it.
+1. The security class of UT13 ships in release 1.0. It covers PB4b's `class` and `advisories` fields and PB10, and is tracked in #543. `release-1.0.md` gains a row for it, row 25. The rest of PB4b, the attestation with `build_time`, `revision` and `build_run_id`, keeps its place in the pipeline plan: only its class fields wait for 1.0.
 2. For 0.9, item 4 of `doc_shell.md` section 7 is accepted on the feature class. Every image 0.9 receives carries no class field, so it is of the feature class, as UT13 decides for an image without the field. The security-class half of the item holds from 1.0.
 3. Until 1.0, every update waits for the confirmation of UT6, and none downloads on a metered connection.
 
@@ -49,5 +49,6 @@ The maintainer chose to place UT13 in 1.0 (2026-10-16).
 
 - `docs/operations/release-1.0.md` gains a row for UT13, and its 1.0 release point names it.
 - `doc_shell.md` section 7, item 4, says that the security class applies from 1.0.
-- `docs/compliance/annex-i-mapping.md` row (c) stays "Partial" until 1.0.
+- UT13 in `doc_update_trust.md`, SH11's amendment in `doc_shell.md`, and items 6 and 7 of the shield sheet in `doc_bar.md` (BR8) name ADR-0120.
+- `docs/compliance/annex-i-mapping.md` rows (c), (2) and (8) stay "Partial" until 1.0, and row (c) says that until then every update waits for the person's confirmation.
 - A security fix released before 1.0 reaches a machine only when its person confirms the restart.

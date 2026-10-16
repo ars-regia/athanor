@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | What Athanor 1.0 contains, how each item is accepted, what waits for 1.1, and the order of work |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 3, 2026-10-14: scope from [ADR-0103](../decisions/0103-audit-5-decisions.md) (revision 1, D1), order and release points from [ADR-0105](../decisions/0105-releases-before-1-0.md), amended by [ADR-0115](../decisions/0115-zero-nine-in-one-week.md) (two releases, 0.3 and 0.9, and rows moved to 1.1) |
+| Status | revision 3, 2026-10-14: scope from [ADR-0103](../decisions/0103-audit-5-decisions.md) (revision 1, D1), order and release points from [ADR-0105](../decisions/0105-releases-before-1-0.md), amended by [ADR-0115](../decisions/0115-zero-nine-in-one-week.md) (two releases, 0.3 and 0.9, and rows moved to 1.1) and [ADR-0120](../decisions/0120-security-class-updates-in-1-0.md) (row 25) |
 
 ## 1. Purpose and date
 
@@ -99,7 +99,7 @@ waits for the maintainer's LUKS2 key backup, which is done in the week of 2026-1
 | --- | --- | --- | --- |
 | 0.3 "chain" | its exit was met on 2026-10-14; tagged when its remaining issues close | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), merged in #354); P2 (#122) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). `system/promote.sh` reads `:stable` back and refuses unless it is the evidence digest (`test_promote.py` `test_stable_is_read_back`) |
 | 0.9 "surface" | about 2026-10-21 (one week) | rows 8, 9, 11, 12, 13 (patches 1 and 2), 15 (the image ships the pinned Flathub remote and the daily update timer, `athanor-flatpak-update.timer`; the `*.preinstall` reader of decision 7 and the packaged store follow), 17, 18, 19, 20, 22, 23, 24; the ISO acceptance under Secure Boot (#252, the "to add" of row 8); the hardware work of 4.3; the visual language and accessibility, without the keyboard monitor that answers Orca alone (AX4, patch 6, in 1.1); the maintainer's aesthetic sign-offs (ST8, VL12). It ships on Fedora 43 | The release candidate: every row placed here holds and the hardware matrix is a recorded run. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`, `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage`, `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`, and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add", the ISO test under Secure Boot firmware ending in an update to a newer `:stable`, and the hardware matrix |
-| 1.0 | before 2026-12-02 | 0.9 rebased onto Fedora 45, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); row 7 (key hierarchy, not-after and revocation) with the image key rotation (PB5b) and its key ceremony, in the window between 0.9 and 1.0; the security-class updates of UT13 ([ADR-0120](../decisions/0120-security-class-updates-in-1-0.md)); proposed, with the rebase: S1 (#124) and P4b (#126), the bootc two-step update chain; no blocking defect | To add: a query for open blocking issues that must return none |
+| 1.0 | before 2026-12-02 | 0.9 rebased onto Fedora 45, or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); row 7 (key hierarchy, not-after and revocation) with the image key rotation (PB5b) and its key ceremony, in the window between 0.9 and 1.0; row 25, the security-class updates of UT13 ([ADR-0120](../decisions/0120-security-class-updates-in-1-0.md)); proposed, with the rebase: S1 (#124) and P4b (#126), the bootc two-step update chain; no blocking defect | To add: a query for open blocking issues that must return none |
 
 Row numbers are those of revision 2 of this file, so that issues and records that cite them
 stay valid: 1 signed immutable image; 2 NVIDIA failures; 3 update chain to `:stable`; 4 one
@@ -107,7 +107,7 @@ human approval per promotion to `:stable`; 5 evidence bundle; 6 resolved package
 hierarchy and MOK key set; 8 installer path; 9 greeter; 10 disk encryption; 11 recovery and
 rollback; 12 desktop session tier; 13 cosmic-comp patches; 14 keyring prompter; 15 application
 installation; 16 Tetragon; 17 attestation deleted; 18 DNS over TLS; 19 USBGuard; 20 `sshd`; 21
-SearXNG; 22 snapshots; 23 update Apply; 24 least privilege and PAM. Rows 10, 14, 16 and 21 are in
+SearXNG; 22 snapshots; 23 update Apply; 24 least privilege and PAM; and, added later, 25 security-class updates. Rows 10, 14, 16 and 21 are in
 section 3 and no longer in section 2. Every other row is in exactly one release, except row 7,
 which is in the window before 1.0, and the rows narrowed below.
 
