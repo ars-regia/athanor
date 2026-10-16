@@ -200,8 +200,19 @@ ACC_UNITS=()
 now_guest() { guest_ssh date +%s; }
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$ACC_HERE/../keyboard_type.py"; }
 # The journal of the units matching UNIT-GLOB since the epoch second SINCE; an SSH or
-# journalctl failure stops the run instead of reading as an empty journal.
+# journalctl failure stops the run instead of reading as an empty journal. journalctl -u fails
+# on a glob that names no unit the journal holds ("Failed to add filter for units: No data
+# available"), as on a fresh guest before the first polkit-agent-helper@ instance: the glob is
+# first matched against the unit fields it expands from, and no match is an empty journal.
 journal_since() { # journal_since SINCE UNIT
+  local units unit matched=''
+  if [[ $2 == *'*'* ]]; then
+    # shellcheck disable=SC2016 # the guest's shell expands the field
+    units=$(guest_ssh 'for field in _SYSTEMD_UNIT UNIT; do sudo journalctl -F "$field" || exit; done') || die "FAIL  the units of the journal could not be read"
+    # shellcheck disable=SC2053 # UNIT is a glob
+    while IFS= read -r unit; do [[ $unit == $2 ]] && matched=1; done <<< "$units"
+    [[ -n $matched ]] || return 0
+  fi
   guest_ssh sudo journalctl -q -b --since "@$1" -o cat -u "'$2'" || die "FAIL  the journal of $2 could not be read"
 }
 # Whether the agent opened a helper since the epoch second SINCE.
