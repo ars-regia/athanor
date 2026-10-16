@@ -158,6 +158,8 @@ shots_pid=$!
 # default PS/2 keyboard the first install on real hardware reached a greeter nobody could
 # type into while this test stayed green.
 set +e
+# The serial socket waits for the console (wait=on): GRUB draws its menu once, and a console
+# that connects after it would never type the boot commands.
 timeout "$TIMEOUT" qemu-system-x86_64 \
     -machine "$machine" "${secure_boot[@]}" -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
     -device qemu-xhci -device usb-kbd \
@@ -173,8 +175,6 @@ timeout "$TIMEOUT" qemu-system-x86_64 \
     -display none -serial "unix:${serial},server=on,wait=on" \
     -monitor "unix:${monitor},server,nowait" &
 qemu_pid=$!
-# The serial socket waits for the console (wait=on): GRUB draws its menu once, and a console
-# that connects after it would never type the boot commands.
 
 # The console decides how long the run lasts, not the clock. It stops as soon as it has
 # an answer: a session, a guest that broke, or a machine that has gone quiet with nothing

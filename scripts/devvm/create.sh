@@ -50,8 +50,15 @@ qemu-system-x86_64 \
   -drive "if=none,id=cd,media=cdrom,readonly=on,file=$iso" \
   -device virtio-scsi-pci -device scsi-cd,drive=cd,bootindex=1 \
   -netdev user,id=n0 -device "virtio-net-pci,netdev=n0,$NIC_PCI_ADDR" \
-  -device virtio-vga -display none -serial "unix:$work/serial.sock,server=on,wait=on"
-wait "$console_pid"
+  -device virtio-vga -display none -serial "unix:$work/serial.sock,server=on,wait=on" &
+qemu_pid=$!
+# A console that fails, before it connects above all, would leave QEMU waiting for it for
+# ever: stop QEMU too. Nothing it holds is kept, so it is killed outright.
+if ! wait "$console_pid"; then
+  kill -KILL "$qemu_pid"
+  die "the install console failed, see the messages above and $work/serial.log"
+fi
+wait "$qemu_pid"
 grep -aq "Athanor devvm kickstart finished" "$work/serial.log" \
   || die "the install did not finish, see $work/serial.log"
 
