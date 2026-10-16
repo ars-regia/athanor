@@ -17,7 +17,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Atspi", "2.0")
-from gi.repository import Atspi  # noqa: E402
+from gi.repository import Atspi, GLib  # noqa: E402
 
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 KEYS = [
@@ -73,7 +73,12 @@ def showing(accessible, role, label):
             if child is not None:
                 visit(child)
 
-    visit(accessible)
+    # A popover rebuilds its rows while it opens: a node read in between no longer exists.
+    # The walk is then empty, and wait_for walks again.
+    try:
+        visit(accessible)
+    except GLib.Error:
+        return []
     return found
 
 
@@ -114,7 +119,7 @@ def main():
             for key in KEYS
         ),
     )
-    opener = showing(app, "button", "Accessibility")
+    opener = wait_for(lambda: showing(app, "button", "Accessibility"), 5)
     step("the Accessibility button shows", bool(opener))
     opener[0].do_action(0)
     # GtkSwitch reports as "check box" on at-spi2-core 2.58; older releases say "switch".
