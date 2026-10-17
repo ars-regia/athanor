@@ -133,9 +133,9 @@ the task of the C1 plan in which the protocol lands, or the reason none is plann
 | `ext_session_lock_manager_v1` | `wayland::session_lock` (1; `mod.rs:110`) | no | 4 |
 | `ext_idle_notifier_v1` | `wayland::idle_notify` (2; `mod.rs:128`; **no per-client filter**) | no | 4 |
 | `zwp_idle_inhibit_manager_v1` | `wayland::idle_inhibit` | no | not planned in C1; notifications honour inhibitors (`doc_session_daemons.md`, SD4), so it follows `ext-idle-notify` |
-| `zwp_input_method_manager_v2`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | `wayland::input_method`, `virtual_keyboard`, `virtual_pointer` (1 each; per-client filter; `virtual_pointer/mod.rs:100`) | no | not planned in C1 (Q6) |
+| `zwp_input_method_manager_v2`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | `wayland::input_method`, `virtual_keyboard`, `virtual_pointer` (1, 1 and 2; per-client filter; `virtual_pointer/mod.rs:55,100`) | no | not planned in C1 (Q6) |
 | `wp_single_pixel_buffer_v1` | `wayland::single_pixel_buffer` (1; `mod.rs:74`) | no | not planned in C1; `athanor-idle` draws its blank with it (`doc_session_daemons.md:107`, SD4) |
-| `zxdg_decoration_manager_v1` | `wayland::shell::xdg::decoration` (1; `mod.rs:153`, with a filter) | no | not planned in C1; the toolkit driver requests server decorations with `WindowDecorations::RequestServer` (`system/athanor-toolkit/src/driver.rs:55`), so without it the toolkit's windows get none |
+| `zxdg_decoration_manager_v1` | `wayland::shell::xdg::decoration` (1; `shell/xdg/decoration.rs:153`, with a filter) | no | not planned in C1; the toolkit driver requests server decorations with `WindowDecorations::RequestServer` (`system/athanor-toolkit/src/driver.rs:55`), so without it the toolkit's windows get none |
 | `zwp_text_input_manager_v3` | `wayland::text_input` | no | not planned; GTK binds it (Q1) |
 | `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | `wayland::selection::ext_data_control` (1), `wlr_data_control` (2; per-client filter) | no | not planned in C1 (Q6) |
 | `wl_data_device_manager`, `zwp_primary_selection_device_manager_v1` | `wayland::selection::data_device`, `primary_selection` | no | not planned; GTK clients need the first to copy and paste (Q1) |
