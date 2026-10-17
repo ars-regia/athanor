@@ -198,12 +198,19 @@ impl App {
         Ok(())
     }
 
-    /// A key held down: as pressed again, except Enter and Space, which activate once.
+    /// A key held down: as pressed again, except Enter, and Space outside a field, which
+    /// activate once.
     fn repeat(&mut self, event: KeyEvent) {
-        if !matches!(
-            event.keysym,
-            Keysym::Return | Keysym::KP_Enter | Keysym::space
-        ) {
+        let in_field = self
+            .ui
+            .focus()
+            .is_some_and(|id| self.ui.field_text(id).is_some());
+        let activates = match event.keysym {
+            Keysym::Return | Keysym::KP_Enter => true,
+            Keysym::space => !in_field,
+            _ => false,
+        };
+        if !activates {
             self.key(event);
         }
     }
