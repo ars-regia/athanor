@@ -47,6 +47,13 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Style panel'", lines[0])
 
+    def test_a_label_that_ends_in_panel_is_matched_as_it_is_said(self):
+        self.assertEqual(compare.compare(["Control panel"], ["Control panel"])[1], [])
+        self.assertEqual(
+            compare.compare(["Control panel"], ["Control grouping"])[1],
+            ["'Control panel': missing"],
+        )
+
     def test_a_panel_is_not_another_role(self):
         self.assertEqual(
             compare.compare(["Island toggle button"], ["Island panel"])[1],
