@@ -247,6 +247,15 @@ item = "LA1"
 purpose = "The Athanor launcher"
 
 [[component]]
+path = "forge/specs/athanor-compositor"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_own_stack.md"
+item = "OS3"
+purpose = "Athanor's own Wayland compositor on Smithay; a workspace spike until revision 2 of doc_own_stack.md"
+
+[[component]]
 path = "forge/specs/athanor-layout-chooser"
 kind = "rpm spec"
 area = "shell"
@@ -649,6 +658,15 @@ status = "specified"
 spec = "doc_shell.md"
 item = "SH5"
 purpose = "Calmo tokens and the generator of the shell's style"
+
+[[component]]
+path = "system/athanor-toolkit"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_own_stack.md"
+item = "OS7"
+purpose = "Athanor's own widget toolkit: Wayland driver, widgets, Parley text, AccessKit accessibility"
 
 [[component]]
 path = "system/athanor-trust-state"

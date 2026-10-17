@@ -67,5 +67,6 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# No git dependency is in use today. A new one is added here with its exact URL.
-allow-git = []
+# Each git dependency is added here with its exact URL. Smithay is taken at a pinned revision,
+# as niri and cosmic-comp take it (doc_own_stack.md OS3; forge/specs/athanor-compositor).
+allow-git = ["https://github.com/Smithay/smithay"]

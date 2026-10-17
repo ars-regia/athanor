@@ -87,6 +87,8 @@ maintainers) this document adds: **a window-management model the maintainer appr
 register, which cosmic-comp cannot host and upstream declines.** A fork starts from cosmic-comp
 (or from niri, both on Smithay), never from zero.
 
+*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor passes its acceptance and replaces cosmic-comp, in release 1.0, as `doc_own_stack.md` sets out.*
+
 ## 3. Open questions
 
 - **Rebase cost.** No cosmic-comp release has yet been rebased with the patch set in place. The maintainer approved CO3 on 2026-10-08 before the measurement: the first rebase measures the cost and reopens CO3 if it exceeds the budget.

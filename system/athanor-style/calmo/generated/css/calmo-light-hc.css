@@ -357,6 +357,82 @@ button.bar-confirm {
     color: @ath_acc_ink;
 }
 
+/* GTK's stock controls on every Athanor surface: their state is drawn in the accent and
+ * the neutrals of Calmo (VL2), not in the fixed blue and greys of GTK's Default theme. */
+window.athanor-surface scale > trough {
+    background-image: none;
+    background-color: @ath_chip;
+}
+
+window.athanor-surface scale > trough > highlight {
+    border-color: @ath_acc;
+    background-image: none;
+    background-color: @ath_acc;
+}
+
+window.athanor-surface switch:checked,
+window.athanor-surface check:checked,
+window.athanor-surface check:indeterminate,
+window.athanor-surface radio:checked,
+window.athanor-surface radio:indeterminate {
+    border-color: @ath_acc;
+    background-image: none;
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
+/* This sheet overrides the Default theme's insensitive colours, so an insensitive control
+ * is dimmed as a whole, as libadwaita dims it. */
+window.athanor-surface scale:disabled,
+window.athanor-surface switch:disabled,
+window.athanor-surface check:disabled,
+window.athanor-surface radio:disabled {
+    opacity: 0.5;
+}
+
+window.athanor-surface entry:focus-within,
+window.athanor-surface spinbutton:focus-within {
+    outline-color: @ath_acc;
+}
+
+window.athanor-surface entry > text > selection:focus-within,
+window.athanor-surface spinbutton > text > selection:focus-within {
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
+window.athanor-surface list row:selected {
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
+/* The control center (doc_control_center.md) and the launcher (doc_launcher.md): one card
+ * on a transparent surface. A tile that is on is filled with the accent (maintainer
+ * decision, 2026-10-17, #570). */
+window.athanor-control-center .control-center,
+window.athanor-launcher .launcher {
+    border: 2px solid @ath_line;
+    background-color: @ath_surf;
+    color: @ath_ink;
+}
+
+/* The launcher's field and result list sit on the card, not on GTK's own grey and white. */
+window.athanor-launcher entry {
+    background-color: @ath_surf2;
+    color: @ath_ink;
+}
+
+window.athanor-launcher list {
+    background-color: transparent;
+    color: @ath_ink;
+}
+
+.control-center-tile > button:checked {
+    background-image: none;
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
+}
+
 /* Notification cards (doc_bar.md BR4): in the list, and on the popup surface, which is
  * transparent so that each card floats with its own shadow. */
 .notification-card {

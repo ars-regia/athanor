@@ -1,5 +1,6 @@
 # Workspace crates that no package ships, one name per line; read by scripts/verify.py (check "shipped").
-# Empty since ADR-0073 retired the crates that were listed here.
+# athanor-compositor: the milestone C1 spike (doc_own_stack.md); cosmic-comp ships until revision 2.
 #
 # Crates outside [workspace.members] need no name here, because the "shipped" check reads
 # members only.
+athanor-compositor
