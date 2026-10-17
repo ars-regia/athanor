@@ -41,7 +41,9 @@ impl Surface {
         }
         window.set_namespace(Some("athanor-launcher"));
         window.set_monitor(Some(monitor));
-        window.add_css_class("launcher-surface");
+        for class in ["athanor-surface", "athanor-launcher", "launcher-surface"] {
+            window.add_css_class(class);
+        }
         let surface = Surface { window, monitor: monitor.clone() };
         // The input region belongs to the GdkSurface, which exists once the window is
         // realized; before that, `window.surface()` is None and the call would do nothing.

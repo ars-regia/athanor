@@ -41,7 +41,9 @@ impl Surface {
         }
         window.set_namespace(Some("athanor-control-center"));
         window.set_monitor(Some(monitor));
-        window.add_css_class("control-center-surface");
+        for class in ["athanor-surface", "athanor-control-center", "control-center-surface"] {
+            window.add_css_class(class);
+        }
         let surface = Surface {
             window,
             monitor: monitor.clone(),
