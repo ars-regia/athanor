@@ -1,0 +1,13 @@
+[package]
+name = "athanor-compositor"
+version = "1.0.0"
+edition = "2021"
+authors = ["Athanor Forge <forge@athanor.os>"]
+license = "GPL-3.0-or-later"
+description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone C1)"
+
+[dependencies]
+# The revision and its date are in README.md; deny.toml admits this URL and no other git source.
+smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_winit", "desktop", "wayland_frontend"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
