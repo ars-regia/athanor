@@ -13,7 +13,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::utils::Point;
+use smithay::utils::{Point, SERIAL_COUNTER};
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -21,10 +21,12 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle};
-use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols::xdg::shell::client::{
+    xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
+};
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
@@ -196,6 +198,9 @@ delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
 delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
+delegate_noop!(Client: xdg_positioner::XdgPositioner);
+delegate_noop!(Client: ignore xdg_popup::XdgPopup);
+delegate_noop!(Client: ignore wl_seat::WlSeat);
 
 /// A new file, already unlinked, for a client's buffers.
 fn unlinked() -> Result<std::fs::File, Error> {
@@ -532,6 +537,11 @@ enum Step {
     OnDemand,
     /// The exclusive surface commits a null buffer.
     UnmapExclusive,
+    /// The exclusive surface opens a popup that grabs the seat with this serial.
+    Popup(u32),
+    /// The exclusive surface commits again, unchanged; the sender is told once the compositor
+    /// has handled it.
+    Recommit(mpsc::Sender<()>),
 }
 
 /// The shell's stand-in: its connection's queue and state, and the globals it binds.
@@ -542,6 +552,7 @@ struct Shell {
     shm: wl_shm::WlShm,
     layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
     wm_base: xdg_wm_base::XdgWmBase,
+    seat: wl_seat::WlSeat,
     /// The buffers' files, open while their buffers are.
     files: Vec<std::fs::File>,
 }
@@ -577,7 +588,13 @@ impl Shell {
         height: u32,
         zone: i32,
         keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
-    ) -> Result<wl_surface::WlSurface, Error> {
+    ) -> Result<
+        (
+            wl_surface::WlSurface,
+            zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        ),
+        Error,
+    > {
         let qh = self.queue.handle();
         let surface = self.compositor.create_surface(&qh, ());
         let layer = self.layer_shell.get_layer_surface(
@@ -602,7 +619,35 @@ impl Shell {
         let buffer = self.buffer(i32::try_from(width)?, i32::try_from(height)?)?;
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
-        Ok(surface)
+        Ok((surface, layer))
+    }
+
+    /// Maps a popup of the fixture's size on the layer surface `parent`, grabbing the seat with
+    /// `serial`.
+    fn popup(
+        &mut self,
+        parent: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        serial: u32,
+    ) -> Result<(), Error> {
+        let qh = self.queue.handle();
+        let positioner = self.wm_base.create_positioner(&qh, ());
+        positioner.set_size(WIDTH, HEIGHT);
+        positioner.set_anchor_rect(0, 0, 1, 1);
+        let surface = self.compositor.create_surface(&qh, ());
+        let xdg = self.wm_base.get_xdg_surface(&surface, &qh, ());
+        let popup = xdg.get_popup(None, &positioner, &qh, ());
+        parent.get_popup(&popup);
+        popup.grab(&self.seat, serial);
+        self.client.configure = None;
+        surface.commit();
+        while self.client.configure.is_none() {
+            self.queue.blocking_dispatch(&mut self.client)?;
+        }
+        xdg.ack_configure(self.client.configure.ok_or("no configure")?);
+        let buffer = self.buffer(WIDTH, HEIGHT)?;
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        Ok(())
     }
 
     /// Maps a window of the fixture's size.
@@ -638,6 +683,7 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
         shm: client.bind(&registry, &qh, 1)?,
         layer_shell: client.bind(&registry, &qh, 4)?,
         wm_base: client.bind(&registry, &qh, 1)?,
+        seat: client.bind(&registry, &qh, 1)?,
         files: Vec::new(),
         queue,
         client,
@@ -665,9 +711,19 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
                 )?;
             }
             Step::UnmapExclusive => {
-                let surface = exclusive.as_ref().ok_or("no exclusive surface")?;
+                let (surface, _) = exclusive.as_ref().ok_or("no exclusive surface")?;
                 surface.attach(None, 0, 0);
                 surface.commit();
+            }
+            Step::Popup(serial) => {
+                let (_, layer) = exclusive.clone().ok_or("no exclusive surface")?;
+                shell.popup(&layer, serial)?;
+            }
+            Step::Recommit(done) => {
+                let (surface, _) = exclusive.as_ref().ok_or("no exclusive surface")?;
+                surface.commit();
+                shell.queue.roundtrip(&mut shell.client)?;
+                done.send(()).map_err(|_| "the test is gone")?;
             }
         }
         connection.flush()?;
@@ -763,6 +819,70 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
         focus(&run.state),
         layer(&run.state, "on-demand"),
         "a click on demand takes it"
+    );
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// An exclusive surface's own popup keeps the keyboard grab it was given: the surface
+/// committing again, as a bar does each frame, does not take the keyboard back from the popup
+/// and end the grab.
+#[test]
+fn an_exclusive_surface_keeps_the_keyboard_in_its_own_popup() {
+    let mut run = Running::start(None);
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state();
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    let exclusive = focus(&run.state).expect("the exclusive surface");
+
+    // A key pressed while the exclusive surface holds the keyboard, as the bar's popover opens.
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, shell_id.clone()));
+    steps
+        .send(Step::Popup(serial.into()))
+        .expect("the shell's client");
+    let in_popup = |state: &State| {
+        focus(state).is_some_and(|surface| {
+            surface != exclusive && state.popups.find_popup(&surface).is_some()
+        })
+    };
+    run.until("the popup's grab takes the keyboard", in_popup);
+    let popup = focus(&run.state);
+
+    let (done, done_rx) = mpsc::channel();
+    steps
+        .send(Step::Recommit(done))
+        .expect("the shell's client");
+    run.until("the recommit is handled", |_| done_rx.try_recv().is_ok());
+    assert_eq!(focus(&run.state), popup, "the popup keeps the keyboard");
+    assert!(
+        run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|k| k.is_grabbed()),
+        "the popup's grab goes on"
     );
 
     drop(steps);
