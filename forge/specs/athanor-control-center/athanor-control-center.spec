@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -58,6 +58,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - The panel wears Calmo's neutrals, and its sliders, switches and active tiles
   follow the accent; a tile that is on is filled with it (#570).

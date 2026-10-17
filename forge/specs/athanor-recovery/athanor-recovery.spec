@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later
@@ -50,6 +50,10 @@ install -D -m 0644 %{sources}/usr/lib/systemd/system-preset/80-athanor-recovery.
 /usr/lib/systemd/system-preset/80-athanor-recovery.preset
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - Built with the Calmo sheets of #570, which draw the shell's controls in the accent.
 

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
@@ -67,6 +67,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-launche
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-launcher.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - The card, field and result list wear Calmo's neutrals; the selected row and the
   field's focus ring follow the accent (#570).
