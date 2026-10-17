@@ -15,7 +15,7 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser into <out>/bin as athanor-toolkit-chooser
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
@@ -37,6 +37,7 @@
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
+#   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
@@ -465,8 +466,10 @@ build-toolkit)
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-toolkit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-toolkit \
-                 && cargo build --release --locked -p athanor-toolkit --example chooser \
-                 && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser'
+                 && cargo build --release --locked -p athanor-toolkit --example chooser --example field --example input_method \
+                 && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser \
+                 && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
+                 && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method'
     ;;
 compositor-globals)
     # doc_own_stack.md, C1 task 1: what a client of athanor-compositor binds.
@@ -843,6 +846,19 @@ atspi)
         exit 2
         ;;
     esac
+    ;;
+input-method)
+    # doc_own_stack.md, T1 task 6 (OS9 item 3): the test input method pre-edits and commits into
+    # athanor-toolkit's text field under cosmic-comp, which offers zwp_input_method_v2 to the
+    # scene's clients because none is behind a security context.
+    require athanor-toolkit-field build-toolkit
+    require athanor-toolkit-input-method build-toolkit
+    in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=4 \
+        RIG_HOLD="python3 /repo/forge/test/shell/input_method_check.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 input-method -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec /out/bin/athanor-toolkit-field"
+    echo "look at $out/input-method-preedit.png (the preedit underlined) and $out/input-method-commit.png"
     ;;
 chooser-e2e)
     # The bar and the dock as in a session, the chooser beside them; the check presses a
