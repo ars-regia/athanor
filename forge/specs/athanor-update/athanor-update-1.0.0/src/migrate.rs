@@ -82,6 +82,14 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>) -> Result<Outcome, Failure> {
         ctx.store.set_channel_absent(true).map_err(storage)?;
         return Ok(Outcome::Waiting("channel-absent"));
     };
+    // The registry answered with the channel: a successful check, as `check.rs` counts one. The
+    // check itself asks the registry only once the policy is enforced, so without this the
+    // signed copy staged below would boot with no check behind it, and the shield would wait
+    // for the check timer to say "verified" (doc_shell.md section 7, item 8).
+    ctx.store.set_last_success(ctx.now).map_err(|err| {
+        tracing::error!(%err, "cannot record the successful check; nothing is staged");
+        Failure { code: athanor_trust_state::ErrorCode::Storage, host: None }
+    })?;
     ctx.store.set_channel_absent(false).map_err(storage)?;
     let mut record = record_of(ctx, &status, &candidate.digest)?;
     // Nothing releases a held digest, and the migration never stages one: the user went back
@@ -190,6 +198,10 @@ mod tests {
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Done));
         assert!(machine.store.migrated());
         assert_eq!(switches(&tools), 1);
+        // The registry was reached before the restart: the signed copy boots verified.
+        let state = crate::check::run(&machine.ctx(&tools, 5600), true).expect("offline");
+        assert_eq!(state.last_successful_check, Some(5000));
+        assert_eq!(athanor_trust_state::badge(&state, 5600), athanor_trust_state::Badge::Check);
     }
 
     #[test]
@@ -393,6 +405,7 @@ mod tests {
         tools.candidate = Ok(None);
         assert_eq!(run(&machine.ctx(&tools, 5000)), Ok(Outcome::Waiting("channel-absent")));
         assert!(!tools.called("switch") && !machine.store.migrated());
+        assert_eq!(machine.store.last_success().expect("read"), None, "a missing channel is not a successful check");
         // The later checks keep saying why, until the channel appears.
         let state = crate::check::run(&machine.ctx(&tools, 5000), true).expect("offline");
         assert_eq!(state.verified.reason, athanor_trust_state::Reason::ChannelAbsent);
