@@ -35,9 +35,12 @@ next Fedora base, before Fedora 43 reaches its end of life on 2026-12-02.
 
 The maintainer took these decisions on 2026-10-17:
 
-1. **Order.** The vision document (`doc_own_stack.md`), this record and the plans of the first two
-   spikes are written now, in parallel with release 0.9; they change no shipped file. The spikes,
-   which compile and use the rig, start after the 0.9 tag.
+1. **Order: the code starts at once.** The vision document (`doc_own_stack.md`), this record and
+   the plans of the first two milestones are written now, and the maintainer approved
+   `doc_own_stack.md` revision 1 the same day, so that the code starts at once, beside release 0.9.
+   The first two milestones, C1 and T1, are the first steps of the real crates, not spikes to
+   archive. The toolkit is built in parallel with the compositor, on the reference laptop; on the
+   desktop, the compositor's builds run only while the rig of release 0.9 is idle.
 2. **The compositor is new, on Smithay.** It is written from Smithay, not forked from cosmic-comp or
    niri, so that its security model is designed in from the start: privileged protocols granted by
    the client's identity, not by a string it supplies; a trusted path for credential prompts;
@@ -63,6 +66,10 @@ The maintainer took these decisions on 2026-10-17:
 7. **The toolkit's widget layer is our own**, on Parley and AccessKit, not on Masonry or Xilem.
 8. **X11 applications run through xwayland-satellite**, a separate process started on demand, so
    that no X11 code runs inside the compositor.
+9. **NVIDIA's driver is tested from the first milestone**, without the maintainer: headless on the
+   desktop's NVIDIA render node (rendering, dmabuf, explicit sync) at every change, and nested in
+   the session. Console sessions on KMS (outputs plugged and unplugged, suspend and resume) come
+   last, with prepared commands, because they take the maintainer's time.
 
 ## Consequences
 

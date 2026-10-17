@@ -1,15 +1,15 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 1, draft of 2026-10-17, not approved.** It sets out the direction ADR-0121
-records: a compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own
-in Rust. Nothing here may be implemented before the maintainer approves a revision (ADR-0074),
-except the two spikes of section 5, which change no shipped file and record their results under
-`docs/spikes/`. Section 7 records the maintainer's decisions of 2026-10-17 and the one left open. The spikes'
-plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
+Status: **revision 1, approved by the maintainer on 2026-10-17.** It sets out the direction
+ADR-0121 records: a compositor of Athanor's own on Smithay, for which release 1.0 waits, and a
+toolkit of its own in Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the
+measurements of the first two milestones of section 5 and the compositor's acceptance. Section 7
+records the maintainer's decisions of 2026-10-17 and the one left open. The milestones' plans are
+`docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
-files this document names. Versions, issue states and sizes age quickly: each spike reads them
+files this document names. Versions, issue states and sizes age quickly: each milestone reads them
 again before it relies on them.
 
 ## 1. Context
@@ -177,7 +177,11 @@ scale. The rig runs the shell's surfaces against it, which brings the two-output
 pull request instead of a scheduled job. Protocol conformance, input methods and the security
 model of OS4 are tested in that fixture. The hardware matrix (outputs plugged and unplugged,
 fractional scale, VRR, NVIDIA, suspend and resume, tablets and touch) is checked on the reference
-laptop, on the maintainer's NVIDIA desktop and in the development VM.
+laptop, on the maintainer's NVIDIA desktop and in the development VM. NVIDIA's driver is tested
+without the maintainer from the first milestone: the fixture also runs headless on the desktop's
+NVIDIA render node, so that rendering, dmabuf and explicit sync are checked at every change, and
+the compositor runs nested in the session. The console sessions on KMS come last (ADR-0121
+decision 9).
 
 ## 4. The toolkit
 
@@ -208,20 +212,22 @@ first surface moves:
    through Parley;
 5. deterministic goldens drawn with `vello_cpu`.
 
-## 5. The two spikes
+## 5. The first two milestones
 
-Both start after the 0.9 tag, run in the rig with `taskset -c 0-3` and on the reference machines,
-change no shipped file, and record their results under `docs/spikes/`. Their plans are named in
-the status line.
+Both start at once, beside release 0.9, as the first steps of the real crates: the compositor
+`athanor-compositor` under `forge/specs/`, built on the desktop while the rig is idle, and the
+toolkit `athanor-toolkit` under `system/`, built on the reference laptop. Their measurements are
+recorded under `docs/spikes/` and go into revision 2. Their plans are named in the status line.
 
-**Spike C1: the shell on a Smithay compositor.** A minimal compositor on Smithay, on a branch,
-runs the current GTK4 bar, dock, greeter and launcher unchanged: in the rig, on the laptop, and on
-the NVIDIA desktop from a text console with explicit sync. It passes when the rig's goldens of
+**Milestone C1: the shell on the own compositor.** The compositor's first version runs the current
+GTK4 bar, dock, greeter and launcher unchanged: in the rig, headless and nested on the NVIDIA
+desktop, and at the end on the laptop and the NVIDIA desktop from a text console with explicit
+sync. It passes when the rig's goldens of
 those surfaces match cosmic-comp's or each difference is explained, Orca reads the bar, and an hour
 of use on the NVIDIA desktop logs no error. It measures: the protocols the shell needs that Smithay
 lacks, the lines written, the frame time on each machine, and each NVIDIA defect met.
 
-**Spike T1: one surface in the toolkit.** The smallest widget layer that draws the layout chooser
+**Milestone T1: one surface in the toolkit.** The smallest widget layer that draws the layout chooser
 (button, a group of toggle buttons that behaves as a radio group, label, focus chain), on Parley, AccessKit and the toolkit's own driver, in an xdg-toplevel as the GTK chooser is,
 beside the chooser's GTK version, plus a single-line text field. It passes when its goldens are
 drawn in the rig's cases (English, German and right to left, at scales 1.0 and 1.5), Orca's transcript holds everything the GTK version's
@@ -231,16 +237,18 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 ## 6. Order
 
-1. This document, ADR-0121 and the spike plans (now, beside release 0.9).
-2. The spikes C1 and T1 (after the 0.9 tag), then revision 2 of this document with their results.
-3. The harnesses of OS9.
+1. This document, ADR-0121 and the plans of the first two milestones.
+2. At once, beside release 0.9 and in parallel: milestone C1 on the desktop and milestone T1 on
+   the laptop, each with the harnesses of OS9 it needs; then revision 2 of this document with
+   their measurements.
+3. The rest of the harnesses of OS9.
 4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
    the GTK4 shell unchanged on top. Revision 2 writes that acceptance: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
    as a recorded run.
-5. The toolkit, after the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
+5. The toolkit, in parallel with the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
    launcher, the bar and the control centre; the greeter last, because it handles the password
    (AGENTS.md, "Stop and ask before editing").
 
@@ -248,7 +256,8 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 Taken by the maintainer on 2026-10-17 and recorded in ADR-0121, in its numbering:
 
-1. **Paper now, spikes after the 0.9 tag** (section 5).
+1. **The code starts at once**, beside release 0.9, with revision 1 approved; C1 and T1 are the
+   first milestones of the real crates; the toolkit is built in parallel, on the laptop (section 5).
 2. **A new compositor on Smithay**, not a fork of cosmic-comp or niri (OS3).
 3. **Licences:** the compositor `GPL-3.0-or-later`, the toolkit `MIT OR Apache-2.0` (OS3, OS7).
 4. **Both in this repository**, as crates of their own.
@@ -261,8 +270,10 @@ Taken by the maintainer on 2026-10-17 and recorded in ADR-0121, in its numbering
    `masonry_core`, would have given widgets, layout and a test harness; full control of the layer
    was preferred.
 8. **xwayland-satellite** in a separate process (OS3, OS4).
+9. **NVIDIA tested from the first milestone**, headless and nested, with the console sessions last
+   (OS6).
 
-Open, settled by spike T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
+Open, settled by milestone T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
 default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
 
 ## 8. Risks
