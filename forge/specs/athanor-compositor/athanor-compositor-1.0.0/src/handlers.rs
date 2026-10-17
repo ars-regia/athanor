@@ -412,9 +412,11 @@ impl XdgShellHandler for State {
     /// made: it names the serial of the last button press sent to it, while it holds the
     /// pointer, or of the last key press or release sent to it, while it holds the keyboard
     /// (`GrabSerials`, as mutter checks them). A client cannot take the keyboard from another
-    /// by opening a popup, and while a layer surface holds the keyboard exclusively only its
-    /// own popups' grab takes it; any other takes the pointer only. A grab refused leaves the
-    /// popup shown without it, as a popover a client opens at start is.
+    /// by opening a popup. The grab's end hands the keyboard to the popups' root, so the grab
+    /// takes the keyboard only when that root can keep it: never for a layer surface whose
+    /// interactivity is `none`, a bar, and while a layer surface holds the keyboard
+    /// exclusively only for its own popups; any other grab takes the pointer only. A grab
+    /// refused leaves the popup shown without it, as a popover a client opens at start is.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
@@ -439,15 +441,17 @@ impl XdgShellHandler for State {
         if !(clicked || typed) {
             return;
         }
-        // The grab's end hands the keyboard to the popups' root: only an exclusive surface's
-        // own popups may take it, so that it comes back to that surface.
-        let exclusive_elsewhere = self
-            .exclusive_layer()
-            .is_some_and(|surface| surface != root);
+        // The grab's end hands the keyboard to the popups' root: the grab takes it only when the
+        // root can keep it, and while a surface holds it exclusively only when that surface is
+        // the root, so that it comes back to a surface that keeps it.
+        let takes_keyboard = self.takes_keyboard(&root)
+            && !self
+                .exclusive_layer()
+                .is_some_and(|surface| surface != root);
         let Ok(mut grab) = self.popups.grab_popup(root, popup, &seat, serial) else {
             return;
         };
-        if let Some(keyboard) = keyboard.filter(|_| !exclusive_elsewhere) {
+        if let Some(keyboard) = keyboard.filter(|_| takes_keyboard) {
             let previous = grab.previous_serial().unwrap_or(serial);
             if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
             {
