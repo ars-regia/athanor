@@ -14,7 +14,9 @@ use smithay::desktop::utils::{
     surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
+use smithay::desktop::{
+    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+};
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
@@ -27,7 +29,7 @@ use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
-use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::compositor::{CompositorClientState, CompositorState, SurfaceData};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
@@ -35,6 +37,7 @@ use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
@@ -63,10 +66,12 @@ pub struct State {
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
+    pub grab_serials: GrabSerials,
     pub backend: Backend,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
     pub dmabuf_state: DmabufState,
@@ -84,6 +89,34 @@ pub struct State {
     pub client_gone: channel::Sender<ClientId>,
 }
 
+/// The serials a popup grab may name, as mutter takes them, each with the client it was sent
+/// to: the last button press, sent to the client under the pointer, and the last key press and
+/// release, sent to the focused client. Serials come from one counter and can be guessed; the
+/// client is what keeps one client from naming another's.
+#[derive(Debug, Default)]
+pub struct GrabSerials {
+    pub button: Option<(Serial, ClientId)>,
+    pub key_press: Option<(Serial, ClientId)>,
+    pub key_release: Option<(Serial, ClientId)>,
+}
+
+impl GrabSerials {
+    /// Whether `serial` is the last button press, and was sent to `client`.
+    pub fn clicked(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.button.as_ref(), serial, client)
+    }
+
+    /// Whether `serial` is the last key press or release, and was sent to `client`.
+    pub fn typed(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.key_press.as_ref(), serial, client)
+            || sent(self.key_release.as_ref(), serial, client)
+    }
+}
+
+fn sent(event: Option<&(Serial, ClientId)>, serial: Serial, client: &ClientId) -> bool {
+    event.is_some_and(|(sent, to)| *sent == serial && to == client)
+}
+
 impl State {
     /// The globals that do not depend on the backend, the seat and the dispatch of the clients'
     /// requests. The backend adds its outputs, linux-dmabuf and linux-drm-syncobj.
@@ -97,6 +130,11 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        // ponytail: every client may bind it; task 5 grants the top and overlay layers by identity (OS4).
+        // Task 5 must also give the compositor an escape from exclusive keyboard focus: today a
+        // 1x1 transparent exclusive overlay surface holds the keyboard for as long as it lives,
+        // which is acceptable only while the compositor runs nested or headless.
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
@@ -126,9 +164,11 @@ impl State {
             popups: PopupManager::default(),
             seat,
             last_input_serial: None,
+            grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             shm_state,
             seat_state,
             dmabuf_state: DmabufState::new(),
@@ -162,12 +202,33 @@ impl State {
         self.space.map_output(output, (x, 0));
     }
 
-    /// The area of the first output: where windows are placed and the pointer moves.
+    /// The area of the first output: where the pointer moves.
     pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
         self.space
             .outputs()
             .next()
             .and_then(|output| self.space.output_geometry(output))
+    }
+
+    /// What the layer surfaces' exclusive zones leave of the first output: where windows are
+    /// placed.
+    pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
+        let output = self.space.outputs().next()?;
+        let area = self.space.output_geometry(output)?;
+        // The layer map lays the output out at its logical size rounded, the space at its
+        // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
+        // fractional scale with no zone places windows as the whole output does.
+        let laid_out = output.current_mode().map(|mode| {
+            let size = mode
+                .size
+                .to_f64()
+                .to_logical(output.current_scale().fractional_scale());
+            output
+                .current_transform()
+                .transform_size(size.to_i32_round())
+        })?;
+        let zone = layer_map_for_output(output).non_exclusive_zone();
+        Some(inset(area, laid_out, zone))
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -191,27 +252,41 @@ impl State {
         frame_target: Time<Monotonic>,
         period: Duration,
     ) {
+        // Collected: the output's layer map is not held while the surfaces are visited.
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        let scanout = |surface: &WlSurface, surface_states: &SurfaceData| {
+            update_surface_primary_scanout_output(
+                surface,
+                output,
+                surface_states,
+                None,
+                states,
+                default_primary_scanout_output_compare,
+            );
+        };
         for window in self.space.elements() {
-            window.with_surfaces(|surface, surface_states| {
-                update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    surface_states,
-                    None,
-                    states,
-                    default_primary_scanout_output_compare,
-                );
-            });
+            window.with_surfaces(scanout);
+        }
+        for layer in &layers {
+            layer.with_surfaces(scanout);
         }
         if damaged {
             let mut feedback = OutputPresentationFeedback::new(output);
+            let flags = |surface: &WlSurface, _: &SurfaceData| {
+                surface_presentation_feedback_flags_from_states(surface, None, states)
+            };
             for window in self.space.elements() {
                 window.take_presentation_feedback(
                     &mut feedback,
                     surface_primary_scanout_output,
-                    |surface, _| {
-                        surface_presentation_feedback_flags_from_states(surface, None, states)
-                    },
+                    flags,
+                );
+            }
+            for layer in &layers {
+                layer.take_presentation_feedback(
+                    &mut feedback,
+                    surface_primary_scanout_output,
+                    flags,
                 );
             }
             feedback.presented(
@@ -222,14 +297,50 @@ impl State {
             );
         }
         // A surface on no output yet, or shown on another one, still gets a frame each second.
+        let throttle = Some(Duration::from_secs(1));
         for window in self.space.elements() {
             window.send_frame(
                 output,
                 frame_target,
-                Some(Duration::from_secs(1)),
+                throttle,
                 surface_primary_scanout_output,
             );
         }
+        for layer in &layers {
+            layer.send_frame(
+                output,
+                frame_target,
+                throttle,
+                surface_primary_scanout_output,
+            );
+        }
+    }
+
+    /// What is under `pos`, with its origin in the space, in the order the outputs are drawn
+    /// from the top: the overlay and top layers, the windows, the bottom and background layers.
+    pub fn under(&self, pos: Point<f64, Logical>) -> Option<(Under, Point<i32, Logical>)> {
+        let output = self.space.output_under(pos).next()?;
+        let origin = self.space.output_geometry(output)?.loc;
+        let map = layer_map_for_output(output);
+        // The top surface of `layer` with input at `pos`: one whose input region leaves `pos`
+        // out lets the click through to what is below.
+        let on = |layer| {
+            map.layers_on(layer).rev().find_map(|surface| {
+                let location = map.layer_geometry(surface)?.loc + origin;
+                surface.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+                Some((Under::Layer(surface.clone()), location))
+            })
+        };
+        let found = on(Layer::Overlay)
+            .or_else(|| on(Layer::Top))
+            .or_else(|| {
+                self.space
+                    .element_under(pos)
+                    .map(|(window, location)| (Under::Window(window.clone()), location))
+            })
+            .or_else(|| on(Layer::Bottom))
+            .or_else(|| on(Layer::Background));
+        found
     }
 
     /// The surface under `pos`, with its origin in the space.
@@ -237,13 +348,13 @@ impl State {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, p)| (s, (p + location).to_f64()))
-            })
+        let (under, origin) = self.under(pos)?;
+        let local = pos - origin.to_f64();
+        let found = match &under {
+            Under::Layer(layer) => layer.surface_under(local, WindowSurfaceType::ALL),
+            Under::Window(window) => window.surface_under(local, WindowSurfaceType::ALL),
+        };
+        found.map(|(surface, at)| (surface, (at + origin).to_f64()))
     }
 
     /// The mapped window whose toplevel is `surface`.
@@ -253,6 +364,12 @@ impl State {
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
     }
+}
+
+/// What the pointer can find under it.
+pub enum Under {
+    Layer(LayerSurface),
+    Window(Window),
 }
 
 /// A new output with its global: `size` in pixels, refreshed at `refresh` mHz.
@@ -360,5 +477,107 @@ impl ClientData for ClientState {
         if let Err(error) = self.gone.send(client_id) {
             tracing::warn!(%error, "a client's disconnection reached no event loop");
         }
+    }
+}
+
+/// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of
+/// the output laid out at `laid_out`. Each inset is kept inside the output, so that a client's
+/// exclusive zone, however large, cannot place windows outside it or overflow; zones that leave
+/// no room at all are ignored, and windows take the whole output.
+fn inset(
+    area: Rectangle<i32, Logical>,
+    laid_out: Size<i32, Logical>,
+    zone: Rectangle<i32, Logical>,
+) -> Rectangle<i32, Logical> {
+    let near = |at: i32, max: i32| at.clamp(0, max);
+    let far = |at: i32, size: i32, laid: i32, max: i32| {
+        laid.saturating_sub(at.saturating_add(size)).clamp(0, max)
+    };
+    let (left, top) = (near(zone.loc.x, area.size.w), near(zone.loc.y, area.size.h));
+    let right = far(zone.loc.x, zone.size.w, laid_out.w, area.size.w - left);
+    let bottom = far(zone.loc.y, zone.size.h, laid_out.h, area.size.h - top);
+    let size = Size::from((area.size.w - left - right, area.size.h - top - bottom));
+    if size.w <= 0 || size.h <= 0 {
+        return area;
+    }
+    Rectangle::new(area.loc + Point::from((left, top)), size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inset, GrabSerials};
+    use smithay::reexports::wayland_server::backend::{ClientData, ClientId};
+    use smithay::reexports::wayland_server::Display;
+    use smithay::utils::{Logical, Rectangle, Serial};
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+
+    fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
+        Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    #[test]
+    fn exclusive_zones_are_kept_inside_the_output() {
+        let output = rect(1280, 0, 854, 534);
+        let laid_out = (853, 533).into();
+        // No zone: the whole output, also where the layer map rounds the size down.
+        assert_eq!(inset(output, laid_out, rect(0, 0, 853, 533)), output);
+        // A bar of 32 at the top and a dock of 64 at the bottom.
+        assert_eq!(
+            inset(output, laid_out, rect(0, 32, 853, 437)),
+            rect(1280, 32, 854, 438)
+        );
+        // The layer map saturates and keeps the zone's size at zero or more; its location can
+        // still be anywhere. A top zone of 100000 leaves no room: ignored, rather than windows
+        // off the output.
+        assert_eq!(inset(output, laid_out, rect(0, 100_000, 853, 0)), output);
+        // A bottom zone of 100000 leaves only the row the layer map's rounding drops: windows
+        // are placed from the output's top edge, still on it.
+        assert_eq!(
+            inset(output, laid_out, rect(0, 0, 853, 0)),
+            rect(1280, 0, 854, 1)
+        );
+        // Values at the ends of i32 do not overflow.
+        assert_eq!(inset(output, laid_out, rect(0, i32::MAX, 853, 0)), output);
+        assert_eq!(
+            inset(
+                output,
+                laid_out,
+                rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX)
+            ),
+            output
+        );
+    }
+
+    struct Data;
+    impl ClientData for Data {}
+
+    /// A client grabbing a popup with the serial of a press or key sent to another client is
+    /// refused, however well it guesses it.
+    #[test]
+    fn a_serial_is_good_only_for_the_client_it_was_sent_to() {
+        let display = Display::<()>::new().expect("display");
+        let mut handle = display.handle();
+        let mut client = || -> ClientId {
+            let (stream, _peer) = UnixStream::pair().expect("socket pair");
+            handle
+                .insert_client(stream, Arc::new(Data))
+                .expect("client")
+                .id()
+        };
+        let (b, m) = (client(), client());
+        let s = Serial::from;
+        let serials = GrabSerials {
+            button: Some((s(7), b.clone())),
+            key_press: Some((s(8), b.clone())),
+            key_release: Some((s(9), m.clone())),
+        };
+        assert!(serials.clicked(s(7), &b));
+        assert!(!serials.clicked(s(7), &m), "B's press named by M");
+        assert!(!serials.clicked(s(6), &b), "an older press");
+        assert!(!serials.clicked(s(8), &b), "a key is not a click");
+        assert!(serials.typed(s(8), &b) && serials.typed(s(9), &m));
+        assert!(!serials.typed(s(8), &m), "B's key named by M");
+        assert!(!serials.typed(s(7), &b), "a click is not a key");
     }
 }

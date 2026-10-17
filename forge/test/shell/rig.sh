@@ -499,7 +499,7 @@ compositor-globals)
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
-        wl_data_device_manager; do
+        wl_data_device_manager zwlr_layer_shell_v1; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -509,7 +509,7 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 12 globals, and a seat with pointer and keyboard"
+    echo "compositor-globals: the 13 globals, and a seat with pointer and keyboard"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
