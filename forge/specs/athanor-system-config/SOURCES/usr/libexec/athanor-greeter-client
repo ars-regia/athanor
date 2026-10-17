@@ -145,10 +145,13 @@ done
 # driver runs the setuid nvidia-modprobe, which no-new-privileges refuses (avc
 # nnp_transition xdm_t to xserver_t); EGL then finds no NVIDIA device and GTK renders in
 # software (#535). With the module visible the driver still calls nvidia-modprobe to
-# create the nodes, which already exist: the helper is masked so that it never runs.
+# create the nodes, which already exist: the helper is masked by /usr/bin/true, which
+# reports them made. The mask comes from /usr, whose read-only remount xdm_t may make;
+# a mask from /dev/null needs a remount of devtmpfs that SELinux refuses xdm_t, and bwrap
+# then fails, which left the -nvidia greeter at a black screen.
 set -- "$@" --ro-bind-try /sys/module/nvidia /sys/module/nvidia
 if [ -e /usr/bin/nvidia-modprobe ]; then
-    set -- "$@" --ro-bind /dev/null /usr/bin/nvidia-modprobe
+    set -- "$@" --ro-bind /usr/bin/true /usr/bin/nvidia-modprobe
 fi
 
 # /dev/dri is absent on a machine with no DRM driver at all, where GTK renders in
