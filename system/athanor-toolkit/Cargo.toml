@@ -10,6 +10,11 @@ accesskit = "0.25"
 accesskit_unix = "0.24"
 parley = "0.12"
 vello_cpu = "0.3"
+# ATHANOR_TOOLKIT_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
+# wgpu reaches through libwayland-client's pointers (wayland-backend's system backend).
+vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"] }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"] }
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
 wayland-client = { workspace = true }
 

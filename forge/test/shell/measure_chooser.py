@@ -13,8 +13,8 @@
 Start-up time to the first frame: from the exec of the binary to the first `wl_surface.commit`
 of the window's surface (the one given to `xdg_wm_base.get_xdg_surface`) after an `attach` of a
 non-null buffer, as the client's own WAYLAND_DEBUG=1 trace sends it: libwayland prints it for
-GTK, wayland-backend for the toolkit. The clock is this script's monotonic clock when the line
-arrives on the client's stderr. Tracing slows both clients by a similar amount, which is not
+both choosers, as the toolkit speaks Wayland through libwayland-client. The clock is this
+script's monotonic clock when the line arrives on the client's stderr. Tracing slows both clients by a similar amount, which is not
 measured; the memory is read in a launch without it.
 """
 
@@ -45,7 +45,8 @@ BUFFER_SIZE = {"create_buffer": 1, "create_immed": 0}
 # Each source file of the toolkit belongs to one area; a new file must be placed here.
 AREAS = {
     "src/driver.rs": "driver",
-    "src/render.rs": "rendering (vello_cpu)",
+    "src/render.rs": "rendering (vello_cpu, and the scene vello_gpu shares)",
+    "src/gpu.rs": "rendering (vello_gpu)",
     "src/widget.rs": "widgets",
     "src/focus.rs": "widgets",
     "src/theme.rs": "widgets",
