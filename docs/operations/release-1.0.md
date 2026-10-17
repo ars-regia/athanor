@@ -18,6 +18,14 @@ Fedora 44 instead ([ADR-0078](../decisions/0078-fedora-release-target.md)). Rele
 Fedora 43; the rebase happens between 0.9 and 1.0 ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md)).
 1.0 never ships on Fedora 43.
 
+*Note (ADR-0121, 2026-10-17): the maintainer decided that 1.0 ships Athanor's own compositor and
+waits for it. The date above no longer bounds 1.0: the rebase to the next Fedora base ships as a
+release 0.x before 2026-12-02. The sentence on 1.0 in section 4 and the 1.0 row of section 4.1
+describe that 0.x release until the next revision of this file. That revision also places rows 7
+and 25 (and ADR-0120's security-class updates), which this file puts in 1.0, so that they do not
+move with 1.0 unseen. The rows of this file that name cosmic-comp and its patches hold until
+that revision aligns them with `doc_own_stack.md`.*
+
 ## 2. In 1.0
 
 1.0 is done when every row holds. An acceptance check written "to add" does not exist yet: the
