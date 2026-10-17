@@ -174,6 +174,26 @@ fn printable(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
+/// The preedit as [`printable`] keeps it, with its cursor's byte offsets moved to match. A
+/// cursor that is not on a character boundary of the preedit is dropped.
+fn printable_preedit(
+    text: &str,
+    cursor: Option<(usize, usize)>,
+) -> (String, Option<(usize, usize)>) {
+    let kept = |at: usize| {
+        text.is_char_boundary(at).then(|| {
+            let dropped: usize = text[..at]
+                .chars()
+                .filter(|c| c.is_control())
+                .map(char::len_utf8)
+                .sum();
+            at - dropped
+        })
+    };
+    let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
+    (printable(text), cursor)
+}
+
 /// The user data of the text-input-v3 objects.
 struct TextInput;
 
@@ -322,7 +342,8 @@ impl App {
         let (Pending { preedit, commit }, current) = self.ime.done(serial);
         let event = commit.and_then(|text| self.ui.commit(&printable(&text)));
         let (preedit, cursor) = preedit.unwrap_or_default();
-        self.ui.compose(&printable(&preedit), cursor);
+        let (preedit, cursor) = printable_preedit(&preedit, cursor);
+        self.ui.compose(&preedit, cursor);
         if current {
             self.changed(event);
         } else {
@@ -688,5 +709,18 @@ mod tests {
             "a stale done still applies its text"
         );
         assert!(ime.done(2).1);
+    }
+
+    #[test]
+    fn the_preedit_cursor_follows_the_text_printable_keeps() {
+        // "a\tbç": the tab goes, so the cursor after "b" (byte 3) moves to byte 2.
+        assert_eq!(
+            printable_preedit("a\tb\u{e7}", Some((3, 5))),
+            ("ab\u{e7}".to_owned(), Some((2, 4)))
+        );
+        assert_eq!(printable_preedit("ab", None), ("ab".to_owned(), None));
+        // Inside "ç", or past the end: no cursor.
+        assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
+        assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
     }
 }
