@@ -138,6 +138,19 @@ impl State {
         })
     }
 
+    /// Whether `surface` can hold the keyboard: a window can, and a layer surface unless its
+    /// interactivity is `none`.
+    pub fn takes_keyboard(&self, surface: &WlSurface) -> bool {
+        self.space
+            .outputs()
+            .find_map(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                    .map(|layer| layer.can_receive_keyboard_focus())
+            })
+            .unwrap_or(true)
+    }
+
     /// A click on `layer`: it takes the keyboard if it asks for it on demand and no surface
     /// holds the keyboard exclusively.
     pub fn focus_layer(&mut self, layer: &LayerSurface) {
