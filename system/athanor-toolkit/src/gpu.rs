@@ -95,13 +95,13 @@ impl Gpu {
             .into_iter()
             .find(|f| matches!(f, TextureFormat::Rgba8Unorm | TextureFormat::Bgra8Unorm))
             .ok_or_else(|| format!("{adapter_name} offers no 8-bit linear surface format"))?;
-        // The driver paces frames with wl_surface frame callbacks in its own loop. A present
-        // that waited for the compositor as well (Fifo) would block that loop, and with it input
-        // and the accessibility bus, for up to a second behind a covered window.
+        // Mailbox where Vulkan offers it, otherwise Fifo, the one mode wgpu offers on GLES. The
+        // driver draws only after the compositor's frame callback for the last frame, which
+        // arrives with the one Mesa's Fifo waits for, so that wait stays short.
         let present_mode = if capabilities.present_modes.contains(&PresentMode::Mailbox) {
             PresentMode::Mailbox
         } else {
-            PresentMode::AutoNoVsync
+            PresentMode::Fifo
         };
         let config = wgpu::SurfaceConfiguration {
             format,

@@ -64,9 +64,10 @@ invocation in the rig, passes. The feature changes the transport under `wayland-
 interface, and libwayland is the implementation GTK and Mesa already use in the same session.
 
 The table predates the frame pacing added after it: the toolkit now draws a frame only after the
-compositor's callback for the last one, on both paths, and `vello_gpu` presents with Mailbox
-where the surface offers it, otherwise without waiting for the compositor. The first frame, which
-the start-up column measures, does not wait on a callback.
+compositor's callback for the last one, on both paths. `vello_gpu` presents with Mailbox where
+Vulkan offers it, otherwise with Fifo, whose wait the pacing keeps short because the toolkit's
+callback and Mesa's arrive together; on GLES, the rig's llvmpipe included, wgpu offers only Fifo.
+The first frame, which the start-up column measures, does not wait on a callback.
 
 With `ATHANOR_TOOLKIT_RENDERER=gpu`, `rig.sh surface toolkit-chooser` passes against the `vello_cpu`
 goldens in all six cases, with no pixel beyond `compare.py`'s 2 % colour distance. Compared
