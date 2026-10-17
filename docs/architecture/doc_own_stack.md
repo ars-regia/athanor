@@ -1,10 +1,10 @@
 # Athanor's own compositor and toolkit
 
 Status: **revision 1, draft of 2026-10-17, not approved.** It sets out the direction ADR-0121
-records: a compositor of Athanor's own on Smithay, and a toolkit of its own in Rust. Nothing here
-may be implemented before the maintainer approves a revision (ADR-0074), except the two spikes of
-section 5, which change no shipped file and record their results under `docs/spikes/`. Section 7
-lists the decisions the maintainer has still to take.
+records: a compositor of Athanor's own on Smithay, shipped in release 1.0, and a toolkit of its own
+in Rust. Nothing here may be implemented before the maintainer approves a revision (ADR-0074),
+except the two spikes of section 5, which change no shipped file and record their results under
+`docs/spikes/`. Section 7 records the maintainer's decisions of 2026-10-17 and the one left open.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each spike reads them
@@ -98,9 +98,11 @@ register, one approved entry at a time.
 ## 3. The compositor
 
 **OS3. A new compositor on Smithay** (ADR-0121). A program of the shell, packaged like the others
-under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revision, added to
-`deny.toml` with its exact URL; moving the revision is its own pull request, as a cosmic-comp rebase
-is today (CO3). The GLES renderer draws; pixman draws in tests.
+under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revision, as niri and
+cosmic-comp take it, added to `deny.toml` with its exact URL; moving the revision is its own pull
+request, as a cosmic-comp rebase is today (CO3). The GLES renderer draws; pixman draws in tests.
+X11 applications run through xwayland-satellite, a separate process the compositor starts when an
+X11 client connects, so that no X11 code runs inside the compositor.
 
 **OS4. The security model is designed in, not patched on.**
 
@@ -141,13 +143,14 @@ laptop, on the maintainer's NVIDIA desktop and in the development VM.
 
 ## 4. The toolkit
 
-**OS7. Built on Linebender and AccessKit.** A library crate under `system/`, `MIT OR Apache-2.0`
-(ADR-0121), built on `masonry_core` for widgets and layout, Parley for text, AccessKit with
-`accesskit_unix` for accessibility, and Vello for drawing. A windowing driver of its own, on
-smithay-client-toolkit, gives layer-shell surfaces, popups, text-input-v3, fractional scale and
-cursor shapes. What upstream lacks (menus, tables, the Collection interface, the combo box state)
-is written as contributions upstream first; the toolkit carries it until upstream takes it, as CO3
-does for cosmic-comp. `verify.py licence`, which today requires `GPL-3.0-or-later` of every crate of
+**OS7. A widget layer of our own, on Parley and AccessKit** (ADR-0121). A library crate under
+`system/`, `MIT OR Apache-2.0`. Parley lays out and edits text, AccessKit with `accesskit_unix`
+publishes the accessible tree, and Vello draws. The widgets, the layout, the focus chain, the
+keyboard navigation, the popups and menus, and the test harness are ours; Masonry and Xilem are
+read as references, not depended on. A windowing driver of its own, on smithay-client-toolkit,
+gives layer-shell surfaces, popups, text-input-v3, fractional scale and cursor shapes. Gaps in
+AccessKit's AT-SPI adapter (the Collection interface, the combo box state) are sent upstream first
+and carried until upstream takes them, as CO3 does for cosmic-comp. `verify.py licence`, which today requires `GPL-3.0-or-later` of every crate of
 ours, names the toolkit's crates as the exception in the change that adds them.
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
@@ -179,43 +182,39 @@ those surfaces match cosmic-comp's or each difference is explained, Orca reads t
 of use on the NVIDIA desktop logs no error. It measures: the protocols the shell needs that Smithay
 lacks, the lines written, the frame time on each machine, and each NVIDIA defect met.
 
-**Spike T1: one surface in the toolkit.** The layout chooser, rebuilt on `masonry_core` with the
-layer-shell driver and `accesskit_unix`, beside its GTK version. It passes when its goldens are
+**Spike T1: one surface in the toolkit.** The smallest widget layer that draws the layout chooser
+(button, radio group, label, focus chain), on Parley, AccessKit and the layer-shell driver,
+beside the chooser's GTK version, plus a single-line text field. It passes when its goldens are
 drawn in English, Italian and right to left, Orca's transcript holds everything the GTK version's
 holds (OS8), and a text field takes composed input from the simulated input method. It measures,
 against the GTK version: binary size, start-up time and memory, with `vello_cpu` and with
-`vello_gpu`, in the VM and on the NVIDIA desktop.
+`vello_gpu`, in the VM and on the NVIDIA desktop, and the lines the widget layer took.
 
 ## 6. Order
 
 1. This document, ADR-0121 and the spike plans (now, beside release 0.9).
 2. The spikes C1 and T1 (after the 0.9 tag), then revision 2 of this document with their results.
 3. The harnesses of OS9.
-4. The compositor, until it replaces cosmic-comp under SH1's rule, with the GTK4 shell unchanged on
-   top.
-5. The toolkit, one surface at a time under OS8: the layout chooser first, then the dock, the
+4. The compositor, until it replaces cosmic-comp under SH1's rule in release 1.0, with the GTK4
+   shell unchanged on top.
+5. The toolkit, after the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
    launcher, the bar and the control centre; the greeter last, because it handles the password
    (AGENTS.md, "Stop and ask before editing").
 
-## 7. Decisions for the maintainer
+## 7. Decisions
 
-Each comes with a recommendation; none is taken.
+Taken by the maintainer on 2026-10-17 (ADR-0121):
 
-1. **The release that changes compositor.** Recommended: release 1.0 ships on cosmic-comp and GTK4,
-   and the own compositor replaces cosmic-comp in a 1.x release once it passes SH1's rule. The
-   alternative, the own compositor in 1.0, puts the whole hardware matrix on the 1.0 path.
-2. **Smithay's source.** Recommended: a pinned git revision, as niri and cosmic-comp do, because
-   0.7.0 is sixteen months behind the main branch. The alternative, the crates.io release, waits for
-   a release with no date.
-3. **The toolkit's widget layer.** Recommended: `masonry_core` from its main branch, with our work
-   sent upstream. The alternatives: a widget layer of our own on Parley and AccessKit (more code,
-   full control), or Xilem's reactive layer on top of Masonry (less code per surface, one more
-   experimental layer).
-4. **XWayland.** Recommended: xwayland-satellite (MPL-2.0), a separate process started on demand,
-   as niri does, so that X11 code never runs inside the compositor. The alternative is Smithay's
-   in-process X11 window manager.
-5. **The renderer of the toolkit.** Recommended: `vello_cpu` by default and `vello_gpu` where spike T1
-   measures it faster, because no figure for NVIDIA or the VM exists.
+1. **Release 1.0 ships the own compositor**, replacing cosmic-comp once it passes SH1's rule. The
+   shell on top stays GTK4 in 1.0. My recommendation was 1.0 on cosmic-comp and the own compositor
+   in a 1.x, to keep the hardware matrix off the path to 1.0; the maintainer chose otherwise.
+2. **Smithay at a pinned git revision**, as niri and cosmic-comp take it (OS3).
+3. **A widget layer of our own** on Parley and AccessKit (OS7). My recommendation was
+   `masonry_core`; the maintainer chose full control over less code.
+4. **xwayland-satellite** in a separate process (OS3).
+
+Open, settled by spike T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
+default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
 
 ## 8. Risks
 
@@ -225,7 +224,10 @@ Each comes with a recommendation; none is taken.
   meets the same driver.
 - **Accessibility.** AccessKit's AT-SPI adapter lacks structural navigation and combo box state
   today; the gate of OS8 may hold a surface back until upstream or we close them.
-- **Masonry is experimental**, released about once a year, and lacks menus and tables.
+- **The widget layer is ours** (decision 3): widgets, layout, focus, menus and the test harness
+  are written before the first surface moves, where Masonry would have given some of them.
+- **Release 1.0 waits for the compositor** (decision 1): a defect of the hardware matrix found late
+  moves the date of 1.0.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them.
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,

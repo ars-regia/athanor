@@ -28,7 +28,7 @@ globals by an unauthenticated engine string, `com.system76.CosmicPanel`.
 
 ## Decision
 
-The maintainer took four decisions on 2026-10-17:
+The maintainer took these decisions on 2026-10-17:
 
 1. **Order.** The vision document (`doc_own_stack.md`), this record and the plans of the first two
    spikes are written now, in parallel with release 0.9; they change no shipped file. The spikes,
@@ -39,18 +39,26 @@ The maintainer took four decisions on 2026-10-17:
    capture confined by policy. cosmic-comp and niri remain reference code for the hardware matrix.
 3. **Licences.** The compositor is `GPL-3.0-or-later`, like the repository (A2-3). The toolkit is
    `MIT OR Apache-2.0`, like AccessKit and Parley it builds on, so that third-party applications
-   of any licence can adopt it; its Apache-2.0-only dependencies, such as Masonry, keep their
-   own licence.
+   of any licence can adopt it.
 4. **Location.** Both live in this repository as crates of their own, each declaring its licence in
    its `Cargo.toml`. They move to repositories of their own, with their history, when outside
    contributors need it.
+5. **Release 1.0 ships the own compositor.** It replaces cosmic-comp in 1.0, once it passes the
+   rule of `doc_shell.md` SH1; the shell on top stays GTK4 in 1.0.
+6. **Smithay is taken at a pinned git revision**, as niri and cosmic-comp take it, added to
+   `deny.toml` with its exact URL; each move of the revision is its own pull request.
+7. **The toolkit's widget layer is our own**, on Parley and AccessKit, not on Masonry or Xilem.
+8. **X11 applications run through xwayland-satellite**, a separate process started on demand, so
+   that no X11 code runs inside the compositor.
 
 ## Consequences
 
 - `doc_shell.md` SH2 and `doc_compositor.md` CO4 hold until the own compositor replaces
-  cosmic-comp under the rule of SH1 (a component leaves only when its replacement passes it); each
-  carries a note naming this record. Which release that is, is an open decision of
-  `doc_own_stack.md`, which is implemented only once approved (ADR-0074).
+  cosmic-comp under the rule of SH1 (a component leaves only when its replacement passes it), in
+  release 1.0; each carries a note naming this record. `doc_own_stack.md` is implemented only once
+  approved (ADR-0074).
+- Release 1.0 waits for the own compositor: its hardware matrix, NVIDIA's driver included, is on
+  the path to 1.0.
 - `athanor-compositor-client` (SH2) stays the only crate of the shell that knows the compositor:
   moving to the own compositor rewrites its inside, as SH2 already foresees.
 - Patches of the CO3 register that the own compositor makes unnecessary keep their exit condition;

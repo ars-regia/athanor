@@ -87,7 +87,7 @@ maintainers) this document adds: **a window-management model the maintainer appr
 register, which cosmic-comp cannot host and upstream declines.** A fork starts from cosmic-comp
 (or from niri, both on Smithay), never from zero.
 
-*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor replaces cosmic-comp under the rule of SH1, as `doc_own_stack.md` sets out.*
+*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor replaces cosmic-comp under the rule of SH1, in release 1.0, as `doc_own_stack.md` sets out.*
 
 ## 3. Open questions
 
