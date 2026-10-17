@@ -110,7 +110,8 @@ impl State {
             self.space.map_element(window.clone(), (x, y), true);
             self.focus(window);
         } else {
-            self.space.map_element(window.clone(), (x, y), false);
+            // Placed where it stays: at the bottom, under the window being typed into.
+            self.space.relocate_element(window, (x, y));
         }
     }
 
@@ -169,9 +170,42 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        // Mapped now, placed at its first sized commit.
-        self.space
-            .map_element(Window::new_wayland_window(surface), (0, 0), false);
+        // Mapped now at the bottom of the stack, placed at its first sized commit.
+        let window = Window::new_wayland_window(surface);
+        self.space.map_element(window.clone(), (0, 0), false);
+        self.space.lower_element(&window);
+    }
+
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.space.unmap_elem(&window);
+        }
+        // The keyboard does not leave a destroyed window by itself. It goes to the top window
+        // left that the user can see, so that the next window a client maps does not find it
+        // free (`place`): placed, and still drawing something, since a client can unmap a
+        // placed window by committing a null buffer.
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard
+            .current_focus()
+            .is_some_and(|focus| focus.is_alive() && &focus != surface.wl_surface())
+        {
+            return;
+        }
+        let top = self
+            .space
+            .elements()
+            .rev()
+            .find(|window| {
+                let size = window.geometry().size;
+                window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
+            })
+            .cloned();
+        match top {
+            Some(window) => self.focus(&window),
+            None => keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial()),
+        }
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
