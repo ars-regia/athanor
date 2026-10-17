@@ -27,6 +27,11 @@ pub struct Theme {
     pub focus: Rgba,
     pub font_size: f32,
     pub padding: f32,
+    /// Around the window's content, under the title bar.
+    pub margin: f32,
+    /// Between the children of a column: the window's sections.
+    pub section_gap: f32,
+    /// Between the children of a group or a row.
     pub gap: f32,
     pub radius: f32,
     pub focus_width: f32,
@@ -46,6 +51,8 @@ impl Default for Theme {
             focus: Rgba::rgb(0x81, 0x3d, 0x9c),
             font_size: 15.0,
             padding: 10.0,
+            margin: 10.0,
+            section_gap: 8.0,
             gap: 8.0,
             radius: 9.0,
             focus_width: 2.0,
