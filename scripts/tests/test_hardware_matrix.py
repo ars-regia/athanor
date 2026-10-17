@@ -3,6 +3,7 @@
 import importlib.util
 import pathlib
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
@@ -22,11 +23,11 @@ SMALL = {
 
 
 def records(**rows):
-    """{machine: record} from machine=[(row, result, issue)]."""
+    """{machine: record} from machine=[(row, result, issue)], each with evidence."""
     return {
         m: {
             "rows": {
-                r: {"result": res, **({"issue": i} if i else {})}
+                r: {"result": res, "evidence": "seen", **({"issue": i} if i else {})}
                 for r, res, i in entries
             }
         }
@@ -44,18 +45,20 @@ class Rows(unittest.TestCase):
         self.assertTrue(matrix.validate(both))
         self.assertTrue(matrix.validate(neither))
 
-    def test_unknown_check_machine_and_duplicate_id_fail(self):
+    def test_unknown_check_machine_duplicate_id_and_bare_untested_fail(self):
         bad = {
             **SMALL,
             "row": [
                 {"id": "a", "title": "A", "check": "nope", "machines": ["desktop"]},
                 {"id": "a", "title": "A", "steps": "x", "machines": ["server"]},
             ],
+            "untested": [{"id": "u", "title": "U", "reason": " "}],
         }
         problems = " ".join(matrix.validate(bad))
         self.assertIn("unknown check", problems)
         self.assertIn("machines", problems)
         self.assertIn("duplicate", problems)
+        self.assertIn("needs a reason", problems)
 
 
 class Summary(unittest.TestCase):
@@ -90,6 +93,91 @@ class Summary(unittest.TestCase):
         text, complete = matrix.summary(SMALL, with_issue)
         self.assertTrue(complete)
         self.assertIn("fail (#535)", text)
+
+    def test_a_result_without_evidence_or_unknown_is_incomplete(self):
+        self.assertEqual(
+            matrix.cell({"result": "untested", "evidence": ""}),
+            ("invalid (untested)", False),
+        )
+        self.assertEqual(
+            matrix.cell({"result": "maybe", "evidence": "x"}),
+            ("invalid (maybe)", False),
+        )
+
+
+class Checks(unittest.TestCase):
+    def test_a_command_that_cannot_run_is_a_failure_not_a_pass(self):
+        bus = (1, "", "Failed to connect to bus")
+        with mock.patch.object(matrix, "run", return_value=bus):
+            result, evidence = matrix.attempt("failed_units")
+        self.assertEqual(result, "fail")
+        self.assertIn("Failed to connect to bus", evidence)
+
+    def test_a_missing_program_is_a_failure(self):
+        missing = (127, "", "mokutil: not found")
+        with mock.patch.object(matrix, "run", return_value=missing):
+            self.assertEqual(matrix.attempt("secure_boot")[0], "fail")
+
+    def test_an_unreadable_journal_is_not_read_as_no_denial(self):
+        with mock.patch.object(matrix, "run", return_value=(0, "", "")):
+            result, evidence = matrix.attempt("avc")
+        self.assertEqual(result, "fail")
+        self.assertIn("not readable", evidence)
+
+    def test_grep_exit_1_with_a_message_is_an_error(self):
+        answers = iter(
+            [(0, "systemd started\n", ""), (1, "", "Compiled without pattern matching")]
+        )
+        with mock.patch.object(matrix, "run", side_effect=lambda argv: next(answers)):
+            self.assertEqual(matrix.attempt("avc")[0], "fail")
+
+    def test_no_denial_passes(self):
+        answers = iter([(0, "systemd started\n", ""), (1, "", "")])
+        with mock.patch.object(matrix, "run", side_effect=lambda argv: next(answers)):
+            self.assertEqual(matrix.attempt("avc"), ("pass", "no denial"))
+
+    def test_a_denial_that_does_not_parse_is_kept(self):
+        line = "avc:  denied { read } garbled"
+        self.assertEqual(matrix.avc_keys(line), [line])
+
+    def test_a_connection_state_with_a_qualifier_is_up(self):
+        out = "ethernet:connected (externally)\nwifi:disconnected\n"
+        with mock.patch.object(matrix, "run", return_value=(0, out, "")):
+            self.assertEqual(matrix.network()[0], "pass")
+
+    def test_an_exception_is_recorded_as_a_failure(self):
+        gone = mock.Mock(side_effect=FileNotFoundError("gone"))
+        with mock.patch.dict(matrix.CHECKS, {"kernel": gone}):
+            self.assertEqual(
+                matrix.attempt("kernel"),
+                ("fail", "could not check: FileNotFoundError: gone"),
+            )
+
+
+class Arguments(unittest.TestCase):
+    def refused(self, argv):
+        with (
+            self.assertRaises(SystemExit) as stop,
+            mock.patch.object(matrix, "write_record") as write,
+        ):
+            matrix.main(argv)
+        self.assertNotEqual(stop.exception.code, 0)
+        write.assert_not_called()
+
+    def test_release_and_machine_must_not_leave_the_tree(self):
+        self.refused(["set", "../../../../tmp/x", "desktop", "kernel", "pass", "n"])
+        self.refused(["run", "/tmp", "desktop"])
+        self.refused(["run", "0.9", "../x"])
+        self.refused(["run", "0.9", "desktp"])
+
+    def test_an_issue_is_a_positive_ascii_number(self):
+        for issue in ("0", "²", "12a"):
+            self.refused(
+                ["set", "0.9", "laptop", "camera", "fail", "black", "--issue", issue]
+            )
+
+    def test_a_note_is_required(self):
+        self.refused(["set", "0.9", "laptop", "camera", "untested", " "])
 
 
 if __name__ == "__main__":

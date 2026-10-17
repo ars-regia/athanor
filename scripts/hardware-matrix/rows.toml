@@ -55,7 +55,7 @@ machines = ["desktop"]
 [[row]]
 id = "usb-internal"
 area = "usb"
-title = "USBGuard's first-boot snapshot allows every internal device"
+title = "USBGuard's first-boot snapshot is done and, with no external USB device plugged, nothing is blocked"
 check = "usb_internal"
 machines = ["desktop", "laptop"]
 
@@ -146,6 +146,34 @@ steps = "Type à, é and ç with the dead keys of us(intl) in a GTK application 
 machines = ["desktop", "laptop"]
 
 [[row]]
+id = "switch-verified"
+area = "boot"
+title = "The release image was installed with switch-verified.sh (release-1.0.md 4.3)"
+steps = "Run `sudo scripts/switch-verified.sh <image>`, reboot, and record the image and digest it verified; `rpm-ostree status` shows the same digest."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "disk-unlock"
+area = "boot"
+title = "Disk unlock on the generic initramfs (D17)"
+steps = "Boot with the LUKS passphrase typed at the initramfs prompt, then with TPM unlock where it is enrolled; record which of the two the machine has."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "compat-profile"
+area = "boot"
+title = "The compatibility boot profile (D45)"
+steps = "Select the compatibility profile in the boot menu: the machine reaches the greeter, and /proc/cmdline carries efi=no_disable_early_pci_dma."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "firmware-outside-image"
+area = "boot"
+title = "Firmware loaded without a file or from outside the image (D48)"
+steps = "Run `journalctl -k -b --grep firmware` and record each device whose firmware came from EFI or from a path outside /usr/lib/firmware; none is a pass with that note."
+machines = ["desktop", "laptop"]
+
+[[row]]
 id = "wifi-join"
 area = "network"
 title = "Wi-Fi joined and kept"
@@ -204,6 +232,21 @@ reason = "no Thunderbolt dock"
 id = "guests"
 title = "Hyper-V, VMware and Xen guests"
 reason = "no such hypervisor in use; the KVM guest is covered by the VM acceptance"
+
+[[untested]]
+id = "windows-esp"
+title = "An installation next to an existing Windows ESP (D17, B2-3)"
+reason = "no machine with Windows installed; the ISO acceptance covers a plain ESP in the VM"
+
+[[untested]]
+id = "usb-root"
+title = "The installed system booting from a USB disk"
+reason = "no installation on a USB disk"
+
+[[untested]]
+id = "sas-raid-ufs"
+title = "SAS, hardware RAID and UFS root disks"
+reason = "no such controller"
 
 [[untested]]
 id = "nvidia-pascal"
