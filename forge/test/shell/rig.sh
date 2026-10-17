@@ -36,6 +36,7 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
@@ -769,11 +770,19 @@ atspi)
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
+        # ATHANOR_CHOOSER_BIN runs another chooser, athanor-toolkit's (doc_own_stack.md, T1), in
+        # the same scene. The transcript, every node's role, name, states and value, must hold
+        # all the reference holds: the GTK chooser's, recorded (OS8).
+        # To record it again, copy <out>/atspi-chooser[-it].json of a GTK run into golden/atspi/.
+        bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
+        transcript=atspi-chooser${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="$required" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-layout-chooser 8" \
+            ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
-            bash -c "$enable && exec /out/bin/athanor-layout-chooser"
+            bash -c "$enable && exec $bin"
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     toolkit-chooser)
         # The same 8 choices in athanor-toolkit's chooser, under athanor-compositor, through
