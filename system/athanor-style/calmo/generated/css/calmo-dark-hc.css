@@ -398,6 +398,17 @@ window.athanor-launcher .launcher {
     color: @ath_ink;
 }
 
+/* The launcher's field and result list sit on the card, not on GTK's own grey and white. */
+window.athanor-launcher entry {
+    background-color: @ath_surf2;
+    color: @ath_ink;
+}
+
+window.athanor-launcher list {
+    background-color: transparent;
+    color: @ath_ink;
+}
+
 .control-center-tile > button:checked {
     background-image: none;
     background-color: @ath_acc;
