@@ -28,12 +28,14 @@
 
 ---
 
-### Task 1: the skeleton draws a GTK4 window in the rig
+### Task 1: the skeleton draws the toolkit's chooser in the rig
 
-- [ ] Record the Smithay revision (`git ls-remote https://github.com/Smithay/smithay HEAD`) and its date in the crate's `README.md`; add it to `deny.toml`.
-- [ ] Winit backend, GLES renderer, `wl_compositor`, `wl_shm`, `wl_seat` with keyboard and pointer, `wl_output`, `xdg-shell`, `linux-dmabuf`, `viewporter`, `fractional-scale-v1`, `presentation-time`, `cursor-shape-v1`, `xdg-activation-v1`.
-- [ ] With `RIG_COMPOSITOR=athanor`, `forge/test/shell/session.sh` (which sway runs) starts `athanor-compositor` instead of cosmic-comp, and `scene.sh` replaces its `cosmic-randr` calls by the compositor's own output size and scale arguments.
-- [ ] Check: after `rig.sh build-layout`, `rig.sh surface chooser` with `RIG_COMPOSITOR=athanor` draws the layout chooser, a plain GTK4 window; save the PNGs beside cosmic-comp's goldens.
+The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout chooser: the compositor's first client is the stack it is built for.
+
+- [x] Record the Smithay revision (`git ls-remote https://github.com/Smithay/smithay HEAD`) and its date in the crate's `README.md`; add it to `deny.toml`.
+- [x] Winit backend, GLES renderer, `wl_compositor`, `wl_shm`, `wl_seat` with keyboard and pointer, `wl_output`, `xdg-shell`, `linux-dmabuf` (version 3: version 4 names the render node, which Smithay finds only with its DRM backend, task 2), `viewporter`, `fractional-scale-v1`, `presentation-time`, `cursor-shape-v1`, `xdg-activation-v1`.
+- [x] With `RIG_COMPOSITOR=athanor`, `forge/test/shell/session.sh` (which sway runs) starts `athanor-compositor --scale "$RIG_SCALE"` instead of cosmic-comp; `scene.sh` waits for it with `wayland-info` and captures sway's output, since the compositor has no screen-copy protocol yet.
+- [x] Check: `rig.sh build-compositor`, `rig.sh build-toolkit` and `rig.sh compositor-globals`; then, with `RIG_COMPOSITOR=athanor`, `rig.sh surface toolkit-chooser` matches four goldens (English and right-to-left at scales 1.0 and 1.5; at 1.5 the toolkit draws at 2 and the compositor scales down) and `rig.sh atspi toolkit-chooser` finds the eight choices; `rig.sh surface chooser` on cosmic-comp is unchanged.
 
 ### Task 2: the headless backend on NVIDIA
 
