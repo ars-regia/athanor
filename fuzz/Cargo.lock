@@ -168,8 +168,10 @@ version = "1.0.0"
 dependencies = [
  "athanor-apps",
  "athanor-compositor-client",
+ "athanor-controls",
  "athanor-i18n",
  "athanor-layout",
+ "athanor-services",
  "athanor-style",
  "athanor-trust-state",
  "athanor-unit",
@@ -178,8 +180,6 @@ dependencies = [
  "gtk4",
  "gtk4-layer-shell",
  "libc",
- "libpulse-binding",
- "libpulse-glib-binding",
  "tracing",
 ]
 
@@ -194,11 +194,23 @@ dependencies = [
  "gdk4-wayland",
  "gio-unix",
  "gtk4",
+ "serde_json",
  "thiserror",
  "tracing",
  "wayland-client",
  "wayland-protocols",
  "wayland-scanner",
+]
+
+[[package]]
+name = "athanor-controls"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+ "athanor-services",
+ "gtk4",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -227,7 +239,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tracing",
- "zvariant",
+ "zbus",
 ]
 
 [[package]]
@@ -243,6 +255,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-services"
+version = "1.0.0"
+dependencies = [
+ "athanor-unit",
+ "futures-util",
+ "libc",
+ "libpulse-binding",
+ "tokio",
+ "tracing",
+ "zbus",
+]
+
+[[package]]
 name = "athanor-shelld"
 version = "1.0.0"
 dependencies = [
@@ -252,7 +277,6 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
- "zvariant",
 ]
 
 [[package]]
@@ -1240,29 +1264,6 @@ dependencies = [
  "num-derive",
  "num-traits",
  "winapi",
-]
-
-[[package]]
-name = "libpulse-glib-binding"
-version = "2.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85be2d534f777c9c2eab62df9d69328c9e1b3099a4834c788bbdb9bec580def5"
-dependencies = [
- "glib",
- "glib-sys",
- "libpulse-binding",
- "libpulse-mainloop-glib-sys",
-]
-
-[[package]]
-name = "libpulse-mainloop-glib-sys"
-version = "1.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8f0126756ef34be1acc91a0533d329c1d6eebf69a3bea1a2a9475fa86dbf6cb"
-dependencies = [
- "glib-sys",
- "libpulse-sys",
- "pkg-config",
 ]
 
 [[package]]
