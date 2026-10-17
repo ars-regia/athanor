@@ -166,15 +166,25 @@ impl Gpu {
             TargetInit::Clear(ClearSettings::default()),
         )?;
         self.queue.submit([encoder.finish()]);
+        self.check()?;
+        self.queue.present(frame);
+        // A present that fails reaches the error slot; one that ends Outdated, Lost, Timeout or
+        // Occluded does not (wgpu 30 drops that status), and may commit nothing: the driver
+        // commits the surface after this, so its frame callback comes in either case.
+        self.check()?;
+        Ok((width, height))
+    }
+
+    /// Fails with the first error wgpu reported since the last check.
+    fn check(&self) -> Result<(), Error> {
         let error = self
             .errors
             .lock()
             .map_err(|_| "wgpu's error slot is poisoned")?
             .take();
-        if let Some(error) = error {
-            return Err(format!("wgpu: {error}").into());
+        match error {
+            Some(error) => Err(format!("wgpu: {error}").into()),
+            None => Ok(()),
         }
-        self.queue.present(frame);
-        Ok((width, height))
     }
 }

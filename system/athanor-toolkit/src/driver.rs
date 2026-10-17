@@ -406,12 +406,16 @@ impl App {
         self.redraw = false;
         self.frame_pending = true;
         let surface = self.window.wl_surface();
-        // Takes effect with the commit below, or with the one vello_gpu's present makes.
+        // Takes effect with the next commit: vello_gpu's present, or the driver's below.
         surface.frame(&self.qh, FrameCallbackData(surface.clone()));
         if let Some(gpu) = &mut self.gpu {
             // Presenting commits the surface, with the scale set here.
             surface.set_buffer_scale(self.scale);
             gpu.draw(&mut self.ui, self.scale as f32)?;
+            // A present wgpu dropped as Outdated or Lost commits nothing and reports nothing:
+            // without this commit the frame callback would never come, and the window would
+            // never draw again. After a present that did commit, this one is empty.
+            self.window.commit();
             self.publish_tree();
             return Ok(());
         }
