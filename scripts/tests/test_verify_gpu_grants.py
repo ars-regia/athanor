@@ -102,6 +102,20 @@ class GpuGrantsTest(unittest.TestCase):
         )
         self.assertEqual(len(found), 2)
 
+    def test_a_mask_bound_from_dev_is_reported(self):
+        from_dev = WRAPPER.format(
+            binds=COMPLETE + 'set -- "$@" --ro-bind /dev/null /usr/bin/nvidia-modprobe\n'
+        )
+        found = problems({"forge/specs/c/SOURCES/usr/libexec/client": from_dev})
+        self.assertEqual(len(found), 1)
+        self.assertIn("remount", found[0])
+        quoted = WRAPPER.format(
+            binds=COMPLETE + 'set -- "$@" --ro-bind-try "/dev/null" /usr/bin/x\n'
+        )
+        self.assertEqual(
+            len(problems({"forge/specs/c/SOURCES/usr/libexec/client": quoted})), 1
+        )
+
     def test_extra_arguments_before_usr_would_cover_the_mask(self):
         early = WRAPPER.format(binds=COMPLETE).replace(
             '    --ro-bind /usr /usr \\\n    --dev-bind-try /dev/dri /dev/dri \\\n    "$@" \\\n',

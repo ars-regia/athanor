@@ -3,7 +3,7 @@
 //! GLES, and offers linux-dmabuf with its feedback and linux-drm-syncobj-v1 when the node can
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
-use crate::state::{new_output, Backend, State};
+use crate::state::{new_output, Backend, State, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::gbm::GbmDevice;
@@ -41,8 +41,6 @@ const REFRESH: i32 = 60_000;
 
 /// How often the clients' frame times are logged.
 const REPORT_EVERY: Duration = Duration::from_secs(10);
-
-const BACKGROUND: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
 
 /// The pixel format of the off-screen buffers and of a frame read back: R, G, B, A bytes.
 pub const FRAME_FORMAT: Fourcc = Fourcc::Abgr8888;
