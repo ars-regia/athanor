@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - Starts at once (ADR-0121 decision 1). Branch from `origin/iso-v0`, report its commit.
-- On the desktop, builds run only while the rig of release 0.9 is idle, under `/var/tmp`, with `taskset -c 0-3`; the desktop must never reset: check `uptime` before a long run.
+- The compositor takes the desktop first; release 0.9's rig work runs on the laptop (`doc_own_stack.md` decision 11). Builds run under `/var/tmp`, with `taskset -c 0-3`, one heavy job at a time; the desktop must never reset: check `uptime` before a long run.
 - `GPL-3.0-or-later`. Smithay enters `deny.toml`'s `allow-git` with its exact URL; no other git dependency. cosmic-comp is read, not copied (`GPL-3.0-only`).
-- The crate passes every `verify.py` check from its first commit, the panic budget included. Until it ships, its name is listed in `experimental/EXEMPT` (the check `shipped`); the change that ships it removes the line and adds the package to `forge/config/packages.json`. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
+- The crate passes every `verify.py` check from its first commit, the panic budget included. Until it ships, its name is listed in `experimental/EXEMPT` (the check `shipped`); the change that ships it, task 9a, removes the line and adds the package to `forge/config/packages.json`. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
 - The rig gains an opt-in `RIG_COMPOSITOR=athanor`; cosmic-comp stays the rig's and the image's default.
 - Only the console sessions of task 9 need the maintainer; they come last, with the commands written out.
 
@@ -79,6 +79,12 @@
 - [ ] Write the commands: switch to a text console, start the compositor with the bar, the dock and a terminal, and switch back; the log path to send back.
 - [ ] Laptop: one hour of use. NVIDIA desktop, three outputs: one hour of use, one suspend and resume, one output unplugged and plugged.
 - [ ] Every defect with its log lines goes into the results.
+
+### Task 9a: the optional session (`doc_own_stack.md` decision 10)
+
+- [ ] Package the compositor as an RPM and ship it in the image: `forge/config/packages.json`, the spec, and the line removed from `experimental/EXEMPT`.
+- [ ] A session the greeter offers beside cosmic-comp's, starting the compositor with the bar and the dock; cosmic-comp stays the default. If the change touches the greeter's login path, stop and ask first (AGENTS.md).
+- [ ] Check: in the development VM the greeter lists both sessions, the default one is cosmic-comp's, and the compositor's session starts the bar and the dock; the maintainer then picks it on the desktop.
 
 ### Task 10: measurements for revision 2
 

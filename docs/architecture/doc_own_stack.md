@@ -4,7 +4,8 @@ Status: **revision 1, approved by the maintainer on 2026-10-17.** It sets out th
 ADR-0121 records: a compositor of Athanor's own on Smithay, for which release 1.0 waits, and a
 toolkit of its own in Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the
 measurements of the first two milestones of section 5 and the compositor's acceptance. Section 7
-records the maintainer's decisions of 2026-10-17 and the one left open. The milestones' plans are
+records the maintainer's decisions of 2026-10-17, two of them taken after the approval, and the
+one left open. The milestones' plans are
 `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`.
 
@@ -249,7 +250,9 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
-   as a recorded run.
+   as a recorded run. Before that acceptance, as soon as milestone C1's DRM backend has passed the
+   console sessions, the image installs the compositor as an optional session chosen at the
+   greeter, cosmic-comp staying the default (decision 10).
 5. The toolkit, in parallel with the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
    launcher, the bar and the control centre; the greeter last, because it handles the password
    (AGENTS.md, "Stop and ask before editing").
@@ -274,6 +277,19 @@ Taken by the maintainer on 2026-10-17 and recorded in ADR-0121, in its numbering
 8. **xwayland-satellite** in a separate process (OS3, OS4).
 9. **NVIDIA tested from the first milestone**, headless and nested, with the console sessions last
    (OS6).
+
+Taken by the maintainer on 2026-10-17, after revision 1 was approved, so that the compositor
+reaches the maintainer's machines in the least time:
+
+10. **An optional session before the acceptance.** Once milestone C1's DRM backend has passed the
+    console sessions, the image ships the compositor as a session the greeter offers beside
+    cosmic-comp's, which stays the default until the acceptance of section 6 step 4. Its defects
+    surface in daily use weeks before release 1.0. The alternative weighed, the compositor outside
+    the image until that acceptance, was not taken.
+11. **The compositor first on the desktop.** Milestone C1 needs the desktop's NVIDIA card and
+    takes the desktop before release 0.9's rig work, which moves to the laptop between the
+    toolkit's runs; release 0.9 may land some days after 2026-10-21. The alternative weighed, the
+    compositor on the desktop only while 0.9's rig is idle, was not taken.
 
 Open, settled by milestone T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
 default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
