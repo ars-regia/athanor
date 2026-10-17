@@ -156,7 +156,8 @@ else
     grim -o WINIT-0 "/out/$tag.png"
     # RIG_STABLE=<n>: a popover can still be resizing at the capture. Capture again each
     # second until two successive PNGs are identical, at most n times; the count goes to
-    # /out/<tag>-stable.txt, so a scene that settles late is visible, not absorbed.
+    # /out/<tag>-stable.txt, so a scene that settles late is visible, and a scene that never
+    # settles fails rather than leave a capture the timing chose.
     if [ -n "${RIG_STABLE:-}" ]; then
         for ((attempt = 1; attempt <= RIG_STABLE; attempt++)); do
             sleep 1
@@ -175,5 +176,9 @@ else
             esac
         done
         echo "captures that differed from their successor: $((attempt - 1)) of at most $RIG_STABLE" > "/out/$tag-stable.txt"
+        if ((attempt > RIG_STABLE)); then
+            echo "scene.sh: $tag did not settle in $RIG_STABLE captures a second apart" >&2
+            exit 1
+        fi
     fi
 fi
