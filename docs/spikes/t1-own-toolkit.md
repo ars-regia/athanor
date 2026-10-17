@@ -53,6 +53,21 @@ and 18 shared objects of 11.5 MiB. The path adds 4.34 MiB to the stripped binary
 renderer runs, wgpu, naga and `vello_gpu` linked statically, and two shared objects to the `cpu`
 row, as the toolkit now loads libwayland-client at start-up.
 
+wgpu reaches the window through libwayland-client's pointers, so the toolkit enables
+wayland-backend's `client_system` feature. Cargo unifies features across a build, so every
+Wayland client crate built with the toolkit speaks Wayland through libwayland-client too. That
+was already so before the toolkit enabled it: `gdk4-wayland`, under `athanor-compositor-client`,
+enables the feature in any `--workspace` build such as `just check-rust`, and
+`athanor-compositor` enables it alone, through Smithay's `wayland-egl` and `winit-wayland`.
+`cargo test -p athanor-toolkit -p athanor-compositor -p athanor-compositor-client`, one
+invocation in the rig, passes. The feature changes the transport under `wayland-client`, not its
+interface, and libwayland is the implementation GTK and Mesa already use in the same session.
+
+The table predates the frame pacing added after it: the toolkit now draws a frame only after the
+compositor's callback for the last one, on both paths, and `vello_gpu` presents with Mailbox
+where the surface offers it, otherwise without waiting for the compositor. The first frame, which
+the start-up column measures, does not wait on a callback.
+
 With `ATHANOR_TOOLKIT_RENDERER=gpu`, `rig.sh surface toolkit-chooser` passes against the `vello_cpu`
 goldens in all six cases, with no pixel beyond `compare.py`'s 2 % colour distance. Compared
 exactly, 2147 to 3803 pixels per image differ, by one or two levels of 255 at most, on the
@@ -116,9 +131,9 @@ the widgets are `widget.rs`, `focus.rs`, `theme.rs` and `lib.rs`.
   for task 8's renderer recommendation.
 - The rig measures `vello_gpu` on llvmpipe only. Its real cost, and whether it beats `vello_cpu`
   at this window size, is in the VM and NVIDIA desktop columns.
-- With `gpu`, a frame wgpu cannot acquire (a timeout, an occluded or outdated surface) ends the
-  client with the cause named, as no other error is hidden; a long-lived client would skip the
-  frame or reconfigure the surface instead.
+- With `gpu`, a frame wgpu cannot acquire (`Timeout`, `Occluded`, `Outdated` or `Lost`) still
+  ends the client with the cause named, as no other error is hidden; a long-lived client would
+  skip the frame, or reconfigure or recreate the surface, instead.
 - GTK's figures are with cairo, as the rig sets it. A GTK run on its default renderer (GL on
   llvmpipe in the rig) would add a row; it is left to the desktop columns, where the session's
   renderer is the real one.
