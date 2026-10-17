@@ -3,8 +3,8 @@
 
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo,
-    TreeUpdate,
+    Action, ActionData, ActionRequest, Node, NodeId, Orientation, Rect, Role, Toggled, TreeId,
+    TreeInfo, TreeUpdate,
 };
 
 pub fn node_id(id: WidgetId) -> NodeId {
@@ -23,8 +23,10 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
         Kind::Column | Kind::Row => Node::new(Role::GenericContainer),
         Kind::Group(name) => {
+            // A group stacks its children as a column, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Group);
             node.set_label(name.as_str());
+            node.set_orientation(Orientation::Vertical);
             node
         }
         Kind::Label(text) => {
@@ -202,6 +204,7 @@ mod tests {
             .iter()
             .filter(|&&g| node(g).role() == Role::Group)
         {
+            assert_eq!(node(*group).orientation(), Some(Orientation::Vertical));
             let toggles: Vec<_> = descendants(ui, *group)
                 .into_iter()
                 .filter_map(|id| node(id).toggled())
