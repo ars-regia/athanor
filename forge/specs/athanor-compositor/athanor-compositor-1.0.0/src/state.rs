@@ -1,6 +1,7 @@
 //! The compositor's state: the protocol globals, the space of windows and its outputs, the seat
 //! and the backend that draws them.
 
+use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
 use crate::winit::Nested;
 use crate::Error;
@@ -16,6 +17,7 @@ use smithay::desktop::utils::{
 use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
+use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
@@ -74,6 +76,12 @@ pub struct State {
     pub syncobj_state: Option<DrmSyncobjState>,
     /// The clients' frame times, kept on the headless backend.
     pub frame_stats: Option<FrameStats>,
+    /// The commits waiting on a fence, each with the event source that waits on it.
+    pub held: Vec<HeldCommit>,
+    /// The sequence number of the next held commit.
+    pub next_held: u64,
+    /// Given to each client's `ClientState`, which sends its id on disconnection.
+    pub client_gone: channel::Sender<ClientId>,
 }
 
 impl State {
@@ -106,6 +114,8 @@ impl State {
         seat.add_pointer();
 
         dispatch_clients(event_loop, display)?;
+        let (client_gone, gone) = channel::channel();
+        release_held_on_disconnection(event_loop, gone)?;
 
         Ok(Self {
             display_handle: dh,
@@ -126,6 +136,17 @@ impl State {
             data_device_state,
             syncobj_state: None,
             frame_stats: None,
+            held: Vec::new(),
+            next_held: 0,
+            client_gone,
+        })
+    }
+
+    /// What the compositor keeps for a client that connects now.
+    pub fn client_state(&self) -> Arc<ClientState> {
+        Arc::new(ClientState {
+            compositor_state: CompositorClientState::default(),
+            gone: self.client_gone.clone(),
         })
     }
 
@@ -289,6 +310,23 @@ fn dispatch_clients(
     Ok(())
 }
 
+/// Drops the held commits of each client that disconnects, with their event sources: a client
+/// gone with a fence that never signals would otherwise keep them, and its buffers, for ever.
+fn release_held_on_disconnection(
+    event_loop: &mut EventLoop<'static, State>,
+    gone: Channel<ClientId>,
+) -> Result<(), Error> {
+    event_loop
+        .handle()
+        .insert_source(gone, |event, _, state| {
+            if let channel::Event::Msg(client) = event {
+                state.release_held(&client);
+            }
+        })
+        .map_err(|e| e.error)?;
+    Ok(())
+}
+
 /// Listens on the next free `wayland-N` socket and returns its name.
 pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
     let socket = ListeningSocketSource::new_auto()?;
@@ -297,7 +335,7 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
         .insert_source(socket, |stream, _, state| {
             if let Err(error) = state
                 .display_handle
-                .insert_client(stream, Arc::new(ClientState::default()))
+                .insert_client(stream, state.client_state())
             {
                 tracing::warn!(%error, "a client could not connect");
             }
@@ -307,12 +345,17 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 }
 
 /// What the compositor keeps per client.
-#[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    gone: channel::Sender<ClientId>,
 }
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
+    fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
+        // The receiver lives as long as the event loop: an error means the compositor is ending.
+        if let Err(error) = self.gone.send(client_id) {
+            tracing::warn!(%error, "a client's disconnection reached no event loop");
+        }
+    }
 }

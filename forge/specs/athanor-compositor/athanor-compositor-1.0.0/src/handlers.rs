@@ -7,15 +7,16 @@ use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, Window};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
+use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
+use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
-use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{Serial, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
-    SurfaceAttributes,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{
     get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
@@ -40,6 +41,22 @@ use std::time::Duration;
 
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
+
+/// How many commits one client may hold waiting on a fence. Each holds an event source with a
+/// file descriptor and pins its buffer; a client keeps a few frames in flight per surface, and
+/// one that queues more without its fences signalling is flooding the compositor, which
+/// disconnects it rather than run out of file descriptors.
+pub const MAX_HELD_COMMITS: usize = 64;
+
+/// `wl_display.error.no_memory`, which a server-side crate has no enum for.
+const NO_MEMORY: u32 = 2;
+
+/// A commit held on a fence: its client, and the event source that waits on the fence.
+pub struct HeldCommit {
+    client: ClientId,
+    seq: u64,
+    token: RegistrationToken,
+}
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
@@ -129,44 +146,80 @@ impl State {
                 .map(|peer| peer.pid);
             stats.commit(surface.id(), pid, dmabuf.is_some(), acquire.is_some());
         }
-        let Some(client) = surface.client() else {
-            return;
-        };
-        let unblock = move |state: &mut State| {
-            let dh = state.display_handle.clone();
-            state
-                .client_compositor_state(&client)
-                .blocker_cleared(state, &dh);
-        };
         if let Some(point) = acquire {
             match point.generate_blocker() {
-                Ok((blocker, source)) => {
-                    match self.loop_handle.insert_source(source, move |_, _, state| {
-                        unblock(state);
-                        Ok(())
-                    }) {
-                        Ok(_) => add_blocker(surface, blocker),
-                        Err(error) => {
-                            tracing::warn!(error = %error.error, "an acquire point cannot be waited on")
-                        }
-                    }
-                }
+                Ok((blocker, source)) => self.hold_commit(surface, blocker, source),
                 Err(error) => tracing::warn!(%error, "an acquire point cannot be waited on"),
             }
         } else if let Some(dmabuf) = dmabuf {
             // An error means the fence has already signalled: nothing to wait for.
             if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
-                match self.loop_handle.insert_source(source, move |_, _, state| {
-                    unblock(state);
-                    Ok(())
-                }) {
-                    Ok(_) => add_blocker(surface, blocker),
-                    Err(error) => {
-                        tracing::warn!(error = %error.error, "a dmabuf's fence cannot be waited on")
-                    }
-                }
+                self.hold_commit(surface, blocker, source);
             }
         }
+    }
+
+    /// Holds the pending commit of `surface` on `blocker` until `source` fires, as anvil does.
+    /// A client past `MAX_HELD_COMMITS` is disconnected with `wl_display.error.no_memory`
+    /// instead; a client's held commits are dropped when it disconnects (`release_held`).
+    pub fn hold_commit<B, S>(&mut self, surface: &WlSurface, blocker: B, source: S)
+    where
+        B: Blocker + Send + 'static,
+        S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
+    {
+        let Some(client) = surface.client() else {
+            return;
+        };
+        let id = client.id();
+        if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
+            tracing::warn!(
+                ?id,
+                "a client holds too many commits on fences: disconnected"
+            );
+            client.kill(
+                &self.display_handle,
+                ProtocolError {
+                    code: NO_MEMORY,
+                    object_id: 1,
+                    object_interface: "wl_display".into(),
+                    message: format!("more than {MAX_HELD_COMMITS} commits wait on a fence"),
+                },
+            );
+            return;
+        }
+        let seq = self.next_held;
+        self.next_held += 1;
+        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
+            state.held.retain(|held| held.seq != seq);
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
+            Ok(())
+        };
+        match self.loop_handle.insert_source(source, unblock) {
+            Ok(token) => {
+                self.held.push(HeldCommit {
+                    client: id,
+                    seq,
+                    token,
+                });
+                add_blocker(surface, blocker);
+            }
+            Err(error) => tracing::warn!(error = %error.error, "a fence cannot be waited on"),
+        }
+    }
+
+    /// Drops the commits `client` holds on fences, with their event sources.
+    pub fn release_held(&mut self, client: &ClientId) {
+        let loop_handle = &self.loop_handle;
+        self.held.retain(|held| {
+            let keep = &held.client != client;
+            if !keep {
+                loop_handle.remove(held.token);
+            }
+            keep
+        });
     }
 
     /// Centres a window on the output at its first commit with a size. It takes the keyboard

@@ -3,16 +3,20 @@
 //! window from a wl_shm buffer and waits for its frame callback; the compositor's frames are then
 //! read back and their pixels compared.
 
+use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
-use crate::state::{ClientState, State};
+use crate::state::State;
 use crate::Error;
-use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
+use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
+use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::{Display, Resource};
 use std::io::Write;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
@@ -191,7 +195,8 @@ fn pixels() -> Result<std::fs::File, Error> {
 }
 
 /// The client's side: lists the globals, maps the window, waits for its first frame callback,
-/// reports the globals' interfaces and stays connected until `quit`.
+/// reports the globals' interfaces and stays connected until `quit` is dropped, sending a
+/// request at each message on it.
 fn client(
     stream: UnixStream,
     report: &mpsc::Sender<Result<Vec<String>, String>>,
@@ -238,8 +243,12 @@ fn client(
 
     report.send(Ok(state.globals.iter().map(|(_, i, _)| i.clone()).collect()))?;
     // The window lives while the connection does; the compositor reads its frames meanwhile.
-    // The compositor drops its sender to say it is done, which ends the wait.
-    while quit.recv().is_ok() {}
+    // A message asks for a request, which wakes the compositor to read from its clients; the
+    // compositor drops its sender to say it is done, which ends the wait.
+    while quit.recv().is_ok() {
+        connection.display().sync(&qh, ());
+        connection.flush()?;
+    }
     Ok(())
 }
 
@@ -251,45 +260,90 @@ fn pixel(frame: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
     px
 }
 
+/// The compositor on two outputs, and a client that has mapped its window and had its frame.
+struct Running {
+    event_loop: EventLoop<'static, State>,
+    state: State,
+    /// The interfaces of the globals the client saw.
+    globals: Vec<String>,
+    /// A message makes the client send a request; dropped, it lets the client go.
+    quit: mpsc::Sender<()>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Running {
+    /// Starts the compositor on `node`, or on Pixman, and runs it until the client has had
+    /// its frame.
+    fn start(node: Option<&Path>) -> Self {
+        let mut event_loop: EventLoop<State> = EventLoop::try_new().expect("event loop");
+        let display: Display<State> = Display::new().expect("display");
+        let mut state =
+            headless::start(&mut event_loop, display, node, &OUTPUTS).expect("headless backend");
+
+        let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+        let client_state = state.client_state();
+        state
+            .display_handle
+            .insert_client(server_end, client_state)
+            .expect("client");
+        let (globals_tx, globals_rx) = mpsc::channel();
+        let (quit, quit_rx) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            if let Err(error) = client(client_end, &globals_tx, &quit_rx) {
+                // The compositor's loop below stops on this.
+                drop(globals_tx.send(Err(error.to_string())));
+            }
+        });
+
+        let started = Instant::now();
+        let globals = loop {
+            event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut state)
+                .expect("dispatch");
+            match globals_rx.try_recv() {
+                Ok(result) => break result.expect("the client failed"),
+                Err(mpsc::TryRecvError::Empty) => {
+                    assert!(
+                        started.elapsed() < TIMEOUT,
+                        "the client had no frame in time"
+                    )
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    panic!("the client ended without a result")
+                }
+            }
+        };
+        Self {
+            event_loop,
+            state,
+            globals,
+            quit,
+            thread,
+        }
+    }
+
+    /// Runs the compositor until `done` holds of its state.
+    fn until(&mut self, what: &str, done: impl Fn(&State) -> bool) {
+        let started = Instant::now();
+        while !done(&self.state) {
+            assert!(started.elapsed() < TIMEOUT, "{what}: not in time");
+            self.event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut self.state)
+                .expect("dispatch");
+        }
+    }
+
+    fn stop(self) {
+        drop(self.quit);
+        self.thread.join().expect("client thread");
+    }
+}
+
 /// Starts the compositor on `node`, or on Pixman, with two outputs and one client, and checks
 /// the globals, the window and the frames of both outputs.
 fn fixture(node: Option<&Path>) {
-    let mut event_loop: EventLoop<State> = EventLoop::try_new().expect("event loop");
-    let display: Display<State> = Display::new().expect("display");
-    let mut state =
-        headless::start(&mut event_loop, display, node, &OUTPUTS).expect("headless backend");
-
-    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    state
-        .display_handle
-        .insert_client(server_end, Arc::new(ClientState::default()))
-        .expect("client");
-    let (globals_tx, globals_rx) = mpsc::channel();
-    let (quit_tx, quit_rx) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        if let Err(error) = client(client_end, &globals_tx, &quit_rx) {
-            // The compositor's loop below stops on this.
-            drop(globals_tx.send(Err(error.to_string())));
-        }
-    });
-
-    // The compositor runs until the client has had its frame.
-    let started = Instant::now();
-    let globals = loop {
-        event_loop
-            .dispatch(Some(Duration::from_millis(5)), &mut state)
-            .expect("dispatch");
-        match globals_rx.try_recv() {
-            Ok(result) => break result.expect("the client failed"),
-            Err(mpsc::TryRecvError::Empty) => {
-                assert!(
-                    started.elapsed() < TIMEOUT,
-                    "the client had no frame in time"
-                )
-            }
-            Err(mpsc::TryRecvError::Disconnected) => panic!("the client ended without a result"),
-        }
-    };
+    let mut run = Running::start(node);
+    let (globals, state) = (&run.globals, &mut run.state);
 
     for global in GLOBALS {
         assert!(globals.iter().any(|g| g == global), "{global} missing");
@@ -333,8 +387,64 @@ fn fixture(node: Option<&Path>) {
         "output 1 is background only"
     );
 
-    drop(quit_tx);
-    thread.join().expect("client thread");
+    run.stop();
+}
+
+/// A commit held on a fence that has not signalled: a one-plane dmabuf on a pipe with nothing
+/// to read, which polls as a fence still pending until a byte is written.
+fn hold(state: &mut State, surface: &WlSurface) -> std::io::PipeWriter {
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    let mut builder = Dmabuf::builder(
+        (1, 1),
+        Fourcc::Argb8888,
+        Modifier::Linear,
+        DmabufFlags::empty(),
+    );
+    assert!(builder.add_plane(OwnedFd::from(reader), 0, 4));
+    let dmabuf = builder.build().expect("dmabuf");
+    let (blocker, source) = dmabuf
+        .generate_blocker(Interest::READ)
+        .expect("an empty pipe is a pending fence");
+    state.hold_commit(surface, blocker, source);
+    writer
+}
+
+/// A client holds commits on fences up to the bound; a fence that signals frees its place; the
+/// commit past the bound is not held but disconnects the client, and its held commits go with it.
+#[test]
+fn a_client_holding_too_many_commits_is_disconnected() {
+    let mut run = Running::start(None);
+    let window = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+    let surface = window.toplevel().expect("a toplevel").wl_surface().clone();
+
+    let mut fences: Vec<_> = (0..MAX_HELD_COMMITS)
+        .map(|_| hold(&mut run.state, &surface))
+        .collect();
+    assert_eq!(run.state.held.len(), MAX_HELD_COMMITS);
+
+    fences[0].write_all(&[0]).expect("signal a fence");
+    run.until("a signalled fence frees its commit", |state| {
+        state.held.len() == MAX_HELD_COMMITS - 1
+    });
+    fences.push(hold(&mut run.state, &surface));
+    assert_eq!(run.state.held.len(), MAX_HELD_COMMITS);
+    assert!(surface.is_alive(), "within the bound the client stays");
+
+    fences.push(hold(&mut run.state, &surface));
+    assert_eq!(run.state.held.len(), MAX_HELD_COMMITS, "past the bound");
+    // The client is killed, not gone: the compositor drops it the next time it reads from its
+    // clients, which a request from the client, still connected, makes it do.
+    run.quit.send(()).expect("the client is listening");
+    run.until("the client past the bound is disconnected", |state| {
+        !surface.is_alive() && state.held.is_empty()
+    });
+    run.stop();
 }
 
 #[test]
