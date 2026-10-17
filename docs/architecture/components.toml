@@ -247,6 +247,15 @@ item = "LA1"
 purpose = "The Athanor launcher"
 
 [[component]]
+path = "forge/specs/athanor-compositor"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_own_stack.md"
+item = "OS3"
+purpose = "Athanor's own Wayland compositor on Smithay; a workspace spike until revision 2 of doc_own_stack.md"
+
+[[component]]
 path = "forge/specs/athanor-layout-chooser"
 kind = "rpm spec"
 area = "shell"
