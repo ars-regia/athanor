@@ -12,3 +12,7 @@ parley = "0.12"
 vello_cpu = "0.3"
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
 wayland-client = { workspace = true }
+
+[dev-dependencies]
+# The chooser example reads the GTK chooser's catalogue, as the GTK chooser does.
+athanor-i18n = { path = "../athanor-i18n" }
