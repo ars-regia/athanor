@@ -14,7 +14,7 @@ use zbus::message::Header;
 use zbus::names::OwnedUniqueName;
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, Connection};
-use zvariant::{Signature, Type};
+use zbus::zvariant::{Signature, Type};
 
 use crate::dnd;
 use crate::hints::Hints;
@@ -496,8 +496,8 @@ mod tests {
 
     #[test]
     fn a_hundred_thousand_actions_yield_at_most_max_actions_pairs() {
-        use zvariant::serialized::Context;
-        use zvariant::{to_bytes, LE};
+        use zbus::zvariant::serialized::Context;
+        use zbus::zvariant::{to_bytes, LE};
 
         let many: Vec<String> = (0..100_000usize)
             .map(|n| {

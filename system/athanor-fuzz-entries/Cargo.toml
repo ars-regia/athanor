@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["update", "shelld", "layout", "gtk"]
 update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:chrono", "dep:tracing"]
-shelld = ["dep:athanor-shelld", "dep:zvariant"]
+shelld = ["dep:athanor-shelld", "dep:zbus"]
 layout = ["dep:athanor-layout", "dep:athanor-trust-state"]
 gtk = ["dep:athanor-bar", "dep:athanor-compositor-client", "dep:glib"]
 
@@ -40,4 +40,4 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
-zvariant = { workspace = true, optional = true }
+zbus = { workspace = true, optional = true }

@@ -485,7 +485,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tracing",
- "zvariant",
+ "zbus",
 ]
 
 [[package]]
@@ -624,7 +624,6 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
- "zvariant",
 ]
 
 [[package]]
