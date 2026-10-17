@@ -409,12 +409,12 @@ impl XdgShellHandler for State {
 
     /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
     /// does. Only a client the user is with gets one, and only for an input event the user
-    /// made: it names the serial of the last button press while it holds the pointer, or of
-    /// the last key press or release while it holds the keyboard (`GrabSerials`, as mutter
-    /// checks them). A client cannot take the keyboard from another by opening a popup, and
-    /// while a layer surface holds the keyboard exclusively only its own popups' grab takes
-    /// it; any other takes the pointer only. A grab refused leaves the popup shown without it,
-    /// as a popover a client opens at start is.
+    /// made: it names the serial of the last button press sent to it, while it holds the
+    /// pointer, or of the last key press or release sent to it, while it holds the keyboard
+    /// (`GrabSerials`, as mutter checks them). A client cannot take the keyboard from another
+    /// by opening a popup, and while a layer surface holds the keyboard exclusively only its
+    /// own popups' grab takes it; any other takes the pointer only. A grab refused leaves the
+    /// popup shown without it, as a popover a client opens at start is.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
@@ -424,14 +424,17 @@ impl XdgShellHandler for State {
             return;
         };
         let (keyboard, pointer) = (seat.get_keyboard(), seat.get_pointer());
-        let client = root.client().map(|client| client.id());
-        let held = |focus: Option<WlSurface>| {
-            client.is_some() && focus.and_then(|s| s.client()).map(|c| c.id()) == client
+        let Some(client) = root.client().map(|client| client.id()) else {
+            return;
         };
-        let serials = &self.grab_serials;
-        let clicked = serials.button == Some(serial)
+        let held = |focus: Option<WlSurface>| {
+            focus
+                .and_then(|surface| surface.client())
+                .is_some_and(|holder| holder.id() == client)
+        };
+        let clicked = self.grab_serials.clicked(serial, &client)
             && pointer.as_ref().is_some_and(|p| held(p.current_focus()));
-        let typed = (serials.key_press == Some(serial) || serials.key_release == Some(serial))
+        let typed = self.grab_serials.typed(serial, &client)
             && keyboard.as_ref().is_some_and(|k| held(k.current_focus()));
         if !(clicked || typed) {
             return;

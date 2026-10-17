@@ -35,7 +35,8 @@ impl Rect {
 pub enum Kind {
     /// Children stacked top to bottom, aligned to the start edge.
     Column,
-    /// Children side by side in reading order: left to right, or right to left.
+    /// Children side by side in reading order, left to right or right to left, all as wide as
+    /// the widest, as a homogeneous GTK box. In a column or a group it fills the width.
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
@@ -121,6 +122,8 @@ pub struct Ui {
     pub title: String,
     pub theme: Theme,
     pub rtl: bool,
+    /// The window's width in logical pixels when its widgets need less, as GTK's default width.
+    pub min_width: f32,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
@@ -140,6 +143,7 @@ impl Ui {
             title: title.to_owned(),
             theme,
             rtl,
+            min_width: 0.0,
             focus: None,
             text: TextContext::default(),
             title_bar: None,
@@ -246,24 +250,33 @@ impl Ui {
     fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
+        let (margin, section_gap, min_width) = (t.margin, t.section_gap, self.min_width);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let children = self.widgets[id].children.clone();
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
+        let between = match self.widgets[id].kind {
+            Kind::Column => section_gap,
+            _ => gap,
+        };
         let widget = &mut self.widgets[id];
         let (w, h) = match &mut widget.kind {
             Kind::Column | Kind::Group(_) => {
-                // The title bar spans the window above the root's padding.
+                // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
                     Some((bar, rest)) if bar_first => (*bar, rest),
                     _ => ((0.0, 0.0), &sizes[..]),
                 };
-                let spacing = gap * content.len().saturating_sub(1) as f32;
+                let spacing = between * content.len().saturating_sub(1) as f32;
                 let w = content.iter().map(|s| s.0).fold(0.0, f32::max);
                 let h = content.iter().map(|s| s.1).sum::<f32>() + spacing;
-                let edge = if id == Self::ROOT { 2.0 * pad } else { 0.0 };
-                ((w + edge).max(bar.0), h + edge + bar.1)
+                if id == Self::ROOT {
+                    let edge = 2.0 * margin;
+                    ((w + edge).max(bar.0).max(min_width), h + edge + bar.1)
+                } else {
+                    (w, h)
+                }
             }
             Kind::TitleBar => {
                 // Room for the buttons on both sides, so the centred title never meets them.
@@ -274,7 +287,8 @@ impl Ui {
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
             Kind::Row => {
-                let w = sizes.iter().map(|s| s.0).sum::<f32>() + spacing;
+                let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                let w = widest * sizes.len() as f32 + spacing;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) => {
@@ -303,18 +317,23 @@ impl Ui {
         self.widgets[id].rect.x = x;
         self.widgets[id].rect.y = y;
         let edge = if id == Self::ROOT {
-            self.theme.padding
+            self.theme.margin
         } else {
             0.0
         };
-        let gap = self.theme.gap;
+        let gap = match self.widgets[id].kind {
+            Kind::Column => self.theme.section_gap,
+            _ => self.theme.gap,
+        };
         let outer = self.widgets[id].rect;
         let children = self.widgets[id].children.clone();
         match self.widgets[id].kind {
             Kind::Row => {
+                let n = children.len().max(1) as f32;
+                let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
                 let mut cx = if self.rtl { x + outer.w } else { x };
                 for c in children {
-                    let w = self.widgets[c].rect.w;
+                    self.widgets[c].rect.w = w;
                     if self.rtl {
                         cx -= w;
                         self.place(c, cx, y);
@@ -357,6 +376,9 @@ impl Ui {
                     children = &children[1..];
                 }
                 for &c in children {
+                    if matches!(self.widgets[c].kind, Kind::Row | Kind::Group(_)) {
+                        self.widgets[c].rect.w = outer.w - 2.0 * edge;
+                    }
                     let r = self.widgets[c].rect;
                     let cx = if self.rtl {
                         x + outer.w - edge - r.w
@@ -522,9 +544,32 @@ mod tests {
     }
 
     #[test]
+    fn a_row_fills_its_column_with_children_of_one_width() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Row", Theme::default(), rtl);
+            ui.min_width = 300.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let short = ui.add(row, Kind::Button("A".into()));
+            let long = ui.add(row, Kind::Button("A longer label".into()));
+            let (w, _) = ui.layout();
+            assert_eq!(w, 300.0, "rtl {rtl}: the window's minimum width");
+            let (s, l) = (ui.widget(short).rect, ui.widget(long).rect);
+            assert!((s.w - l.w).abs() < 0.01, "rtl {rtl}: {s:?} {l:?}");
+            // In reading order from the start edge, the margin's width inside the window.
+            let (left, right) = if rtl { (l, s) } else { (s, l) };
+            let margin = ui.theme.margin;
+            assert!((left.x - margin).abs() < 0.01, "rtl {rtl}: {left:?}");
+            assert!(
+                (right.x + right.w - (w - margin)).abs() < 0.01,
+                "rtl {rtl}: {right:?}"
+            );
+        }
+    }
+
+    #[test]
     fn the_title_bar_spans_the_window_with_its_buttons_at_the_end_edge() {
         for rtl in [false, true] {
-            let mut ui = crate::chooser::build(rtl).ui;
+            let mut ui = crate::chooser::build(&athanor_i18n::Catalog::empty(), rtl).ui;
             let plain = ui.layout();
             ui.add_title_bar();
             ui.add_title_bar();

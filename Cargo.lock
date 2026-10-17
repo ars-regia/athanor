@@ -648,6 +648,7 @@ version = "0.1.0"
 dependencies = [
  "accesskit",
  "accesskit_unix",
+ "athanor-i18n",
  "parley",
  "smithay-client-toolkit",
  "vello_cpu",

@@ -94,13 +94,32 @@ pub struct State {
     pub client_gone: channel::Sender<ClientId>,
 }
 
-/// The serials a popup grab may name, as mutter takes them: the last button press, sent to the
-/// client under the pointer, and the last key press and release, sent to the focused client.
+/// The serials a popup grab may name, as mutter takes them, each with the client it was sent
+/// to: the last button press, sent to the client under the pointer, and the last key press and
+/// release, sent to the focused client. Serials come from one counter and can be guessed; the
+/// client is what keeps one client from naming another's.
 #[derive(Debug, Default)]
 pub struct GrabSerials {
-    pub button: Option<Serial>,
-    pub key_press: Option<Serial>,
-    pub key_release: Option<Serial>,
+    pub button: Option<(Serial, ClientId)>,
+    pub key_press: Option<(Serial, ClientId)>,
+    pub key_release: Option<(Serial, ClientId)>,
+}
+
+impl GrabSerials {
+    /// Whether `serial` is the last button press, and was sent to `client`.
+    pub fn clicked(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.button.as_ref(), serial, client)
+    }
+
+    /// Whether `serial` is the last key press or release, and was sent to `client`.
+    pub fn typed(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.key_press.as_ref(), serial, client)
+            || sent(self.key_release.as_ref(), serial, client)
+    }
+}
+
+fn sent(event: Option<&(Serial, ClientId)>, serial: Serial, client: &ClientId) -> bool {
+    event.is_some_and(|(sent, to)| *sent == serial && to == client)
 }
 
 impl State {
@@ -491,8 +510,12 @@ fn inset(
 
 #[cfg(test)]
 mod tests {
-    use super::inset;
-    use smithay::utils::{Logical, Rectangle};
+    use super::{inset, GrabSerials};
+    use smithay::reexports::wayland_server::backend::{ClientData, ClientId};
+    use smithay::reexports::wayland_server::Display;
+    use smithay::utils::{Logical, Rectangle, Serial};
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
 
     fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
         Rectangle::new((x, y).into(), (w, h).into())
@@ -529,5 +552,37 @@ mod tests {
             ),
             output
         );
+    }
+
+    struct Data;
+    impl ClientData for Data {}
+
+    /// A client grabbing a popup with the serial of a press or key sent to another client is
+    /// refused, however well it guesses it.
+    #[test]
+    fn a_serial_is_good_only_for_the_client_it_was_sent_to() {
+        let display = Display::<()>::new().expect("display");
+        let mut handle = display.handle();
+        let mut client = || -> ClientId {
+            let (stream, _peer) = UnixStream::pair().expect("socket pair");
+            handle
+                .insert_client(stream, Arc::new(Data))
+                .expect("client")
+                .id()
+        };
+        let (b, m) = (client(), client());
+        let s = Serial::from;
+        let serials = GrabSerials {
+            button: Some((s(7), b.clone())),
+            key_press: Some((s(8), b.clone())),
+            key_release: Some((s(9), m.clone())),
+        };
+        assert!(serials.clicked(s(7), &b));
+        assert!(!serials.clicked(s(7), &m), "B's press named by M");
+        assert!(!serials.clicked(s(6), &b), "an older press");
+        assert!(!serials.clicked(s(8), &b), "a key is not a click");
+        assert!(serials.typed(s(8), &b) && serials.typed(s(9), &m));
+        assert!(!serials.typed(s(8), &m), "B's key named by M");
+        assert!(!serials.typed(s(7), &b), "a click is not a key");
     }
 }

@@ -9,6 +9,7 @@ use smithay::backend::input::{
 };
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 impl State {
@@ -30,9 +31,13 @@ impl State {
                 };
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                let to = keyboard
+                    .current_focus()
+                    .and_then(|surface| surface.client());
+                let sent = to.map(|client| (serial, client.id()));
                 match event.state() {
-                    KeyState::Pressed => self.grab_serials.key_press = Some(serial),
-                    KeyState::Released => self.grab_serials.key_release = Some(serial),
+                    KeyState::Pressed => self.grab_serials.key_press = sent,
+                    KeyState::Released => self.grab_serials.key_release = sent,
                 }
                 keyboard.input::<(), _>(
                     self,
@@ -73,7 +78,8 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
                 if event.state() == ButtonState::Pressed {
-                    self.grab_serials.button = Some(serial);
+                    let to = pointer.current_focus().and_then(|surface| surface.client());
+                    self.grab_serials.button = to.map(|client| (serial, client.id()));
                 }
                 pointer.button(
                     self,
