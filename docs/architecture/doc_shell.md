@@ -49,7 +49,7 @@ What the platform gives us today:
 
 **SH2. cosmic-comp stays; the dependency has an exit.** We do not write a compositor.
 
-*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor replaces cosmic-comp under the rule of SH1, in release 1.0, as `doc_own_stack.md` sets out.*
+*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor passes its acceptance and replaces cosmic-comp, in release 1.0, as `doc_own_stack.md` sets out.*
 
 - A Rust compositor is 2.6–3.3 MB of Rust on top of Smithay's 4.4 MB, and its cost is the hardware matrix, not the first version. A compositor of our own on Smithay would still depend on the maintainer of cosmic-comp, through the library.
 - cosmic-comp is GPL-3 and Smithay is MIT. A fork is always possible, and we only run cosmic-comp as a separate process.

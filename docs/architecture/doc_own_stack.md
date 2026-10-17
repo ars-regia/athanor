@@ -1,10 +1,12 @@
 # Athanor's own compositor and toolkit
 
 Status: **revision 1, draft of 2026-10-17, not approved.** It sets out the direction ADR-0121
-records: a compositor of Athanor's own on Smithay, shipped in release 1.0, and a toolkit of its own
+records: a compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own
 in Rust. Nothing here may be implemented before the maintainer approves a revision (ADR-0074),
 except the two spikes of section 5, which change no shipped file and record their results under
-`docs/spikes/`. Section 7 records the maintainer's decisions of 2026-10-17 and the one left open.
+`docs/spikes/`. Section 7 records the maintainer's decisions of 2026-10-17 and the one left open. The spikes'
+plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
+`docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each spike reads them
@@ -19,7 +21,8 @@ again before it relies on them.
   centre are GTK4 programs of our own, and `athanor-compositor-client` is the only crate that knows
   the compositor (SH2).
 - **The patch register** (`doc_compositor.md` CO3) carries or plans the features that only a
-  compositor can give: the trusted path for credential prompts (row 5, ADR-0041,
+  compositor can give: the trusted path for credential prompts (row 5, ADR-0041 as
+  amended by ADR-0092,
   `doc_lock_and_prompts.md` LP13), the keyboard monitor that answers Orca alone (row 6,
   `doc_accessibility.md` AX4), sticky, slow and bounce keys (row 7, AX11), a reduced-motion switch,
   and no capture of window content while locked (row 10). Each is a patch to rebase at every
@@ -102,36 +105,70 @@ under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revis
 cosmic-comp take it, added to `deny.toml` with its exact URL; moving the revision is its own pull
 request, as a cosmic-comp rebase is today (CO3). The GLES renderer draws; pixman draws in tests.
 X11 applications run through xwayland-satellite, a separate process the compositor starts when an
-X11 client connects, so that no X11 code runs inside the compositor.
+X11 client connects, so that no X11 code runs inside the compositor. cosmic-comp and niri are
+read, not copied: cosmic-comp is `GPL-3.0-only`, and a port from any project names its source and
+a licence that allows `GPL-3.0-or-later` (ADR-0121).
 
-**OS4. The security model is designed in, not patched on.**
+**OS4. The security model is designed in, not patched on.** Its guarantees hold against confined
+applications and against mistakes, not against unconfined code running as the user, which is the
+user (`doc_threat_model.md` TM1; TM6 for the trusted path; `doc_accessibility.md` AX4 for the
+keyboard monitor). Such a process can connect to the main socket without a security context,
+start a unit of any name with `systemd-run --user`, or add a drop-in to a unit, so no check below
+is a barrier against it.
 
 - **Privileged protocols by identity.** wlr-layer-shell's top and overlay layers,
   ext-foreign-toplevel-list, ext-image-copy-capture, input-method, virtual keyboard and pointer,
-  data control, ext-session-lock and the compositor's private interface are granted to a client by
-  the systemd unit its process runs in, read from the connection's peer credentials and pidfd when
-  it connects, against an allow-list under `/usr` in the read-only image. A string the client
-  supplies grants nothing, which closes the finding of spike P4.
-- **No privileged protocol through a security context.** Every launched application connects
-  through `security-context-v1` (`doc_session_daemons.md` SD8) and receives the standard globals
-  only.
-- **The trusted path** of LP13 is drawn by the compositor around the polkit agent and the keyring
-  prompt, identified by executable under `/usr` and by unit, as LP13 requires. Because the
-  compositor owns the stacking order, the full-screen and tiled imitations of the open gap L13 are
-  in its reach; how it closes them is specified with the trusted path, not here.
-- **Orca alone receives keys** (AX4): the keyboard monitor admits only a client in the cgroup of
-  `orca.service`, at every call.
+  data control, ext-session-lock and the compositor's private interface are granted to a client
+  only when both the executable of its process, a file under `/usr` in the read-only image, and
+  the systemd unit it runs in match an allow-list under `/usr`. Both are read from the
+  connection's peer credentials and pidfd when it connects. A string the client supplies grants
+  nothing, which narrows the finding of spike P4 to unconfined code.
+- **No privileged protocol through a security context.** A client that connects through
+  `security-context-v1`, as every application launched through the shell does
+  (`doc_session_daemons.md` SD8), receives the standard globals only, whatever its executable or
+  unit.
+- **The trusted path** follows LP13 as ADR-0092 amended it: the compositor borders the floating
+  windows of clients that carry a security context, and the real prompt is told apart by the
+  absence of that border and by the reveal key. If a decoration around the agent stays, the agent
+  is identified by its executable under `/usr` and its unit, as LP13 says. Because the compositor
+  owns the stacking order, the full-screen and tiled imitations of the open gap L13 are in its
+  reach; how it closes them is specified with the trusted path, not here.
+- **The keyboard monitor answers Orca** (AX4): it admits only a client whose executable is Orca's
+  under `/usr` and whose cgroup is `orca.service`'s, at every call; an integrity check, as AX4
+  says, not a barrier against unconfined code.
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
-  by identity.
+  by identity as above.
+- **X11 applications are one client.** Every X11 application reaches the compositor through
+  xwayland-satellite, as one Wayland client with the satellite's identity, and shares one X server
+  with every other X11 application. The satellite connects through a security context in a unit
+  of its own, so its windows receive the standard globals only and carry the border of confined
+  clients; inside the X server, X11 applications are not isolated from one another, and the
+  documents that present X11 applications say so.
 
-When the own compositor replaces cosmic-comp, rows 5, 6, 7 and 10 of the register leave with it.
+The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
+and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
+and row 4 (the reduced-motion switch, AX9) are behaviour the own compositor ships from its first
+version. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
+three-finger swipe) follows decision 4 of `doc_overview.md`. Rows 8 and 9 depend on spikes of
+cosmic-comp; the behaviour they protect (an input method's grab dropped while locked, the special
+layer namespace counted only on overlay or top) is a requirement tested in the fixture of OS6.
 
 **OS5. The shell does not change to move.** `athanor-compositor-client` keeps its interface; its
-inside is rewritten for the new compositor, as SH2 foresees. The shell keeps the standard protocols
-it uses (`ext-workspace-v1`, `ext-foreign-toplevel-list-v1`, `ext-image-copy-capture-v1`,
-`ext-session-lock-v1`, `ext-idle-notify-v1`, wlr-layer-shell). A private protocol is added only where
-no standard one exists, and is documented here before it is written.
+inside is rewritten for the new compositor, as SH2 foresees. Before it replaces cosmic-comp, the
+own compositor provides what the shell and the components 1.0 keeps take from cosmic-comp today:
+
+- the standard protocols the shell uses: `ext-workspace-v1`, `ext-foreign-toplevel-list-v1`,
+  `ext-image-copy-capture-v1`, `ext-session-lock-v1`, `ext-idle-notify-v1`, wlr-layer-shell,
+  `security-context-v1` and `xdg-activation-v1`;
+- an equivalent of each COSMIC protocol in use: `zcosmic_toplevel_info_v1` and
+  `zcosmic_toplevel_manager_v1` (window state and actions, `doc_overview.md`),
+  `zcosmic_workspace_manager_v2`, `zcosmic_keyboard_layout_manager_v1` (`doc_languages.md`) and
+  `cosmic_a11y_manager_v1` (`doc_accessibility.md`): a standard protocol where one covers it,
+  otherwise a private Athanor protocol, documented here before it is written;
+- the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
+- for cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings, which ADR-0103 D13 keeps in
+  1.0, either the protocols each uses or its replacement by a component of Athanor's (ADR-0121).
 
 **OS6. Tested without a GPU, with several outputs.** The compositor has a headless backend and an
 in-process client and server fixture, as niri does, with virtual outputs of any number, size and
@@ -173,7 +210,8 @@ first surface moves:
 ## 5. The two spikes
 
 Both start after the 0.9 tag, run in the rig with `taskset -c 0-3` and on the reference machines,
-change no shipped file, and record their results under `docs/spikes/`.
+change no shipped file, and record their results under `docs/spikes/`. Their plans are named in
+the status line.
 
 **Spike C1: the shell on a Smithay compositor.** A minimal compositor on Smithay, on a branch,
 runs the current GTK4 bar, dock, greeter and launcher unchanged: in the rig, on the laptop, and on
@@ -195,23 +233,33 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 1. This document, ADR-0121 and the spike plans (now, beside release 0.9).
 2. The spikes C1 and T1 (after the 0.9 tag), then revision 2 of this document with their results.
 3. The harnesses of OS9.
-4. The compositor, until it replaces cosmic-comp under SH1's rule in release 1.0, with the GTK4
-   shell unchanged on top.
+4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
+   the GTK4 shell unchanged on top. Revision 2 writes that acceptance: every surface 1.0 carries
+   drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
+   the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
+   cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
+   as a recorded run.
 5. The toolkit, after the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
    launcher, the bar and the control centre; the greeter last, because it handles the password
    (AGENTS.md, "Stop and ask before editing").
 
 ## 7. Decisions
 
-Taken by the maintainer on 2026-10-17 (ADR-0121):
+Taken by the maintainer on 2026-10-17 and recorded in ADR-0121, in its numbering:
 
-1. **Release 1.0 ships the own compositor**, replacing cosmic-comp once it passes SH1's rule. The
-   shell on top stays GTK4 in 1.0. My recommendation was 1.0 on cosmic-comp and the own compositor
-   in a 1.x, to keep the hardware matrix off the path to 1.0; the maintainer chose otherwise.
-2. **Smithay at a pinned git revision**, as niri and cosmic-comp take it (OS3).
-3. **A widget layer of our own** on Parley and AccessKit (OS7). My recommendation was
-   `masonry_core`; the maintainer chose full control over less code.
-4. **xwayland-satellite** in a separate process (OS3).
+1. **Paper now, spikes after the 0.9 tag** (section 5).
+2. **A new compositor on Smithay**, not a fork of cosmic-comp or niri (OS3).
+3. **Licences:** the compositor `GPL-3.0-or-later`, the toolkit `MIT OR Apache-2.0` (OS3, OS7).
+4. **Both in this repository**, as crates of their own.
+5. **Release 1.0 waits for the own compositor**, with the GTK4 shell on top; the rebase to the
+   next Fedora base ships as a release 0.x before 2026-12-02. The alternative weighed, 1.0 on
+   cosmic-comp and the own compositor in 1.1, kept the hardware matrix off the path to 1.0 and was
+   not taken.
+6. **Smithay at a pinned git revision**, as niri and cosmic-comp take it (OS3).
+7. **A widget layer of our own** on Parley and AccessKit (OS7). The alternative weighed,
+   `masonry_core`, would have given widgets, layout and a test harness; full control of the layer
+   was preferred.
+8. **xwayland-satellite** in a separate process (OS3, OS4).
 
 Open, settled by spike T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
 default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
@@ -224,10 +272,11 @@ default and `vello_gpu` where T1 measures it faster, because no figure for NVIDI
   meets the same driver.
 - **Accessibility.** AccessKit's AT-SPI adapter lacks structural navigation and combo box state
   today; the gate of OS8 may hold a surface back until upstream or we close them.
-- **The widget layer is ours** (decision 3): widgets, layout, focus, menus and the test harness
+- **The widget layer is ours** (decision 7): widgets, layout, focus, menus and the test harness
   are written before the first surface moves, where Masonry would have given some of them.
-- **Release 1.0 waits for the compositor** (decision 1): a defect of the hardware matrix found late
-  moves the date of 1.0.
+- **Release 1.0 waits for the compositor** (decision 5): its date follows the compositor's
+  acceptance, a defect of the hardware matrix found late moves it, and until then each Fedora
+  rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them.
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
