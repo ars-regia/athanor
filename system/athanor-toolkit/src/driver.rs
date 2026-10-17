@@ -138,6 +138,9 @@ struct App {
     window: Window,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    /// For the keyboard's repeat timer. The keyboard's data keeps a clone, and the loop owns the
+    /// connection that owns that data: the cycle lives until the process ends, as `run` is
+    /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
     scale: i32,
@@ -193,6 +196,16 @@ impl App {
         }
         self.a11y.update_if_active(|| update);
         Ok(())
+    }
+
+    /// A key held down: as pressed again, except Enter and Space, which activate once.
+    fn repeat(&mut self, event: KeyEvent) {
+        if !matches!(
+            event.keysym,
+            Keysym::Return | Keysym::KP_Enter | Keysym::space
+        ) {
+            self.key(event);
+        }
     }
 
     fn key(&mut self, event: KeyEvent) {
@@ -315,7 +328,7 @@ impl SeatHandler for App {
                     &seat,
                     None,
                     self.loop_handle.clone(),
-                    Box::new(|app: &mut App, _, event| app.key(event)),
+                    Box::new(|app: &mut App, _, event| app.repeat(event)),
                 )
                 .map(|k| self.keyboard = Some(k))
                 .map_err(Into::into),
@@ -401,7 +414,7 @@ impl KeyboardHandler for App {
         _: u32,
         event: KeyEvent,
     ) {
-        self.key(event);
+        self.repeat(event);
     }
 
     fn release_key(

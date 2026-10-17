@@ -380,12 +380,18 @@ impl Ui {
         };
         let text: String = text
             .chars()
-            .filter(|c| !c.is_control())
+            .filter(|&c| !c.is_control() && !is_invisible_format(c))
             .take(Self::FIELD_MAX_CHARS)
             .collect();
         field.set_text(&text);
         Some(Event::Edited(id))
     }
+}
+
+/// Bidirectional overrides, isolates and marks, and the line and paragraph separators: they
+/// change how text reads without being seen.
+fn is_invisible_format(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 #[cfg(test)]

@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(ui.focus(), Some(button));
 
         // A value set from outside loses its control characters and its excess length.
-        let value = format!("a\nb\u{7}{}", "x".repeat(2 * Ui::FIELD_MAX_CHARS));
+        let value = format!("a\nb\u{7}\u{202E}{}", "x".repeat(2 * Ui::FIELD_MAX_CHARS));
         let set = request(
             field,
             Action::SetValue,

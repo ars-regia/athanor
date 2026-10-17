@@ -117,7 +117,6 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
                 // Text longer than the field stays inside it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
                 draw_text(&mut ctx, &mut resources, &layout, (x, y), t.text)?;
-                ctx.pop_clip();
                 if focus == Some(id) {
                     if let Some(c) = field.caret(&mut ui.text, 1.5) {
                         let (x, y) = (f64::from(x), f64::from(y));
@@ -125,6 +124,7 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
                         ctx.fill_rect(&Rect::new(c.x0 + x, c.y0 + y, c.x1 + x, c.y1 + y));
                     }
                 }
+                ctx.pop_clip();
             }
         }
         if focus == Some(id) {
