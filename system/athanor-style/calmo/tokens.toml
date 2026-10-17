@@ -183,6 +183,14 @@ fg = "acc_fg"
 bg = ["surf", "surf2", "bar", "chip"]
 each = true
 kind = "ui"
+# The high-contrast variants draw their own acc, never a preset (appearance.rs accent_css),
+# in the fills and borders of checked and selected controls.
+[[pair]]
+fg = "acc"
+bg = ["surf", "surf2", "bar", "chip"]
+each = true
+kind = "ui"
+only = ["light-hc", "dark-hc"]
 [[pair]]
 fg = "bad"
 bg = ["surf", "bar"]

@@ -2,7 +2,7 @@
 import tomllib
 from pathlib import Path
 
-from color import FOREGROUND_STEP, contrast, foreground, from_hex, from_oklab, resolve, to_hex, to_oklab
+from color import FOREGROUND_STEP, contrast, foreground, from_hex, from_oklab, quantize, resolve, to_hex, to_oklab
 
 HERE = Path(__file__).resolve().parent
 VARIANTS = ("light", "dark", "light-hc", "dark-hc")
@@ -21,7 +21,7 @@ def on_accent(tokens, accent):
     `acc_ink`, as appearance.rs `on_accent` chooses it at run time."""
     if contrast(accent, WHITE) >= 4.5:
         return WHITE
-    return colors(tokens, "dark")["acc_ink"]
+    return quantize(colors(tokens, "dark")["acc_ink"])
 
 
 def fill(tokens, accent):
@@ -29,7 +29,7 @@ def fill(tokens, accent):
     ink reaches 4.5:1 on it; then its OKLab lightness is lowered in steps until white does.
     Of libadwaita's nine presets only red (#e62d42) is darkened, to #e2283f (maintainer
     decision, 2026-10-17, #571). appearance.rs `fill` is the same rule."""
-    dark_ink = colors(tokens, "dark")["acc_ink"]
+    dark_ink = quantize(colors(tokens, "dark")["acc_ink"])
     if max(contrast(accent, WHITE), contrast(accent, dark_ink)) >= 4.5:
         return accent
     lightness, a, b = to_oklab(accent)
@@ -57,7 +57,9 @@ def colors(tokens, variant, accent=None):
         palette["acc_ink"] = on_accent(tokens, palette["acc"])
     if "acc" in palette:
         dark = variant.startswith("dark")
-        palette["acc_fg"] = foreground(palette["acc"], [palette[n] for n in SURFACES], dark)
+        # Against the surfaces as the sheets carry them and appearance.rs reads them: 8 bits.
+        surfaces = [quantize(palette[n]) for n in SURFACES]
+        palette["acc_fg"] = foreground(palette["acc"], surfaces, dark)
     return palette
 
 

@@ -5,7 +5,7 @@ import sys
 import math
 
 import tokens as tk
-from color import contrast, from_oklab, over, to_oklab
+from color import contrast, from_oklab, over, quantize, to_oklab
 
 THRESHOLD = {"text": 4.5, "large": 3.0, "ui": 3.0}
 # VL11's sweep of the hue circle: 15 degree steps at the lowest chroma VL3 allows.
@@ -16,7 +16,8 @@ SWEEP_CHROMA = 0.08
 def accents(tokens):
     """[(label, colour)]: the nine presets, then the sweep. The sweep's two lightness limits
     are the darkest and the lightest of the presets in OKLab: the range a fixed accent takes.
-    VL3's wallpaper correction (VL12 step 4) will narrow them to the lightness it allows."""
+    VL3's wallpaper correction (VL12 step 4) will narrow them to the lightness it allows.
+    Each sweep colour is rounded to 8 bits, as a user's accent always is."""
     named = tk.presets(tokens)
     if not named:
         return []
@@ -26,7 +27,7 @@ def accents(tokens):
         for hue in range(0, 360, SWEEP_STEP):
             angle = math.radians(hue)
             lab = (limit, SWEEP_CHROMA * math.cos(angle), SWEEP_CHROMA * math.sin(angle))
-            cases.append((f"h{hue} L{limit:.2f}", from_oklab(lab)))
+            cases.append((f"h{hue} L{limit:.2f}", quantize(from_oklab(lab))))
     return cases
 
 
@@ -53,14 +54,18 @@ def flatten(names, palette):
 
 def palettes(tokens):
     """[(label, variant, palette)]: each variant with its own accent, then the light and the
-    dark variant with each accent of `accents`."""
+    dark variant with each accent of `accents`. Every colour is rounded to 8 bits, as the
+    sheets carry it."""
     cases = [(variant, variant, tk.colors(tokens, variant)) for variant in tk.VARIANTS]
     for variant in ("light", "dark"):
         if "acc" not in cases[tk.VARIANTS.index(variant)][2]:
             continue
         for label, accent in accents(tokens):
             cases.append((f"{variant} {label}", variant, tk.colors(tokens, variant, accent)))
-    return cases
+    return [
+        (label, variant, {name: quantize(c) for name, c in palette.items()})
+        for label, variant, palette in cases
+    ]
 
 
 def check(tokens):

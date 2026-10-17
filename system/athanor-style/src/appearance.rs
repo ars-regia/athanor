@@ -438,7 +438,8 @@ pub fn fill(accent: Rgb) -> Rgb {
         return accent;
     }
     let mut last = accent;
-    for colour in lightness_steps(accent, -1.0) {
+    // The accent itself failed above; its round trip through OKLab is not tried again.
+    for colour in lightness_steps(accent, -1.0).skip(1) {
         if contrast(colour, WHITE) >= MIN_CONTRAST {
             return colour;
         }
@@ -671,20 +672,23 @@ mod tests {
     }
 
     #[test]
-    fn the_presets_are_drawn_as_the_generator_derives_them() {
-        for &(name, dark, preset, acc, ink, fg) in generated::PRESETS {
-            let accent = Accent::from_name(name).map(Accent::rgb);
-            assert_eq!(
-                accent,
-                Some(preset),
-                "{name}: tokens.toml and Accent::rgb differ"
-            );
+    fn the_accents_are_drawn_as_the_generator_derives_them() {
+        let mut presets = 0;
+        for &(name, dark, accent, acc, ink, fg) in generated::ACCENTS {
+            if let Some(preset) = Accent::from_name(name) {
+                assert_eq!(
+                    preset.rgb(),
+                    accent,
+                    "{name}: tokens.toml and Accent::rgb differ"
+                );
+                presets += 1;
+            }
             let surfaces = if dark {
                 &SURFACES_DARK
             } else {
                 &SURFACES_LIGHT
             };
-            assert_eq!(fill(preset), acc, "{name} fill, dark {dark}");
+            assert_eq!(fill(accent), acc, "{name} fill, dark {dark}");
             assert_eq!(on_accent(acc), ink, "{name} ink, dark {dark}");
             assert_eq!(
                 foreground(acc, surfaces, dark),
@@ -692,7 +696,7 @@ mod tests {
                 "{name} foreground, dark {dark}"
             );
         }
-        assert_eq!(generated::PRESETS.len(), 2 * Accent::ALL.len());
+        assert_eq!(presets, 2 * Accent::ALL.len());
     }
 
     #[test]

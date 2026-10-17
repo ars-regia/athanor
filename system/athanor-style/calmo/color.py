@@ -38,6 +38,11 @@ def to_hex(color):
     return "#%02x%02x%02x" % tuple(round(c * 255) for c in color[:3])
 
 
+def quantize(color):
+    """`color` with its channels rounded to 8 bits, as CSS carries it; alpha unchanged."""
+    return from_hex(to_hex(color))[:3] + (color[3],)
+
+
 def luminance(color):
     def linear(u):
         return u / 12.92 if u <= 0.04045 else ((u + 0.055) / 1.055) ** 2.4
