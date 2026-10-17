@@ -1,0 +1,20 @@
+Lettore schermo attivo.
+Disposizione
+Stile raggruppamento
+Isola pulsante di commutazione premuto.
+Barra pulsante di commutazione non premuto.
+Essenziale pulsante di commutazione non premuto.
+Pannello raggruppamento
+In alto pulsante di commutazione premuto.
+In basso pulsante di commutazione non premuto.
+Dock raggruppamento
+Visibile pulsante di commutazione premuto.
+Nascondi automaticamente pulsante di commutazione non premuto.
+Nessuno pulsante di commutazione non premuto.
+Stile raggruppamento
+Isola pulsante di commutazione premuto.
+Barra pulsante di commutazione non premuto.
+Essenziale pulsante di commutazione non premuto.
+Pannello raggruppamento
+In alto pulsante di commutazione premuto.
+Lettore schermo disattivato.

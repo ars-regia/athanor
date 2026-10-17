@@ -37,6 +37,7 @@
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
+#   rig.sh orca chooser [it]   Orca's speech for a walk with Tab holds the GTK chooser's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
@@ -846,6 +847,37 @@ atspi)
         exit 2
         ;;
     esac
+    ;;
+orca)
+    # doc_own_stack.md, OS8: Orca's speech transcript for a walk with Tab through the chooser, in
+    # English and in Italian, must hold every utterance of the GTK chooser's, recorded first in
+    # golden/orca/. ATHANOR_CHOOSER_BIN runs another chooser, athanor-toolkit's. The published
+    # rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build of the Containerfile's rig stage.
+    # To record it again, copy <out>/orca-chooser[-it].txt of a GTK run into golden/orca/.
+    [ "${2:-}" = chooser ] || { echo "rig.sh orca: the surface is 'chooser', not '${2:-}'" >&2; exit 2; }
+    lang=(RIG_LOCALE=en_US.UTF-8)
+    case "${3:-}" in
+    '') ;;
+    it)
+        in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it && msgfmt --check -o /out/locale/it/athanor-layout-chooser.mo \
+            /repo/forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/po/it.po"
+        lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG=/out/locale/it/athanor-layout-chooser.mo)
+        ;;
+    *) echo "rig.sh orca: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
+    esac
+    if ! in_rig "$(rig_image)" rpm -q orca wtype; then
+        echo "rig.sh orca: $(rig_image) has no Orca; build the Containerfile's rig stage and name it in ATHANOR_RIG_IMAGE" >&2
+        exit 1
+    fi
+    bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
+    transcript=orca-chooser${3:+-$3}.txt
+    # Ten controls, Minimize, Close and the eight choices; the eleventh Tab comes back round.
+    in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+        RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript 11" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-chooser -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true && exec $bin"
+    in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
+        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript"
     ;;
 input-method)
     # doc_own_stack.md, T1 task 6 (OS9 item 3): the test input method pre-edits and commits into
