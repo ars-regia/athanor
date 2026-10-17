@@ -15,7 +15,7 @@
 - Starts at once (ADR-0121 decision 1). Branch from `origin/iso-v0`, report its commit.
 - On the desktop, builds run only while the rig of release 0.9 is idle, under `/var/tmp`, with `taskset -c 0-3`; the desktop must never reset: check `uptime` before a long run.
 - `GPL-3.0-or-later`. Smithay enters `deny.toml`'s `allow-git` with its exact URL; no other git dependency. cosmic-comp is read, not copied (`GPL-3.0-only`).
-- The crate passes every `verify.py` check from its first commit, the panic budget included; a crate not yet shipped is declared as `verify.py` requires (`experimental/EXEMPT` or a spec outside the image's package list), never by weakening a check.
+- The crate passes every `verify.py` check from its first commit, the panic budget included. Until it ships, its name is listed in `experimental/EXEMPT` (the check `shipped`); the change that ships it removes the line and adds the package to `forge/config/packages.json`. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
 - The rig gains an opt-in `RIG_COMPOSITOR=athanor`; cosmic-comp stays the rig's and the image's default.
 - Only the console sessions of task 9 need the maintainer; they come last, with the commands written out.
 
@@ -33,13 +33,14 @@
 - [ ] Record the Smithay revision (`git ls-remote https://github.com/Smithay/smithay HEAD`) and its date in the crate's `README.md`; add it to `deny.toml`.
 - [ ] Winit backend, GLES renderer, `wl_compositor`, `wl_shm`, `wl_seat` with keyboard and pointer, `wl_output`, `xdg-shell`, `linux-dmabuf`, `viewporter`, `fractional-scale-v1`, `presentation-time`, `cursor-shape-v1`, `xdg-activation-v1`.
 - [ ] With `RIG_COMPOSITOR=athanor`, `forge/test/shell/session.sh` (which sway runs) starts `athanor-compositor` instead of cosmic-comp, and `scene.sh` replaces its `cosmic-randr` calls by the compositor's own output size and scale arguments.
-- [ ] Check: `rig.sh surface chooser` with `RIG_COMPOSITOR=athanor` draws the layout chooser, a plain GTK4 window; save the PNGs beside cosmic-comp's goldens.
+- [ ] Check: after `rig.sh build-layout`, `rig.sh surface chooser` with `RIG_COMPOSITOR=athanor` draws the layout chooser, a plain GTK4 window; save the PNGs beside cosmic-comp's goldens.
 
 ### Task 2: the headless backend on NVIDIA
 
 - [ ] A headless backend: GBM on a render node, outputs of any number, size and scale, frames read back for comparison.
 - [ ] `linux-drm-syncobj-v1` on that backend.
-- [ ] Check, on the desktop without the maintainer: a GTK4 client and a Vulkan client (`vkcube --wsi wayland`) draw on NVIDIA's render node through dmabuf with explicit sync for ten minutes; frame times and every error line are recorded. The same test runs on llvmpipe in the rig.
+- [ ] Check, on the desktop without the maintainer: a GTK4 client and a Vulkan client (`vkcube --wsi wayland`) draw on NVIDIA's render node through dmabuf with explicit sync for ten minutes; frame times and every error line are recorded. In the rig, which has no Vulkan driver, the same test runs on llvmpipe with the GTK4 client and `eglgears_wayland` (adding it to the rig's `Containerfile` re-pins `rig-image.digest`).
+- [ ] The in-process client and server fixture of OS6 on that backend: a test starts the compositor and Wayland clients in one process, with virtual outputs, and asserts on globals, surfaces and frames.
 
 ### Task 3: layer shell, bar and dock, and the goldens
 

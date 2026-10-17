@@ -14,7 +14,8 @@
 
 - Starts at once, in parallel with milestone C1 (ADR-0121 decision 1). Branch from `origin/iso-v0`, report its commit.
 - Built and tested on the reference laptop (the rig's podman image, `-j 4`), so that the desktop's cores stay with release 0.9 and milestone C1.
-- `MIT OR Apache-2.0`; `verify.py licence` names the crate as its exception in the same change; every dependency's licence is in `deny.toml`'s allow-list.
+- `MIT OR Apache-2.0`. `verify.py licence` admits an exception today only for a crate that links `greetd_ipc`; the first change generalises it so that each exception carries its own reason, names the toolkit there, and adds the negative control to `scripts/tests`. Every dependency's licence is in `deny.toml`'s allow-list.
+- The crate is a library; the chooser built on it is an `examples/` target until it replaces the GTK chooser, so the check `shipped` needs no exemption. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
 - Masonry and Xilem are read, never depended on (ADR-0121 decision 7).
 - The chooser's strings come from its GTK version's catalogue; nothing is retranslated.
 
@@ -31,6 +32,7 @@
 
 - [ ] SCTK: an xdg-toplevel window, the role of the GTK chooser, so that the goldens compare toolkits and not surface roles; a layer-shell surface on the overlay layer behind the same driver interface; `wp_fractional_scale_v1` with `wp_viewporter`, keyboard and pointer from the seat, `cursor-shape-v1`.
 - [ ] `vello_cpu` renders a scene into a `wl_shm` buffer at the fractional scale.
+- [ ] `rig.sh`'s `capture_chooser` and `atspi chooser` take the chooser's binary from `ATHANOR_CHOOSER_BIN`, by default `/out/bin/athanor-layout-chooser`, which `rig.sh build-layout` installs.
 - [ ] Check: the rig's chooser scene, with `ATHANOR_CHOOSER_BIN` pointing at the toolkit's chooser, captures a drawn rectangle at the rig's scales, 1.0 and 1.5.
 
 ### Task 2: the widget core
@@ -52,7 +54,7 @@
 
 ### Task 5: Orca's transcript
 
-- [ ] Record the GTK chooser's transcript with `rig.sh atspi chooser` and `rig.sh atspi chooser it` (the OS8 reference, kept with the results).
+- [ ] Record the GTK chooser's transcript, after `rig.sh build-layout`, with `rig.sh atspi chooser` and `rig.sh atspi chooser it` (the OS8 reference, kept with the results).
 - [ ] Record the toolkit chooser's transcript with the same scenario.
 - [ ] Compare per element: name, role, state, value. Check: nothing the GTK transcript holds is missing.
 

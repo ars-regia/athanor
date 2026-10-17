@@ -193,7 +193,9 @@ read as references, not depended on. A windowing driver of its own, on smithay-c
 gives layer-shell surfaces, popups, text-input-v3, fractional scale and cursor shapes. Gaps in
 AccessKit's AT-SPI adapter (the Collection interface, the combo box state) are sent upstream first
 and carried until upstream takes them, as CO3 does for cosmic-comp. `verify.py licence`, which today requires `GPL-3.0-or-later` of every crate of
-ours, names the toolkit's crates as the exception in the change that adds them.
+ours and admits an exception only for a crate that links `greetd_ipc`, is generalised in the
+change that adds the toolkit, so that each exception carries its own reason, and names the
+toolkit's crates there.
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's

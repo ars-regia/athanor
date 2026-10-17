@@ -75,7 +75,7 @@ The maintainer took these decisions on 2026-10-17:
 
 - `doc_shell.md` SH2 and `doc_compositor.md` CO4 hold until the own compositor passes the
   acceptance of decision 5 and replaces cosmic-comp, in release 1.0; each carries a note naming
-  this record. `doc_own_stack.md` is implemented only once approved (ADR-0074).
+  this record. `doc_own_stack.md` revision 1 was approved on 2026-10-17 (decision 1, ADR-0074).
 - This record amends ADR-0103 D1 and ADR-0115 in the date of 1.0, which follows the own
   compositor's acceptance instead of Fedora 43's end of life, and ADR-0103 D14, whose cosmic-comp
   patches at 1.0 become requirements of the own compositor (`doc_own_stack.md` OS4). It amends
