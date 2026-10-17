@@ -113,6 +113,30 @@ class BaselineTest(unittest.TestCase):
         self.assertIn("\nPresentDevicePolicy=apply-policy\n", conf)
 
 
+def raw_descriptors(configurations):
+    """The descriptors attribute of a device in sysfs: the device descriptor, then each
+    configuration with, for each interface, one interface descriptor for each alternate setting,
+    each followed by an endpoint. An interface is (class, subclass, protocol), with a fourth item
+    for a count of alternate settings other than one."""
+    out = bytes([18, 1]) + bytes(16)
+    for value, interfaces in enumerate(configurations, 1):
+        body = b""
+        for number, (cls, sub, proto, *alternates) in enumerate(interfaces):
+            for setting in range(alternates[0] if alternates else 1):
+                body += bytes([9, 4, number, setting, 1, int(cls, 16), int(sub, 16), int(proto, 16), 0])
+                body += bytes([7, 5, 0x81, 3, 8, 0, 10])
+        total = 9 + len(body)
+        out += bytes([9, 2, total & 0xFF, total >> 8, len(interfaces), value, 0, 0x80, 50]) + body
+    return out
+
+
+def interface_name(device, number):
+    """The kernel's name for an interface of configuration 1: a root hub's is named after its
+    bus, usb1's 1-0:1.0, any other device's after the device."""
+    port = f"{device[3:]}-0" if device.startswith("usb") else device
+    return f"{port}:1.{number}"
+
+
 class InternalSnapshot(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -124,7 +148,10 @@ class InternalSnapshot(unittest.TestCase):
         self.marker = self.work / "state/usbguard-internal.done"
         self.pending = self.work / "state/usbguard-internal.pending"
 
-    def device(self, name, vid, pid, interfaces, serial=None, configured=True, vanished=False):
+    def device(self, name, vid, pid, interfaces, serial=None, configured=True, vanished=False, configurations=None):
+        """A device as sysfs shows it. Unconfigured, it shows its device descriptor only; the
+        interface directories, which the script must not take for devices, carry no attributes:
+        the interfaces are read from the descriptors."""
         d = self.sysfs / name
         d.mkdir()
         if not vanished:
@@ -134,13 +161,9 @@ class InternalSnapshot(unittest.TestCase):
         if serial is not None:
             (d / "serial").write_text(serial + "\n")
         if not configured:
+            (d / "descriptors").write_bytes(raw_descriptors([])[:18])
             return
-        for i, (cls, sub, proto) in enumerate(interfaces):
-            f = d / f"{name}:1.{i}"
-            f.mkdir()
-            (f / "bInterfaceClass").write_text(cls + "\n")
-            (f / "bInterfaceSubClass").write_text(sub + "\n")
-            (f / "bInterfaceProtocol").write_text(proto + "\n")
+        self.configure(name, interfaces, configurations)
 
     def run_script(self, sync=None, sleep=None, check=True, wait_tenths=50):
         """Runs the script; `sync` and `sleep` are bodies of stand-ins for sync(1) and sleep(1),
@@ -185,15 +208,13 @@ case $(wc -l < {count}) in
             self.assertIn(f"<3>{name} did not settle within 0.3 s: ", done.stderr)
         self.assertIn("Not recording the snapshot as done: ", done.stderr)
 
-    def configure(self, name, interfaces):
+    def configure(self, name, interfaces, configurations=None):
         """Finishes the enumeration of a device made with configured=False."""
         d = self.sysfs / name
-        for i, (cls, sub, proto) in enumerate(interfaces):
-            f = d / f"{name}:1.{i}"
-            f.mkdir()
-            (f / "bInterfaceClass").write_text(cls + "\n")
-            (f / "bInterfaceSubClass").write_text(sub + "\n")
-            (f / "bInterfaceProtocol").write_text(proto + "\n")
+        configurations = configurations or [interfaces]
+        (d / "descriptors").write_bytes(raw_descriptors(configurations))
+        for number in range(len(configurations[0])):
+            (d / interface_name(name, number)).mkdir()
         (d / "bConfigurationValue").write_text("1\n")
 
     def first_run_leaves_1_1_pending(self):
@@ -222,7 +243,91 @@ case $(wc -l < {count}) in
         )
         self.assertTrue(any("id 058f:9540" in r and "{ 0b:00:00 }" in r for r in rules))
         self.assertTrue(any("id 8087:0029" in r and "e0:01:01" in r for r in rules))
-        self.assertTrue(any("id 1d6b:0002" in r and "09:00:00" in r for r in rules))
+        self.assertIn('allow id 1d6b:0002 serial "" via-port "usb1" with-interface equals { 09:00:00 }', rules)
+        self.assertTrue(self.marker.exists())
+
+    def test_alternate_settings_are_listed_as_usbguard_lists_them(self):
+        # #567: USBGuard lists one interface type for each interface descriptor, every alternate
+        # setting included; a rule that lists one per interface never matches such a device.
+        self.device("1-5", "8087", "0a2b", [("e0", "01", "01"), ("e0", "01", "01", 6)])
+        self.device("1-6", "04f2", "b59a", [("0e", "01", "00"), ("0e", "02", "00", 12)])
+        self.run_script()
+        self.assertEqual(
+            sorted(self.written()),
+            [
+                'allow id 04f2:b59a serial "" via-port "1-6" with-interface equals { 0e:01:00'
+                + " 0e:02:00" * 12
+                + " }",
+                'allow id 8087:0a2b serial "" via-port "1-5" with-interface equals {' + " e0:01:01" * 7 + " }",
+            ],
+        )
+
+    def test_a_root_hub_settles(self):
+        # #567: a root hub's interface is 1-0:1.0, not usb1:1.0; the snapshot must not wait for it.
+        self.device("usb1", "1d6b", "0002", [("09", "00", "00")])
+        self.device("usb2", "1d6b", "0003", [("09", "00", "00")])
+        done = self.run_script()
+        self.assertEqual(len(self.written()), 2)
+        self.assertNotIn("did not settle", done.stderr)
+        self.assertTrue(self.marker.exists())
+
+    def test_mass_storage_in_another_configuration_is_not_admitted(self):
+        # USBGuard admits a device, not one of its configurations, and lists the interfaces of all
+        # of them: a modem that usb_modeswitch can turn into a stick gets no rule.
+        self.device("1-1", "12d1", "1506", None, configurations=[[("08", "06", "50")], [("02", "0e", "00")]])
+        done = self.run_script()
+        self.assertEqual(self.written(), [])
+        self.assertIn("Not admitting 12d1:1506 on 1-1: mass storage.", done.stderr)
+        self.assertTrue(self.marker.exists())
+
+    def test_malformed_descriptors_leave_the_device_pending(self):
+        good = raw_descriptors([[("0e", "01", "00")]])
+        short = bytearray(good)
+        short[27] = 8  # the interface descriptor's length, after the device and configuration
+        broken = {
+            "1-1": good[:-3],  # the last descriptor runs past the end
+            "1-2": good + b"\x07",  # a byte left over
+            "1-3": good + b"\x00\x24",  # a zero length
+            "1-4": bytes(short),
+        }
+        for port, raw in broken.items():
+            self.device(port, "0c45", "6a10", [("0e", "01", "00")])
+            (self.sysfs / port / "descriptors").write_bytes(raw)
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, *broken)
+        for port in broken:
+            self.assertIn(f"{port} did not settle within 0.3 s: malformed descriptors", done.stderr)
+        self.assertEqual(self.written(), [])
+
+    def test_empty_descriptors_leave_the_device_pending(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/descriptors").write_bytes(b"")
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: configured, with no interface descriptor yet", done.stderr)
+
+    def test_unreadable_descriptors_leave_the_device_pending_with_the_reason(self):
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/descriptors").unlink()
+        (self.sysfs / "1-1/descriptors").mkdir()
+        done = self.run_script(check=False, wait_tenths=3)
+        self.assert_not_done(done, "1-1")
+        self.assertIn("1-1 did not settle within 0.3 s: od: ", done.stderr)
+
+    def test_class_specific_descriptors_are_walked_over_by_their_length(self):
+        # A UVC or audio interface is followed by class-specific descriptors of odd lengths, whose
+        # bytes may read 04 where a type would be: only the descriptors' own types count.
+        raw = bytearray(raw_descriptors([[("0e", "01", "00")]]))
+        extra = bytes([5, 0x24, 0x04, 0x04, 0x08]) + bytes([3, 0x24, 0x04])
+        raw[36:36] = extra  # after the interface descriptor, before its endpoint
+        total = int.from_bytes(raw[20:22], "little") + len(extra)
+        raw[20:22] = total.to_bytes(2, "little")
+        self.device("1-1", "0c45", "6a10", [("0e", "01", "00")])
+        (self.sysfs / "1-1/descriptors").write_bytes(bytes(raw))
+        self.run_script()
+        self.assertEqual(
+            self.written(), ['allow id 0c45:6a10 serial "" via-port "1-1" with-interface equals { 0e:01:00 }']
+        )
         self.assertEqual(self.rules.stat().st_mode & 0o777, 0o600)
 
     def test_no_rule_for_mass_storage(self):
@@ -342,27 +447,18 @@ case $(wc -l < {count}) in
         self.assertTrue(self.marker.exists())
 
     def test_a_device_reconfigured_between_passes_is_recorded_once_it_reads_the_same_twice(self):
-        # usb_modeswitch, or a udev rule writing bConfigurationValue: configuration 1 offers mass
-        # storage; configuration 2, the modem, gains its interfaces one at a time. A pass that
-        # falls inside the change sees half of them, and the next pass reads differently.
-        self.device("1-1", "12d1", "1506", [("08", "06", "50")])
-        d = self.sysfs / "1-1"
-        iface = (
-            "mkdir {d}/1-1:2.{n} && echo {c} > {d}/1-1:2.{n}/bInterfaceClass && "
-            "echo {s} > {d}/1-1:2.{n}/bInterfaceSubClass && echo {p} > {d}/1-1:2.{n}/bInterfaceProtocol"
+        # usb_modeswitch, or a udev rule writing bConfigurationValue: the pass before the change
+        # reads configuration 1, the next one configuration 2, and the device is read again. The
+        # rule lists the interfaces of both configurations, as USBGuard sees the device.
+        self.device(
+            "1-1", "12d1", "1506", None, configurations=[[("02", "0e", "00")], [("02", "0e", "00"), ("0a", "00", "01")]]
         )
-        self.run_script(
-            sleep=self.on_wait(
-                f"rm -r {d}/1-1:1.0 && echo 2 > {d}/bConfigurationValue && "
-                + iface.format(d=d, n=0, c="02", s="0e", p="00"),
-                iface.format(d=d, n=1, c="0a", s="00", p="01"),
-            )
-        )
+        self.run_script(sleep=self.on_wait(f"echo 2 > {self.sysfs / '1-1/bConfigurationValue'}"))
         self.assertEqual(
             self.written(),
-            ['allow id 12d1:1506 serial "" via-port "1-1" with-interface equals { 02:0e:00 0a:00:01 }'],
+            ['allow id 12d1:1506 serial "" via-port "1-1" with-interface equals { 02:0e:00 02:0e:00 0a:00:01 }'],
         )
-        self.assertEqual(len((self.work / "waits").read_text().splitlines()), 3)
+        self.assertEqual(len((self.work / "waits").read_text().splitlines()), 2)
         self.assertTrue(self.marker.exists())
 
     def test_a_device_admitted_before_it_leaves_the_bus_is_not_named_as_left(self):
@@ -381,8 +477,12 @@ case $(wc -l < {count}) in
     def test_a_device_that_never_reads_the_same_twice_is_left_pending_with_its_serial(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00")], "CAM1")
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        proto = self.sysfs / "1-1/1-1:1.0/bInterfaceProtocol"
-        done = self.run_script(sleep=f"echo 0$((1 - $(< {proto}))) > {proto}\n", check=False, wait_tenths=3)
+        # Each wait flips the protocol of its interface.
+        desc, one, other = self.sysfs / "1-1/descriptors", self.work / "one", self.work / "other"
+        one.write_bytes(raw_descriptors([[("0e", "01", "00")]]))
+        other.write_bytes(raw_descriptors([[("0e", "01", "01")]]))
+        flip = f"if cmp -s {desc} {one}; then cp {other} {desc}; else cp {one} {desc}; fi\n"
+        done = self.run_script(sleep=flip, check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
         self.assertIn("1-1 did not settle within 0.3 s: no two consecutive passes read it the same", done.stderr)
         self.assertEqual(self.pending.read_text(), "runs 1\n1-1 0c45:6a10 CAM1\n")
@@ -692,13 +792,13 @@ printf '%d.%02d 0.00\\n' $((c / 100)) $((c % 100)) > {uptime}
 
         waits = self.work / "waits"
         # The script sleeps only while a device is pending: its first wait finishes the
-        # enumeration, the interface with its attributes, as sysfs shows it, and the pass after
-        # the second wait reads the device as the one before it did.
+        # enumeration, the descriptors and then the configuration, and the pass after the second
+        # wait reads the device as the one before it did.
+        full = self.work / "full"
+        full.write_bytes(raw_descriptors([[("0e", "01", "00")]]))
         finish = f"""echo >> {waits}
-if [[ ! -e {d}/1-1:1.0 ]]; then
-  mkdir {d}/pending
-  for a in Class:0e SubClass:01 Protocol:00; do echo "${{a#*:}}" > "{d}/pending/bInterface${{a%:*}}"; done
-  mv {d}/pending {d}/1-1:1.0
+if ! cmp -s {full} {d}/descriptors; then
+  cp {full} {d}/descriptors
   echo 1 > {d}/bConfigurationValue
 fi
 """

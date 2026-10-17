@@ -241,6 +241,8 @@ async fn exchange<C: Conversation>(
     // The password typed on the card answers PAM's first secret question and no other: a
     // further one (a new password, its confirmation) is put to the person in PAM's words.
     let mut password = password;
+    // PAM's own error lines, which are the reason of a refusal that follows them.
+    let mut pam_errors = Vec::new();
     for _ in 0..MAX_AUTH_STEPS {
         resp = match resp {
             Response::AuthMessage {
@@ -253,6 +255,7 @@ async fn exchange<C: Conversation>(
                 }
                 AuthMessageType::Error => {
                     person.error(&auth_message);
+                    pam_errors.push(auth_message);
                     post_no_answer(stream)?
                 }
                 AuthMessageType::Secret => match password.take() {
@@ -286,16 +289,35 @@ async fn exchange<C: Conversation>(
                 };
                 return match send_request(stream, &req)? {
                     Response::Success => Ok(Outcome::SignedIn),
-                    Response::Error { description, .. } => Err(description),
+                    Response::Error {
+                        error_type,
+                        description,
+                    } => Err(refusal(error_type, &description, &pam_errors)),
                     Response::AuthMessage { .. } => {
                         Err(tr("The login service gave an unexpected answer."))
                     }
                 };
             }
-            Response::Error { description, .. } => return Err(description),
+            Response::Error {
+                error_type,
+                description,
+            } => return Err(refusal(error_type, &description, &pam_errors)),
         };
     }
     Err(tr("Too many authentication steps."))
+}
+
+/// What the person reads of greetd's refusal (doc_lock_and_prompts.md, "Errors"): PAM's
+/// own error text where PAM supplied one, else "Wrong password". greetd's description names
+/// a PAM function and constant (`pam_acct_mgmt: ACCT_EXPIRED`) that nobody can act on, so it
+/// goes to the log only. A refusal of greetd's own, not PAM's, is no wrong password.
+fn refusal(error_type: greetd_ipc::ErrorType, description: &str, pam_errors: &[String]) -> String {
+    tracing::warn!(error = %description, "greetd refused the sign-in");
+    match error_type {
+        greetd_ipc::ErrorType::AuthError if pam_errors.is_empty() => tr("Wrong password"),
+        greetd_ipc::ErrorType::AuthError => pam_errors.join("\n"),
+        greetd_ipc::ErrorType::Error => tr("The login service refused the sign-in."),
+    }
 }
 
 /// Signs `username` in through greetd, with the password typed on the card when there is
@@ -711,7 +733,7 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("a locked account does not sign in");
-        assert!(reason.contains("AUTH_ERR"), "{reason}");
+        assert_eq!(reason, locked, "PAM's text is the reason, greetd's code is not");
         assert_eq!(*person.errors.borrow(), [locked]);
         assert_eq!(answers(&requests), [None]);
         assert_eq!(password_sent(&requests), 0);
@@ -732,10 +754,50 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("an expired password does not sign in");
-        assert!(reason.contains("NEW_AUTHTOK_REQD"), "{reason}");
+        assert_eq!(reason, expired, "PAM's text is the reason, greetd's code is not");
         assert_eq!(*person.errors.borrow(), [expired]);
         assert_eq!(answers(&requests), [Some(PASSWORD.to_string()), None]);
         assert_eq!(password_sent(&requests), 1);
+    }
+
+    #[test]
+    fn a_refusal_without_pams_words_is_a_wrong_password_and_never_greetds_code() {
+        let person = Person::default();
+        let (result, _) = login(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                auth_error("authentication error: pam_authenticate: AUTH_ERR"),
+            ],
+            &person,
+        );
+        assert_eq!(result, Err("Wrong password".to_string()));
+
+        // Whichever PAM call refused, with no line of PAM's the reason is the same.
+        let (result, _) = login(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                auth_error("authentication error: pam_acct_mgmt: ACCT_EXPIRED"),
+            ],
+            &person,
+        );
+        assert_eq!(result, Err("Wrong password".to_string()));
+
+        // A refusal of greetd's own, at the start of the session, is no wrong password.
+        let (result, _) = login(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                Response::Success,
+                Response::Error {
+                    error_type: greetd_ipc::ErrorType::Error,
+                    description: "session_start: could not start the session".to_string(),
+                },
+            ],
+            &person,
+        );
+        assert_eq!(
+            result,
+            Err("The login service refused the sign-in.".to_string())
+        );
     }
 
     #[test]
@@ -904,7 +966,7 @@ mod tests {
             &person,
             &[("ada", None)],
         );
-        assert!(result.is_err());
+        assert_eq!(result, Err(locked.to_string()));
         assert_eq!(*person.errors.borrow(), [locked]);
         assert!(
             person.asked.borrow().is_empty(),
@@ -924,7 +986,7 @@ mod tests {
             &person,
             &[("ada", None)],
         );
-        assert!(result.is_err());
+        assert_eq!(result, Err(expired.to_string()));
         assert_eq!(*person.errors.borrow(), [expired]);
         assert_eq!(person.asked.borrow().len(), 1, "no further prompt");
         assert_eq!(answers(&requests), [Some(PASSWORD.to_string()), None]);

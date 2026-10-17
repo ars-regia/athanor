@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,8 +43,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
-* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Built with the Calmo sheets of #570, which draw the shell's controls in the accent.
+
+* Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- A refused sign-in shows PAM's error text, or "Wrong password" when PAM gives none, never
+  greetd's error code, which goes to the log (#555).
 
 * Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Cancel a session whose login failed before the next one is created: greetd 0.10 keeps a
