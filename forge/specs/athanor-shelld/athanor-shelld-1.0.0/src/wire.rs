@@ -3,7 +3,7 @@
 //! links this crate for this type (doc_bar.md BR1, "Shared code").
 
 use serde::{Deserialize, Serialize};
-use zvariant::Type;
+use zbus::zvariant::Type;
 
 use crate::icon::Icon;
 use crate::store::{self, Notification, Visual};
@@ -120,8 +120,8 @@ mod tests {
             timeout_ms: 6,
             popup_ms_left: 7,
         };
-        let ctxt = zvariant::serialized::Context::new_dbus(zvariant::LE, 0);
-        let bytes = zvariant::to_bytes(ctxt, &wire).expect("the wire value serializes");
+        let ctxt = zbus::zvariant::serialized::Context::new_dbus(zbus::zvariant::LE, 0);
+        let bytes = zbus::zvariant::to_bytes(ctxt, &wire).expect("the wire value serializes");
         let (tuple, _): (BarTuple, usize) =
             bytes.deserialize().expect("the bar's tuple reads it back");
         // Tuples above twelve fields implement neither `PartialEq` nor `Debug`: compare
