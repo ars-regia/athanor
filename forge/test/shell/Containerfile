@@ -47,6 +47,17 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
       adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
+# Orca, for the speech transcripts of doc_own_stack.md (OS8): orca_walk.py runs it with a debug
+# file and walks the surface with Tab through wtype's virtual keyboard, as the rig has no input
+# device. The base image installs English messages only (%_install_langs); the Italian
+# transcript says roles and states in Orca's and AT-SPI's Italian, so this step keeps both.
+# AT-SPI's come with an update of at-spi2-core: the base's release is no longer in the
+# repositories to install again.
+RUN echo '%_install_langs en_US:it' > /etc/rpm/macros.zz-orca-langs \
+  && dnf5 -y install --setopt=install_weak_deps=False orca wtype \
+  && dnf5 -y upgrade --setopt=install_weak_deps=False at-spi2-core \
+  && rm /etc/rpm/macros.zz-orca-langs \
+  && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
 # published one pinned by build-image.digest when that file exists: a change here takes effect
