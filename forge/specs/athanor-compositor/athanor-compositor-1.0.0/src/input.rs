@@ -52,8 +52,6 @@ impl State {
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
-                let serial = SERIAL_COUNTER.next_serial();
-                self.last_input_serial = Some(serial);
                 if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
                     let window = self
                         .space
@@ -63,6 +61,10 @@ impl State {
                         self.focus(&window);
                     }
                 }
+                // After the focus: the button's serial is then newer than the keyboard's enter,
+                // so a token made from the click that focused a window is in range.
+                let serial = SERIAL_COUNTER.next_serial();
+                self.last_input_serial = Some(serial);
                 pointer.button(
                     self,
                     &ButtonEvent {

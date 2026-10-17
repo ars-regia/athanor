@@ -83,8 +83,9 @@ impl CompositorHandler for State {
 }
 
 impl State {
-    /// Centres a window on the output at its first commit with a size, activates it and gives
-    /// it the keyboard.
+    /// Centres a window on the output at its first commit with a size. It takes the keyboard
+    /// only when no live surface holds it or its own client does: mapping a window is not the
+    /// user's input, so a client cannot take the focus from another by opening one.
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
@@ -98,8 +99,19 @@ impl State {
         }
         let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
         let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
-        self.space.map_element(window.clone(), (x, y), true);
-        self.focus(window);
+        let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
+        let holder = self
+            .seat
+            .get_keyboard()
+            .and_then(|keyboard| keyboard.current_focus())
+            .and_then(|surface| owner(&surface));
+        let own = window.toplevel().and_then(|t| owner(t.wl_surface()));
+        if holder.is_none() || holder == own {
+            self.space.map_element(window.clone(), (x, y), true);
+            self.focus(window);
+        } else {
+            self.space.map_element(window.clone(), (x, y), false);
+        }
     }
 
     /// Raises `window`, activates it and gives it the keyboard; the others are deactivated.
@@ -247,8 +259,10 @@ impl XdgActivationHandler for State {
     }
 
     /// A token is good only when the client that asks for it holds the keyboard focus of this
-    /// seat and names a serial this compositor sent since that focus: a client cannot take the
-    /// focus without the user's input.
+    /// seat, which it gets from the user's click or from mapping a window while nothing else
+    /// holds it (`place`). The serial must also be one this compositor sent since that focus;
+    /// the focused client always holds its own enter serial, so the range only keeps out serials
+    /// never sent, and the focus check is what keeps other clients out.
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
