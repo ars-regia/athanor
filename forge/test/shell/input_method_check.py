@@ -7,8 +7,10 @@ preedit, then with the commit; and reads the field's text on the accessibility b
 empty under the preedit, which is not text yet, and the committed text after.
 """
 
+import queue
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -43,13 +45,32 @@ def capture(name):
     subprocess.run(["grim", "-o", "WINIT-0", f"/out/{name}.png"], check=True)
 
 
-def step(method, expected):
-    line = method.stdout.readline().strip()
-    if line != expected:
+def reader(method):
+    """The input method's lines, read on a thread so that a wait for one can time out; None
+    when its output ends."""
+    lines = queue.Queue()
+
+    def read():
+        for line in method.stdout:
+            lines.put(line.strip())
+        lines.put(None)
+
+    threading.Thread(target=read, daemon=True).start()
+    return lines
+
+
+def step(method, lines, expected):
+    """Waits up to TIMEOUT for the input method's next line; kills it unless that is expected."""
+    try:
+        line = lines.get(timeout=TIMEOUT)
+    except queue.Empty:
+        line = f"nothing in {TIMEOUT} s"
+    else:
+        line = "nothing more" if line is None else repr(line)
+    if line != repr(expected):
         method.kill()
         print(
-            f"FAIL the input method said {line!r}, expected {expected!r}",
-            file=sys.stderr,
+            f"FAIL the input method said {line}, expected {expected!r}", file=sys.stderr
         )
         return False
     return True
@@ -74,7 +95,8 @@ def main():
         stdout=subprocess.PIPE,
         text=True,
     )
-    if not step(method, f"preedit {PREEDIT}"):
+    lines = reader(method)
+    if not step(method, lines, f"preedit {PREEDIT}"):
         return 1
     # The preedit is drawn but not committed: the field's text stays empty.
     time.sleep(1)
@@ -82,7 +104,7 @@ def main():
     preedit_text = value_of(node, Atspi)
     method.stdin.write("commit\n")
     method.stdin.flush()
-    if not step(method, f"commit {COMMIT}"):
+    if not step(method, lines, f"commit {COMMIT}"):
         return 1
     committed = wait_for_text(Atspi, node, COMMIT)
     capture("input-method-commit")
