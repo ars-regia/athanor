@@ -67,6 +67,17 @@ class CasesTest(unittest.TestCase):
     def test_the_chooser_has_the_twelve_cases_of_sh13(self):
         self.assertEqual(len(cases.surface_cases("chooser")), 12)
 
+    def test_the_toolkit_chooser_has_english_and_rtl_at_two_scales(self):
+        self.assertEqual(
+            [c.tag for c in cases.surface_cases("toolkit-chooser")],
+            [
+                "toolkit-chooser-light-1.0-en",
+                "toolkit-chooser-light-1.0-rtl",
+                "toolkit-chooser-light-1.5-en",
+                "toolkit-chooser-light-1.5-rtl",
+            ],
+        )
+
     BAR_SCENES = (
         "bar",
         "bar-power",

@@ -59,6 +59,13 @@ SURFACES = {
     # doc_launcher.md, LA11: the launcher with a query and its preview (plan 3a); the
     # library's 12 cases come with plan 3b.
     "launcher": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
+    # doc_own_stack.md, C1 task 1: athanor-toolkit's chooser under athanor-compositor. The
+    # toolkit has no theme or catalog yet: one variant, English and the mirrored layout.
+    "toolkit-chooser": {
+        "variants": ("light",),
+        "scales": ("1.0", "1.5"),
+        "locales": ("en", "rtl"),
+    },
 }
 
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).
@@ -75,10 +82,11 @@ PORTRAIT = (1080, 1920)
 
 def surface_cases(surface):
     spec = SURFACES[surface]
+    locales = [(short, LOCALES[short]) for short in spec.get("locales", LOCALES)]
     return [
         Case(f"{surface}-{variant}-{scale}-{short}", variant, scale, locale, catalog)
         for variant, scale, (short, (locale, catalog)) in product(
-            spec["variants"], spec["scales"], LOCALES.items()
+            spec["variants"], spec["scales"], locales
         )
     ]
 
