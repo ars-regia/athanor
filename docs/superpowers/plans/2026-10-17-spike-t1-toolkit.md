@@ -31,12 +31,12 @@
 
 - [ ] SCTK: layer-shell surface on the overlay layer, `wp_fractional_scale_v1` with `wp_viewporter`, keyboard and pointer from the seat, `cursor-shape-v1`.
 - [ ] `vello_cpu` renders a scene into a `wl_shm` buffer at the fractional scale.
-- [ ] Check: the rig's chooser scene, with `ATHANOR_CHOOSER_BIN` (spike branch only) pointing at the spike, captures a drawn rectangle at scales 1, 1.25 and 2.
+- [ ] Check: the rig's chooser scene, with `ATHANOR_CHOOSER_BIN` (spike branch only) pointing at the spike, captures a drawn rectangle at the rig's scales, 1.0 and 1.5.
 
 ### Task 2: the widget core
 
-- [ ] A widget tree with flex rows and columns, hit testing, a focus chain with Tab, Shift+Tab and arrow keys, and a focus ring drawn in the foreground accent of `athanor-style` (`acc_fg`, #571).
-- [ ] Widgets: label (Parley layout, bidirectional text), button, radio group, single-line text field (Parley editor: selection, clipboard, composition).
+- [ ] A widget tree with flex rows and columns, hit testing, a focus chain with Tab, Shift+Tab and arrow keys, and a focus ring drawn in the colour of `athanor-style`'s `on_accent` (`system/athanor-style/src/appearance.rs`).
+- [ ] Widgets: label (Parley layout, bidirectional text), button, a group of toggle buttons with radio behaviour (the GTK chooser's `ToggleButton`s with `set_group`), single-line text field (Parley editor: selection, clipboard, composition).
 - [ ] Check: unit tests drive keys through the tree and assert the focus order, in left-to-right and right-to-left.
 
 ### Task 3: AccessKit
@@ -47,8 +47,8 @@
 
 ### Task 4: the chooser
 
-- [ ] Rebuild the chooser's screen from its GTK source: the preset cards as a radio group, the panel and dock options, the confirm button, and its strings through `athanor-i18n`.
-- [ ] Check: `rig.sh surface chooser` with the spike draws in English, Italian and an RTL locale; save the PNGs beside the GTK goldens and list each visible difference.
+- [ ] Rebuild the chooser's screen from its GTK source: the preset cards as that toggle-button group, exposing the same AT-SPI role as the GTK version, the panel and dock options, the confirm button, and its strings through `athanor-i18n`.
+- [ ] Check: `rig.sh surface chooser` with the spike draws in the rig's cases (`cases.py`: English, German and the right-to-left locale, scales 1.0 and 1.5); save the PNGs beside the GTK goldens and list each visible difference.
 
 ### Task 5: Orca's transcript
 
@@ -58,7 +58,7 @@
 
 ### Task 6: input method
 
-- [ ] A test input-method client on `zwp_input_method_v2` (the rig's sway parent offers it) that sends a pre-edit string, then commits it.
+- [ ] A test input-method client on `zwp_input_method_v2`, connected unconfined to the compositor under test (cosmic-comp offers the protocol only outside a security context, `doc_languages.md`), that sends a pre-edit string, then commits it. If the scene cannot host it, the task moves to the fixture of OS9 and the results say so.
 - [ ] Check: the text field shows the pre-edit underlined, then the committed text, and AccessKit reports the committed value.
 
 ### Task 7: measurements

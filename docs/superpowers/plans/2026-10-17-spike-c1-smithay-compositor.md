@@ -33,7 +33,7 @@
 - [ ] Record the Smithay revision (`git ls-remote https://github.com/Smithay/smithay HEAD`) and its date in `spikes/c1-compositor/README.md`.
 - [ ] Winit backend, GLES renderer, `wl_compositor`, `wl_shm`, `wl_seat` with keyboard and pointer, `wl_output`, `xdg-shell`, `linux-dmabuf`, `viewporter`, `fractional-scale-v1`, `presentation-time`, `cursor-shape-v1`, `xdg-activation-v1`.
 - [ ] `scene.sh`: with `RIG_COMPOSITOR=c1`, start the spike's binary instead of cosmic-comp in step 2, and replace `cosmic-randr` by the spike's own output size and scale arguments.
-- [ ] Check: a GTK4 window (`gtk4-demo` in the rig image) started in the scene with `RIG_COMPOSITOR=c1` draws; save the capture beside the same scene on cosmic-comp.
+- [ ] Check: `rig.sh surface chooser` with `RIG_COMPOSITOR=c1` draws the layout chooser, a plain GTK4 window; save the PNGs beside cosmic-comp's goldens.
 
 ### Task 2: layer shell, bar and dock
 

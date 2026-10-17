@@ -78,7 +78,8 @@ The maintainer took these decisions on 2026-10-17:
   next revision aligns its rows.
 - Release 1.0 waits for the own compositor: its hardware matrix, NVIDIA's driver included, is on
   the path to 1.0. A release 0.x before 2026-12-02 carries the Fedora rebase that ADR-0115 placed
-  between 0.9 and 1.0; its number and scope are set in the next revision of `release-1.0.md`.
+  between 0.9 and 1.0; its number and scope are set in the next revision of `release-1.0.md`. This
+  amends ADR-0105, whose sequence of releases before 1.0 gains that release.
 - `athanor-compositor-client` (SH2) stays the only crate of the shell that knows the compositor:
   moving to the own compositor rewrites its inside, as SH2 already foresees.
 - Patches of the CO3 register that the own compositor makes unnecessary keep their exit condition;

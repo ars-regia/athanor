@@ -172,7 +172,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
 | ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
-| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115 | platform, build, signing, security, shell, docs, process |
+| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115, ADR-0121 | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | amended by ADR-0115 | update, build, signing, security, kernel |
 | ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |
 | ADR-0108 | 0108 | [A GitHub App for the bump and merge bots, with a review-only bypass](0108-bots-github-app.md) | accepted | process, security, build |

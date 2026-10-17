@@ -133,9 +133,9 @@ is a barrier against it.
   is identified by its executable under `/usr` and its unit, as LP13 says. Because the compositor
   owns the stacking order, the full-screen and tiled imitations of the open gap L13 are in its
   reach; how it closes them is specified with the trusted path, not here.
-- **The keyboard monitor answers Orca** (AX4): it admits only a client whose executable is Orca's
-  under `/usr` and whose cgroup is `orca.service`'s, at every call; an integrity check, as AX4
-  says, not a barrier against unconfined code.
+- **The keyboard monitor answers Orca** (AX4): it admits only a client whose cgroup is
+  `orca.service`'s, as AX4 says, and, added by the own compositor, whose executable is Orca's under
+  `/usr`, at every call; an integrity check, as AX4 says, not a barrier against unconfined code.
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
   by identity as above.
@@ -159,7 +159,8 @@ inside is rewritten for the new compositor, as SH2 foresees. Before it replaces 
 own compositor provides what the shell and the components 1.0 keeps take from cosmic-comp today:
 
 - the standard protocols the shell uses: `ext-workspace-v1`, `ext-foreign-toplevel-list-v1`,
-  `ext-image-copy-capture-v1`, `ext-session-lock-v1`, `ext-idle-notify-v1`, wlr-layer-shell,
+  `ext-image-copy-capture-v1`, `ext-foreign-toplevel-image-capture-source-manager-v1` (window
+  thumbnails), `ext-session-lock-v1`, `ext-idle-notify-v1`, wlr-layer-shell,
   `security-context-v1` and `xdg-activation-v1`;
 - an equivalent of each COSMIC protocol in use: `zcosmic_toplevel_info_v1` and
   `zcosmic_toplevel_manager_v1` (window state and actions, `doc_overview.md`),
@@ -221,9 +222,9 @@ of use on the NVIDIA desktop logs no error. It measures: the protocols the shell
 lacks, the lines written, the frame time on each machine, and each NVIDIA defect met.
 
 **Spike T1: one surface in the toolkit.** The smallest widget layer that draws the layout chooser
-(button, radio group, label, focus chain), on Parley, AccessKit and the layer-shell driver,
+(button, a group of toggle buttons that behaves as a radio group, label, focus chain), on Parley, AccessKit and the layer-shell driver,
 beside the chooser's GTK version, plus a single-line text field. It passes when its goldens are
-drawn in English, Italian and right to left, Orca's transcript holds everything the GTK version's
+drawn in the rig's cases (English, German and right to left, at scales 1.0 and 1.5), Orca's transcript holds everything the GTK version's
 holds (OS8), and a text field takes composed input from the simulated input method. It measures,
 against the GTK version: binary size, start-up time and memory, with `vello_cpu` and with
 `vello_gpu`, in the VM and on the NVIDIA desktop, and the lines the widget layer took.
