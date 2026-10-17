@@ -47,6 +47,10 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
       adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
+# athanor-compositor's headless soak (doc_own_stack.md, C1 task 2) draws eglgears_wayland on
+# llvmpipe beside a GTK4 client.
+RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
+  && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
 # published one pinned by build-image.digest when that file exists: a change here takes effect
