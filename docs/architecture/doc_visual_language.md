@@ -50,7 +50,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 **VL3. The accent.**
 
 - **Two modes.**
-  - **Fixed,** the default: one of libadwaita's nine presets, with libadwaita's values. Shell and applications show exactly the same colour.
+  - **Fixed,** the default: one of libadwaita's nine presets, with libadwaita's values. Shell and applications show exactly the same colour, except where the foreground accent and the fill rule of VL10 (amended 2026-10-17, #571) move it.
   - **From the wallpaper:** the dominant colour of the wallpaper, extracted with the `material-colors` crate (0.5.0, MIT OR Apache-2.0, checked on crates.io on 2026-10-05; the library under matugen, whose own licence is GPL-2.0-or-later and which only writes configuration files for other programs). The result is corrected in OKLCH before use: chroma raised to at least 0.08, so that libadwaita does not turn it into slate, and lightness moved until the accent reaches 3:1 against every shell surface of the active variant. The shell uses the corrected colour exactly; applications show the nearest of the nine.
 - **The value is computed when it can change:** when the wallpaper changes while the mode is "from the wallpaper", and when the mode is switched on. No process stays resident to watch.
 - **With the hearth wallpaper (VL8) the mode behaves as fixed,** because the extraction would only return the hearth's own colour.
@@ -142,11 +142,15 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 - **New `[motion]`:** `fast = 100`, `normal = 200`, `slow = 300` (ms), and `curve = [0.25, 0.46, 0.45, 0.94]`.
 - **`[accent]`:** the factory accent becomes purple. The tokens keep describing it as a hue and a saturation for the tinting rule; the generator derives them from `#9141ac` and keeps the nine presets as named values.
 - **The colours of the four variants** keep their rules and are retuned by the generator so that every declared pair passes VL11 with each of the nine accents and with the wallpaper sweep.
+- **The foreground accent** (amended 2026-10-17, maintainer decision, #571). No retuning of the surfaces lets every preset reach 3:1 on them: purple stays near 2.3:1 on the dark chip, yellow near 2.5:1 on the light one. So the accent is drawn in two colours, as libadwaita derives `accent_color` from `accent_bg_color`:
+  - **`acc_fg`**, for lines, rings, indicators and thin fills (the focus ring, a field's border and caret, the dock's running indicator, a slider's highlight): the accent with its OKLab lightness raised in the dark variants and lowered in the light ones, in steps of 0.005, until it reaches 3:1 against `surf`, `surf2`, `bar` and `chip`. A preset that already reaches 3:1 is unchanged.
+  - **`acc`**, for filled controls, with `acc_ink` on top: the preset itself, unless neither white nor `acc_ink` reaches 4.5:1 on it; then its OKLab lightness is lowered in the same steps until white does. Of the nine presets only red is moved, from `#e62d42` to `#e2283f`.
+  - The generator and `appearance.rs` apply the same rules; a generated table of each preset's colours makes a test fail when they disagree. `[accent.presets]` names the nine presets in `tokens.toml`.
 
 **VL11. Verification.**
 
 - **In CI, on every change of `system/athanor-style`:**
-  - The contrast check (`contrast.py`) runs every declared pair in the four variants with each of the nine presets, and with a sweep of the hue circle in 15° steps at the lowest chroma and the two lightness limits that VL3 allows. Text needs 4.5:1, large text and controls 3:1.
+  - The contrast check (`contrast.py`) runs every declared pair in the four variants, and in the light and dark variants with each of the nine presets and with a sweep of the hue circle in 15° steps at the lowest chroma and the two lightness limits that VL3 allows. Text needs 4.5:1, large text and controls 3:1.
   - A lint of the shell's CSS templates and hand-written CSS fails on any length in `px` that does not come from a token, and on any font size in `px`.
   - A test compares every `transition` and animation duration in the shell's CSS with the `[motion]` tokens.
   - GTK's own parser reads the generated CSS; a warning fails the build, as SH5 already requires.
@@ -216,7 +220,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 
 ## 6. Decisions taken
 
-Decisions 1 to 6 were taken by the maintainer on 2026-10-05 (the status line of revision 1; decision 6 was amended on 2026-10-06), and decision 7 on 2026-10-08.
+Decisions 1 to 6 were taken by the maintainer on 2026-10-05 (the status line of revision 1; decision 6 was amended on 2026-10-06), decision 7 on 2026-10-08, and decision 8 on 2026-10-17.
 
 1. **Identity.** Calmo is aligned to libadwaita rather than replaced by a new identity: the default applications and our own are libadwaita applications, and the shell and they should read as one system (section 1).
 2. **Direction.** B, "Calmo tinto", chosen on drafts of three directions (A "Continuo", B "Calmo tinto", C "Ardesia") drawn on the bar, the dock, the control center and a libadwaita window, light and dark (VL2).
@@ -225,4 +229,5 @@ Decisions 1 to 6 were taken by the maintainer on 2026-10-05 (the status line of 
 5. **Type.** The system font and libadwaita's relative type scale for the shell (VL6).
 6. **Shield.** Chosen on 2026-10-05: the shield in the bar only when it has something to say. Reversed on 2026-10-06 by maintainer decision A2-24 (#159): the shield is always visible at the end of the bar in every preset and state, as `doc_bar.md` BR6 says (VL8). In the same wave ADR-0077 point 4 settled where else the mark may appear: only in the trust shield.
 7. **The appearance store** (VL4; 2026-10-08, ADR-0099). Choice: the GNOME keys `color-scheme`, `accent-color` and `high-contrast` are the store, and the Athanor schema keeps only `accent-mode` and `accent-computed`; the mirrors are removed. Reason: A2-20 (ADR-0057) prefers the key every consumer already reads, so nothing can disagree and no write order has to be kept. Alternative set aside: an Athanor schema as the source with GNOME keys as mirrors, which left a window in which the two disagreed and made a change by another tool silently revert.
+8. **The foreground accent and the red fill** (VL10 as amended; 2026-10-17, #571). Choice: lines, rings, indicators and thin fills take a per-variant foreground accent that reaches 3:1 on every shell surface, filled controls keep the preset, and a preset on which no ink reaches 4.5:1 is darkened until white does, which today moves only red. Reason: the dark surfaces cannot be retuned far enough for the factory purple to reach 3:1, and on libadwaita's red neither white (4.36:1) nor Calmo's near-black (4.28:1) reaches 4.5:1. Alternatives set aside: black text on red (4.82:1), which keeps the preset exactly but draws a harsher control unlike libadwaita's; and accepting 4.36:1 as a permanent exception of the contrast check.
 

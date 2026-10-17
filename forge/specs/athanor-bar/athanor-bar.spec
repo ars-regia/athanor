@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        11%{?dist}
+Release:        13%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,13 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+- The popovers' sliders, switches and check buttons follow the accent (#570).
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
 - The shield's held line names both causes: the user went back from the offered version,
   or it did not start, as the signed copy of a fresh install's build can (UT5).

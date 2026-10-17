@@ -48,6 +48,21 @@ class ContrastTest(unittest.TestCase):
             if variant.endswith("-hc") and (variant[:-3], fg, bg) in rows:
                 self.assertGreaterEqual(ratio + 1e-9, rows[(variant[:-3], fg, bg)], (variant, fg, bg))
 
+    def test_the_presets_and_the_sweep_run_in_light_and_dark(self):
+        cases = [(label, variant) for label, variant, _ in contrast.palettes(tk.load())]
+        # Four variants, then 9 presets and 2 x 24 hues in each of light and dark.
+        self.assertEqual(len(cases), 4 + 2 * (9 + 2 * 360 // contrast.SWEEP_STEP))
+        self.assertIn(("dark purple", "dark"), cases)
+        self.assertIn(("light h345 L0.67", "light"), cases)
+        self.assertFalse(any(variant.endswith("-hc") for label, variant in cases[4:]))
+
+    def test_tokens_without_an_accent_run_no_accent_case(self):
+        self.assertEqual(len(contrast.palettes(GREY)), 4)
+
+    def test_every_accent_case_passes(self):
+        failing = [row for row in contrast.check(tk.load()) if row[4] < row[5]]
+        self.assertEqual(failing, [])
+
 
 if __name__ == "__main__":
     unittest.main()

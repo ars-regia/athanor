@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        6%{?dist}
 Summary:        The Athanor dock
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,13 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-dock
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-dock.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- Built with the Calmo sheets of #570, which draw the shell's controls in the accent.
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Stage 2 switch (doc_bar.md, BR8): enabled for every user by
   /usr/lib/systemd/user-preset/80-athanor-dock.preset under athanor-session.target.

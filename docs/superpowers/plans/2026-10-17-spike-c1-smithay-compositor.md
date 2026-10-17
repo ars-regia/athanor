@@ -4,7 +4,7 @@
 
 **Goal:** the first version of `athanor-compositor`, on Smithay, hosts the current GTK4 shell (bar, dock, greeter, launcher) in the rig and on NVIDIA's driver, and its measurements go into revision 2 of `doc_own_stack.md`.
 
-**Architecture:** a compositor on Smithay at a pinned git revision, built from `anvil`'s structure: the winit backend nested in the rig's sway parent, as cosmic-comp is today; a headless backend on a GBM render node for the test fixture and for NVIDIA; the udev/DRM backend with libseat on hardware. Privileged globals are granted by executable and unit (OS4). The code is the real crate, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`, a member of the workspace, merged task by task; cosmic-comp stays the image's compositor until the acceptance of revision 2.
+**Architecture:** a compositor on Smithay at a pinned git revision, built from `anvil`'s structure: the winit backend nested in the rig's sway parent, as cosmic-comp is today; a headless backend on a GBM render node for the test fixture and for NVIDIA; the udev/DRM backend with libseat on hardware. Privileged globals are granted by executable and unit (OS4). The code is the real crate, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`, a member of the workspace, merged task by task; cosmic-comp stays the image's default compositor until the acceptance of revision 2, and the compositor is an optional session from task 9a (ADR-0122).
 
 **Tech Stack:** Rust, Smithay (git revision recorded in task 1), calloop, the GLES renderer, GBM, the rig (`forge/test/shell/rig.sh`, `scene.sh`, `session.sh`).
 
@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - Starts at once (ADR-0121 decision 1). Branch from `origin/iso-v0`, report its commit.
-- On the desktop, builds run only while the rig of release 0.9 is idle, under `/var/tmp`, with `taskset -c 0-3`; the desktop must never reset: check `uptime` before a long run.
+- The compositor takes the desktop first; release 0.9's rig work runs on the laptop (`doc_own_stack.md` decision 11). Builds run under `/var/tmp`, with `taskset -c 0-3`, one heavy job at a time; the desktop must never reset: check `uptime` before a long run.
 - `GPL-3.0-or-later`. Smithay enters `deny.toml`'s `allow-git` with its exact URL; no other git dependency. cosmic-comp is read, not copied (`GPL-3.0-only`).
-- The crate passes every `verify.py` check from its first commit, the panic budget included. Until it ships, its name is listed in `experimental/EXEMPT` (the check `shipped`); the change that ships it removes the line and adds the package to `forge/config/packages.json`. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
+- The crate passes every `verify.py` check from its first commit, the panic budget included. Until it ships, its name is listed in `experimental/EXEMPT` (the check `shipped`); the change that ships it, task 9a, removes the line and adds the package to `forge/config/packages.json`. The first change adds its `docs/architecture/components.toml` entry (the check `coverage`).
 - The rig gains an opt-in `RIG_COMPOSITOR=athanor`; cosmic-comp stays the rig's and the image's default.
 - Only the console sessions of task 9 need the maintainer; they come last, with the commands written out.
 
@@ -81,6 +81,16 @@ The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout
 - [ ] Write the commands: switch to a text console, start the compositor with the bar, the dock and a terminal, and switch back; the log path to send back.
 - [ ] Laptop: one hour of use. NVIDIA desktop, three outputs: one hour of use, one suspend and resume, one output unplugged and plugged.
 - [ ] Every defect with its log lines goes into the results.
+
+### Task 9a: the optional session (`doc_own_stack.md` decision 10)
+
+Prerequisites: tasks 5 and 9 verified (ADR-0122 decision 1).
+
+- [ ] Ask the maintainer before any code: the greeter's session choice is its login path (AGENTS.md, "Stop and ask before editing"), and it needs an approved revision of `doc_session.md` first (ADR-0074). The greeter today starts one command, `athanor-session`, which exports the COSMIC defaults.
+- [ ] List the OS4 requirements C1 does not cover (the trusted path of LP13, the lock path) in the pull request; the maintainer accepts them there before the session ships.
+- [ ] Package the compositor as an RPM and ship it in the image: `forge/config/packages.json`, the spec, and the line removed from `experimental/EXEMPT`; its unit passes `verify.py services`, the crate `verify.py panics` and the TM3 persistence rules.
+- [ ] A session the greeter offers beside cosmic-comp's, starting the compositor with the bar and the dock; cosmic-comp stays the default.
+- [ ] Check: in the development VM the greeter lists both sessions, the default one is cosmic-comp's, and the compositor's session starts the bar and the dock; the maintainer then picks it on the desktop.
 
 ### Task 10: measurements for revision 2
 

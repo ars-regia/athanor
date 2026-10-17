@@ -302,26 +302,34 @@ impl Appearance {
     }
 
     /// The named colours that replace Calmo's accent, or `None` to keep it: in high
-    /// contrast, whose accent the contrast gate has checked.
+    /// contrast, whose accent the contrast gate has checked. The fill of a control, its ink,
+    /// and the foreground accent of lines, rings, indicators and thin fills (#571).
     pub fn accent_css(&self) -> Option<String> {
         if self.high_contrast {
             return None;
         }
-        let accent = self.accent_rgb();
+        let accent = fill(self.accent_rgb());
+        let surfaces = if self.dark {
+            &SURFACES_DARK
+        } else {
+            &SURFACES_LIGHT
+        };
         Some(format!(
-            "@define-color ath_acc {};\n@define-color ath_acc_ink {};\n",
+            "@define-color ath_acc {};\n@define-color ath_acc_ink {};\n@define-color ath_acc_fg {};\n",
             accent.hex(),
-            on_accent(accent).hex()
+            on_accent(accent).hex(),
+            foreground(accent, surfaces, self.dark).hex()
         ))
     }
 }
 
-/// Calmo's ink on light accents (`ath_acc_ink` of the dark variant) and plain white.
-const DARK_INK: Rgb = Rgb {
-    red: 0x0d,
-    green: 0x11,
-    blue: 0x26,
-};
+/// `SURFACES_LIGHT`, `SURFACES_DARK` and `DARK_INK`, generated from the tokens.
+mod generated {
+    use super::Rgb;
+    include!("../calmo/generated/accent.rs");
+}
+use generated::{DARK_INK, SURFACES_DARK, SURFACES_LIGHT};
+
 const WHITE: Rgb = Rgb {
     red: 0xff,
     green: 0xff,
@@ -329,17 +337,115 @@ const WHITE: Rgb = Rgb {
 };
 /// WCAG 2.x, level AA, normal text.
 const MIN_CONTRAST: f64 = 4.5;
+/// WCAG 2.1, 1.4.11: lines, rings, indicators and thin fills.
+const MIN_FOREGROUND_CONTRAST: f64 = 3.0;
+/// The step of the lightness searches, in OKLab lightness.
+const LIGHTNESS_STEP: f64 = 0.005;
+
+fn linear(channel: u8) -> f64 {
+    let c = f64::from(channel) / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
 
 fn luminance(colour: Rgb) -> f64 {
-    let linear = |channel: u8| {
-        let c = f64::from(channel) / 255.0;
-        if c <= 0.03928 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
     0.2126 * linear(colour.red) + 0.7152 * linear(colour.green) + 0.0722 * linear(colour.blue)
+}
+
+/// sRGB to OKLab (L, a, b), after Björn Ottosson's reference, as `calmo/color.py` computes it.
+fn to_oklab(colour: Rgb) -> [f64; 3] {
+    let (r, g, b) = (
+        linear(colour.red),
+        linear(colour.green),
+        linear(colour.blue),
+    );
+    let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).powf(1.0 / 3.0);
+    let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).powf(1.0 / 3.0);
+    let s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).powf(1.0 / 3.0);
+    [
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    ]
+}
+
+/// OKLab to sRGB, each channel clipped to the gamut and rounded to 8 bits.
+fn from_oklab([lightness, a, b]: [f64; 3]) -> Rgb {
+    let l = (lightness + 0.3963377774 * a + 0.2158037573 * b).powi(3);
+    let m = (lightness - 0.1055613458 * a - 0.0638541728 * b).powi(3);
+    let s = (lightness - 0.0894841775 * a - 1.2914855480 * b).powi(3);
+    let channel = |u: f64| {
+        let u = u.clamp(0.0, 1.0);
+        let c = if u <= 0.0031308 {
+            12.92 * u
+        } else {
+            1.055 * u.powf(1.0 / 2.4) - 0.055
+        };
+        // In 0..=255 after the clamp.
+        (c * 255.0).round() as u8
+    };
+    Rgb {
+        red: channel(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+        green: channel(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+        blue: channel(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+    }
+}
+
+/// The colours `accent` takes with its OKLab lightness moved by one step after another, in
+/// `direction` (+1 or -1), the accent itself first; the search covers the whole lightness range.
+fn lightness_steps(accent: Rgb, direction: f64) -> impl Iterator<Item = Rgb> {
+    let [lightness, a, b] = to_oklab(accent);
+    let steps = (1.0 / LIGHTNESS_STEP).round() as u32;
+    (0..=steps).map(move |step| {
+        from_oklab([
+            lightness + direction * f64::from(step) * LIGHTNESS_STEP,
+            a,
+            b,
+        ])
+    })
+}
+
+/// The accent as a line, a ring, an indicator or a thin fill (#571): `accent` with its OKLab
+/// lightness raised in the dark variant and lowered in the light one, in steps, until it reaches
+/// 3:1 against every surface. `calmo/color.py` `foreground` is the same rule. White and black
+/// reach 3:1 on every Calmo surface, so the search always ends; the extreme is the fallback.
+pub fn foreground(accent: Rgb, surfaces: &[Rgb], dark: bool) -> Rgb {
+    let direction = if dark { 1.0 } else { -1.0 };
+    let reaches = |colour: &Rgb| {
+        surfaces
+            .iter()
+            .all(|surface| contrast(*colour, *surface) >= MIN_FOREGROUND_CONTRAST)
+    };
+    let mut last = accent;
+    for colour in lightness_steps(accent, direction) {
+        if reaches(&colour) {
+            return colour;
+        }
+        last = colour;
+    }
+    last
+}
+
+/// The accent as the fill of a control, under its text: the accent itself, unless neither ink
+/// reaches AA on it; then its OKLab lightness is lowered in steps until white does. Of the nine
+/// presets only red is darkened (maintainer decision, 2026-10-17, #571). `calmo/tokens.py`
+/// `fill` is the same rule.
+pub fn fill(accent: Rgb) -> Rgb {
+    if contrast(accent, WHITE).max(contrast(accent, DARK_INK)) >= MIN_CONTRAST {
+        return accent;
+    }
+    let mut last = accent;
+    // The accent itself failed above; its round trip through OKLab is not tried again.
+    for colour in lightness_steps(accent, -1.0).skip(1) {
+        if contrast(colour, WHITE) >= MIN_CONTRAST {
+            return colour;
+        }
+        last = colour;
+    }
+    last
 }
 
 fn contrast(a: Rgb, b: Rgb) -> f64 {
@@ -563,5 +669,68 @@ mod tests {
         // 4.36:1 in white, short of AA.
         assert_eq!(on_accent(Accent::Red.rgb()), DARK_INK);
         assert_eq!(on_accent(Accent::Yellow.rgb()), DARK_INK);
+    }
+
+    #[test]
+    fn the_accents_are_drawn_as_the_generator_derives_them() {
+        let mut presets = 0;
+        for &(name, dark, accent, acc, ink, fg) in generated::ACCENTS {
+            if let Some(preset) = Accent::from_name(name) {
+                assert_eq!(
+                    preset.rgb(),
+                    accent,
+                    "{name}: tokens.toml and Accent::rgb differ"
+                );
+                presets += 1;
+            }
+            let surfaces = if dark {
+                &SURFACES_DARK
+            } else {
+                &SURFACES_LIGHT
+            };
+            assert_eq!(fill(accent), acc, "{name} fill, dark {dark}");
+            assert_eq!(on_accent(acc), ink, "{name} ink, dark {dark}");
+            assert_eq!(
+                foreground(acc, surfaces, dark),
+                fg,
+                "{name} foreground, dark {dark}"
+            );
+        }
+        assert_eq!(presets, 2 * Accent::ALL.len());
+    }
+
+    #[test]
+    fn accent_css_names_the_fill_the_ink_and_the_foreground() {
+        let dark_purple = Appearance {
+            dark: true,
+            ..Appearance::default()
+        };
+        let css = dark_purple.accent_css().unwrap_or_default();
+        assert!(css.contains("@define-color ath_acc #9141ac;"), "{css}");
+        assert!(css.contains("@define-color ath_acc_ink #ffffff;"), "{css}");
+        assert!(css.contains("@define-color ath_acc_fg #a555c1;"), "{css}");
+        let red = Appearance {
+            accent: Accent::Red,
+            ..Appearance::default()
+        };
+        let css = red.accent_css().unwrap_or_default();
+        assert!(css.contains("@define-color ath_acc #e2283f;"), "{css}");
+        assert!(css.contains("@define-color ath_acc_ink #ffffff;"), "{css}");
+    }
+
+    #[test]
+    fn a_computed_accent_reaches_three_to_one_on_every_surface() {
+        for hex in ["#202020", "#f0f0f0", "#808000", "#00ffff", "#2a0a3a"] {
+            let accent = Rgb::from_hex(hex).unwrap_or(WHITE);
+            for (dark, surfaces) in [(false, &SURFACES_LIGHT), (true, &SURFACES_DARK)] {
+                let fg = foreground(fill(accent), surfaces, dark);
+                for surface in surfaces {
+                    assert!(
+                        contrast(fg, *surface) >= MIN_FOREGROUND_CONTRAST,
+                        "{hex} dark {dark}"
+                    );
+                }
+            }
+        }
     }
 }
