@@ -56,3 +56,23 @@ class StepTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CaptureAfterTest(unittest.TestCase):
+    def capture_after(self, shots, timeout=1):
+        frames = iter(shots)
+        with (
+            mock.patch.object(check, "capture", lambda name: next(frames)),
+            mock.patch.object(check, "TIMEOUT", timeout),
+            mock.patch.object(check, "CAPTURE_INTERVAL_S", 0),
+        ):
+            return check.capture_after("shot", b"old")
+
+    def test_the_tree_ahead_of_the_pixels_waits_for_the_new_frame(self):
+        self.assertEqual(self.capture_after([b"old", b"old", b"new", b"new"]), b"new")
+
+    def test_a_frame_still_changing_is_captured_again(self):
+        self.assertEqual(self.capture_after([b"mid", b"new", b"new"]), b"new")
+
+    def test_an_output_that_never_changes_times_out(self):
+        self.assertIsNone(self.capture_after(iter(lambda: b"old", None), timeout=0.05))

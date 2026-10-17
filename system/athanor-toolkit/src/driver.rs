@@ -1,9 +1,10 @@
-//! The Wayland driver on smithay-client-toolkit: one xdg-toplevel drawn in shared memory, the
-//! keyboard and the pointer, the input method through text-input-v3, and the AccessKit adapter
-//! on AT-SPI.
+//! The Wayland driver on smithay-client-toolkit: one xdg-toplevel drawn in shared memory by
+//! vello_cpu or through wgpu by vello_gpu, the keyboard and the pointer, the input method through
+//! text-input-v3, and the AccessKit adapter on AT-SPI.
 
 use crate::a11y::tree_update;
-use crate::render::{render, Error};
+use crate::gpu::Gpu;
+use crate::render::{layout, render, Error};
 use crate::widget::{Event, Key, Ui, WindowButton};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
@@ -14,7 +15,7 @@ use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::{
     zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3},
 };
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
+    compositor::{CompositorHandler, CompositorState, FrameCallbackData},
     delegate_registry,
     dispatch2::Dispatch2,
     output::{OutputHandler, OutputState},
@@ -44,8 +45,22 @@ use wayland_client::{
 /// What the application does with each event; it may change the widgets.
 pub type Handler = Box<dyn FnMut(&mut Ui, Event)>;
 
+/// The variable that picks the renderer: `cpu` (the default) or `gpu`.
+pub const RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
+
+/// Whether [`RENDERER`]'s value asks for the GPU. Anything but `cpu`, `gpu` or unset is refused.
+fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
+    match value.as_deref().map(|v| v.to_str()) {
+        None | Some(Some("cpu")) => Ok(false),
+        Some(Some("gpu")) => Ok(true),
+        Some(Some(other)) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
+        Some(None) => Err(format!("{RENDERER} is not valid UTF-8; it takes cpu or gpu").into()),
+    }
+}
+
 /// Opens `ui` in a window and runs until the user closes it.
 pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
+    let gpu = wants_gpu(std::env::var_os(RENDERER))?;
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
     let qh = queue.handle();
@@ -67,6 +82,17 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     window.set_title(ui.title.as_str());
     window.set_app_id(app_id);
     window.commit();
+    let gpu = if gpu {
+        // SAFETY: `app` owns the wgpu surface and drops it before the window, by the order of
+        // App's fields.
+        #[allow(unsafe_code)]
+        let gpu = unsafe { Gpu::new(&conn, window.wl_surface()) }
+            .map_err(|e| format!("{RENDERER}=gpu: {e}"))?;
+        eprintln!("athanor-toolkit: vello_gpu on {}", gpu.adapter);
+        Some(gpu)
+    } else {
+        None
+    };
 
     // The adapter calls its handlers on its own thread: the first tree comes from the last
     // update drawn, and actions travel to the event loop.
@@ -88,6 +114,8 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     );
 
     let mut app = App {
+        gpu,
+        qh: qh.clone(),
         registry: RegistryState::new(&globals),
         seat: SeatState::new(&globals, &qh),
         output: OutputState::new(&globals, &qh),
@@ -104,6 +132,8 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
         modifiers: Modifiers::default(),
         scale: 1,
         configured: false,
+        frame_pending: false,
+        redraw: false,
         exit: false,
         ui,
         on_event,
@@ -253,6 +283,11 @@ impl DeactivationHandler for Deactivation {
 }
 
 struct App {
+    /// Drawing through wgpu when [`RENDERER`] asks for it; first, so that it drops before the
+    /// window's surface it draws on.
+    gpu: Option<Gpu>,
+    /// For the frame callbacks that pace drawing.
+    qh: QueueHandle<App>,
     registry: RegistryState,
     seat: SeatState,
     output: OutputState,
@@ -273,6 +308,11 @@ struct App {
     modifiers: Modifiers,
     scale: i32,
     configured: bool,
+    /// A frame is committed and its callback has not come: the next one waits for it, so that
+    /// drawing never runs ahead of the compositor, which throttles a covered window.
+    frame_pending: bool,
+    /// The state changed while a frame was pending: the callback draws it.
+    redraw: bool,
     exit: bool,
     ui: Ui,
     on_event: Handler,
@@ -355,6 +395,30 @@ impl App {
         if !self.configured {
             return Ok(());
         }
+        if self.frame_pending {
+            // Lay out now, so that the accessibility tree follows the state at once; the
+            // pixels follow at the frame callback.
+            layout(&mut self.ui, self.scale as f32)?;
+            self.publish_tree();
+            self.redraw = true;
+            return Ok(());
+        }
+        self.redraw = false;
+        self.frame_pending = true;
+        let surface = self.window.wl_surface();
+        // Takes effect with the next commit: vello_gpu's present, or the driver's below.
+        surface.frame(&self.qh, FrameCallbackData(surface.clone()));
+        if let Some(gpu) = &mut self.gpu {
+            // Presenting commits the surface, with the scale set here.
+            surface.set_buffer_scale(self.scale);
+            gpu.draw(&mut self.ui, self.scale as f32)?;
+            // A present wgpu dropped as Outdated or Lost commits nothing and reports nothing:
+            // without this commit the frame callback would never come, and the window would
+            // never draw again. After a present that did commit, this one is empty.
+            self.window.commit();
+            self.publish_tree();
+            return Ok(());
+        }
         let pixmap = render(&mut self.ui, self.scale as f32)?;
         let (w, h) = (i32::from(pixmap.width()), i32::from(pixmap.height()));
         let (buffer, canvas) = self
@@ -369,18 +433,21 @@ impl App {
         {
             *dst = [src[2], src[1], src[0], src[3]];
         }
-        let surface = self.window.wl_surface();
         surface.set_buffer_scale(self.scale);
         surface.damage_buffer(0, 0, w, h);
         buffer.attach_to(surface)?;
         self.window.commit();
+        self.publish_tree();
+        Ok(())
+    }
 
+    /// Hands the tree of the window just drawn to the accessibility adapter.
+    fn publish_tree(&mut self) {
         let update = tree_update(&self.ui, f64::from(self.scale));
         if let Ok(mut initial) = self.initial.lock() {
             initial.clone_from(&update);
         }
         self.a11y.update_if_active(|| update);
-        Ok(())
     }
 
     /// A key held down: as pressed again, except Enter, and Space outside a field, which
@@ -445,7 +512,12 @@ impl CompositorHandler for App {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
+        self.frame_pending = false;
+        if self.redraw {
+            self.update(None);
+        }
+    }
 
     fn surface_enter(
         &mut self,
@@ -694,6 +766,20 @@ smithay_client_toolkit::delegate_dispatch2!(App);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_renderer_variable_takes_cpu_or_gpu_only() {
+        assert!(!wants_gpu(None).unwrap());
+        assert!(!wants_gpu(Some("cpu".into())).unwrap());
+        assert!(wants_gpu(Some("gpu".into())).unwrap());
+        for refused in ["", "GPU", "vulkan"] {
+            assert!(wants_gpu(Some(refused.into())).is_err(), "{refused:?}");
+        }
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0x67, 0xff]);
+        let error = wants_gpu(Some(invalid)).unwrap_err().to_string();
+        assert!(error.contains("is not valid UTF-8"), "{error}");
+    }
 
     #[test]
     fn a_done_answers_the_latest_state_only_with_the_count_of_commits() {

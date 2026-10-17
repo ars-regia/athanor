@@ -1,21 +1,92 @@
-//! Drawing on vello_cpu: the whole window into a premultiplied RGBA pixmap, at any scale.
+//! Drawing: the whole window as one scene, at any scale. [`render`] rasterises it with vello_cpu
+//! into a premultiplied RGBA pixmap; `gpu.rs` hands the same scene to vello_gpu.
 
 use crate::text::Brush;
 use crate::theme::Rgba;
 use crate::widget::{Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
-use vello_cpu::kurbo::{Affine, Circle, Line, Rect, RoundedRect, Shape, Stroke};
-use vello_cpu::peniko::Color;
-use vello_cpu::{Glyph, Pixmap, RenderContext, Resources};
+use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
+use vello_cpu::peniko::{Color, FontData};
+use vello_cpu::{Glyph, Pixmap, RenderContext};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
+
+/// The calls the window's scene makes, which vello_cpu's `RenderContext` and vello_gpu's
+/// `Scene` both offer under the same names, on the types of their shared vello_common.
+pub trait Canvas {
+    type Resources;
+    fn set_transform(&mut self, transform: Affine);
+    fn set_paint(&mut self, color: Color);
+    fn set_stroke(&mut self, stroke: Stroke);
+    fn fill_rect(&mut self, rect: &Rect);
+    fn fill_path(&mut self, path: &BezPath);
+    fn stroke_path(&mut self, path: &BezPath);
+    fn push_clip_path(&mut self, path: &BezPath);
+    fn pop_clip(&mut self);
+    /// Fills a run of glyphs of one font and size, hinted.
+    fn glyphs(
+        &mut self,
+        resources: &mut Self::Resources,
+        font: &FontData,
+        size: f32,
+        glyphs: impl Iterator<Item = Glyph> + Clone,
+    ) -> Result<(), Error>;
+}
+
+macro_rules! canvas {
+    ($canvas:ty, $resources:ty) => {
+        impl Canvas for $canvas {
+            type Resources = $resources;
+            fn set_transform(&mut self, transform: Affine) {
+                <$canvas>::set_transform(self, transform);
+            }
+            fn set_paint(&mut self, color: Color) {
+                <$canvas>::set_paint(self, color);
+            }
+            fn set_stroke(&mut self, stroke: Stroke) {
+                <$canvas>::set_stroke(self, stroke);
+            }
+            fn fill_rect(&mut self, rect: &Rect) {
+                <$canvas>::fill_rect(self, rect);
+            }
+            fn fill_path(&mut self, path: &BezPath) {
+                <$canvas>::fill_path(self, path);
+            }
+            fn stroke_path(&mut self, path: &BezPath) {
+                <$canvas>::stroke_path(self, path);
+            }
+            fn push_clip_path(&mut self, path: &BezPath) {
+                <$canvas>::push_clip_path(self, path);
+            }
+            fn pop_clip(&mut self) {
+                <$canvas>::pop_clip(self);
+            }
+            fn glyphs(
+                &mut self,
+                resources: &mut $resources,
+                font: &FontData,
+                size: f32,
+                glyphs: impl Iterator<Item = Glyph> + Clone,
+            ) -> Result<(), Error> {
+                self.glyph_run(resources, font)
+                    .font_size(size)
+                    .hint(true)
+                    .fill_glyphs(glyphs)?;
+                Ok(())
+            }
+        }
+    };
+}
+
+canvas!(RenderContext, vello_cpu::Resources);
+canvas!(vello_gpu::Scene, vello_gpu::Resources);
 
 fn color(c: Rgba) -> Color {
     let [r, g, b, a] = c.0;
     Color::from_rgba8(r, g, b, a)
 }
 
-fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> vello_cpu::kurbo::BezPath {
+fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     let o = f64::from(outset);
     RoundedRect::new(
         f64::from(r.x) - o,
@@ -27,9 +98,9 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> vello_cpu::kurbo
     .to_path(0.1)
 }
 
-fn draw_text(
-    ctx: &mut RenderContext,
-    resources: &mut Resources,
+fn draw_text<C: Canvas>(
+    ctx: &mut C,
+    resources: &mut C::Resources,
     layout: &Layout<Brush>,
     (x, y): (f32, f32),
     paint: Rgba,
@@ -45,10 +116,7 @@ fn draw_text(
                 x: x + g.x,
                 y: y + g.y,
             });
-            ctx.glyph_run(resources, run.run().font())
-                .font_size(run.run().font_size())
-                .hint(true)
-                .fill_glyphs(glyphs)?;
+            ctx.glyphs(resources, run.run().font(), run.run().font_size(), glyphs)?;
             // An input method's preedit is underlined, from the font's own metrics.
             if let Some(underline) = &run.style().underline {
                 let metrics = run.run().font_metrics();
@@ -68,19 +136,40 @@ fn draw_text(
     Ok(())
 }
 
-/// Lays the window out and draws it at `scale` physical pixels per logical pixel.
+/// Lays the window out and draws it with vello_cpu at `scale` physical pixels per logical pixel.
 pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
+    let (width, height) = layout(ui, scale)?;
+    let mut ctx = RenderContext::new(width, height);
+    let mut resources = vello_cpu::Resources::new();
+    paint(ui, scale, &mut ctx, &mut resources)?;
+    ctx.flush();
+    let mut pixmap = Pixmap::new(width, height);
+    ctx.render(&mut pixmap, &mut resources);
+    Ok(pixmap)
+}
+
+/// Lays the window out; returns its size in physical pixels at `scale`.
+pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     if !(scale.is_finite() && scale > 0.0) {
         return Err(format!("scale {scale} is not a positive number").into());
     }
     // Whole logical pixels: an integer buffer scale then divides the buffer, as wl_surface
     // requires, and the background covers every pixel.
     let (w, h) = ui.layout();
+    let width = u16::try_from((w.ceil() * scale).ceil() as u32)?;
+    let height = u16::try_from((h.ceil() * scale).ceil() as u32)?;
+    Ok((width, height))
+}
+
+/// Draws the window, laid out by [`layout`], on `ctx` at `scale`.
+pub fn paint<C: Canvas>(
+    ui: &mut Ui,
+    scale: f32,
+    ctx: &mut C,
+    resources: &mut C::Resources,
+) -> Result<(), Error> {
+    let (w, h) = ui.size();
     let (w, h) = (w.ceil(), h.ceil());
-    let width = u16::try_from((w * scale).ceil() as u32)?;
-    let height = u16::try_from((h * scale).ceil() as u32)?;
-    let mut ctx = RenderContext::new(width, height);
-    let mut resources = Resources::new();
     ctx.set_transform(Affine::scale(f64::from(scale)));
     let t = ui.theme.clone();
     ctx.set_paint(color(t.background));
@@ -131,7 +220,7 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
             }
             Kind::Label(_) => {
                 if let Some(layout) = &widget.text {
-                    draw_text(&mut ctx, &mut resources, layout, (r.x, r.y), t.text)?;
+                    draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
                 }
             }
             Kind::Button(_) | Kind::Toggle { .. } => {
@@ -148,7 +237,7 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
                         r.x + (r.w - layout.width()) / 2.0,
                         r.y + (r.h - layout.height()) / 2.0,
                     );
-                    draw_text(&mut ctx, &mut resources, layout, at, ink)?;
+                    draw_text(ctx, resources, layout, at, ink)?;
                 }
             }
             Kind::Field(field) => {
@@ -167,7 +256,7 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
                 let layout = layout.clone();
                 // Text longer than the field stays inside it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
-                draw_text(&mut ctx, &mut resources, &layout, (x, y), t.text)?;
+                draw_text(ctx, resources, &layout, (x, y), t.text)?;
                 if focus == Some(id) {
                     if let Some(c) = field.caret(&mut ui.text, 1.5) {
                         let (x, y) = (f64::from(x), f64::from(y));
@@ -184,10 +273,7 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
             ctx.stroke_path(&rounded(r, t.focus_width, t.radius));
         }
     }
-    ctx.flush();
-    let mut pixmap = Pixmap::new(width, height);
-    ctx.render(&mut pixmap, &mut resources);
-    Ok(pixmap)
+    Ok(())
 }
 
 #[cfg(test)]

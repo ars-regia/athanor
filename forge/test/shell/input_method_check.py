@@ -19,6 +19,8 @@ from atspi_check import find_application, value_of
 
 PREEDIT, COMMIT = "ni", "你"
 TIMEOUT = 10
+# Between two captures of a frame that may still be on its way.
+CAPTURE_INTERVAL_S = 0.1
 
 
 def entry(Atspi):
@@ -43,6 +45,23 @@ def wait_for_text(Atspi, node, expected):
 
 def capture(name):
     subprocess.run(["grim", "-o", "WINIT-0", f"/out/{name}.png"], check=True)
+    return Path(f"/out/{name}.png").read_bytes()
+
+
+def capture_after(name, before):
+    """Captures the output as /out/<name>.png once it differs from `before`, the PNG of an
+    earlier capture, and two captures in a row agree: the toolkit updates its accessibility tree
+    at once and draws at the compositor's next frame callback, so the tree can be ahead of the
+    pixels. Returns the PNG, or None when the output does not settle on a change in TIMEOUT."""
+    deadline = time.monotonic() + TIMEOUT
+    last = None
+    while time.monotonic() < deadline:
+        shot = capture(name)
+        if shot != before and shot == last:
+            return shot
+        last = shot
+        time.sleep(CAPTURE_INTERVAL_S)
+    return None
 
 
 def reader(method):
@@ -89,6 +108,7 @@ def main():
             file=sys.stderr,
         )
         return 1
+    before = capture("input-method-before")
     method = subprocess.Popen(
         ["/out/bin/athanor-toolkit-input-method", PREEDIT, COMMIT],
         stdin=subprocess.PIPE,
@@ -99,16 +119,18 @@ def main():
     if not step(method, lines, f"preedit {PREEDIT}"):
         return 1
     # The preedit is drawn but not committed: the field's text stays empty.
-    time.sleep(1)
-    capture("input-method-preedit")
+    preedit = capture_after("input-method-preedit", before)
     preedit_text = value_of(node, Atspi)
     method.stdin.write("commit\n")
     method.stdin.flush()
     if not step(method, lines, f"commit {COMMIT}"):
         return 1
     committed = wait_for_text(Atspi, node, COMMIT)
-    capture("input-method-commit")
     failures = []
+    if preedit is None:
+        failures.append(f"the preedit changed no pixel of the output in {TIMEOUT} s")
+    elif capture_after("input-method-commit", preedit) is None:
+        failures.append(f"the commit changed no pixel of the output in {TIMEOUT} s")
     if preedit_text != "":
         failures.append(
             f"under the preedit the field's text is {preedit_text!r}, expected ''"
