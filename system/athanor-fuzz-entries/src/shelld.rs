@@ -3,8 +3,8 @@
 use athanor_shelld::hints::Hints;
 use athanor_shelld::image::{self, Raw};
 use athanor_shelld::{icon, notifications};
-use zvariant::serialized::{Context, Data};
-use zvariant::LE;
+use zbus::zvariant::serialized::{Context, Data};
+use zbus::zvariant::LE;
 
 use crate::Setup;
 

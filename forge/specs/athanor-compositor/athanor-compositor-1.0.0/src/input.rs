@@ -29,10 +29,8 @@ impl State {
                 );
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let (Some(area), Some(pointer)) = (
-                    self.space.output_geometry(&self.output),
-                    self.seat.get_pointer(),
-                ) else {
+                let (Some(area), Some(pointer)) = (self.output_area(), self.seat.get_pointer())
+                else {
                     return;
                 };
                 let location = event.position_transformed(area.size) + area.loc.to_f64();

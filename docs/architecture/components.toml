@@ -476,6 +476,15 @@ item = "whole document"
 purpose = "GitHub repository settings as code: export, diff and apply .github/settings"
 
 [[component]]
+path = "scripts/hardware-matrix"
+kind = "script tool"
+area = "platform"
+status = "specified"
+spec = "doc_kernel_profile.md"
+item = "D17"
+purpose = "Runs and records the maintainer's hardware matrix before each release gate"
+
+[[component]]
 path = "scripts/rename.py"
 kind = "script tool"
 area = "docs"

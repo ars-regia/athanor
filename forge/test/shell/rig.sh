@@ -17,6 +17,7 @@
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
 #   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
+#   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
@@ -247,7 +248,7 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
 # list and a tray menu, the popovers of the four system modules against
 # system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
-    local surface=$1 open="" preset=float panel=top dock=visible settle=8
+    local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable=""
     local session=(python3 /repo/forge/test/shell/bar_session.py)
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
@@ -265,8 +266,9 @@ capture_bar() { # capture_bar <surface>
     # The system modules against the fixtures, which start before the bar: a longer settle.
     bar-network) open=network settle=12 session+=(--fixtures) ;;
     # The adapter already discovers, so the popover opens at its final size: cosmic-comp
-    # at a fractional scale leaves the edge column of a popover drawn before it grew.
-    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures --discovering) ;;
+    # at a fractional scale leaves the edge column of a popover drawn before it grew. Its
+    # bottom edge was still settling at 1.5 right-to-left (#545): capture until it is stable.
+    bar-bluetooth) open=bluetooth settle=12 stable=10 session+=(--fixtures --discovering) ;;
     bar-audio) open=audio settle=12 session+=(--fixtures) ;;
     bar-battery) open=battery settle=12 session+=(--fixtures) ;;
     # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
@@ -291,7 +293,7 @@ capture_bar() { # capture_bar <surface>
         if [ -n "$open" ]; then
             override+=(ATHANOR_BAR_OPEN="$open")
         fi
-        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_CONFIG_SEED="/out/seed-$tag" \
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_STABLE="$stable" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY="$bar_overlay" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- "${session[@]}"
     done < <(python3 -B "$rig/cases.py" "$surface")
@@ -481,7 +483,8 @@ compositor-globals)
         bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
-        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1; do
+        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
+        wl_data_device_manager; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -491,7 +494,18 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 11 globals, and a seat with pointer and keyboard"
+    echo "compositor-globals: the 12 globals, and a seat with pointer and keyboard"
+    ;;
+compositor-soak)
+    # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
+    # the rig has no render node, so the compositor draws on Pixman and the clients on llvmpipe.
+    # mesa-demos installs eglgears_wayland under /usr/lib64/mesa, off PATH.
+    # compositor_soak.sh rewrites its logs in /out/compositor-soak.
+    require athanor-compositor build-compositor
+    in_rig "$(rig_image)" dbus-run-session -- /repo/forge/test/shell/compositor_soak.sh \
+        /out/compositor-soak "${RIG_SOAK:-600}" \
+        /out/bin/athanor-compositor --headless --output 1280x800 --output 800x600@1.5 -- \
+        'GDK_BACKEND=wayland exec python3 /repo/forge/test/shell/gtk_animation.py' 'exec /usr/lib64/mesa/eglgears_wayland'
     ;;
 cargo)
     shift

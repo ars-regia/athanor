@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use zvariant::{OwnedValue, Signature, Type};
+use zbus::zvariant::{OwnedValue, Signature, Type};
 
 use crate::icon::{self, Icon};
 use crate::image::{self, Image, Raw};
@@ -174,8 +174,8 @@ fn is_desktop_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zvariant::serialized::Context;
-    use zvariant::{to_bytes, Value, LE};
+    use zbus::zvariant::serialized::Context;
+    use zbus::zvariant::{to_bytes, Value, LE};
 
     fn decode(map: HashMap<&str, Value<'_>>) -> Hints {
         let encoded = to_bytes(Context::new_dbus(LE, 0), &map).expect("encode");

@@ -1,0 +1,252 @@
+# The hardware matrix: release-1.0.md section 4.3 and doc_kernel_profile.md D17.
+#
+# A row with `check` is run by `matrix.py run` on the machine; a row with `steps` is checked
+# by hand and recorded with `matrix.py set`. `machines` names the machines the row is checked on.
+# The development VM is not a column: the VM acceptance (scripts/devvm/acceptance) covers the
+# KVM guest at every release. Hardware the maintainer does not have is an [[untested]] entry,
+# recorded as untested, never as passed (D17).
+
+machines = ["desktop", "laptop"]
+
+# --- automatic -------------------------------------------------------------------------------
+
+[[row]]
+id = "secure-boot"
+area = "boot"
+title = "Secure Boot is enabled"
+check = "secure_boot"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "signed-origin"
+area = "update"
+title = "The booted image follows a signed reference (ostree-image-signed)"
+check = "signed_origin"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "kernel"
+area = "boot"
+title = "The booted kernel is Azoth"
+check = "kernel"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "selinux"
+area = "security"
+title = "SELinux is enforcing"
+check = "selinux"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "avc"
+area = "security"
+title = "No AVC denial in this boot (Fedora's are triaged with `set` and a note, D20)"
+check = "avc"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "nvidia-module"
+area = "graphics"
+title = "The NVIDIA modules are loaded and signed"
+check = "nvidia_module"
+machines = ["desktop"]
+
+[[row]]
+id = "usb-internal"
+area = "usb"
+title = "USBGuard's first-boot snapshot is done and, with no external USB device plugged, nothing is blocked"
+check = "usb_internal"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "network"
+area = "network"
+title = "A wired or wireless connection is up"
+check = "network"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "bluetooth-adapter"
+area = "network"
+title = "The Bluetooth adapter is present and powered"
+check = "bluetooth"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "battery"
+area = "power"
+title = "The battery reports its charge"
+check = "battery"
+machines = ["laptop"]
+
+[[row]]
+id = "failed-units"
+area = "platform"
+title = "No failed system or user unit"
+check = "failed_units"
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "shell-units"
+area = "shell"
+title = "The bar, the dock and athanor-shelld are active"
+check = "shell_units"
+machines = ["desktop", "laptop"]
+
+# --- by hand ---------------------------------------------------------------------------------
+
+[[row]]
+id = "outputs-hotplug"
+area = "graphics"
+title = "An output unplugged and plugged back"
+steps = "Unplug an external output and plug it back: the bar and the dock return to it in place within five seconds."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "output-scale"
+area = "graphics"
+title = "An output at 150 %"
+steps = "Set one output to 150 % in Settings: the bar, the dock and the launcher draw sharp and unclipped."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "gtk-gpu"
+area = "graphics"
+title = "GTK applications draw on the GPU (#535)"
+steps = "Run `GSK_DEBUG=renderer gnome-text-editor`: it names a GL or Vulkan renderer, not Cairo."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "suspend-resume"
+area = "power"
+title = "Suspend and resume"
+steps = "Run `systemctl suspend` and wake the machine with the keyboard: the session, every output and the GPU come back, and `matrix.py run` afterwards finds no failed unit."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "audio"
+area = "audio"
+title = "Speakers, microphone and display audio"
+steps = "The bar's output slider changes the loudness; the input level moves when you speak; sound plays over HDMI or DisplayPort where the monitor has speakers."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "usb-new-device"
+area = "usb"
+title = "A USB device never seen before"
+steps = "Plug in a USB device the machine has never seen: it is blocked as the policy says, and the internal devices keep working."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "dead-keys"
+area = "input"
+title = "Dead keys of us(intl)"
+steps = "Type à, é and ç with the dead keys of us(intl) in a GTK application and in the greeter."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "switch-verified"
+area = "boot"
+title = "The release image was installed with switch-verified.sh (release-1.0.md 4.3)"
+steps = "Run `sudo scripts/switch-verified.sh <image>`, reboot, and record the image and digest it verified; `rpm-ostree status` shows the same digest."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "disk-unlock"
+area = "boot"
+title = "Disk unlock on the generic initramfs (D17, D42)"
+steps = "Boot with the LUKS passphrase typed at the initramfs prompt; where `athanor-uki-enroll` enrolled TPM plus PIN, boot again with the PIN. Record which methods the machine has (1.0 has no TPM-only unlock, D42)."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "firmware-outside-image"
+area = "boot"
+title = "Firmware loaded without a file or from outside the image (D48)"
+steps = "Run `journalctl -k -b --grep firmware` and record each device whose firmware came from EFI or from a path outside /usr/lib/firmware; none is a pass with that note."
+machines = ["desktop", "laptop"]
+
+[[row]]
+id = "wifi-join"
+area = "network"
+title = "Wi-Fi joined and kept"
+steps = "Join a WPA2 network from the bar: the connection survives two reboots."
+machines = ["laptop"]
+
+[[row]]
+id = "bluetooth-pair"
+area = "network"
+title = "A phone paired from the bar"
+steps = "Pair a phone from the bar's Bluetooth popover, confirming the PIN on both screens: it reads paired, trusted and connected."
+machines = ["laptop"]
+
+[[row]]
+id = "laptop-keys"
+area = "input"
+title = "Brightness, volume and the lid"
+steps = "The brightness and volume keys move the backlight and the volume with their indicator; closing the lid suspends."
+machines = ["laptop"]
+
+[[row]]
+id = "camera"
+area = "media"
+title = "The internal camera"
+steps = "Snapshot shows the internal camera's image."
+machines = ["laptop"]
+
+# --- hardware the maintainer does not have (D17) ---------------------------------------------
+
+[[untested]]
+id = "vmd"
+title = "Intel VMD storage"
+reason = "no machine with VMD"
+
+[[untested]]
+id = "emmc"
+title = "AMD and Intel eMMC storage"
+reason = "no machine with eMMC"
+
+[[untested]]
+id = "i2c-thc-keyboard"
+title = "A laptop with an I2C or THC keyboard"
+reason = "the reference laptop's keyboard is on the i8042 controller"
+
+[[untested]]
+id = "apple-spi-keyboard"
+title = "An Apple SPI keyboard"
+reason = "no Apple machine"
+
+[[untested]]
+id = "thunderbolt-dock"
+title = "A Thunderbolt dock"
+reason = "no Thunderbolt dock"
+
+[[untested]]
+id = "guests"
+title = "Hyper-V, VMware and Xen guests"
+reason = "no such hypervisor in use; the KVM guest is covered by the VM acceptance"
+
+[[untested]]
+id = "compat-profile"
+title = "The compatibility boot profile of the UKI (D45)"
+reason = "no 1.0 carrier: it comes with the UKI (A2-8, #150)"
+
+[[untested]]
+id = "windows-esp"
+title = "An installation next to an existing Windows ESP (D17, B2-3)"
+reason = "no machine with Windows installed; the ISO acceptance covers a plain ESP in the VM"
+
+[[untested]]
+id = "usb-root"
+title = "The installed system booting from a USB disk"
+reason = "no installation on a USB disk"
+
+[[untested]]
+id = "sas-raid-ufs"
+title = "SAS, hardware RAID and UFS root disks"
+reason = "no such controller"
+
+[[untested]]
+id = "nvidia-pascal"
+title = "The laptop's GeForce MX150 (Pascal)"
+reason = "Pascal needs the -nvidia-legacy image, whose evidence moved to 1.1 (release-1.0.md section 4.3)"

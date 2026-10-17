@@ -13,4 +13,3 @@ serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }
-zvariant = { workspace = true }
