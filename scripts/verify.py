@@ -2518,18 +2518,25 @@ UPSTREAM_SPECS = {
     "forge/specs/polkit/polkit.spec",
 }
 # Own code that is declared under a different licence than OWN_LICENCE, by repository
-# path: path -> (licence, reason). An entry is a decision, not a tolerance: the declared
-# licence must match exactly, so the entry cannot hide a drift in either direction.
+# path: path -> (licence, reason, dependency). An entry is a decision, not a tolerance: the
+# declared licence must match exactly, so the entry cannot hide a drift in either direction.
+# `dependency` names the crate whose licence forces the exception, and the entry holds only
+# while the manifest depends on it; None marks an exception the maintainer chose, whose reason
+# names the decision record.
 OWN_LICENCE_EXCEPTIONS = {
     # greetd_ipc is GPL-3.0-only; the greeter binary links it, so the binary can only be
     # distributed under GPL-3.0-only terms (maintainer decision, audit 4, LIC-N02).
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/Cargo.toml":
-        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)"),
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui.spec":
-        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)"),
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
+    # The toolkit is permissive so that applications outside Athanor can use it (ADR-0121,
+    # doc_own_stack.md OS7).
+    "system/athanor-toolkit/Cargo.toml":
+        ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
 }
-# The crate whose dependency forces the exception above; a crate that depends on it must be
-# in the table, and a crate in the table must still depend on it.
+# The crate whose dependency forces the greeter's exception above; a crate that depends on it
+# must be in the table with it as its dependency.
 GPL3_ONLY_DEPENDENCY = "greetd_ipc"
 # Files that carry packaging metadata outside Cargo.toml and *.spec.
 NFPM_FILES = ["flake.nix"]
@@ -2623,7 +2630,8 @@ def licence_problems(root=None):
 
 
 def exception_problems(root, files):
-    """OWN_LICENCE_EXCEPTIONS must match the dependency that justifies it, both ways."""
+    """OWN_LICENCE_EXCEPTIONS must match the dependency that justifies it, both ways; an
+    exception without a dependency must not depend on GPL3_ONLY_DEPENDENCY either."""
     out = []
     dependents = set()
     for f in files:
@@ -2637,11 +2645,15 @@ def exception_problems(root, files):
             continue
         if GPL3_ONLY_DEPENDENCY in manifest.get("dependencies", {}):
             dependents.add(f)
-    for f in sorted(dependents - set(OWN_LICENCE_EXCEPTIONS)):
-        out.append(f"{f}: depends on {GPL3_ONLY_DEPENDENCY} (GPL-3.0-only) and has no entry in OWN_LICENCE_EXCEPTIONS")
-    for f in sorted(p for p in OWN_LICENCE_EXCEPTIONS if p.endswith("Cargo.toml")):
-        if (root / f).is_file() and f not in dependents:
-            out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry, but it no longer depends on {GPL3_ONLY_DEPENDENCY}")
+    for f in sorted(dependents):
+        if OWN_LICENCE_EXCEPTIONS.get(f, (None, None, None))[2] != GPL3_ONLY_DEPENDENCY:
+            out.append(f"{f}: depends on {GPL3_ONLY_DEPENDENCY} (GPL-3.0-only) and has no entry in OWN_LICENCE_EXCEPTIONS")
+    for f, (_, reason, dependency) in sorted(OWN_LICENCE_EXCEPTIONS.items()):
+        if not reason:
+            out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry without a reason")
+        if (dependency and f.endswith("Cargo.toml") and (root / f).is_file()
+                and f not in dependents):
+            out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry, but it no longer depends on {dependency}")
     return out
 
 
