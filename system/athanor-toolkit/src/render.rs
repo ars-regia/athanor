@@ -49,6 +49,20 @@ fn draw_text(
                 .font_size(run.run().font_size())
                 .hint(true)
                 .fill_glyphs(glyphs)?;
+            // An input method's preedit is underlined, from the font's own metrics.
+            if let Some(underline) = &run.style().underline {
+                let metrics = run.run().font_metrics();
+                let size = underline.size.unwrap_or(metrics.underline_size).max(1.0);
+                let offset = underline.offset.unwrap_or(metrics.underline_offset);
+                let top = y + run.baseline() - offset;
+                let left = x + run.offset();
+                ctx.fill_rect(&Rect::new(
+                    f64::from(left),
+                    f64::from(top),
+                    f64::from(left + run.advance()),
+                    f64::from(top + size),
+                ));
+            }
         }
     }
     Ok(())
@@ -149,6 +163,44 @@ mod tests {
         let mut h = DefaultHasher::new();
         pixmap.data_as_u8_slice().hash(&mut h);
         h.finish()
+    }
+
+    /// A field holding "abc", composed or committed, drawn without focus so no caret shows.
+    fn field(composed: bool) -> Result<Pixmap, Error> {
+        let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
+        let field = ui.field(crate::Ui::ROOT, "Name", "");
+        ui.set_focus(Some(field));
+        if composed {
+            ui.compose("abc", None);
+        } else {
+            ui.commit("abc");
+        }
+        ui.set_focus(None);
+        render(&mut ui, 1.0)
+    }
+
+    #[test]
+    fn a_preedit_is_drawn_underlined() -> Result<(), Error> {
+        let (composed, committed) = (field(true)?, field(false)?);
+        let width = usize::from(composed.width());
+        let rows: Vec<usize> = composed
+            .data_as_u8_slice()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(committed.data_as_u8_slice().as_chunks::<4>().0)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| i / width)
+            .collect();
+        // The same glyphs, and one thin line more under them.
+        let (top, bottom) = (rows.iter().min(), rows.iter().max());
+        assert!(rows.len() >= 10, "{} pixels differ", rows.len());
+        assert!(
+            bottom.zip(top).is_some_and(|(b, t)| b - t <= 2),
+            "rows {top:?} to {bottom:?}"
+        );
+        Ok(())
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! The Wayland driver on smithay-client-toolkit: one xdg-toplevel drawn in shared memory, the
-//! keyboard and the pointer, and the AccessKit adapter on AT-SPI.
+//! keyboard and the pointer, the input method through text-input-v3, and the AccessKit adapter
+//! on AT-SPI.
 
 use crate::a11y::tree_update;
 use crate::render::{render, Error};
@@ -8,9 +9,14 @@ use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHan
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
+use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::{
+    zwp_text_input_manager_v3::{self, ZwpTextInputManagerV3},
+    zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3},
+};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_registry,
+    dispatch2::Dispatch2,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -51,6 +57,8 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     let compositor = CompositorState::bind(&globals, &qh)?;
     let xdg_shell = XdgShell::bind(&globals, &qh)?;
     let shm = Shm::bind(&globals, &qh)?;
+    // Optional: without it, text comes from the keyboard alone.
+    let text_input_manager = globals.bind(&qh, 1..=1, TextInput).ok();
     let surface = compositor.create_surface(&qh);
     let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
     window.set_title(ui.title.as_str());
@@ -85,6 +93,9 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
         window,
         keyboard: None,
         pointer: None,
+        text_input_manager,
+        text_input: None,
+        ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
         scale: 1,
@@ -125,6 +136,83 @@ impl ActionHandler for Actions {
 
 struct Deactivation;
 
+/// The text-input-v3 state of the window.
+#[derive(Default)]
+struct Ime {
+    /// The compositor sent `enter` for our surface and no `leave` since.
+    entered: bool,
+    /// We sent `enable` and no `disable` since.
+    enabled: bool,
+    pending: Pending,
+}
+
+/// The events of text-input-v3 that take effect together at its next `done`.
+#[derive(Default)]
+struct Pending {
+    /// The preedit and its cursor, a byte range in it.
+    preedit: Option<(String, Option<(usize, usize)>)>,
+    commit: Option<String>,
+}
+
+/// Text from the input method without control characters: the field holds one line.
+fn printable(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// The user data of the text-input-v3 objects.
+struct TextInput;
+
+impl Dispatch2<ZwpTextInputManagerV3, App> for TextInput {
+    fn event(
+        &self,
+        _: &mut App,
+        _: &ZwpTextInputManagerV3,
+        _: zwp_text_input_manager_v3::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
+}
+
+impl Dispatch2<ZwpTextInputV3, App> for TextInput {
+    fn event(
+        &self,
+        app: &mut App,
+        _: &ZwpTextInputV3,
+        event: zwp_text_input_v3::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+        use zwp_text_input_v3::Event;
+        match event {
+            Event::Enter { .. } => {
+                app.ime.entered = true;
+                app.sync_text_input();
+            }
+            Event::Leave { .. } => {
+                app.ime.entered = false;
+                app.sync_text_input();
+            }
+            Event::PreeditString {
+                text,
+                cursor_begin,
+                cursor_end,
+            } => {
+                let cursor = usize::try_from(cursor_begin)
+                    .ok()
+                    .zip(usize::try_from(cursor_end).ok());
+                app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
+            }
+            Event::CommitString { text } => app.ime.pending.commit = text,
+            // ponytail: the field sends no surrounding text, so an input method has none to
+            // delete; send it with set_surrounding_text when an engine needs it.
+            Event::DeleteSurroundingText { .. } => {}
+            Event::Done { .. } => app.text_input_done(),
+            _ => {}
+        }
+    }
+}
+
 impl DeactivationHandler for Deactivation {
     fn deactivate_accessibility(&mut self) {}
 }
@@ -138,6 +226,9 @@ struct App {
     window: Window,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    text_input_manager: Option<ZwpTextInputManagerV3>,
+    text_input: Option<ZwpTextInputV3>,
+    ime: Ime,
     /// For the keyboard's repeat timer. The keyboard's data keeps a clone, and the loop owns the
     /// connection that owns that data: the cycle lives until the process ends, as `run` is
     /// called once per process.
@@ -164,6 +255,42 @@ impl App {
             self.error = Some(error);
             self.exit = true;
         }
+        self.sync_text_input();
+    }
+
+    /// Enables the input method while the window has the keyboard and a field the focus, and
+    /// disables it otherwise.
+    fn sync_text_input(&mut self) {
+        let Some(text_input) = &self.text_input else {
+            return;
+        };
+        let field = self
+            .ui
+            .focus()
+            .filter(|&id| self.ime.entered && self.ui.field_text(id).is_some());
+        if field.is_some() == self.ime.enabled {
+            return;
+        }
+        if let Some(id) = field {
+            let r = self.ui.widget(id).rect;
+            text_input.enable();
+            text_input.set_content_type(ContentHint::None, ContentPurpose::Normal);
+            text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
+        } else {
+            text_input.disable();
+        }
+        text_input.commit();
+        self.ime.enabled = field.is_some();
+    }
+
+    /// Applies what the input method sent since the last `done`, in the protocol's order: the
+    /// committed text replaces the preedit, then the new preedit is shown.
+    fn text_input_done(&mut self) {
+        let Pending { preedit, commit } = std::mem::take(&mut self.ime.pending);
+        let event = commit.and_then(|text| self.ui.commit(&printable(&text)));
+        let (preedit, cursor) = preedit.unwrap_or_default();
+        self.ui.compose(&printable(&preedit), cursor);
+        self.changed(event);
     }
 
     fn draw(&mut self) -> Result<(), Error> {
@@ -328,17 +455,21 @@ impl SeatHandler for App {
         capability: Capability,
     ) {
         let result: Result<(), Error> = match capability {
-            Capability::Keyboard if self.keyboard.is_none() => self
-                .seat
-                .get_keyboard_with_repeat(
-                    qh,
-                    &seat,
-                    None,
-                    self.loop_handle.clone(),
-                    Box::new(|app: &mut App, _, event| app.repeat(event)),
-                )
-                .map(|k| self.keyboard = Some(k))
-                .map_err(Into::into),
+            Capability::Keyboard if self.keyboard.is_none() => {
+                if let (Some(manager), None) = (&self.text_input_manager, &self.text_input) {
+                    self.text_input = Some(manager.get_text_input(&seat, qh, TextInput));
+                }
+                self.seat
+                    .get_keyboard_with_repeat(
+                        qh,
+                        &seat,
+                        None,
+                        self.loop_handle.clone(),
+                        Box::new(|app: &mut App, _, event| app.repeat(event)),
+                    )
+                    .map(|k| self.keyboard = Some(k))
+                    .map_err(Into::into)
+            }
             Capability::Pointer if self.pointer.is_none() => self
                 .seat
                 .get_pointer(qh, &seat)
