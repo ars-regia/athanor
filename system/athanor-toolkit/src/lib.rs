@@ -14,7 +14,7 @@ pub mod theme;
 pub mod widget;
 
 pub use theme::{Rgba, Theme};
-pub use widget::{Event, Key, Kind, Rect, Ui, Widget, WidgetId};
+pub use widget::{Event, Key, Kind, Rect, Ui, Widget, WidgetId, WindowButton};
 
 #[cfg(test)]
 #[path = "../examples/chooser/tree.rs"]

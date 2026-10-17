@@ -26,7 +26,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(ui.title.as_str());
             node
         }
-        Kind::Column | Kind::Row => Node::new(Role::GenericContainer),
+        Kind::Column | Kind::Row | Kind::TitleBar => Node::new(Role::GenericContainer),
         Kind::Group(name) => {
             // A group stacks its children as a column, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Group);
@@ -37,6 +37,12 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::Label(text) => {
             let mut node = Node::new(Role::Label);
             node.set_value(text.as_str());
+            node
+        }
+        Kind::WindowButton(button) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(button.name());
+            node.add_action(Action::Click);
             node
         }
         Kind::Button(label) => {
@@ -169,6 +175,7 @@ mod tests {
             },
         );
         let field = ui.field(Ui::ROOT, "Field", "text");
+        ui.add_title_bar();
         ui.layout();
 
         let mut update = tree_update(&ui, 1.0);
@@ -274,6 +281,34 @@ mod tests {
         assert!(text.starts_with("abx"), "{text:.8}");
         assert_eq!(text.chars().count(), Ui::FIELD_MAX_CHARS);
         assert!(crate::render::render(&mut ui, 1.0).is_ok());
+    }
+
+    #[test]
+    fn the_title_bar_reads_as_gtks() {
+        let mut ui = chooser::build(false).ui;
+        ui.add_title_bar();
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let bar = ui.widget(Ui::ROOT).children[0];
+        let parts: Vec<_> = ui
+            .widget(bar)
+            .children
+            .iter()
+            .map(|&id| &update.nodes[id].1)
+            .collect();
+        let read: Vec<_> = parts
+            .iter()
+            .map(|n| (n.role(), n.label().or(n.value()).unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (Role::Label, "Layout"),
+                (Role::Button, "Minimize"),
+                (Role::Button, "Close")
+            ]
+        );
+        assert!(parts[1..].iter().all(|n| n.supports_action(Action::Click)));
     }
 
     #[test]

@@ -2,9 +2,9 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{Kind, Ui};
+use crate::widget::{Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
-use vello_cpu::kurbo::{Affine, Rect, RoundedRect, Shape, Stroke};
+use vello_cpu::kurbo::{Affine, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::Color;
 use vello_cpu::{Glyph, Pixmap, RenderContext, Resources};
 
@@ -92,6 +92,43 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
         let r = widget.rect;
         match &mut widget.kind {
             Kind::Column | Kind::Row | Kind::Group(_) => {}
+            Kind::TitleBar => {
+                ctx.set_paint(color(t.title_bar));
+                ctx.fill_rect(&Rect::new(
+                    f64::from(r.x),
+                    f64::from(r.y),
+                    f64::from(r.x + r.w),
+                    f64::from(r.bottom()),
+                ));
+                ctx.set_paint(color(t.border));
+                ctx.fill_rect(&Rect::new(
+                    f64::from(r.x),
+                    f64::from(r.bottom() - 1.0),
+                    f64::from(r.x + r.w),
+                    f64::from(r.bottom()),
+                ));
+            }
+            // A round button with its mark drawn as lines, as GTK's symbolic icons.
+            Kind::WindowButton(button) => {
+                let (cx, cy) = (f64::from(r.center_x()), f64::from(r.y + r.h / 2.0));
+                ctx.set_paint(color(t.surface));
+                ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                let arm = f64::from(r.w) * 0.16;
+                let lines = match button {
+                    WindowButton::Minimize => {
+                        vec![Line::new((cx - arm, cy + arm), (cx + arm, cy + arm))]
+                    }
+                    WindowButton::Close => vec![
+                        Line::new((cx - arm, cy - arm), (cx + arm, cy + arm)),
+                        Line::new((cx + arm, cy - arm), (cx - arm, cy + arm)),
+                    ],
+                };
+                ctx.set_paint(color(t.text));
+                ctx.set_stroke(Stroke::new(1.5));
+                for line in lines {
+                    ctx.stroke_path(&line.to_path(0.1));
+                }
+            }
             Kind::Label(_) => {
                 if let Some(layout) = &widget.text {
                     draw_text(&mut ctx, &mut resources, layout, (r.x, r.y), t.text)?;

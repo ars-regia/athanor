@@ -4,7 +4,7 @@
 
 use crate::a11y::tree_update;
 use crate::render::{render, Error};
-use crate::widget::{Event, Key, Ui};
+use crate::widget::{Event, Key, Ui, WindowButton};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
@@ -27,7 +27,7 @@ use smithay_client_toolkit::{
     },
     shell::{
         xdg::{
-            window::{Window, WindowConfigure, WindowDecorations, WindowHandler},
+            window::{DecorationMode, Window, WindowConfigure, WindowDecorations, WindowHandler},
             XdgShell,
         },
         WaylandSurface,
@@ -60,7 +60,10 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     // Optional: without it, text comes from the keyboard alone.
     let text_input_manager = globals.bind(&qh, 1..=1, TextInput).ok();
     let surface = compositor.create_surface(&qh);
-    let window = xdg_shell.create_window(surface, WindowDecorations::RequestServer, &qh);
+    // The window draws its own title bar, as GTK does, so assistive technologies find the
+    // title and the window's buttons in its tree; a compositor that insists on drawing them
+    // says so in the first configure.
+    let window = xdg_shell.create_window(surface, WindowDecorations::RequestClient, &qh);
     window.set_title(ui.title.as_str());
     window.set_app_id(app_id);
     window.commit();
@@ -93,6 +96,7 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
         window,
         keyboard: None,
         pointer: None,
+        pointer_seat: None,
         text_input_manager,
         text_input: None,
         ime: Ime::default(),
@@ -226,6 +230,8 @@ struct App {
     window: Window,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    /// The seat of the pointer, which moving the window by its title bar names.
+    pointer_seat: Option<wl_seat::WlSeat>,
     text_input_manager: Option<ZwpTextInputManagerV3>,
     text_input: Option<ZwpTextInputV3>,
     ime: Ime,
@@ -248,8 +254,14 @@ struct App {
 impl App {
     /// Hands an event to the application, then redraws and updates the accessibility tree.
     fn changed(&mut self, event: Option<Event>) {
-        if let Some(event) = event {
-            (self.on_event)(&mut self.ui, event);
+        match event {
+            Some(Event::Window(WindowButton::Minimize)) => self.window.set_minimized(),
+            Some(Event::Window(WindowButton::Close)) => {
+                self.exit = true;
+                return;
+            }
+            Some(event) => (self.on_event)(&mut self.ui, event),
+            None => {}
         }
         if let Err(error) = self.draw() {
             self.error = Some(error);
@@ -430,9 +442,14 @@ impl WindowHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &Window,
-        _: WindowConfigure,
+        configure: WindowConfigure,
         _: u32,
     ) {
+        // ponytail: once drawn, the title bar stays if the compositor later takes the
+        // decorations over; no compositor of Athanor's switches modes on a mapped window.
+        if configure.decoration_mode == DecorationMode::Client {
+            self.ui.add_title_bar();
+        }
         // ponytail: the window keeps the widgets' natural size whatever the compositor
         // suggests; stretching to the configured size comes with the layout milestone.
         self.configured = true;
@@ -470,11 +487,13 @@ impl SeatHandler for App {
                     .map(|k| self.keyboard = Some(k))
                     .map_err(Into::into)
             }
-            Capability::Pointer if self.pointer.is_none() => self
-                .seat
-                .get_pointer(qh, &seat)
-                .map(|p| self.pointer = Some(p))
-                .map_err(Into::into),
+            Capability::Pointer if self.pointer.is_none() => {
+                self.pointer_seat = Some(seat.clone());
+                self.seat
+                    .get_pointer(qh, &seat)
+                    .map(|p| self.pointer = Some(p))
+                    .map_err(Into::into)
+            }
             _ => Ok(()),
         };
         if let Err(error) = result {
@@ -589,11 +608,20 @@ impl PointerHandler for App {
     ) {
         for event in events {
             if let PointerEventKind::Press {
-                button: BTN_LEFT, ..
+                button: BTN_LEFT,
+                serial,
+                ..
             } = event.kind
             {
-                let (x, y) = event.position;
-                let event = self.ui.click(x as f32, y as f32);
+                let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                // A press on the title bar outside its buttons moves the window.
+                if self.ui.hit(x, y).is_none() && self.ui.in_title_bar(x, y) {
+                    if let Some(seat) = &self.pointer_seat {
+                        self.window.move_(seat, serial);
+                    }
+                    continue;
+                }
+                let event = self.ui.click(x, y);
                 self.changed(event);
             }
         }
