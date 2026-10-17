@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -58,6 +58,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- The panel wears Calmo's neutrals, and its sliders, switches and active tiles
+  follow the accent; a tile that is on is filled with it (#570).
+
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First release (doc_control_center.md, plan Task 11): the resident panel on pinned layer
   surfaces, shown and hidden by os.athanor.ControlCenter1.Show and Toggle, bound to Super+C at
