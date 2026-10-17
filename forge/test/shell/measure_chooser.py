@@ -234,6 +234,12 @@ def run(binary, out, runs):
             seconds, line, size, adapter = first_frame([binary])
         except RuntimeError as error:
             sys.exit(f"measure_chooser: {error} (run {index + 1})")
+        # A binary that ignores the variable would otherwise be reported as vello_gpu.
+        if os.environ.get(RENDERER) == "gpu" and adapter is None:
+            sys.exit(
+                f"measure_chooser: {binary} named no GPU adapter with {RENDERER}=gpu "
+                f"(run {index + 1})"
+            )
         startups.append(seconds)
     try:
         mem = resident([binary])

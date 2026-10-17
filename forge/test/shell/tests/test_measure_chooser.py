@@ -3,6 +3,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -129,6 +130,26 @@ class ProcessTest(unittest.TestCase):
         )
         self.assertEqual(line, "-> wl_surface#7.commit()")
         self.assertEqual(adapter, "llvmpipe (Gl, Cpu, )")
+
+    def test_a_gpu_run_that_names_no_adapter_fails(self):
+        with tempfile.TemporaryDirectory() as root:
+            client = Path(root) / "client"
+            client.write_text(
+                "#!/bin/sh\n"
+                "echo ' -> xdg_wm_base#3.get_xdg_surface(new id xdg_surface#9, wl_surface#7)' >&2\n"
+                "echo ' -> wl_surface#7.attach(wl_buffer#12, 0, 0)' >&2\n"
+                "echo ' -> wl_surface#7.commit()' >&2\n"
+                "sleep 60\n",
+                encoding="utf-8",
+            )
+            client.chmod(0o755)
+            with (
+                unittest.mock.patch.dict(
+                    os.environ, {"ATHANOR_TOOLKIT_RENDERER": "gpu"}
+                ),
+                self.assertRaisesRegex(SystemExit, "named no GPU adapter"),
+            ):
+                measure_chooser.run(str(client), str(Path(root) / "out.json"), 1)
 
     def test_a_client_that_ignores_terminate_is_killed(self):
         proc = measure_chooser.spawn(["sh", "-c", "trap '' TERM; sleep 60"], os.environ)
