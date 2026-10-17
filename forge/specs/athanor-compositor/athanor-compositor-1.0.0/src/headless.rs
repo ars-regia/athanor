@@ -264,19 +264,6 @@ impl State {
             tracing::warn!(%error, "the clients could not be flushed");
         }
     }
-
-    /// The pixels of output `index` as the space now stands, `FRAME_FORMAT`, row by row from
-    /// the top.
-    #[cfg(test)]
-    pub fn capture(&mut self, index: usize) -> Result<Vec<u8>, Error> {
-        let Backend::Headless(headless) = &mut self.backend else {
-            return Err("only the headless backend reads frames back".into());
-        };
-        headless
-            .draw(index, &self.space, true)?
-            .pixels
-            .ok_or_else(|| "the frame was not read back".into())
-    }
 }
 
 impl Headless {
@@ -464,5 +451,21 @@ impl FrameStats {
             };
         }
         self.draws = Timing::default();
+    }
+}
+
+// Test-only code comes last: `verify.py panics` stops reading a file where it begins.
+#[cfg(test)]
+impl State {
+    /// The pixels of output `index` as the space now stands, `FRAME_FORMAT`, row by row from
+    /// the top.
+    pub fn capture(&mut self, index: usize) -> Result<Vec<u8>, Error> {
+        let Backend::Headless(headless) = &mut self.backend else {
+            return Err("only the headless backend reads frames back".into());
+        };
+        headless
+            .draw(index, &self.space, true)?
+            .pixels
+            .ok_or_else(|| "the frame was not read back".into())
     }
 }

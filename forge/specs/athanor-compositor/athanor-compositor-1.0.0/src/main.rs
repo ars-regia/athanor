@@ -4,8 +4,6 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(test)]
-mod fixture;
 mod handlers;
 mod headless;
 mod input;
@@ -128,6 +126,10 @@ fn main() -> ExitCode {
         }
     }
 }
+
+// Test-only code comes last: `verify.py panics` stops reading a file where it begins.
+#[cfg(test)]
+mod fixture;
 
 #[cfg(test)]
 mod tests {
