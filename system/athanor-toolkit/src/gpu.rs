@@ -16,7 +16,7 @@ use std::task::{Context, Poll, Waker};
 use vello_gpu::{ClearSettings, RenderSize, RenderTargetConfig, TargetInit, TextureBindings};
 use wayland_client::{protocol::wl_surface::WlSurface, Connection, Proxy};
 use wgpu::rwh::{HasDisplayHandle, RawWindowHandle, WaylandWindowHandle};
-use wgpu::{CurrentSurfaceTexture, TextureFormat};
+use wgpu::{CurrentSurfaceTexture, PresentMode, TextureFormat};
 
 pub struct Gpu {
     surface: wgpu::Surface<'static>,
@@ -87,17 +87,25 @@ impl Gpu {
                 slot.get_or_insert_with(|| error.to_string());
             }
         }));
+        let capabilities = surface.get_capabilities(&adapter);
         // vello_gpu, as vello_cpu, writes sRGB-encoded values: the surface must not encode them
         // again.
-        let format = surface
-            .get_capabilities(&adapter)
+        let format = capabilities
             .formats
             .into_iter()
             .find(|f| matches!(f, TextureFormat::Rgba8Unorm | TextureFormat::Bgra8Unorm))
             .ok_or_else(|| format!("{adapter_name} offers no 8-bit linear surface format"))?;
+        // The driver paces frames with wl_surface frame callbacks in its own loop. A present
+        // that waited for the compositor as well (Fifo) would block that loop, and with it input
+        // and the accessibility bus, for up to a second behind a covered window.
+        let present_mode = if capabilities.present_modes.contains(&PresentMode::Mailbox) {
+            PresentMode::Mailbox
+        } else {
+            PresentMode::AutoNoVsync
+        };
         let config = wgpu::SurfaceConfiguration {
             format,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             // Not configured yet: the first frame configures the window's size.
             width: 0,
             height: 0,

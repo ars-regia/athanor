@@ -4,7 +4,7 @@
 
 use crate::a11y::tree_update;
 use crate::gpu::Gpu;
-use crate::render::{render, Error};
+use crate::render::{layout, render, Error};
 use crate::widget::{Event, Key, Ui, WindowButton};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
@@ -15,7 +15,7 @@ use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::{
     zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3},
 };
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState},
+    compositor::{CompositorHandler, CompositorState, FrameCallbackData},
     delegate_registry,
     dispatch2::Dispatch2,
     output::{OutputHandler, OutputState},
@@ -115,6 +115,7 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
 
     let mut app = App {
         gpu,
+        qh: qh.clone(),
         registry: RegistryState::new(&globals),
         seat: SeatState::new(&globals, &qh),
         output: OutputState::new(&globals, &qh),
@@ -131,6 +132,8 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
         modifiers: Modifiers::default(),
         scale: 1,
         configured: false,
+        frame_pending: false,
+        redraw: false,
         exit: false,
         ui,
         on_event,
@@ -283,6 +286,8 @@ struct App {
     /// Drawing through wgpu when [`RENDERER`] asks for it; first, so that it drops before the
     /// window's surface it draws on.
     gpu: Option<Gpu>,
+    /// For the frame callbacks that pace drawing.
+    qh: QueueHandle<App>,
     registry: RegistryState,
     seat: SeatState,
     output: OutputState,
@@ -303,6 +308,11 @@ struct App {
     modifiers: Modifiers,
     scale: i32,
     configured: bool,
+    /// A frame is committed and its callback has not come: the next one waits for it, so that
+    /// drawing never runs ahead of the compositor, which throttles a covered window.
+    frame_pending: bool,
+    /// The state changed while a frame was pending: the callback draws it.
+    redraw: bool,
     exit: bool,
     ui: Ui,
     on_event: Handler,
@@ -385,7 +395,19 @@ impl App {
         if !self.configured {
             return Ok(());
         }
+        if self.frame_pending {
+            // Lay out now, so that the accessibility tree follows the state at once; the
+            // pixels follow at the frame callback.
+            layout(&mut self.ui, self.scale as f32)?;
+            self.publish_tree();
+            self.redraw = true;
+            return Ok(());
+        }
+        self.redraw = false;
+        self.frame_pending = true;
         let surface = self.window.wl_surface();
+        // Takes effect with the commit below, or with the one vello_gpu's present makes.
+        surface.frame(&self.qh, FrameCallbackData(surface.clone()));
         if let Some(gpu) = &mut self.gpu {
             // Presenting commits the surface, with the scale set here.
             surface.set_buffer_scale(self.scale);
@@ -486,7 +508,12 @@ impl CompositorHandler for App {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
+        self.frame_pending = false;
+        if self.redraw {
+            self.update(None);
+        }
+    }
 
     fn surface_enter(
         &mut self,
