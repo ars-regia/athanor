@@ -1,7 +1,7 @@
 //! The nested backend: a window of the parent compositor is the output; its events are input,
 //! resizes and the redraws that paint the space.
 
-use crate::state::{new_output, Backend, State};
+use crate::state::{new_output, Backend, State, BACKGROUND};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
@@ -18,8 +18,6 @@ use std::time::Duration;
 
 /// The output's refresh, in mHz: the parent compositor paces the redraws.
 const REFRESH: i32 = 60_000;
-
-const BACKGROUND: [f32; 4] = [0.1, 0.1, 0.1, 1.0];
 
 /// The parent's window, the one output it shows and that output's damage.
 pub struct Nested {

@@ -72,6 +72,9 @@ poppler-rs = "0.26"
 cairo-rs = "0.22"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# wlr-layer-shell's client side, for athanor-compositor's fixture only (a dev-dependency); the
+# 0.3 series is generated against wayland-protocols 0.32.
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-scanner = "0.31"
 # The PulseAudio protocol that pipewire-pulse serves, on its threaded main loop (athanor-services).
 libpulse-binding = "2.30"

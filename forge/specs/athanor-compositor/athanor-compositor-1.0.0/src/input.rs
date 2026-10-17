@@ -10,9 +10,19 @@ use smithay::backend::input::{
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::SERIAL_COUNTER;
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 
 impl State {
+    /// A click at `location` focuses the window it lands on, or the layer surface there that
+    /// asks for the keyboard on demand.
+    pub fn click_focus(&mut self, location: Point<f64, Logical>) {
+        match self.under(location) {
+            Some((Under::Window(window), _)) => self.focus(&window),
+            Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
+            None => {}
+        }
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
             InputEvent::Keyboard { event, .. } => {
@@ -61,11 +71,7 @@ impl State {
                     return;
                 };
                 if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-                    match self.under(pointer.current_location()) {
-                        Some((Under::Window(window), _)) => self.focus(&window),
-                        Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
-                        None => {}
-                    }
+                    self.click_focus(pointer.current_location());
                 }
                 // After the focus: the button's serial is then newer than the keyboard's enter,
                 // so a token made from the click that focused a window is in range.
