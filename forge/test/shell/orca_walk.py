@@ -33,6 +33,46 @@ def utterances(log):
     return [match.group(1) for match in SPEECH.finditer(log)]
 
 
+def run(command):
+    """Runs a command; returns its error output when it fails, else None."""
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    return (
+        None
+        if result.returncode == 0
+        else result.stderr.strip() or f"exit {result.returncode}"
+    )
+
+
+def walk(orca, tabs):
+    """Waits for Orca, walks the surface and quits Orca; returns why it failed, or None."""
+    deadline = time.monotonic() + STARTUP
+    while not owned():
+        if time.monotonic() > deadline or orca.poll() is not None:
+            return f"Orca did not take {SERVICE}"
+        time.sleep(0.5)
+    time.sleep(3 * PAUSE)
+    for _ in range(tabs):
+        if error := run(["wtype", "-k", "Tab"]):
+            return f"wtype did not press Tab: {error}"
+        time.sleep(PAUSE)
+    quit_orca = [
+        "busctl",
+        "--user",
+        "call",
+        SERVICE,
+        "/org/gnome/Orca/Service",
+        SERVICE,
+        "Quit",
+    ]
+    if error := run(quit_orca):
+        return f"Orca did not quit through {SERVICE}: {error}"
+    try:
+        orca.wait(timeout=STARTUP)
+    except subprocess.TimeoutExpired:
+        return f"Orca did not exit within {STARTUP} s of Quit"
+    return None
+
+
 def main(argv):
     if len(argv) != 2:
         print(__doc__, file=sys.stderr)
@@ -44,31 +84,16 @@ def main(argv):
         orca = subprocess.Popen(
             ["orca", "--replace", f"--debug-file={log}"], stdout=stderr, stderr=stderr
         )
-        deadline = time.monotonic() + STARTUP
-        while not owned():
-            if time.monotonic() > deadline or orca.poll() is not None:
+        # Orca never outlives the walk, whichever way the walk ends.
+        try:
+            error = walk(orca, tabs)
+        finally:
+            if orca.poll() is None:
                 orca.kill()
-                print(f"FAIL Orca did not take {SERVICE}", file=sys.stderr)
-                return 1
-            time.sleep(0.5)
-        time.sleep(3 * PAUSE)
-        for _ in range(tabs):
-            subprocess.run(["wtype", "-k", "Tab"], check=True)
-            time.sleep(PAUSE)
-        subprocess.run(
-            [
-                "busctl",
-                "--user",
-                "call",
-                SERVICE,
-                "/org/gnome/Orca/Service",
-                SERVICE,
-                "Quit",
-            ],
-            check=True,
-            capture_output=True,
-        )
-        orca.wait(timeout=STARTUP)
+                orca.wait()
+    if error:
+        print(f"FAIL {error}", file=sys.stderr)
+        return 1
     spoken = utterances(log.read_text(errors="replace"))
     transcript.write_text("".join(f"{line}\n" for line in spoken))
     print(f"Orca spoke {len(spoken)} utterance(s) into {transcript}")
