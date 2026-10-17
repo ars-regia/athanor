@@ -150,7 +150,7 @@ Kept as Calmo stood, the shell would wear indigo beside blue applications, Inter
 **VL11. Verification.**
 
 - **In CI, on every change of `system/athanor-style`:**
-  - The contrast check (`contrast.py`) runs every declared pair in the four variants with each of the nine presets, and with a sweep of the hue circle in 15° steps at the lowest chroma and the two lightness limits that VL3 allows. Text needs 4.5:1, large text and controls 3:1.
+  - The contrast check (`contrast.py`) runs every declared pair in the four variants, and in the light and dark variants with each of the nine presets and with a sweep of the hue circle in 15° steps at the lowest chroma and the two lightness limits that VL3 allows. Text needs 4.5:1, large text and controls 3:1.
   - A lint of the shell's CSS templates and hand-written CSS fails on any length in `px` that does not come from a token, and on any font size in `px`.
   - A test compares every `transition` and animation duration in the shell's CSS with the `[motion]` tokens.
   - GTK's own parser reads the generated CSS; a warning fails the build, as SH5 already requires.

@@ -135,7 +135,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **AX8. The focus ring.**
 
-- The ring is drawn on the focused widget only: `window.athanor-surface *:focus:focus-visible { outline: 2px solid @ath_acc; outline-offset: 2px; }`.
+- The ring is drawn on the focused widget only: `window.athanor-surface *:focus:focus-visible { outline: 2px solid @ath_acc_fg; outline-offset: 2px; }`.
 - Its colour is the accent corrected to 3:1 against the surface (`doc_visual_language.md`), so its contrast is checked by the same CI check as the controls.
 - In both high-contrast variants the ring is 3 px wide.
 - The lock screen and the polkit agent's dialog are trusted surfaces and never take the user's accent (`doc_lock_and_prompts.md` LP14): their ring is drawn in the factory accent, as VL4 does for the greeter (`doc_visual_language.md` VL4), corrected to the same 3:1.
