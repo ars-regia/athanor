@@ -216,6 +216,41 @@ mod tests {
         assert_eq!(missing(ui, &update), Vec::<WidgetId>::new());
     }
 
+    #[test]
+    fn requests_from_assistive_technologies_are_bounded() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        let button = ui.add(Ui::ROOT, Kind::Button("Button".into()));
+        let field = ui.field(Ui::ROOT, "Field", "");
+        ui.layout();
+        let request = |target: WidgetId, action, data| ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(target),
+            data,
+        };
+
+        // A widget that takes no focus, or a node that does not exist, leaves the focus alone.
+        ui.set_focus(Some(button));
+        assert_eq!(ui.do_action(&request(label, Action::Click, None)), None);
+        assert_eq!(ui.do_action(&request(label, Action::Focus, None)), None);
+        assert_eq!(ui.do_action(&request(ui.len(), Action::Click, None)), None);
+        assert_eq!(ui.focus(), Some(button));
+
+        // A value set from outside loses its control characters and its excess length.
+        let value = format!("a\nb\u{7}{}", "x".repeat(2 * Ui::FIELD_MAX_CHARS));
+        let set = request(
+            field,
+            Action::SetValue,
+            Some(ActionData::Value(value.into())),
+        );
+        assert_eq!(ui.do_action(&set), Some(Event::Edited(field)));
+        let text = ui.field_text(field).unwrap_or_default();
+        assert!(text.starts_with("abx"), "{text:.8}");
+        assert_eq!(text.chars().count(), Ui::FIELD_MAX_CHARS);
+        assert!(crate::render::render(&mut ui, 1.0).is_ok());
+    }
+
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {
         let mut out = Vec::new();
         for &c in &ui.widget(id).children {

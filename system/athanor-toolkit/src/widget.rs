@@ -123,6 +123,8 @@ impl Ui {
     }
 
     pub const ROOT: WidgetId = 0;
+    /// The longest text a field takes from outside the keyboard, in characters.
+    pub const FIELD_MAX_CHARS: usize = 1024;
 
     /// Adds `kind` as the last child of `parent`.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
@@ -171,8 +173,13 @@ impl Ui {
         self.focus
     }
 
+    /// Moves the focus to `id`, or clears it with `None`; a widget that takes no focus leaves
+    /// it where it is.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
-        self.focus = id.filter(|&id| self.widgets[id].is_focusable());
+        match id {
+            Some(id) if !self.widgets[id].is_focusable() => {}
+            _ => self.focus = id,
+        }
     }
 
     /// The window's size in logical pixels, after [`Ui::layout`].
@@ -371,7 +378,12 @@ impl Ui {
         let Kind::Field(field) = &mut self.widgets[id].kind else {
             return None;
         };
-        field.set_text(text);
+        let text: String = text
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(Self::FIELD_MAX_CHARS)
+            .collect();
+        field.set_text(&text);
         Some(Event::Edited(id))
     }
 }

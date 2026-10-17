@@ -604,7 +604,6 @@ dependencies = [
  "smithay-client-toolkit",
  "vello_cpu",
  "wayland-client",
- "wayland-protocols",
 ]
 
 [[package]]

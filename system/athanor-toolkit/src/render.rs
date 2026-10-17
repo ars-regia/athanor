@@ -22,7 +22,7 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> vello_cpu::kurbo
         f64::from(r.y) - o,
         f64::from(r.x + r.w) + o,
         f64::from(r.y + r.h) + o,
-        f64::from(radius) + o,
+        (f64::from(radius) + o).max(0.0),
     )
     .to_path(0.1)
 }
@@ -56,7 +56,13 @@ fn draw_text(
 
 /// Lays the window out and draws it at `scale` physical pixels per logical pixel.
 pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
+    if !(scale.is_finite() && scale > 0.0) {
+        return Err(format!("scale {scale} is not a positive number").into());
+    }
+    // Whole logical pixels: an integer buffer scale then divides the buffer, as wl_surface
+    // requires, and the background covers every pixel.
     let (w, h) = ui.layout();
+    let (w, h) = (w.ceil(), h.ceil());
     let width = u16::try_from((w * scale).ceil() as u32)?;
     let height = u16::try_from((h * scale).ceil() as u32)?;
     let mut ctx = RenderContext::new(width, height);
@@ -108,7 +114,10 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
                 };
                 let y = r.y + (r.h - layout.height()) / 2.0;
                 let layout = layout.clone();
+                // Text longer than the field stays inside it.
+                ctx.push_clip_path(&rounded(r, 0.0, t.radius));
                 draw_text(&mut ctx, &mut resources, &layout, (x, y), t.text)?;
+                ctx.pop_clip();
                 if focus == Some(id) {
                     if let Some(c) = field.caret(&mut ui.text, 1.5) {
                         let (x, y) = (f64::from(x), f64::from(y));
@@ -143,9 +152,17 @@ mod tests {
     }
 
     #[test]
+    fn a_scale_that_is_not_positive_is_refused() {
+        let mut ui = chooser::build(false).ui;
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(render(&mut ui, scale).is_err(), "scale {scale}");
+        }
+    }
+
+    #[test]
     fn the_chooser_renders_deterministically_at_both_scales() -> Result<(), Error> {
         let mut ui = chooser::build(false).ui;
-        let (w, _) = ui.size();
+        let w = ui.size().0.ceil();
         for scale in [1.0, 1.5] {
             let first = render(&mut ui, scale)?;
             let second = render(&mut ui, scale)?;

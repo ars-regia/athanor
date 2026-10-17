@@ -6,7 +6,7 @@ use crate::render::{render, Error};
 use crate::widget::{Event, Key, Ui};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
-use smithay_client_toolkit::reexports::calloop::EventLoop;
+use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -43,7 +43,7 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
     let qh = queue.handle();
-    let mut event_loop: EventLoop<App> = EventLoop::try_new()?;
+    let mut event_loop: EventLoop<'static, App> = EventLoop::try_new()?;
     WaylandSource::new(conn.clone(), queue)
         .insert(event_loop.handle())
         .map_err(|e| e.error.to_string())?;
@@ -85,6 +85,7 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
         window,
         keyboard: None,
         pointer: None,
+        loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
         scale: 1,
         configured: false,
@@ -137,6 +138,7 @@ struct App {
     window: Window,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
     scale: i32,
     configured: bool,
@@ -308,7 +310,13 @@ impl SeatHandler for App {
         let result: Result<(), Error> = match capability {
             Capability::Keyboard if self.keyboard.is_none() => self
                 .seat
-                .get_keyboard(qh, &seat, None)
+                .get_keyboard_with_repeat(
+                    qh,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(|app: &mut App, _, event| app.key(event)),
+                )
                 .map(|k| self.keyboard = Some(k))
                 .map_err(Into::into),
             Capability::Pointer if self.pointer.is_none() => self

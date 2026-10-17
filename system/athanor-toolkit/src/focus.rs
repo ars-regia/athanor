@@ -74,13 +74,13 @@ pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
         Key::Down => best(
             candidates
                 .filter(|(_, c)| c.y >= r.bottom())
-                .map(|(id, c)| (id, (c.y - r.bottom(), dx(&c))))
+                .map(|(id, c)| (id, ((c.y - r.bottom()).round(), dx(&c))))
                 .collect(),
         ),
         Key::Up => best(
             candidates
                 .filter(|(_, c)| c.bottom() <= r.y)
-                .map(|(id, c)| (id, (r.y - c.bottom(), dx(&c))))
+                .map(|(id, c)| (id, ((r.y - c.bottom()).round(), dx(&c))))
                 .collect(),
         ),
         _ => None,
