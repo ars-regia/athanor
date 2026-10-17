@@ -46,11 +46,21 @@ class Failed(Exception):
     """A check could not observe what it checks."""
 
 
+# What a file or a command's output that is missing or not as expected raises.
+UNOBSERVED = (OSError, ValueError, KeyError, TypeError, IndexError)
+
+
 def run(argv):
     """(returncode, stdout, stderr); a missing program reads as 127, a timeout as 124."""
     try:
+        # The C locale: nmcli and others translate the words the checks compare.
         p = subprocess.run(
-            argv, capture_output=True, check=False, text=True, timeout=TIMEOUT
+            argv,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=TIMEOUT,
+            env=os.environ | {"LC_ALL": "C"},
         )
     except FileNotFoundError:
         return 127, "", f"{argv[0]}: not found"
@@ -71,8 +81,9 @@ def need(argv, ok=(0,)):
 
 
 def secure_boot():
+    # Only the bare line: "validation is disabled in shim" or "Setup Mode" may follow it.
     text = need(["mokutil", "--sb-state"]).strip()
-    return ("pass" if "SecureBoot enabled" in text else "fail"), text
+    return ("pass" if text == "SecureBoot enabled" else "fail"), text
 
 
 def booted():
@@ -151,23 +162,24 @@ def usb_internal():
     result = need(
         ["systemctl", "show", "-P", "Result", "athanor-usbguard-internal.service"]
     ).strip()
+    # Devices only: an interface (a name with ':') has no idVendor.
+    devices = [
+        pathlib.Path(p).parent
+        for p in sorted(glob.glob("/sys/bus/usb/devices/*/authorized"))
+        if ":" not in pathlib.Path(p).parent.name
+    ]
     blocked = []
-    for path in sorted(glob.glob("/sys/bus/usb/devices/*/authorized")):
-        device = pathlib.Path(path).parent
-        try:
-            if (device / "authorized").read_text().strip() == "1":
-                continue
+    for device in devices:
+        if (device / "authorized").read_text().strip() != "1":
             ident = ":".join(
                 (device / name).read_text().strip()
                 for name in ("idVendor", "idProduct")
             )
-        except FileNotFoundError:
-            continue  # unplugged while it was read
-        blocked.append(f"{device.name} {ident}")
-    ok = marker.exists() and result == "success" and not blocked
+            blocked.append(f"{device.name} {ident}")
+    ok = marker.exists() and result == "success" and devices and not blocked
     evidence = (
         f"snapshot {'done' if marker.exists() else 'not done'}; unit result {result}; "
-        f"blocked: {', '.join(blocked) or 'none'}"
+        f"{len(devices)} devices, blocked: {', '.join(blocked) or 'none'}"
     )
     return ("pass" if ok else "fail"), evidence
 
@@ -250,7 +262,7 @@ def attempt(check):
         return CHECKS[check]()
     except Failed as e:
         return "fail", f"could not check: {e}"
-    except (OSError, ValueError, KeyError) as e:
+    except UNOBSERVED as e:
         return "fail", f"could not check: {type(e).__name__}: {e}"
 
 
@@ -341,7 +353,9 @@ def read_record(release, machine):
 def write_record(release, machine, record):
     path = record_path(release, machine)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    partial = path.with_suffix(".json.partial")
+    partial.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    partial.replace(path)
 
 
 def now():
@@ -352,8 +366,8 @@ def host():
     facts = {"hostname": socket.gethostname(), "kernel": os.uname().release}
     try:
         deployment = booted()
-    except (Failed, ValueError, KeyError) as e:
-        return facts | {"error": f"no booted deployment: {e}"}
+    except (Failed, *UNOBSERVED) as e:
+        return facts | {"error": f"no booted deployment: {type(e).__name__}: {e}"}
     return facts | {
         "image": deployment.get("container-image-reference", ""),
         "digest": deployment.get("container-image-reference-digest", ""),
@@ -363,6 +377,10 @@ def host():
 
 def cmd_run(matrix, release, machine):
     record = read_record(release, machine)
+    # An interrupted run must not leave rows of an earlier boot under this boot's header.
+    record["rows"] = {
+        k: v for k, v in record["rows"].items() if v.get("how") != "automatic"
+    }
     record.update(release=release, machine=machine, host=host())
     for row in matrix["row"]:
         if "check" not in row or machine not in row["machines"]:

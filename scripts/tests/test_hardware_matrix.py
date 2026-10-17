@@ -118,6 +118,43 @@ class Checks(unittest.TestCase):
         with mock.patch.object(matrix, "run", return_value=missing):
             self.assertEqual(matrix.attempt("secure_boot")[0], "fail")
 
+    def test_secure_boot_passes_only_on_the_bare_line(self):
+        for text, result in (
+            ("SecureBoot enabled\n", "pass"),
+            ("SecureBoot enabled\nSecureBoot validation is disabled in shim\n", "fail"),
+            ("SecureBoot enabled\nPlatform is in Setup Mode\n", "fail"),
+            ("SecureBoot disabled\n", "fail"),
+        ):
+            with mock.patch.object(matrix, "run", return_value=(0, text, "")):
+                self.assertEqual(matrix.secure_boot()[0], result, text)
+
+    def test_no_usb_device_is_not_a_pass(self):
+        with (
+            mock.patch.object(matrix, "run", return_value=(0, "success\n", "")),
+            mock.patch.object(matrix.glob, "glob", return_value=[]),
+            mock.patch.object(matrix.pathlib.Path, "exists", return_value=True),
+        ):
+            result, evidence = matrix.usb_internal()
+        self.assertEqual(result, "fail")
+        self.assertIn("0 devices", evidence)
+
+    def test_run_drops_the_automatic_rows_of_an_earlier_run(self):
+        old = {
+            "rows": {
+                "stale": {"result": "pass", "evidence": "old", "how": "automatic"},
+                "camera": {"result": "pass", "evidence": "seen", "how": "maintainer"},
+            }
+        }
+        written = []
+        with (
+            mock.patch.object(matrix, "read_record", return_value=old),
+            mock.patch.object(matrix, "write_record", side_effect=lambda r, m, rec: written.append(dict(rec["rows"]))),
+            mock.patch.object(matrix, "host", return_value={}),
+            mock.patch.object(matrix, "attempt", return_value=("pass", "seen")),
+        ):
+            matrix.cmd_run(SMALL, "0.9", "desktop")
+        self.assertEqual(set(written[-1]), {"a", "camera"})
+
     def test_an_unreadable_journal_is_not_read_as_no_denial(self):
         with mock.patch.object(matrix, "run", return_value=(0, "", "")):
             result, evidence = matrix.attempt("avc")

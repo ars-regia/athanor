@@ -155,15 +155,8 @@ machines = ["desktop", "laptop"]
 [[row]]
 id = "disk-unlock"
 area = "boot"
-title = "Disk unlock on the generic initramfs (D17)"
-steps = "Boot with the LUKS passphrase typed at the initramfs prompt, then with TPM unlock where it is enrolled; record which of the two the machine has."
-machines = ["desktop", "laptop"]
-
-[[row]]
-id = "compat-profile"
-area = "boot"
-title = "The compatibility boot profile (D45)"
-steps = "Select the compatibility profile in the boot menu: the machine reaches the greeter, and /proc/cmdline carries efi=no_disable_early_pci_dma."
+title = "Disk unlock on the generic initramfs (D17, D42)"
+steps = "Boot with the LUKS passphrase typed at the initramfs prompt; where `athanor-uki-enroll` enrolled TPM plus PIN, boot again with the PIN. Record which methods the machine has (1.0 has no TPM-only unlock, D42)."
 machines = ["desktop", "laptop"]
 
 [[row]]
@@ -232,6 +225,11 @@ reason = "no Thunderbolt dock"
 id = "guests"
 title = "Hyper-V, VMware and Xen guests"
 reason = "no such hypervisor in use; the KVM guest is covered by the VM acceptance"
+
+[[untested]]
+id = "compat-profile"
+title = "The compatibility boot profile of the UKI (D45)"
+reason = "no 1.0 carrier: it comes with the UKI (A2-8, #150)"
 
 [[untested]]
 id = "windows-esp"
