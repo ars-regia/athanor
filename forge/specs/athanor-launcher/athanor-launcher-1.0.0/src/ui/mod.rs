@@ -39,6 +39,7 @@ const CSS: &str = "
 .preview { min-width: 320px; padding: 12px; }
 .section-title { font-size: 0.85em; opacity: 0.7; padding: 8px 8px 2px; }
 .row-subtitle { font-size: 0.85em; opacity: 0.7; }
+row:selected .row-subtitle { opacity: 1; }
 .launcher-footer { font-size: 0.85em; opacity: 0.7; padding-top: 8px; }
 ";
 
