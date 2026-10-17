@@ -194,7 +194,9 @@ capture_layout() {
     done < <(python3 -B "$rig/cases.py" layout --outputs "${RIG_LAYOUT_OUTPUTS:-1}")
 }
 
-capture_chooser() {
+# The chooser's test catalogs, German and the right-to-left pseudo-language, made from the GTK
+# chooser's: both choosers read them.
+stage_chooser_catalogs() {
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
         mkdir -p /out/locale/chooser
@@ -203,6 +205,12 @@ capture_chooser() {
             /repo/forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/po/athanor-layout-chooser.pot \
             /out/chooser-pseudo-rtl.po
         msgfmt -o /out/locale/chooser/rtl.mo /out/chooser-pseudo-rtl.po'
+}
+
+# ATHANOR_CHOOSER_BIN runs another chooser in the GTK chooser's scenes, athanor-toolkit's
+# (doc_own_stack.md, T1 task 4); its captures then differ from the GTK goldens by design.
+capture_chooser() {
+    stage_chooser_catalogs
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         seed_scheme "$out/seed-$tag" "$variant"
@@ -213,23 +221,24 @@ capture_chooser() {
         in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
-            /out/bin/athanor-layout-chooser
+            "${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}"
     done < <(python3 -B "$rig/cases.py" chooser)
 }
 
-# doc_own_stack.md, C1 task 1: athanor-toolkit's chooser under athanor-compositor, mirrored
-# by ATHANOR_RTL for the right-to-left cases. At 1.5 the toolkit draws at 2 and the
-# compositor scales it down.
+# doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
+# athanor-compositor, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
+# the toolkit draws at 2 and the compositor scales it down.
 capture_toolkit_chooser() {
     require athanor-compositor build-compositor
     require athanor-toolkit-chooser build-toolkit
-    while IFS=$'\t' read -r tag _ scale locale _; do
+    stage_chooser_catalogs
+    while IFS=$'\t' read -r tag _ scale locale catalog; do
         tags+=("$tag")
-        rtl=()
-        if [ "${tag##*-}" = rtl ]; then
-            rtl=(ATHANOR_RTL=1)
+        override=()
+        if [ "$catalog" != - ]; then
+            override=(ATHANOR_I18N_CATALOG="/out/locale/chooser/$catalog")
         fi
-        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE="$locale" "${rtl[@]}" \
+        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE="$locale" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             /out/bin/athanor-toolkit-chooser
     done < <(python3 -B "$rig/cases.py" toolkit-chooser)

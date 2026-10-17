@@ -59,13 +59,10 @@ SURFACES = {
     # doc_launcher.md, LA11: the launcher with a query and its preview (plan 3a); the
     # library's 12 cases come with plan 3b.
     "launcher": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
-    # doc_own_stack.md, C1 task 1: athanor-toolkit's chooser under athanor-compositor. The
-    # toolkit has no theme or catalog yet: one variant, English and the mirrored layout.
-    "toolkit-chooser": {
-        "variants": ("light",),
-        "scales": ("1.0", "1.5"),
-        "locales": ("en", "rtl"),
-    },
+    # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
+    # athanor-compositor, in the GTK chooser's catalogs. The toolkit has no dark theme yet:
+    # one variant.
+    "toolkit-chooser": {"variants": ("light",), "scales": ("1.0", "1.5")},
 }
 
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).
