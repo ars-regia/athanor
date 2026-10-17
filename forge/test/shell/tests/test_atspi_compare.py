@@ -96,6 +96,12 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("note: role 'panel'", lines[0])
 
+    def test_an_empty_reference_fails(self):
+        empty = ["the reference holds no element"]
+        self.assertEqual(compare.compare([], REFERENCE)[1], empty)
+        # The application's node alone is not an element either.
+        self.assertEqual(compare.compare(REFERENCE[:1], REFERENCE)[1], empty)
+
 
 if __name__ == "__main__":
     unittest.main()

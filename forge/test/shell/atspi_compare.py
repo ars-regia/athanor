@@ -71,6 +71,9 @@ def compare(reference, transcript):
     """Returns (lines, failures): a verdict per element of the reference, and the failures."""
     candidates = spoken(transcript)
     lines, failures = [], []
+    if not spoken(reference):
+        # A reference that holds nothing would let any transcript pass.
+        return lines, ["the reference holds no element"]
     for ref in spoken(reference):
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = next(

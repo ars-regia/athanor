@@ -53,6 +53,11 @@ class CompareTest(unittest.TestCase):
             ["'Island toggle button': missing"],
         )
 
+    def test_an_empty_reference_fails(self):
+        self.assertEqual(
+            compare.compare([], REFERENCE)[1], ["the reference holds no utterance"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

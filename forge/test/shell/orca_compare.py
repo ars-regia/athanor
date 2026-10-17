@@ -29,6 +29,9 @@ def compare(reference, transcript):
     """Returns (lines, failures) for two lists of utterances."""
     spoken = {heard(utterance): utterance for utterance in transcript}
     lines, failures = [], []
+    if not reference:
+        # A reference that holds nothing would let any transcript pass.
+        return lines, ["the reference holds no utterance"]
     for utterance in dict.fromkeys(reference):
         if utterance in spoken:
             said = spoken[utterance]
