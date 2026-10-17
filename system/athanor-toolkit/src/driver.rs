@@ -147,7 +147,18 @@ struct Ime {
     entered: bool,
     /// We sent `enable` and no `disable` since.
     enabled: bool,
+    /// The `commit` requests sent so far, which a `done` that answers the latest state names.
+    commits: u32,
     pending: Pending,
+}
+
+impl Ime {
+    /// Takes what a `done` applies, and whether its serial answers the latest state we sent:
+    /// text-input-v3 says a `done` with another serial is applied, but must not change the
+    /// object's state.
+    fn done(&mut self, serial: u32) -> (Pending, bool) {
+        (std::mem::take(&mut self.pending), serial == self.commits)
+    }
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -211,7 +222,7 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
-            Event::Done { .. } => app.text_input_done(),
+            Event::Done { serial } => app.text_input_done(serial),
             _ => {}
         }
     }
@@ -252,8 +263,17 @@ struct App {
 }
 
 impl App {
-    /// Hands an event to the application, then redraws and updates the accessibility tree.
+    /// Hands an event to the application, then redraws and updates the accessibility tree and
+    /// the input method.
     fn changed(&mut self, event: Option<Event>) {
+        self.update(event);
+        if !self.exit {
+            self.sync_text_input();
+        }
+    }
+
+    /// Hands an event to the application, then redraws and updates the accessibility tree.
+    fn update(&mut self, event: Option<Event>) {
         match event {
             Some(Event::Window(WindowButton::Minimize)) => self.window.set_minimized(),
             Some(Event::Window(WindowButton::Close)) => {
@@ -267,7 +287,6 @@ impl App {
             self.error = Some(error);
             self.exit = true;
         }
-        self.sync_text_input();
     }
 
     /// Enables the input method while the window has the keyboard and a field the focus, and
@@ -292,17 +311,23 @@ impl App {
             text_input.disable();
         }
         text_input.commit();
+        self.ime.commits = self.ime.commits.wrapping_add(1);
         self.ime.enabled = field.is_some();
     }
 
     /// Applies what the input method sent since the last `done`, in the protocol's order: the
-    /// committed text replaces the preedit, then the new preedit is shown.
-    fn text_input_done(&mut self) {
-        let Pending { preedit, commit } = std::mem::take(&mut self.ime.pending);
+    /// committed text replaces the preedit, then the new preedit is shown. A `done` that
+    /// answers an older state sends no new state; the next one that answers the latest does.
+    fn text_input_done(&mut self, serial: u32) {
+        let (Pending { preedit, commit }, current) = self.ime.done(serial);
         let event = commit.and_then(|text| self.ui.commit(&printable(&text)));
         let (preedit, cursor) = preedit.unwrap_or_default();
         self.ui.compose(&printable(&preedit), cursor);
-        self.changed(event);
+        if current {
+            self.changed(event);
+        } else {
+            self.update(event);
+        }
     }
 
     fn draw(&mut self) -> Result<(), Error> {
@@ -644,3 +669,24 @@ impl ProvidesRegistryState for App {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(App);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_done_answers_the_latest_state_only_with_the_count_of_commits() {
+        let mut ime = Ime {
+            commits: 2,
+            ..Ime::default()
+        };
+        ime.pending.commit = Some("a".into());
+        let (pending, current) = ime.done(1);
+        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        assert!(
+            ime.pending.commit.is_none(),
+            "a stale done still applies its text"
+        );
+        assert!(ime.done(2).1);
+    }
+}
