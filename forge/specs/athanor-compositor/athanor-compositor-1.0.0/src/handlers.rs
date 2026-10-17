@@ -381,7 +381,11 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    /// The clipboard follows the keyboard: only the focused client reads it.
+    /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of
+    /// the selection, and no other client is sent one. An offer a client already holds stays
+    /// readable after it loses the focus, for as long as the selection's source answers:
+    /// Smithay checks no focus on `wl_data_offer.receive` and keeps the offer's object data to
+    /// itself, so the compositor cannot withdraw it.
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| surface.client());
         set_data_device_focus(&self.display_handle, seat, client);
