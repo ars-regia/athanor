@@ -49,6 +49,8 @@ What the platform gives us today:
 
 **SH2. cosmic-comp stays; the dependency has an exit.** We do not write a compositor.
 
+*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor replaces cosmic-comp under the rule of SH1, as `doc_own_stack.md` sets out.*
+
 - A Rust compositor is 2.6–3.3 MB of Rust on top of Smithay's 4.4 MB, and its cost is the hardware matrix, not the first version. A compositor of our own on Smithay would still depend on the maintainer of cosmic-comp, through the library.
 - cosmic-comp is GPL-3 and Smithay is MIT. A fork is always possible, and we only run cosmic-comp as a separate process.
 - **Containment in one crate.** `athanor-compositor-client` is the only crate of the shell that may depend on COSMIC at run time: the `cosmic-*` protocols, `cosmic-client-toolkit`, the `cosmic-config` keys, read by path as `athanor-style` does today because `cosmic-config` is not on crates.io and the workspace allows no git source, any configuration of cosmic-comp the shell writes, such as shortcuts or workspace behaviour, and the reading of `CosmicTheme` for the mode and the accent (SH5), which moves there from `athanor-style`. It is a library that every surface links, not a daemon: each surface keeps its own Wayland connection, and no new IPC surface appears.
