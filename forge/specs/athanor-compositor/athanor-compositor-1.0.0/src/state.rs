@@ -14,7 +14,7 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopSignal, PostAction};
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, DisplayHandle};
-use smithay::utils::{Clock, Logical, Monotonic, Point, Transform};
+use smithay::utils::{Clock, Logical, Monotonic, Point, Serial, Transform};
 use smithay::wayland::compositor::{CompositorClientState, CompositorState};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufState};
@@ -39,6 +39,8 @@ pub struct State {
     pub popups: PopupManager,
     pub seat: Seat<Self>,
     pub output: Output,
+    /// The serial of the newest key or button event sent to a client.
+    pub last_input_serial: Option<Serial>,
     pub backend: WinitGraphicsBackend<GlesRenderer>,
     pub damage_tracker: OutputDamageTracker,
 
@@ -116,6 +118,7 @@ impl State {
             popups: PopupManager::default(),
             seat,
             output,
+            last_input_serial: None,
             backend,
             damage_tracker,
             compositor_state,
@@ -188,6 +191,9 @@ fn listen(
             // holding it would need.
             move |_, _, state| {
                 display.dispatch_clients(state)?;
+                if let Err(error) = state.display_handle.flush_clients() {
+                    tracing::warn!(%error, "the clients could not be flushed");
+                }
                 Ok(PostAction::Continue)
             },
         )

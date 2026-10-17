@@ -17,11 +17,13 @@ impl State {
                 let Some(keyboard) = self.seat.get_keyboard() else {
                     return;
                 };
+                let serial = SERIAL_COUNTER.next_serial();
+                self.last_input_serial = Some(serial);
                 keyboard.input::<(), _>(
                     self,
                     event.key_code(),
                     event.state(),
-                    SERIAL_COUNTER.next_serial(),
+                    serial,
                     Event::time(&event),
                     |_, _, _| FilterResult::Forward,
                 );
@@ -51,6 +53,7 @@ impl State {
                     return;
                 };
                 let serial = SERIAL_COUNTER.next_serial();
+                self.last_input_serial = Some(serial);
                 if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
                     let window = self
                         .space

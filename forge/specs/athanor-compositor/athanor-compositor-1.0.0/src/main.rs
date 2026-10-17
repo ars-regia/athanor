@@ -1,6 +1,8 @@
 //! athanor-compositor: Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone
 //! C1). Task 1 runs nested, on the winit backend, in a parent compositor.
 
+#![forbid(unsafe_code)]
+
 mod handlers;
 mod input;
 mod state;

@@ -9,7 +9,7 @@ use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, Popup
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
-use smithay::reexports::wayland_server::Client;
+use smithay::reexports::wayland_server::{Client, Resource};
 use smithay::utils::{Serial, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
@@ -246,27 +246,38 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation_state
     }
 
-    /// A token is good only when it carries a serial of this seat's keyboard no older than its
-    /// last focus: a client cannot take the focus without the user's input.
+    /// A token is good only when the client that asks for it holds the keyboard focus of this
+    /// seat and names a serial this compositor sent since that focus: a client cannot take the
+    /// focus without the user's input.
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
-        let Some((serial, seat)) = data.serial else {
+        self.xdg_activation_state
+            .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
+        let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
+        let Some(enter) = keyboard.last_enter() else {
+            return false;
+        };
+        let focused = keyboard
+            .current_focus()
+            .and_then(|surface| surface.client())
+            .map(|focused| focused.id());
         Seat::from_resource(&seat).as_ref() == Some(&self.seat)
-            && keyboard
-                .last_enter()
-                .is_some_and(|last| serial.is_no_older_than(&last))
+            && focused == Some(client)
+            && serial_since_focus(serial, enter, self.last_input_serial)
     }
 
     fn request_activation(
         &mut self,
-        _token: XdgActivationToken,
+        token: XdgActivationToken,
         data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
+        // A token activates once.
+        self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
             if let Some(window) = self.window_for(&surface) {
                 self.focus(&window);
@@ -275,4 +286,39 @@ impl XdgActivationHandler for State {
     }
 }
 
+/// Whether `serial` is one this compositor has sent since the keyboard entered the focused
+/// surface at `enter`: no older than `enter`, and no newer than the last key or button event.
+/// Serials wrap, so "older" is the wrapping order Smithay's `Serial` compares in.
+fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>) -> bool {
+    let newest = last_input
+        .filter(|last| last.is_no_older_than(&enter))
+        .unwrap_or(enter);
+    serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
+}
+
 smithay::delegate_dispatch2!(State);
+
+#[cfg(test)]
+mod tests {
+    use super::serial_since_focus;
+    use smithay::utils::Serial;
+
+    #[test]
+    fn only_a_serial_sent_since_the_focus_is_accepted() {
+        let s = Serial::from;
+        // Focus entered at 10; the last key or button event carried 14.
+        assert!(serial_since_focus(s(10), s(10), Some(s(14))));
+        assert!(serial_since_focus(s(12), s(10), Some(s(14))));
+        assert!(serial_since_focus(s(14), s(10), Some(s(14))));
+        // Before the focus, or never sent.
+        assert!(!serial_since_focus(s(9), s(10), Some(s(14))));
+        assert!(!serial_since_focus(s(15), s(10), Some(s(14))));
+        assert!(!serial_since_focus(s(0x4000_0000), s(7), Some(s(14))));
+        // No input since the focus: only the focus serial itself.
+        assert!(serial_since_focus(s(10), s(10), Some(s(4))));
+        assert!(!serial_since_focus(s(11), s(10), None));
+        // Across the wrap of the counter.
+        assert!(serial_since_focus(s(2), s(u32::MAX - 1), Some(s(3))));
+        assert!(!serial_since_focus(s(4), s(u32::MAX - 1), Some(s(3))));
+    }
+}
