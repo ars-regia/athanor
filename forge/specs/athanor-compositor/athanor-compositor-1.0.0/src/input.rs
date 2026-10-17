@@ -1,7 +1,8 @@
 //! Input from the backend to the seat: keys to the focused surface, the pointer to the surface
-//! under it, a click focuses the window it lands on.
+//! under it, a click focuses the window it lands on, or the layer surface that asks for the
+//! keyboard on demand.
 
-use crate::state::State;
+use crate::state::{State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
@@ -51,12 +52,10 @@ impl State {
                     return;
                 };
                 if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-                    let window = self
-                        .space
-                        .element_under(pointer.current_location())
-                        .map(|(w, _)| w.clone());
-                    if let Some(window) = window {
-                        self.focus(&window);
+                    match self.under(pointer.current_location()) {
+                        Some((Under::Window(window), _)) => self.focus(&window),
+                        Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
+                        None => {}
                     }
                 }
                 // After the focus: the button's serial is then newer than the keyboard's enter,

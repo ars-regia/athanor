@@ -52,3 +52,10 @@ ATHANOR_RENDER_NODE=/dev/dri/renderD128 cargo test -p athanor-compositor -- --ig
 
 `forge/test/shell/rig.sh compositor-soak` runs it headless on Pixman in the rig for ten minutes,
 under a GTK4 client (`gtk_animation.py`) and `eglgears_wayland` on llvmpipe.
+
+Task 3 adds `wlr-layer-shell` (`src/layer.rs`): the four layers of each output, their exclusive
+zones, which windows are placed inside, and `xdg_popup`s parented to a layer surface. The
+keyboard follows `keyboard_interactivity`: an exclusive surface on the top or overlay layer
+holds it while mapped, an on-demand one takes it on a click, and one with none never gets it.
+A popup grab is honoured only for a client that already holds the pointer or the keyboard.
+Every client may bind the protocol until task 5 grants the top and overlay layers by identity.

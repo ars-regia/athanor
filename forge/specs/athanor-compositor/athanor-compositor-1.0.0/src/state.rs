@@ -14,7 +14,9 @@ use smithay::desktop::utils::{
     surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
     update_surface_primary_scanout_output, OutputPresentationFeedback,
 };
-use smithay::desktop::{PopupManager, Space, Window, WindowSurfaceType};
+use smithay::desktop::{
+    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+};
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
@@ -27,7 +29,7 @@ use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
-use smithay::wayland::compositor::{CompositorClientState, CompositorState};
+use smithay::wayland::compositor::{CompositorClientState, CompositorState, SurfaceData};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
@@ -35,6 +37,7 @@ use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
@@ -67,6 +70,7 @@ pub struct State {
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
+    pub layer_shell_state: WlrLayerShellState,
     pub shm_state: ShmState,
     pub seat_state: SeatState<Self>,
     pub dmabuf_state: DmabufState,
@@ -97,6 +101,8 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
+        // ponytail: every client may bind it; task 5 grants the top and overlay layers by identity (OS4).
+        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
@@ -129,6 +135,7 @@ impl State {
             backend,
             compositor_state,
             xdg_shell_state,
+            layer_shell_state,
             shm_state,
             seat_state,
             dmabuf_state: DmabufState::new(),
@@ -162,12 +169,31 @@ impl State {
         self.space.map_output(output, (x, 0));
     }
 
-    /// The area of the first output: where windows are placed and the pointer moves.
+    /// The area of the first output: where the pointer moves.
     pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
         self.space
             .outputs()
             .next()
             .and_then(|output| self.space.output_geometry(output))
+    }
+
+    /// What the layer surfaces' exclusive zones leave of the first output: where windows are
+    /// placed.
+    pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
+        let output = self.space.outputs().next()?;
+        let mut area = self.space.output_geometry(output)?;
+        // The layer map lays the output out at its logical size rounded, the space at its
+        // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
+        // fractional scale with no zone places windows as the whole output does.
+        let laid_out = output.current_mode().map(|mode| {
+            let size = mode.size.to_f64().to_logical(output.current_scale().fractional_scale());
+            output.current_transform().transform_size(size.to_i32_round())
+        })?;
+        let zone = layer_map_for_output(output).non_exclusive_zone();
+        let far = laid_out.to_point() - zone.loc - zone.size.to_point();
+        area.loc += zone.loc;
+        area.size -= (zone.loc + far).to_size();
+        Some(area)
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -191,28 +217,33 @@ impl State {
         frame_target: Time<Monotonic>,
         period: Duration,
     ) {
+        // Collected: the output's layer map is not held while the surfaces are visited.
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        let scanout = |surface: &WlSurface, surface_states: &SurfaceData| {
+            update_surface_primary_scanout_output(
+                surface,
+                output,
+                surface_states,
+                None,
+                states,
+                default_primary_scanout_output_compare,
+            );
+        };
         for window in self.space.elements() {
-            window.with_surfaces(|surface, surface_states| {
-                update_surface_primary_scanout_output(
-                    surface,
-                    output,
-                    surface_states,
-                    None,
-                    states,
-                    default_primary_scanout_output_compare,
-                );
-            });
+            window.with_surfaces(scanout);
+        }
+        for layer in &layers {
+            layer.with_surfaces(scanout);
         }
         if damaged {
             let mut feedback = OutputPresentationFeedback::new(output);
+            let flags =
+                |surface: &WlSurface, _: &SurfaceData| surface_presentation_feedback_flags_from_states(surface, None, states);
             for window in self.space.elements() {
-                window.take_presentation_feedback(
-                    &mut feedback,
-                    surface_primary_scanout_output,
-                    |surface, _| {
-                        surface_presentation_feedback_flags_from_states(surface, None, states)
-                    },
-                );
+                window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+            }
+            for layer in &layers {
+                layer.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
             }
             feedback.presented(
                 frame_target,
@@ -222,14 +253,36 @@ impl State {
             );
         }
         // A surface on no output yet, or shown on another one, still gets a frame each second.
+        let throttle = Some(Duration::from_secs(1));
         for window in self.space.elements() {
-            window.send_frame(
-                output,
-                frame_target,
-                Some(Duration::from_secs(1)),
-                surface_primary_scanout_output,
-            );
+            window.send_frame(output, frame_target, throttle, surface_primary_scanout_output);
         }
+        for layer in &layers {
+            layer.send_frame(output, frame_target, throttle, surface_primary_scanout_output);
+        }
+    }
+
+    /// What is under `pos`, with its origin in the space, in the order the outputs are drawn
+    /// from the top: the overlay and top layers, the windows, the bottom and background layers.
+    pub fn under(&self, pos: Point<f64, Logical>) -> Option<(Under, Point<i32, Logical>)> {
+        let output = self.space.output_under(pos).next()?;
+        let origin = self.space.output_geometry(output)?.loc;
+        let map = layer_map_for_output(output);
+        let on = |layer| {
+            let surface = map.layer_under(layer, pos - origin.to_f64())?;
+            let location = map.layer_geometry(surface)?.loc + origin;
+            Some((Under::Layer(surface.clone()), location))
+        };
+        let found = on(Layer::Overlay)
+            .or_else(|| on(Layer::Top))
+            .or_else(|| {
+                self.space
+                    .element_under(pos)
+                    .map(|(window, location)| (Under::Window(window.clone()), location))
+            })
+            .or_else(|| on(Layer::Bottom))
+            .or_else(|| on(Layer::Background));
+        found
     }
 
     /// The surface under `pos`, with its origin in the space.
@@ -237,13 +290,13 @@ impl State {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(s, p)| (s, (p + location).to_f64()))
-            })
+        let (under, origin) = self.under(pos)?;
+        let local = pos - origin.to_f64();
+        let found = match &under {
+            Under::Layer(layer) => layer.surface_under(local, WindowSurfaceType::ALL),
+            Under::Window(window) => window.surface_under(local, WindowSurfaceType::ALL),
+        };
+        found.map(|(surface, at)| (surface, (at + origin).to_f64()))
     }
 
     /// The mapped window whose toplevel is `surface`.
@@ -253,6 +306,12 @@ impl State {
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
     }
+}
+
+/// What the pointer can find under it.
+pub enum Under {
+    Layer(LayerSurface),
+    Window(Window),
 }
 
 /// A new output with its global: `size` in pixels, refreshed at `refresh` mHz.

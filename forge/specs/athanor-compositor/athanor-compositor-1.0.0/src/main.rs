@@ -7,6 +7,7 @@
 mod handlers;
 mod headless;
 mod input;
+mod layer;
 mod state;
 mod winit;
 
