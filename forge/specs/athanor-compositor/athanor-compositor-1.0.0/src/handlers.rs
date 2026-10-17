@@ -4,7 +4,11 @@
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
-use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, Window};
+use smithay::desktop::{
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
+    PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
+};
+use smithay::input::pointer::Focus;
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
@@ -12,7 +16,7 @@ use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{Serial, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
@@ -98,6 +102,7 @@ impl CompositorHandler for State {
                 self.place(&window);
             }
         }
+        self.layer_commit(surface);
 
         // The first commit of a toplevel or a popup gets its initial configure.
         if let Some(toplevel) = self.window_for(surface).as_ref().and_then(Window::toplevel) {
@@ -225,7 +230,8 @@ impl State {
         });
     }
 
-    /// Centres a window on the output at its first commit with a size. It takes the keyboard
+    /// Centres a window, at its first commit with a size, in what the layer surfaces' exclusive
+    /// zones leave of the output. It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
     /// user's input, so a client cannot take the focus from another by opening one.
     fn place(&mut self, window: &Window) {
@@ -233,7 +239,7 @@ impl State {
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
             return;
         }
-        let Some(area) = self.output_area() else {
+        let Some(area) = self.window_area() else {
             return;
         };
         if !window.user_data().insert_if_missing(|| Placed) {
@@ -257,7 +263,8 @@ impl State {
         }
     }
 
-    /// Raises `window`, activates it and gives it the keyboard; the others are deactivated.
+    /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
+    /// the keyboard exclusively; the others are deactivated.
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
         for other in self.space.elements() {
@@ -266,32 +273,86 @@ impl State {
                 toplevel.send_pending_configure();
             }
         }
-        if let (Some(keyboard), Some(toplevel)) = (self.seat.get_keyboard(), window.toplevel()) {
-            let surface = toplevel.wl_surface().clone();
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let target = self
+            .exclusive_layer()
+            .or_else(|| window.toplevel().map(|t| t.wl_surface().clone()));
+        if let Some(surface) = target {
             keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
         }
     }
 
-    /// Keeps a popup inside the output.
-    fn unconstrain_popup(&self, popup: &PopupSurface) {
+    /// When `gone`, a destroyed window or a layer surface that gave the keyboard up, held the
+    /// keyboard, the keyboard goes to the surface that holds it exclusively, else to the top
+    /// window left that the user can see, so that the next window a client maps does not find
+    /// it free (`place`): placed, and still drawing something, since a client can unmap a
+    /// placed window by committing a null buffer.
+    pub fn refocus(&mut self, gone: &WlSurface) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard
+            .current_focus()
+            .is_some_and(|focus| focus.is_alive() && &focus != gone)
+        {
+            return;
+        }
+        if let Some(surface) = self.exclusive_layer() {
+            self.focus_exclusive(surface);
+            return;
+        }
+        let top = self
+            .space
+            .elements()
+            .rev()
+            .find(|window| {
+                let size = window.geometry().size;
+                window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
+            })
+            .cloned();
+        match top {
+            Some(window) => self.focus(&window),
+            None => keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial()),
+        }
+    }
+
+    /// Keeps a popup inside the output its root, a window or a layer surface, is shown on.
+    pub fn unconstrain_popup(&self, popup: &PopupSurface) {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self.window_for(&root) else {
-            return;
-        };
-        let (Some(output), Some(window)) =
-            (self.output_area(), self.space.element_geometry(&window))
-        else {
+        let Some((origin, output)) = self.popup_root_place(&root) else {
             return;
         };
         // Relative to the popup's parent.
         let mut target = output;
         target.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(popup.clone()));
-        target.loc -= window.loc;
+        target.loc -= origin;
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
+    }
+
+    /// The origin in the space of a popup's root, a window or a layer surface, and the area of
+    /// the output it is shown on.
+    fn popup_root_place(
+        &self,
+        root: &WlSurface,
+    ) -> Option<(Point<i32, Logical>, Rectangle<i32, Logical>)> {
+        if let Some(window) = self.window_for(root) {
+            return Some((
+                self.space.element_geometry(&window)?.loc,
+                self.output_area()?,
+            ));
+        }
+        self.space.outputs().find_map(|output| {
+            let area = self.space.output_geometry(output)?;
+            let map = layer_map_for_output(output);
+            let layer = map.layer_for_surface(root, WindowSurfaceType::TOPLEVEL)?;
+            Some((map.layer_geometry(layer)?.loc + area.loc, area))
+        })
     }
 }
 
@@ -321,32 +382,8 @@ impl XdgShellHandler for State {
         if let Some(window) = self.window_for(surface.wl_surface()) {
             self.space.unmap_elem(&window);
         }
-        // The keyboard does not leave a destroyed window by itself. It goes to the top window
-        // left that the user can see, so that the next window a client maps does not find it
-        // free (`place`): placed, and still drawing something, since a client can unmap a
-        // placed window by committing a null buffer.
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return;
-        };
-        if keyboard
-            .current_focus()
-            .is_some_and(|focus| focus.is_alive() && &focus != surface.wl_surface())
-        {
-            return;
-        }
-        let top = self
-            .space
-            .elements()
-            .rev()
-            .find(|window| {
-                let size = window.geometry().size;
-                window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
-            })
-            .cloned();
-        match top {
-            Some(window) => self.focus(&window),
-            None => keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial()),
-        }
+        // The keyboard does not leave a destroyed window by itself.
+        self.refocus(surface.wl_surface());
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -370,8 +407,69 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
     }
 
-    // ponytail: no popup grab; menus that need one arrive with the shell's popovers (task 3).
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
+    /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
+    /// does. Only a client the user is with gets one, and only for an input event the user
+    /// made: it names the serial of the last button press sent to it, while it holds the
+    /// pointer, or of the last key press or release sent to it, while it holds the keyboard
+    /// (`GrabSerials`, as mutter checks them). A client cannot take the keyboard from another
+    /// by opening a popup. The grab's end hands the keyboard to the popups' root, so the grab
+    /// takes the keyboard only when that root can keep it: never for a layer surface whose
+    /// interactivity is `none`, a bar, and while a layer surface holds the keyboard
+    /// exclusively only for its own popups; any other grab takes the pointer only. A grab
+    /// refused leaves the popup shown without it, as a popover a client opens at start is.
+    fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<Self>::from_resource(&seat) else {
+            return;
+        };
+        let popup = PopupKind::Xdg(surface);
+        let Ok(root) = find_popup_root_surface(&popup) else {
+            return;
+        };
+        let (keyboard, pointer) = (seat.get_keyboard(), seat.get_pointer());
+        let Some(client) = root.client().map(|client| client.id()) else {
+            return;
+        };
+        let held = |focus: Option<WlSurface>| {
+            focus
+                .and_then(|surface| surface.client())
+                .is_some_and(|holder| holder.id() == client)
+        };
+        let clicked = self.grab_serials.clicked(serial, &client)
+            && pointer.as_ref().is_some_and(|p| held(p.current_focus()));
+        let typed = self.grab_serials.typed(serial, &client)
+            && keyboard.as_ref().is_some_and(|k| held(k.current_focus()));
+        if !(clicked || typed) {
+            return;
+        }
+        // The grab's end hands the keyboard to the popups' root: the grab takes it only when the
+        // root can keep it, and while a surface holds it exclusively only when that surface is
+        // the root, so that it comes back to a surface that keeps it.
+        let takes_keyboard = self.takes_keyboard(&root)
+            && !self
+                .exclusive_layer()
+                .is_some_and(|surface| surface != root);
+        let Ok(mut grab) = self.popups.grab_popup(root, popup, &seat, serial) else {
+            return;
+        };
+        if let Some(keyboard) = keyboard.filter(|_| takes_keyboard) {
+            let previous = grab.previous_serial().unwrap_or(serial);
+            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
+            {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            keyboard.set_focus(self, grab.current_grab(), serial);
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        }
+        if let Some(pointer) = pointer {
+            let previous = grab.previous_serial().unwrap_or_else(|| grab.serial());
+            if pointer.is_grabbed() && !(pointer.has_grab(serial) || pointer.has_grab(previous)) {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        }
+    }
 }
 
 impl SeatHandler for State {

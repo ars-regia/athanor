@@ -1,13 +1,15 @@
 //! Input from the backend to the seat: keys to the focused surface, the pointer to the surface
-//! under it, a click focuses the window it lands on.
+//! under it, a click focuses the window it lands on, or the layer surface that asks for the
+//! keyboard on demand.
 
-use crate::state::State;
+use crate::state::{State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
 };
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::SERIAL_COUNTER;
 
 impl State {
@@ -19,6 +21,14 @@ impl State {
                 };
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                let to = keyboard
+                    .current_focus()
+                    .and_then(|surface| surface.client());
+                let sent = to.map(|client| (serial, client.id()));
+                match event.state() {
+                    KeyState::Pressed => self.grab_serials.key_press = sent,
+                    KeyState::Released => self.grab_serials.key_release = sent,
+                }
                 keyboard.input::<(), _>(
                     self,
                     event.key_code(),
@@ -51,18 +61,20 @@ impl State {
                     return;
                 };
                 if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-                    let window = self
-                        .space
-                        .element_under(pointer.current_location())
-                        .map(|(w, _)| w.clone());
-                    if let Some(window) = window {
-                        self.focus(&window);
+                    match self.under(pointer.current_location()) {
+                        Some((Under::Window(window), _)) => self.focus(&window),
+                        Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
+                        None => {}
                     }
                 }
                 // After the focus: the button's serial is then newer than the keyboard's enter,
                 // so a token made from the click that focused a window is in range.
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                if event.state() == ButtonState::Pressed {
+                    let to = pointer.current_focus().and_then(|surface| surface.client());
+                    self.grab_serials.button = to.map(|client| (serial, client.id()));
+                }
                 pointer.button(
                     self,
                     &ButtonEvent {

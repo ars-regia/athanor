@@ -8,6 +8,7 @@ use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::winit::{WinitEvent, WinitGraphicsBackend};
+use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::render_output;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::EventLoop;
@@ -70,6 +71,7 @@ pub fn start(
                         .output
                         .change_current_state(Some(mode), None, None, None);
                     nested.output.set_preferred(mode);
+                    layer_map_for_output(&nested.output).arrange();
                 }
             }
             WinitEvent::Input(event) => state.process_input_event(event),

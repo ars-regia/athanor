@@ -53,12 +53,13 @@ fn background(px: &[u8; 4]) -> bool {
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Every global the compositor offers on every backend.
-const GLOBALS: [&str; 12] = [
+const GLOBALS: [&str; 13] = [
     "wl_compositor",
     "wl_subcompositor",
     "wl_shm",
     "wl_seat",
     "xdg_wm_base",
+    "zwlr_layer_shell_v1",
     "zxdg_output_manager_v1",
     "wp_viewporter",
     "wp_fractional_scale_manager_v1",
