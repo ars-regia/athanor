@@ -7,7 +7,10 @@ showing interactive widget has no name, or when fewer interactive widgets than e
 are found, which is what an empty or missing tree looks like. With ATSPI_REQUIRED_NAME
 set, a showing node must carry that name: the greeter's seal says its badge so (section 7,
 item 3). An environment variable, because scene.sh splits RIG_HOLD on spaces.
+With ATSPI_TRANSCRIPT set, the tree is also written there as JSON, every node with its role,
+name, states and value, for atspi_compare.py (doc_own_stack.md, OS8).
 """
+import json
 import os
 import sys
 import time
@@ -43,6 +46,28 @@ def walk(accessible, Atspi, depth=0, out=None):
     return out
 
 
+def value_of(accessible, Atspi):
+    """What a screen reader reads as the node's value: a number, or the text of an entry."""
+    if accessible.get_value_iface() is not None:
+        return str(Atspi.Value.get_current_value(accessible))
+    if accessible.get_editable_text_iface() is not None:
+        return Atspi.Text.get_text(accessible, 0, Atspi.Text.get_character_count(accessible))
+    return ""
+
+
+def transcript(accessible, Atspi, depth=0, out=None):
+    """Every node, depth first: its role, name, sorted state names and value."""
+    out = [] if out is None else out
+    states = sorted(state.value_nick for state in accessible.get_state_set().get_states())
+    out.append({"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
+                "states": states, "value": value_of(accessible, Atspi)})
+    for index in range(accessible.get_child_count()):
+        child = accessible.get_child_at_index(index)
+        if child is not None:
+            transcript(child, Atspi, depth + 1, out)
+    return out
+
+
 def find_application(Atspi, name, seconds=20):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -72,6 +97,11 @@ def main(argv):
         print(f"{'  ' * depth}{role}: {name!r}{'' if showing else ' (hidden)'}")
     found = problems([(role, name, showing) for role, name, showing, _ in tree], int(argv[1]),
                      [name for name in [os.environ.get("ATSPI_REQUIRED_NAME", "")] if name])
+    path = os.environ.get("ATSPI_TRANSCRIPT", "")
+    if path:
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(transcript(app, Atspi), file, ensure_ascii=False, indent=1)
+            file.write("\n")
     for line in found:
         print(f"FAIL {line}", file=sys.stderr)
     return 1 if found else 0

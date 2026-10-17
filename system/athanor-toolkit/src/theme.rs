@@ -21,6 +21,8 @@ pub struct Theme {
     /// Text and marks drawn on the accent.
     pub on_accent: Rgba,
     pub border: Rgba,
+    /// The title bar the window draws itself: Calmo's `bar` token, light variant.
+    pub title_bar: Rgba,
     /// The focus ring around the focused widget.
     pub focus: Rgba,
     pub font_size: f32,
@@ -40,6 +42,7 @@ impl Default for Theme {
             accent: Rgba::rgb(0x81, 0x3d, 0x9c),
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
             border: Rgba::rgb(0xc0, 0xbf, 0xbc),
+            title_bar: Rgba::rgb(0xfb, 0xfc, 0xfd),
             focus: Rgba::rgb(0x81, 0x3d, 0x9c),
             font_size: 15.0,
             padding: 10.0,

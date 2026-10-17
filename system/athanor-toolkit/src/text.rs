@@ -108,7 +108,12 @@ impl TextField {
     }
 
     /// Shows the input method's preedit; an empty preedit ends the composition without text.
+    /// `cursor` is a byte range in the preedit; one that does not fall on its characters'
+    /// boundaries hides the caret instead.
     pub fn compose(&mut self, cx: &mut TextContext, preedit: &str, cursor: Option<(usize, usize)>) {
+        let cursor = cursor.filter(|&(start, end)| {
+            start <= end && preedit.is_char_boundary(start) && preedit.is_char_boundary(end)
+        });
         let mut driver = self.editor.driver(&mut cx.fonts, &mut cx.layouts);
         if preedit.is_empty() {
             driver.clear_compose();
@@ -168,6 +173,13 @@ mod tests {
         field.compose(&mut cx, "", None);
         assert!(!field.is_composing());
         assert_eq!(field.text(), "axéb");
+
+        // A cursor from outside that splits a character, or runs backwards, is not trusted.
+        for cursor in [(1, 1), (0, 9), (2, 0)] {
+            field.compose(&mut cx, "é", Some(cursor));
+            assert_eq!(field.shown(), "axééb", "{cursor:?}");
+        }
+        field.compose(&mut cx, "", None);
 
         field.set_text("שלום");
         assert_eq!(field.text(), "שלום");
