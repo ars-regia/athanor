@@ -1,5 +1,7 @@
+import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -59,6 +61,91 @@ class FirstFrameTest(unittest.TestCase):
             "[1.2]  -> wl_surface@20.commit()",
         ]
         self.assertEqual(first_frame(lines), [])
+
+    def test_the_first_xdg_surface_is_the_window(self):
+        lines = [
+            "[1.0]  -> xdg_wm_base@8.get_xdg_surface(new id xdg_surface@21, wl_surface@20)",
+            "[1.1]  -> xdg_wm_base@8.get_xdg_surface(new id xdg_surface@31, wl_surface@30)",
+            "[1.2]  -> wl_surface@30.attach(wl_buffer@35, 0, 0)",
+            "[1.3]  -> wl_surface@30.commit()",
+            "[1.4]  -> wl_surface@20.attach(wl_buffer@36, 0, 0)",
+            "[1.5]  -> wl_surface@20.commit()",
+        ]
+        self.assertEqual(first_frame(lines), [5])
+
+    def test_discarded_messages_are_ignored(self):
+        lines = [
+            "[1.0]  -> xdg_wm_base#8.get_xdg_surface(new id xdg_surface#21, wl_surface#20)",
+            "[1.1]  -> wl_surface#20.attach(wl_buffer#35, 0, 0)",
+            "[1.2] {Default Queue} [discarded]  -> wl_surface#20.commit()",
+            "[1.3] [discarded]  -> wl_surface#20.commit()",
+        ]
+        self.assertEqual(first_frame(lines), [])
+
+    def test_the_window_buffer_size_from_shm_or_dmabuf(self):
+        for create, size in [
+            (
+                "wl_shm_pool#12.create_buffer(new id wl_buffer#35, 0, 448, 326, 1792, 0)",
+                (448, 326),
+            ),
+            (
+                "wl_shm_pool@12.create_buffer(wl_buffer@35, 4096, 420, 293, 1680, 0)",
+                (420, 293),
+            ),
+            (
+                "zwp_linux_buffer_params_v1#40.create_immed(new id wl_buffer#35, 840, 586, 875708993, 0)",
+                (840, 586),
+            ),
+        ]:
+            frame = measure_chooser.FirstFrame()
+            for line in [
+                "[1.0]  -> xdg_wm_base#8.get_xdg_surface(new id xdg_surface#21, wl_surface#20)",
+                f"[1.1]  -> {create}",
+                "[1.2]  -> wl_surface#20.attach(wl_buffer#35, 0, 0)",
+                "[1.3]  -> wl_surface#20.commit()",
+            ]:
+                frame.feed(line)
+            self.assertEqual((frame.done, frame.size), (True, size), create)
+
+
+class ProcessTest(unittest.TestCase):
+    def test_a_client_that_exits_is_reported_at_once(self):
+        start = time.monotonic()
+        with self.assertRaisesRegex(
+            RuntimeError, "exited with 3 before its first frame"
+        ):
+            measure_chooser.first_frame(["sh", "-c", "exit 3"], timeout=20)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_a_client_that_ignores_terminate_is_killed(self):
+        proc = measure_chooser.spawn(["sh", "-c", "trap '' TERM; sleep 60"], os.environ)
+        time.sleep(0.2)  # let the shell install its trap
+        start = time.monotonic()
+        measure_chooser.stop(proc, grace=0.5)
+        self.assertEqual(proc.returncode, -9)
+        self.assertLess(time.monotonic() - start, 5)
+
+    def test_a_client_that_exits_before_the_memory_reading_is_reported(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "exited with 0 before the memory reading"
+        ):
+            measure_chooser.resident(["true"], after=10)
+
+    def test_shared_objects_are_counted_once_per_file_and_deleted_ones_left_out(self):
+        with tempfile.TemporaryDirectory() as root:
+            lib = Path(root) / "libx.so.1"
+            lib.write_bytes(b"x" * 10)
+            (Path(root) / "libx.so").symlink_to(lib.name)
+            maps = "\n".join(
+                [
+                    f"7f00-7f01 r--p 00000000 00:1f 42 {lib}",
+                    f"7f01-7f02 r-xp 00001000 00:1f 42 {lib}",
+                    f"7f02-7f03 r--p 00000000 00:1f 42 {Path(root) / 'libx.so'}",
+                    f"7f03-7f04 r--p 00000000 00:1f 43 {Path(root) / 'liby.so'} (deleted)",
+                    "7f04-7f05 rw-p 00000000 00:00 0 [heap]",
+                ]
+            )
+            self.assertEqual(list(measure_chooser.shared_objects(maps).values()), [10])
 
 
 class CountTest(unittest.TestCase):

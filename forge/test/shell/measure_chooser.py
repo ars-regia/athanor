@@ -3,8 +3,8 @@
 
   measure_chooser.py run <binary> <out.json> [runs]
       Inside a scene (rig.sh measure-chooser runs it as RIG_HOLD): the stripped size of
-      <binary>, its start-up time to the first frame over [runs] launches (5), and its
-      resident memory one minute after the last launch.
+      <binary>, its start-up time to the first frame and its window's buffer over [runs] traced
+      launches (5), and its memory one minute after one more launch, untraced.
   measure_chooser.py lines <toolkit-dir>
       The toolkit's lines, split by area, counted as tokei counts code, comments and blanks.
   measure_chooser.py report <toolkit-dir> <out.json>...
@@ -14,7 +14,8 @@ Start-up time to the first frame: from the exec of the binary to the first `wl_s
 of the window's surface (the one given to `xdg_wm_base.get_xdg_surface`) after an `attach` of a
 non-null buffer, as the client's own WAYLAND_DEBUG=1 trace sends it: libwayland prints it for
 GTK, wayland-backend for the toolkit. The clock is this script's monotonic clock when the line
-arrives on the client's stderr. Both clients pay the same tracing cost.
+arrives on the client's stderr. Tracing slows both clients by a similar amount, which is not
+measured; the memory is read in a launch without it.
 """
 
 import json
@@ -36,6 +37,10 @@ FIRST_FRAME_TIMEOUT_S = 30
 # 1.24) or wayland-backend's "[ts] -> iface@id.req(args)".
 REQUEST = re.compile(r" -> (\w+)[@#](\d+)\.(\w+)\((.*)\)\s*$")
 OBJECT = re.compile(r"(\w+)[@#](\d+)")
+# The requests that make a wl_buffer, and where its width and height sit among the arguments
+# that follow the new buffer: wl_shm_pool's (offset, width, height, stride, format) and
+# linux-dmabuf's (width, height, format, flags).
+BUFFER_SIZE = {"create_buffer": 1, "create_immed": 0}
 
 # Each source file of the toolkit belongs to one area; a new file must be placed here.
 AREAS = {
@@ -58,30 +63,41 @@ class FirstFrame:
     """Feed it trace lines; `done` turns true on the window's first commit with a buffer."""
 
     def __init__(self):
-        self.window = None  # the wl_surface id of the xdg_surface
-        self.attached = (
-            set()
-        )  # wl_surface ids with a non-null buffer attached, not yet committed
+        self.window = None  # the wl_surface id of the first xdg_surface
+        self.buffers = {}  # wl_buffer id: (width, height)
+        self.attached = {}  # wl_surface id: the wl_buffer attached, not yet committed
+        self.size = None  # the window's buffer at its first frame, (width, height)
         self.done = False
 
     def feed(self, line):
         match = REQUEST.search(line)
-        if not match or self.done:
+        # libwayland marks the messages of a destroyed proxy "[discarded]": never sent.
+        if not match or self.done or "[discarded]" in line:
             return self.done
         interface, oid, request, args = match.groups()
+        objects = OBJECT.findall(args)
         if interface == "xdg_wm_base" and request == "get_xdg_surface":
-            surfaces = [o for i, o in OBJECT.findall(args) if i == "wl_surface"]
-            if surfaces:
+            surfaces = [o for i, o in objects if i == "wl_surface"]
+            if surfaces and self.window is None:
                 self.window = surfaces[0]
+        elif request in BUFFER_SIZE and objects and objects[0][0] == "wl_buffer":
+            after = args.split(objects[0][1], 1)[1].split(",")[1:]
+            first = BUFFER_SIZE[request]
+            size = [a.strip() for a in after[first : first + 2]]
+            # Anything else is a trace this parser does not know: the size stays unknown.
+            if len(size) == 2 and all(a.isdigit() for a in size):
+                self.buffers[objects[0][1]] = (int(size[0]), int(size[1]))
         elif interface == "wl_surface" and request == "attach":
             buffer = OBJECT.match(args.strip())
             if buffer and buffer.group(1) == "wl_buffer" and buffer.group(2) != "0":
-                self.attached.add(oid)
+                self.attached[oid] = buffer.group(2)
             else:
-                self.attached.discard(oid)
+                self.attached.pop(oid, None)
         elif interface == "wl_surface" and request == "commit":
-            self.done = oid == self.window and oid in self.attached
-            self.attached.discard(oid)
+            buffer = self.attached.pop(oid, None)
+            self.done = oid == self.window and buffer is not None
+            if self.done:
+                self.size = self.buffers.get(buffer)
         return self.done
 
 
@@ -92,30 +108,48 @@ def stripped_size(binary):
         return target.stat().st_size
 
 
-def memory(pid):
-    status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
-    rss = int(re.search(r"^VmRSS:\s+(\d+) kB", status, re.MULTILINE).group(1))
-    rollup = Path(f"/proc/{pid}/smaps_rollup").read_text(encoding="utf-8")
-    pss = int(re.search(r"^Pss:\s+(\d+) kB", rollup, re.MULTILINE).group(1))
-    objects = set()
-    for line in Path(f"/proc/{pid}/maps").read_text(encoding="utf-8").splitlines():
+def kilobytes(path, field):
+    text = Path(path).read_text(encoding="utf-8")
+    match = re.search(rf"^{field}:\s+(\d+) kB", text, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"no {field} in {path}")
+    return int(match.group(1))
+
+
+def shared_objects(maps):
+    """The distinct shared objects in a /proc/<pid>/maps text, one per file even when mapped
+    under two paths, as {(st_dev, st_ino): size}. A file deleted since it was mapped is left
+    out: its size on disk is gone."""
+    found = {}
+    for line in maps.splitlines():
         fields = line.split(maxsplit=5)
-        if len(fields) == 6 and ".so" in Path(fields[5]).name:
-            objects.add(fields[5])
+        if (
+            len(fields) < 6
+            or fields[5].endswith(" (deleted)")
+            or ".so" not in Path(fields[5]).name
+        ):
+            continue
+        try:
+            st = os.stat(fields[5])
+        except FileNotFoundError:
+            continue
+        found[(st.st_dev, st.st_ino)] = st.st_size
+    return found
+
+
+def memory(pid):
+    objects = shared_objects(Path(f"/proc/{pid}/maps").read_text(encoding="utf-8"))
     return {
-        "rss_kb": rss,
-        "pss_kb": pss,
+        "rss_kb": kilobytes(f"/proc/{pid}/status", "VmRSS"),
+        "pss_kb": kilobytes(f"/proc/{pid}/smaps_rollup", "Pss"),
         "shared_objects": len(objects),
-        "shared_objects_bytes": sum(os.stat(o).st_size for o in objects),
+        "shared_objects_bytes": sum(objects.values()),
     }
 
 
-def launch(binary):
-    """Start the binary traced; return (process, seconds to first frame or None, first-frame line)."""
-    env = dict(os.environ, WAYLAND_DEBUG="1")
-    start = time.monotonic()
-    proc = subprocess.Popen(
-        [binary],
+def spawn(argv, env):
+    return subprocess.Popen(
+        argv,
         env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -123,48 +157,80 @@ def launch(binary):
         text=True,
         errors="replace",
     )
-    seen = threading.Event()
-    result = {}
-
-    def drain():  # read to the end, so the client never blocks on a full pipe
-        frame = FirstFrame()
-        for line in proc.stderr:
-            if not seen.is_set() and frame.feed(line):
-                result["seconds"] = time.monotonic() - start
-                result["line"] = line.strip()
-                seen.set()
-
-    threading.Thread(target=drain, daemon=True).start()
-    seen.wait(FIRST_FRAME_TIMEOUT_S)
-    return proc, start, result
 
 
-def stop(proc):
-    proc.terminate()
-    proc.wait(timeout=10)
+def first_frame(argv, env=None, timeout=FIRST_FRAME_TIMEOUT_S):
+    """Run argv traced until its first frame, then stop it. Returns (seconds, the first-frame
+    request, the window's buffer size). Raises RuntimeError when the client exits, or draws
+    nothing within `timeout`, first."""
+    env = dict(os.environ if env is None else env, WAYLAND_DEBUG="1")
+    start = time.monotonic()
+    proc = spawn(argv, env)
+    try:
+        ended = threading.Event()  # the first frame, or the end of stderr
+        frame, result = FirstFrame(), {}
+
+        def drain():  # read to the end, so the client never blocks on a full pipe
+            for line in proc.stderr:
+                if not ended.is_set() and frame.feed(line):
+                    result["seconds"] = time.monotonic() - start
+                    result["line"] = line.strip()
+                    ended.set()
+            ended.set()
+
+        threading.Thread(target=drain, daemon=True).start()
+        ended.wait(timeout)
+        if "seconds" in result:
+            return result["seconds"], result["line"], frame.size
+        if ended.is_set():
+            raise RuntimeError(
+                f"{argv[0]} exited with {proc.wait(10)} before its first frame"
+            )
+        raise RuntimeError(f"{argv[0]} drew no frame in {timeout} s")
+    finally:
+        stop(proc)
+
+
+def stop(proc, grace=10):
+    """Terminate the client, and kill it if it is still running after `grace` seconds."""
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    if proc.stderr:
+        proc.stderr.close()
+
+
+def resident(argv, after=MEMORY_AFTER_S):
+    """Run argv untraced for `after` seconds, then read its memory and stop it."""
+    proc = spawn(argv, os.environ)
+    try:
+        # Keep reading stderr, so a chatty client never blocks on a full pipe.
+        threading.Thread(target=proc.stderr.read, daemon=True).start()
+        try:
+            code = proc.wait(timeout=after)
+        except subprocess.TimeoutExpired:
+            return memory(proc.pid)
+        raise RuntimeError(f"{argv[0]} exited with {code} before the memory reading")
+    finally:
+        stop(proc)
 
 
 def run(binary, out, runs):
     startups = []
-    line = None
     for index in range(runs):
-        proc, start, result = launch(binary)
-        if "seconds" not in result:
-            stop(proc)
-            sys.exit(
-                f"measure_chooser: {binary} drew no frame in {FIRST_FRAME_TIMEOUT_S} s (run {index + 1})"
-            )
-        startups.append(result["seconds"])
-        line = result["line"]
-        if index < runs - 1:
-            stop(proc)
-    time.sleep(max(0.0, MEMORY_AFTER_S - (time.monotonic() - start)))
-    if proc.poll() is not None:
-        sys.exit(
-            f"measure_chooser: {binary} exited before the memory reading ({proc.returncode})"
-        )
-    mem = memory(proc.pid)
-    stop(proc)
+        try:
+            seconds, line, size = first_frame([binary])
+        except RuntimeError as error:
+            sys.exit(f"measure_chooser: {error} (run {index + 1})")
+        startups.append(seconds)
+    try:
+        mem = resident([binary])
+    except (RuntimeError, OSError) as error:
+        sys.exit(f"measure_chooser: {error}")
     cpu = re.search(
         r"^model name\s*:\s*(.+)$",
         Path("/proc/cpuinfo").read_text(encoding="utf-8"),
@@ -175,6 +241,7 @@ def run(binary, out, runs):
         "stripped_bytes": stripped_size(binary),
         "startup_s": startups,
         "first_frame_request": line,
+        "window_buffer": size,
         "memory_after_s": MEMORY_AFTER_S,
         **mem,
         "cpu": cpu.group(1) if cpu else "unknown",
@@ -232,18 +299,26 @@ def lines(toolkit):
 def report(toolkit, outs):
     print(
         "| Chooser | Stripped binary | Start-up to first frame, median (min-max, runs) "
-        "| RSS after 1 min | PSS after 1 min | Shared objects mapped |"
+        "| Window buffer | RSS after 1 min | PSS after 1 min "
+        "| Shared objects mapped, their on-disk size |"
     )
-    print("| --- | --- | --- | --- | --- | --- |")
-    for out in outs:
-        r = json.loads(Path(out).read_text(encoding="utf-8"))
+    print("| --- | --- | --- | --- | --- | --- | --- |")
+    records = [json.loads(Path(out).read_text(encoding="utf-8")) for out in outs]
+    for r in records:
         ms = [s * 1000 for s in r["startup_s"]]
+        size = r.get("window_buffer")
         print(
             f"| `{r['binary']}` | {r['stripped_bytes'] / 1048576:.2f} MiB "
             f"| {statistics.median(ms):.0f} ms ({min(ms):.0f}-{max(ms):.0f}, {len(ms)}) "
+            f"| {f'{size[0]}x{size[1]}' if size else 'unknown'} "
             f"| {r['rss_kb'] / 1024:.1f} MiB | {r['pss_kb'] / 1024:.1f} MiB "
             f"| {r['shared_objects']}, {r['shared_objects_bytes'] / 1048576:.1f} MiB |"
         )
+    print()
+    print("The request each start-up time ends on, from the last launch:")
+    print()
+    for r in records:
+        print(f"- `{r['binary']}`: `{r['first_frame_request']}`")
     print()
     print("| Area | Code | Of which tests | Comments | Blanks |")
     print("| --- | --- | --- | --- | --- |")
