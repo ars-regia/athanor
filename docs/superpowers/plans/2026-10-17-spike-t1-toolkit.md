@@ -4,7 +4,7 @@
 
 **Goal:** answer, with measurements, whether a widget layer of our own on Parley and AccessKit can draw the layout chooser so that Orca says no less than it says for the GTK version, and what it costs against GTK4.
 
-**Architecture:** a windowing driver on smithay-client-toolkit (layer-shell surface, `wl_shm` buffers from `vello_cpu`, then a wgpu surface for `vello_gpu`), a widget tree with flex layout and a focus chain, Parley for text and editing, AccessKit with `accesskit_unix` attached directly to the driver's event loop. The code lives on the branch `spike-t1-toolkit` under `spikes/t1-toolkit/`, with its own `Cargo.lock`, outside the workspace, and is never merged: the results document is.
+**Architecture:** a windowing driver on smithay-client-toolkit (an xdg-toplevel, as the GTK chooser's `ApplicationWindow` is, and layer-shell surfaces for the shell surfaces that follow; `wl_shm` buffers from `vello_cpu`, then a wgpu surface for `vello_gpu`), a widget tree with flex layout and a focus chain, Parley for text and editing, AccessKit with `accesskit_unix` attached directly to the driver's event loop. The code lives on the branch `spike-t1-toolkit` under `spikes/t1-toolkit/`, with its own `Cargo.lock`, outside the workspace, and is never merged: the results document is.
 
 **Tech Stack:** Rust, smithay-client-toolkit, calloop, Parley, AccessKit and `accesskit_unix`, `vello_cpu`, `vello_gpu`, the rig.
 
@@ -27,9 +27,9 @@
 
 ---
 
-### Task 1: a layer-shell surface that draws
+### Task 1: a window that draws
 
-- [ ] SCTK: layer-shell surface on the overlay layer, `wp_fractional_scale_v1` with `wp_viewporter`, keyboard and pointer from the seat, `cursor-shape-v1`.
+- [ ] SCTK: an xdg-toplevel window, the role of the GTK chooser, so that the goldens compare toolkits and not surface roles; a layer-shell surface on the overlay layer behind the same driver interface; `wp_fractional_scale_v1` with `wp_viewporter`, keyboard and pointer from the seat, `cursor-shape-v1`.
 - [ ] `vello_cpu` renders a scene into a `wl_shm` buffer at the fractional scale.
 - [ ] Check: the rig's chooser scene, with `ATHANOR_CHOOSER_BIN` (spike branch only) pointing at the spike, captures a drawn rectangle at the rig's scales, 1.0 and 1.5.
 

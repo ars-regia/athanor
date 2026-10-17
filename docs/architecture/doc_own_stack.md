@@ -222,7 +222,7 @@ of use on the NVIDIA desktop logs no error. It measures: the protocols the shell
 lacks, the lines written, the frame time on each machine, and each NVIDIA defect met.
 
 **Spike T1: one surface in the toolkit.** The smallest widget layer that draws the layout chooser
-(button, a group of toggle buttons that behaves as a radio group, label, focus chain), on Parley, AccessKit and the layer-shell driver,
+(button, a group of toggle buttons that behaves as a radio group, label, focus chain), on Parley, AccessKit and the toolkit's own driver, in an xdg-toplevel as the GTK chooser is,
 beside the chooser's GTK version, plus a single-line text field. It passes when its goldens are
 drawn in the rig's cases (English, German and right to left, at scales 1.0 and 1.5), Orca's transcript holds everything the GTK version's
 holds (OS8), and a text field takes composed input from the simulated input method. It measures,
