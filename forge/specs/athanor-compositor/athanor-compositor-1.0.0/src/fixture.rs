@@ -5,13 +5,15 @@
 
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
-use crate::state::{State, BACKGROUND};
+use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::desktop::layer_map_for_output;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
+use smithay::utils::Point;
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -23,6 +25,7 @@ use wayland_client::protocol::{
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 const WIDTH: i32 = 200;
@@ -75,6 +78,8 @@ struct Client {
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
+    /// The serial, width and height of the last configure of a layer surface.
+    layer_configure: Option<(u32, u32, u32)>,
     frame_done: bool,
 }
 
@@ -164,26 +169,53 @@ impl Dispatch<wl_callback::WlCallback, ()> for Client {
     }
 }
 
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        event: zwlr_layer_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zwlr_layer_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            client.layer_configure = Some((serial, width, height));
+        }
+    }
+}
+
 delegate_noop!(Client: wl_compositor::WlCompositor);
+delegate_noop!(Client: zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(Client: wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
 delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 
-/// An unlinked file holding the window's pixels, XRGB8888 in memory order B, G, R, X.
-fn pixels() -> Result<std::fs::File, Error> {
+/// A new file, already unlinked, for a client's buffers.
+fn unlinked() -> Result<std::fs::File, Error> {
     let path = std::env::temp_dir().join(format!(
         "athanor-compositor-fixture-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
-    let mut file = std::fs::OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create_new(true)
         .open(&path)?;
     std::fs::remove_file(&path)?;
+    Ok(file)
+}
+
+/// An unlinked file holding the window's pixels, XRGB8888 in memory order B, G, R, X.
+fn pixels() -> Result<std::fs::File, Error> {
+    let mut file = unlinked()?;
     let row = |bgrx: [u8; 4]| bgrx.repeat(WIDTH as usize);
     for y in 0..HEIGHT {
         let colour = if y < HEIGHT / 2 {
@@ -477,8 +509,267 @@ fn the_background_is_calmo_bg1() {
     let sheet = std::fs::read_to_string(sheet).expect("calmo-dark.css");
     let hex = sheet
         .lines()
-        .find_map(|line| line.strip_prefix("@define-color ath_bg1 #")?.strip_suffix(';'))
+        .find_map(|line| {
+            line.strip_prefix("@define-color ath_bg1 #")?
+                .strip_suffix(';')
+        })
         .expect("ath_bg1 in calmo-dark.css");
     let bytes = BACKGROUND.map(|c| (c * 255.0).round() as u8);
-    assert_eq!(format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2]), hex);
+    assert_eq!(
+        format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2]),
+        hex
+    );
+}
+/// What the test asks its second client, the shell's stand-in, to do next.
+enum Step {
+    /// A top-layer surface along the output's top edge, 50 high, with an exclusive zone of 50
+    /// and exclusive keyboard interactivity.
+    Exclusive,
+    /// A window, placed in what the zone leaves.
+    Window,
+    /// A top-layer surface along the output's bottom edge, 40 high, that takes the keyboard on
+    /// demand.
+    OnDemand,
+    /// The exclusive surface commits a null buffer.
+    UnmapExclusive,
+}
+
+/// The shell's stand-in: its connection's queue and state, and the globals it binds.
+struct Shell {
+    queue: wayland_client::EventQueue<Client>,
+    client: Client,
+    compositor: wl_compositor::WlCompositor,
+    shm: wl_shm::WlShm,
+    layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    wm_base: xdg_wm_base::XdgWmBase,
+    /// The buffers' files, open while their buffers are.
+    files: Vec<std::fs::File>,
+}
+
+impl Shell {
+    /// A buffer of `width` by `height` pixels, black.
+    fn buffer(&mut self, width: i32, height: i32) -> Result<wl_buffer::WlBuffer, Error> {
+        let qh = &self.queue.handle();
+        let file = unlinked()?;
+        file.set_len(u64::try_from(width * height * 4)?)?;
+        let pool = self
+            .shm
+            .create_pool(file.as_fd(), width * height * 4, qh, ());
+        let buffer = pool.create_buffer(
+            0,
+            width,
+            height,
+            width * 4,
+            wl_shm::Format::Xrgb8888,
+            qh,
+            (),
+        );
+        pool.destroy();
+        self.files.push(file);
+        Ok(buffer)
+    }
+
+    /// Maps a layer surface `height` high along the `anchor` edge of the first output.
+    fn layer(
+        &mut self,
+        namespace: &str,
+        anchor: zwlr_layer_surface_v1::Anchor,
+        height: u32,
+        zone: i32,
+        keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    ) -> Result<wl_surface::WlSurface, Error> {
+        let qh = self.queue.handle();
+        let surface = self.compositor.create_surface(&qh, ());
+        let layer = self.layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            namespace.into(),
+            &qh,
+            (),
+        );
+        layer.set_anchor(anchor);
+        layer.set_size(0, height);
+        layer.set_exclusive_zone(zone);
+        layer.set_keyboard_interactivity(keyboard);
+        self.client.layer_configure = None;
+        surface.commit();
+        while self.client.layer_configure.is_none() {
+            self.queue.blocking_dispatch(&mut self.client)?;
+        }
+        let (serial, width, height) = self.client.layer_configure.ok_or("no configure")?;
+        layer.ack_configure(serial);
+        let buffer = self.buffer(i32::try_from(width)?, i32::try_from(height)?)?;
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        Ok(surface)
+    }
+
+    /// Maps a window of the fixture's size.
+    fn window(&mut self) -> Result<(), Error> {
+        let qh = self.queue.handle();
+        let surface = self.compositor.create_surface(&qh, ());
+        let xdg = self.wm_base.get_xdg_surface(&surface, &qh, ());
+        xdg.get_toplevel(&qh, ());
+        self.client.configure = None;
+        surface.commit();
+        while self.client.configure.is_none() {
+            self.queue.blocking_dispatch(&mut self.client)?;
+        }
+        xdg.ack_configure(self.client.configure.ok_or("no configure")?);
+        let buffer = self.buffer(WIDTH, HEIGHT)?;
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        Ok(())
+    }
+}
+
+/// The shell's stand-in: does each step it is sent, until the sender is dropped.
+fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), Error> {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity};
+    let connection = Connection::from_socket(stream)?;
+    let mut queue = connection.new_event_queue();
+    let qh = queue.handle();
+    let registry = connection.display().get_registry(&qh, ());
+    let mut client = Client::default();
+    queue.roundtrip(&mut client)?;
+    let mut shell = Shell {
+        compositor: client.bind(&registry, &qh, 4)?,
+        shm: client.bind(&registry, &qh, 1)?,
+        layer_shell: client.bind(&registry, &qh, 4)?,
+        wm_base: client.bind(&registry, &qh, 1)?,
+        files: Vec::new(),
+        queue,
+        client,
+    };
+    let mut exclusive = None;
+    while let Ok(step) = steps.recv() {
+        match step {
+            Step::Exclusive => {
+                exclusive = Some(shell.layer(
+                    "exclusive",
+                    Anchor::Top | Anchor::Left | Anchor::Right,
+                    50,
+                    50,
+                    KeyboardInteractivity::Exclusive,
+                )?);
+            }
+            Step::Window => shell.window()?,
+            Step::OnDemand => {
+                shell.layer(
+                    "on-demand",
+                    Anchor::Bottom | Anchor::Left | Anchor::Right,
+                    40,
+                    0,
+                    KeyboardInteractivity::OnDemand,
+                )?;
+            }
+            Step::UnmapExclusive => {
+                let surface = exclusive.as_ref().ok_or("no exclusive surface")?;
+                surface.attach(None, 0, 0);
+                surface.commit();
+            }
+        }
+        connection.flush()?;
+    }
+    Ok(())
+}
+
+/// The keyboard follows the layer surfaces' interactivity (register row 1 of CO3): an
+/// exclusive top-layer surface takes it while mapped, and a window mapped meanwhile neither
+/// takes it nor overlaps the surface's exclusive zone; a click on an on-demand surface does
+/// not take it from the exclusive one; unmapping the exclusive surface hands it back to the
+/// top window; a click then gives it to the on-demand surface.
+#[test]
+fn layer_surfaces_take_and_give_back_the_keyboard() {
+    let mut run = Running::start(None);
+    let first = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state();
+    run.state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client");
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let layer = |state: &State, namespace: &str| {
+        let output = state.space.outputs().next()?;
+        let map = layer_map_for_output(output);
+        let layer = map.layers().find(|layer| layer.namespace() == namespace)?;
+        Some(layer.wl_surface().clone())
+    };
+
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        let exclusive = layer(state, "exclusive");
+        exclusive.is_some() && focus(state) == exclusive
+    });
+    let exclusive = layer(&run.state, "exclusive");
+
+    // Centred in what the zone leaves: 50 lower by half the zone, at y 375 rather than 350.
+    steps.send(Step::Window).expect("the shell's client");
+    let (x, y) = ((OUTPUTS[0].width - WIDTH) / 2, 50 + (750 - HEIGHT) / 2);
+    run.until("the window is placed below the zone", |state| {
+        state
+            .space
+            .elements()
+            .any(|w| *w != first && state.space.element_location(w) == Some((x, y).into()))
+    });
+    assert_eq!(focus(&run.state), exclusive, "the window does not take it");
+    let second = run
+        .state
+        .space
+        .elements()
+        .find(|w| **w != first)
+        .expect("the second window")
+        .clone();
+    let second = second.toplevel().expect("a toplevel").wl_surface().clone();
+
+    let bottom = Point::from((
+        f64::from(OUTPUTS[0].width) / 2.0,
+        f64::from(OUTPUTS[0].height) - 20.0,
+    ));
+    steps.send(Step::OnDemand).expect("the shell's client");
+    run.until("the on-demand surface is under the pointer", |state| {
+        matches!(state.under(bottom), Some((Under::Layer(l), _)) if l.namespace() == "on-demand")
+    });
+    run.state.click_focus(bottom);
+    assert_eq!(
+        focus(&run.state),
+        exclusive,
+        "a click does not take it from the exclusive surface"
+    );
+
+    steps
+        .send(Step::UnmapExclusive)
+        .expect("the shell's client");
+    run.until("unmapping hands the keyboard back", |state| {
+        focus(state).as_ref() == Some(&second)
+    });
+
+    run.state.click_focus(bottom);
+    assert_eq!(
+        focus(&run.state),
+        layer(&run.state, "on-demand"),
+        "a click on demand takes it"
+    );
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
 }
