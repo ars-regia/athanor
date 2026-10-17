@@ -1810,7 +1810,7 @@ def check_docs():
 
 # Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 2, "panic!(": 0}
+BUDGET = {".unwrap()": 0, ".expect(": 0, "panic!(": 0}
 
 
 def is_test_file(p):
