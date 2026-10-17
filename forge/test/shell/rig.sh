@@ -14,6 +14,9 @@
 #   rig.sh build-layout     clippy, tests and release build of athanor-layout, the chooser and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
+#   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser into <out>/bin as athanor-toolkit-chooser
+#   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
@@ -31,12 +34,12 @@
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
-#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -80,14 +83,18 @@ fi
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
+# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp.
 in_rig() { # in_rig <image> <command...>
-    local image=$1 kms=()
+    local image=$1 opts=()
     shift
     if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
-        kms=(--device /dev/dri -v /run/udev:/run/udev:ro -e RIG_OUTPUTS)
+        opts=(--device /dev/dri -v /run/udev:/run/udev:ro -e RIG_OUTPUTS)
+    fi
+    if [ -n "${RIG_COMPOSITOR:-}" ]; then
+        opts+=(-e RIG_COMPOSITOR)
     fi
     mkdir -p "$out"
-    podman run --rm --memory 6g --security-opt label=disable "${kms[@]}" \
+    podman run --rm --memory 6g --security-opt label=disable "${opts[@]}" \
         -v "$root:/repo:ro" -v "$out:/out" "$image" "$@"
 }
 
@@ -204,6 +211,24 @@ capture_chooser() {
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             /out/bin/athanor-layout-chooser
     done < <(python3 -B "$rig/cases.py" chooser)
+}
+
+# doc_own_stack.md, C1 task 1: athanor-toolkit's chooser under athanor-compositor, mirrored
+# by ATHANOR_RTL for the right-to-left cases. At 1.5 the toolkit draws at 2 and the
+# compositor scales it down.
+capture_toolkit_chooser() {
+    require athanor-compositor build-compositor
+    require athanor-toolkit-chooser build-toolkit
+    while IFS=$'\t' read -r tag _ scale locale _; do
+        tags+=("$tag")
+        rtl=()
+        if [ "${tag##*-}" = rtl ]; then
+            rtl=(ATHANOR_RTL=1)
+        fi
+        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE="$locale" "${rtl[@]}" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
+            /out/bin/athanor-toolkit-chooser
+    done < <(python3 -B "$rig/cases.py" toolkit-chooser)
 }
 
 require() { # require <binary> <recipe>: a scene that runs one of our binaries
@@ -421,6 +446,47 @@ build-shelld)
                  && cargo test --locked -p athanor-unit -p athanor-shelld \
                  && cargo build --release --locked -p athanor-shelld \
                  && install -m 0755 /out/target/release/athanor-shelld /out/bin/'
+    ;;
+build-compositor)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
+        bash -c 'cargo clippy --locked -p athanor-compositor --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-compositor \
+                 && cargo build --release --locked -p athanor-compositor \
+                 && install -m 0755 /out/target/release/athanor-compositor /out/bin/'
+    ;;
+build-toolkit)
+    mkdir -p "$out/bin" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
+        bash -c 'cargo clippy --locked -p athanor-toolkit --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-toolkit \
+                 && cargo build --release --locked -p athanor-toolkit --example chooser \
+                 && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser'
+    ;;
+compositor-globals)
+    # doc_own_stack.md, C1 task 1: what a client of athanor-compositor binds.
+    require athanor-compositor build-compositor
+    rm -f "$out/compositor-globals.txt"
+    in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 compositor-globals -- \
+        bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
+    missing=()
+    for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
+        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1; do
+        grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
+    done
+    for capability in pointer keyboard; do
+        grep -Eq "capabilities:.*\b$capability\b" "$out/compositor-globals.txt" || missing+=("wl_seat $capability")
+    done
+    if [ "${#missing[@]}" != 0 ]; then
+        echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
+        exit 1
+    fi
+    echo "compositor-globals: the 11 globals, and a seat with pointer and keyboard"
     ;;
 cargo)
     shift
@@ -709,6 +775,16 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-layout-chooser"
         ;;
+    toolkit-chooser)
+        # The same 8 choices in athanor-toolkit's chooser, under athanor-compositor, through
+        # AccessKit (doc_own_stack.md, C1 task 1).
+        require athanor-compositor build-compositor
+        require athanor-toolkit-chooser build-toolkit
+        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-toolkit-chooser 8" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
+            bash -c "$enable && exec /out/bin/athanor-toolkit-chooser"
+        ;;
     bar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield.
@@ -793,6 +869,7 @@ surface | update-goldens)
     bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
     dock) capture_dock ;;
     launcher) capture_launcher ;;
+    toolkit-chooser) capture_toolkit_chooser ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2

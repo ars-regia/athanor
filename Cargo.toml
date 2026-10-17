@@ -25,6 +25,8 @@ members = [
   "system/athanor-services",
   "system/athanor-unit",
   "system/athanor-trust-state",
+  "system/athanor-toolkit",
+  "forge/specs/athanor-compositor/athanor-compositor-1.0.0",
 ]
 
 # The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery

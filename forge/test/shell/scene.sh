@@ -10,7 +10,9 @@ width=$1 height=$2 scale=$3 tag=$4
 shift 4
 [ "${1:-}" = "--" ] && shift
 settle=${RIG_SETTLE:-4}
-export RIG_TAG=$tag
+# RIG_COMPOSITOR=athanor nests athanor-compositor in place of cosmic-comp (session.sh), at this
+# scale from its start: it has no cosmic-randr protocol.
+export RIG_TAG=$tag RIG_SCALE=$scale
 
 export XDG_RUNTIME_DIR=/run/user/1000
 scratch=$(mktemp -d)
@@ -115,7 +117,7 @@ else
     sway_display=$(basename "$oldest")
     swaymsg output HEADLESS-1 mode "${width}x${height}" > /dev/null
 
-    # 2. cosmic-comp takes the next free socket; its one tiled window fills the output.
+    # 2. The nested compositor takes the next free socket; its one tiled window fills the output.
     cosmic_display() {
         for socket in "$XDG_RUNTIME_DIR"/wayland-[0-9]; do
             [ "$(basename "$socket")" != "$sway_display" ] && basename "$socket" && return 0
@@ -125,10 +127,14 @@ else
     wait_for 30 cosmic_display > /dev/null
     WAYLAND_DISPLAY=$(cosmic_display)
     export WAYLAND_DISPLAY
-    wait_for 20 cosmic-randr list > /dev/null
+    if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
+        wait_for 20 wayland-info > /dev/null
+    else
+        wait_for 20 cosmic-randr list > /dev/null
 
-    # 3. Size and fractional scale of the nested output.
-    cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
+        # 3. Size and fractional scale of the nested output.
+        cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
+    fi
     sleep 1
 fi
 
@@ -152,6 +158,9 @@ if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
         parts+=("$scratch/$output.png")
     done
     magick "${parts[@]}" +append "/out/$tag.png"
+elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
+    # athanor-compositor offers no screen copy yet: sway's output holds its window, edge to edge.
+    WAYLAND_DISPLAY=$sway_display grim -o HEADLESS-1 "/out/$tag.png"
 else
     grim -o WINIT-0 "/out/$tag.png"
 fi

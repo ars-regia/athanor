@@ -1,0 +1,14 @@
+[package]
+name = "athanor-toolkit"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+description = "Athanor's own widget toolkit: Wayland driver, widgets, text on Parley, accessibility on AccessKit"
+
+[dependencies]
+accesskit = "0.25"
+accesskit_unix = "0.24"
+parley = "0.12"
+vello_cpu = "0.3"
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
+wayland-client = { workspace = true }

@@ -15,6 +15,12 @@ spec.loader.exec_module(verify)
 OWN = verify.OWN_LICENCE
 CRATE = '[package]\nname = "x"\nversion = "1.0.0"\nlicense = "%s"\n'
 UPSTREAM = sorted(verify.UPSTREAM_SPECS)[0]
+TOOLKIT = "system/athanor-toolkit/Cargo.toml"
+
+
+def GREETER_ENTRIES():
+    return [p for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
+            if e[2] == verify.GPL3_ONLY_DEPENDENCY]
 
 
 class SpdxTest(unittest.TestCase):
@@ -32,12 +38,13 @@ class SpdxTest(unittest.TestCase):
 class LicenceExceptionTest(unittest.TestCase):
     def test_the_greeter_is_declared_gpl_3_only_and_nothing_else_is(self):
         self.assertEqual(verify.licence_problems(), [])
-        for path, (lic, reason) in verify.OWN_LICENCE_EXCEPTIONS.items():
+        for path, (lic, reason, _) in verify.OWN_LICENCE_EXCEPTIONS.items():
             self.assertNotEqual(lic, verify.OWN_LICENCE, path)
             self.assertTrue(reason, path)
 
     def test_an_exception_must_match_exactly(self):
-        crate, spec = sorted(verify.OWN_LICENCE_EXCEPTIONS)
+        crate, spec = sorted([p for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
+                       if e[2] == verify.GPL3_ONLY_DEPENDENCY])
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             subprocess.run(["git", "-C", tmp, "init", "-q"], check=True)
@@ -72,7 +79,7 @@ class ExceptionSelfCheckTest(unittest.TestCase):
 
     def test_a_table_entry_without_the_dependency_fails(self):
         root = self.tree(None)
-        crate = next(p for p in verify.OWN_LICENCE_EXCEPTIONS if p.endswith("Cargo.toml"))
+        crate = next(p for p in GREETER_ENTRIES() if p.endswith("Cargo.toml"))
         self.write(root, crate, CRATE % "GPL-3.0-only")
         problems = verify.licence_problems(root)
         self.assertEqual(len(problems), 1)
@@ -80,10 +87,30 @@ class ExceptionSelfCheckTest(unittest.TestCase):
 
     def test_an_entry_with_the_dependency_passes(self):
         root = self.tree(None)
-        crate = next(p for p in verify.OWN_LICENCE_EXCEPTIONS if p.endswith("Cargo.toml"))
+        crate = next(p for p in GREETER_ENTRIES() if p.endswith("Cargo.toml"))
         self.write(root, crate, CRATE % "GPL-3.0-only"
                    + "[dependencies]\n%s = { workspace = true }\n" % verify.GPL3_ONLY_DEPENDENCY)
         self.assertEqual(verify.licence_problems(root), [])
+
+    def test_a_chosen_exception_passes_with_its_licence(self):
+        root = self.tree(None)
+        self.write(root, TOOLKIT, CRATE % verify.OWN_LICENCE_EXCEPTIONS[TOOLKIT][0])
+        self.assertEqual(verify.licence_problems(root), [])
+
+    def test_a_chosen_exception_still_needs_its_licence(self):
+        root = self.tree(None)
+        self.write(root, TOOLKIT, CRATE % OWN)
+        problems = verify.licence_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("expected 'MIT OR Apache-2.0'", problems[0])
+
+    def test_a_chosen_exception_does_not_cover_the_gpl_dependency(self):
+        root = self.tree(None)
+        self.write(root, TOOLKIT, CRATE % verify.OWN_LICENCE_EXCEPTIONS[TOOLKIT][0]
+                   + "[dependencies]\n%s = \"0.10\"\n" % verify.GPL3_ONLY_DEPENDENCY)
+        problems = verify.licence_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("no entry in OWN_LICENCE_EXCEPTIONS", problems[0])
 
 
 class LicenceProblemsTest(unittest.TestCase):
