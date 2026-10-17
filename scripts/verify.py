@@ -1834,6 +1834,77 @@ def test_module_files(paths):
     return found
 
 
+RAW_STRING = re.compile(r'b?r(#*)"')
+
+
+def skip_rust(txt, i):
+    """The index past the string, character literal or comment that starts at `i`, or `i`."""
+    if txt.startswith("//", i):
+        end = txt.find("\n", i)
+        return len(txt) if end < 0 else end
+    if txt.startswith("/*", i):
+        end = txt.find("*/", i + 2)
+        return len(txt) if end < 0 else end + 2
+    raw = RAW_STRING.match(txt, i)
+    if raw and not (i and (txt[i - 1].isalnum() or txt[i - 1] == "_")):
+        end = txt.find('"' + raw.group(1), raw.end())
+        return len(txt) if end < 0 else end + 1 + len(raw.group(1))
+    if txt[i] == '"':
+        j = i + 1
+        while j < len(txt) and txt[j] != '"':
+            j += 2 if txt[j] == "\\" else 1
+        return j + 1
+    if txt[i] == "'":
+        # A character literal is one character ('{') or one escape ('\n', '\u{7b}'); anything
+        # else is a lifetime ('a), which has no closing quote.
+        if txt.startswith("'", i + 2) and txt[i + 1] != "\\":
+            return i + 3
+        end = txt.find("'", i + 2)
+        if txt.startswith("\\", i + 1) and 0 < end - i <= 11:
+            return end + 1
+    return i
+
+
+def item_end(txt, i):
+    """The index past the item that starts at `i`: its attributes, then up to its `;` or the
+    brace that closes its body, outside strings, comments and brackets."""
+    depth, body = 0, False
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j != i:
+            i = j
+            continue
+        c = txt[i]
+        if c in "([":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "{":
+            depth += 1
+            body = True
+        elif c == "}":
+            depth -= 1
+            if body and depth == 0:
+                return i + 1
+        elif c == ";" and depth == 0 and not body:
+            return i + 1
+        i += 1
+    return len(txt)
+
+
+def without_test_items(txt):
+    """`txt` with each item under `#[cfg(test)]` blanked, newlines kept so that line numbers
+    hold. Code after a test module is production code, and stays."""
+    out, at = [], 0
+    while (start := txt.find("#[cfg(test)]", at)) >= 0:
+        end = item_end(txt, start + len("#[cfg(test)]"))
+        out.append(txt[at:start])
+        out.append(re.sub(r"[^\n]", " ", txt[start:end]))
+        at = end
+    out.append(txt[at:])
+    return "".join(out)
+
+
 @check("panics", "Il budget di panic in codice non di test non cresce")
 def check_panics():
     r = Result()
@@ -1845,10 +1916,7 @@ def check_panics():
     for p in files:
         if is_test_file(p) or p in test_modules:
             continue
-        txt = read(p)
-        cut = txt.find("#[cfg(test)]")
-        if cut > 0:
-            txt = txt[:cut]
+        txt = without_test_items(read(p))
         for i, line in enumerate(txt.split("\n"), 1):
             code = line.split("//")[0]
             for k in BUDGET:
