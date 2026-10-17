@@ -8,6 +8,20 @@ schema = 1
 hue = 231
 saturation = 62
 
+# libadwaita's nine accent presets (adw-accent-color.c), the colours the shell shows in the
+# fixed mode (VL3). The contrast check runs every pair with each of them; appearance.rs
+# carries the same values, and its test reads them here.
+[accent.presets]
+blue = "#3584e4"
+teal = "#2190a4"
+green = "#3a944a"
+yellow = "#c88800"
+orange = "#ed5b00"
+red = "#e62d42"
+pink = "#d56199"
+purple = "#9141ac"
+slate = "#6f8396"
+
 [font]
 family = "Inter"
 features = '"tnum", "cv11"'
@@ -162,16 +176,21 @@ kind = "text"
 fg = "acc_soft_ink"
 bg = "acc_soft"
 kind = "text"
+# The accent as a line, a ring, an indicator or a thin fill, against every surface it is
+# drawn on, a slider's trough (chip) included (#571).
 [[pair]]
-fg = "acc"
-bg = ["surf", "surf2", "bar"]
+fg = "acc_fg"
+bg = ["surf", "surf2", "bar", "chip"]
 each = true
 kind = "ui"
-# A slider's highlight against its trough.
+# The high-contrast variants draw their own acc, never a preset (appearance.rs accent_css),
+# in the fills and borders of checked and selected controls.
 [[pair]]
 fg = "acc"
-bg = "chip"
+bg = ["surf", "surf2", "bar", "chip"]
+each = true
 kind = "ui"
+only = ["light-hc", "dark-hc"]
 [[pair]]
 fg = "bad"
 bg = ["surf", "bar"]

@@ -65,6 +65,40 @@ class TokensTest(unittest.TestCase):
             self.assertEqual(tk.colors(moved, "light")[name], tk.colors(self.tokens, "light")[name])
         self.assertNotEqual(tk.colors(moved, "light")["acc"], tk.colors(self.tokens, "light")["acc"])
 
+    def test_oklab_round_trips(self):
+        for text in ("#9141ac", "#c88800", "#000000", "#ffffff"):
+            self.assertEqual(color.to_hex(color.from_oklab(color.to_oklab(color.from_hex(text)))), text)
+
+    def test_the_foreground_keeps_an_accent_that_already_reaches_three(self):
+        white = color.from_hex("#ffffff")
+        purple = color.from_hex("#9141ac")
+        self.assertEqual(color.foreground(purple, [white], dark=False), purple)
+
+    def test_the_foreground_moves_away_from_the_surfaces_until_three(self):
+        surfaces = [tk.colors(self.tokens, "dark")[n] for n in tk.SURFACES]
+        purple = color.from_hex("#9141ac")
+        moved = color.foreground(purple, surfaces, dark=True)
+        self.assertGreater(color.to_oklab(moved)[0], color.to_oklab(purple)[0])
+        self.assertGreaterEqual(min(color.contrast(moved, s) for s in surfaces), 3.0)
+        # One step less is not enough: the search stops at the first lightness that passes.
+        lightness, a, b = color.to_oklab(moved)
+        before = color.from_oklab((lightness - color.FOREGROUND_STEP, a, b))
+        self.assertLess(min(color.contrast(before, s) for s in surfaces), 3.0)
+
+    def test_only_red_needs_a_darker_fill(self):
+        presets = tk.presets(self.tokens)
+        self.assertEqual(len(presets), 9)
+        darkened = {name for name, accent in presets.items() if tk.fill(self.tokens, accent) != accent}
+        self.assertEqual(darkened, {"red"})
+        self.assertEqual(color.to_hex(tk.fill(self.tokens, presets["red"])), "#e2283f")
+
+    def test_a_preset_replaces_the_accent_and_its_ink(self):
+        purple = tk.presets(self.tokens)["purple"]
+        palette = tk.colors(self.tokens, "dark", purple)
+        self.assertEqual(palette["acc"], purple)
+        self.assertEqual(color.to_hex(palette["acc_ink"]), "#ffffff")
+        self.assertEqual(color.to_hex(palette["acc_fg"]), "#a555c1")
+
 
 if __name__ == "__main__":
     unittest.main()
