@@ -39,7 +39,7 @@
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca chooser [it]   Orca's speech for a walk with Tab holds the GTK chooser's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
-#   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of both choosers, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
+#   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
@@ -89,6 +89,8 @@ fi
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
 # RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp.
+# ATHANOR_TOOLKIT_RENDERER reaches athanor-toolkit's clients: cpu (the default) or gpu, which
+# draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
     local image=$1 opts=()
     shift
@@ -97,6 +99,9 @@ in_rig() { # in_rig <image> <command...>
     fi
     if [ -n "${RIG_COMPOSITOR:-}" ]; then
         opts+=(-e RIG_COMPOSITOR)
+    fi
+    if [ -n "${ATHANOR_TOOLKIT_RENDERER:-}" ]; then
+        opts+=(-e ATHANOR_TOOLKIT_RENDERER)
     fi
     mkdir -p "$out"
     podman run --rm --memory 6g --security-opt label=disable "${opts[@]}" \
@@ -904,20 +909,25 @@ orca)
         "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript"
     ;;
 measure-chooser)
-    # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-toolkit's (vello_cpu) in the same
-    # scene under cosmic-comp, one after the other; measure_chooser.py launches each, so the
-    # scene's own client only holds it open. The tables go to <out>/measure/report.md.
+    # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-toolkit's, with vello_cpu and with
+    # vello_gpu, in the same scene under cosmic-comp, one after the other; measure_chooser.py
+    # launches each, so the scene's own client only holds it open. The tables go to
+    # <out>/measure/report.md.
     require athanor-layout-chooser build-layout
     require athanor-toolkit-chooser build-toolkit
     mkdir -p "$out/measure"
-    for bin in athanor-layout-chooser athanor-toolkit-chooser; do
-        in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
+    runs=(athanor-layout-chooser: athanor-toolkit-chooser:cpu athanor-toolkit-chooser:gpu)
+    for run in "${runs[@]}"; do
+        bin=${run%%:*} renderer=${run#*:}
+        name=$bin${renderer:+-$renderer}
+        ATHANOR_TOOLKIT_RENDERER=$renderer in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
-            RIG_HOLD="python3 -B /repo/forge/test/shell/measure_chooser.py run /out/bin/$bin /out/measure/$bin.json" \
-            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "measure-$bin" -- sleep 600
+            RIG_HOLD="python3 -B /repo/forge/test/shell/measure_chooser.py run /out/bin/$bin /out/measure/$name.json" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "measure-$name" -- sleep 600
     done
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/measure_chooser.py report /repo/system/athanor-toolkit \
-        /out/measure/athanor-layout-chooser.json /out/measure/athanor-toolkit-chooser.json > "$out/measure/report.md"
+        /out/measure/athanor-layout-chooser.json /out/measure/athanor-toolkit-chooser-cpu.json \
+        /out/measure/athanor-toolkit-chooser-gpu.json > "$out/measure/report.md"
     cat "$out/measure/report.md"
     ;;
 input-method)

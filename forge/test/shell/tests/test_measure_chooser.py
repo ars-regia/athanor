@@ -117,6 +117,19 @@ class ProcessTest(unittest.TestCase):
             measure_chooser.first_frame(["sh", "-c", "exit 3"], timeout=20)
         self.assertLess(time.monotonic() - start, 10)
 
+    def test_the_adapter_the_toolkit_names_is_recorded(self):
+        trace = (
+            "echo 'athanor-toolkit: vello_gpu on llvmpipe (Gl, Cpu, )' >&2;"
+            "echo ' -> xdg_wm_base#3.get_xdg_surface(new id xdg_surface#9, wl_surface#7)' >&2;"
+            "echo ' -> wl_surface#7.attach(wl_buffer#12, 0, 0)' >&2;"
+            "echo ' -> wl_surface#7.commit()' >&2; sleep 60"
+        )
+        _, line, _, adapter = measure_chooser.first_frame(
+            ["sh", "-c", trace], timeout=20
+        )
+        self.assertEqual(line, "-> wl_surface#7.commit()")
+        self.assertEqual(adapter, "llvmpipe (Gl, Cpu, )")
+
     def test_a_client_that_ignores_terminate_is_killed(self):
         proc = measure_chooser.spawn(["sh", "-c", "trap '' TERM; sleep 60"], os.environ)
         time.sleep(0.2)  # let the shell install its trap

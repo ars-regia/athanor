@@ -4,18 +4,20 @@
   measure_chooser.py run <binary> <out.json> [runs]
       Inside a scene (rig.sh measure-chooser runs it as RIG_HOLD): the stripped size of
       <binary>, its start-up time to the first frame and its window's buffer over [runs] traced
-      launches (5), and its memory one minute after one more launch, untraced.
+      launches (5), and its memory one minute after one more launch, untraced. For
+      athanor-toolkit's chooser, ATHANOR_TOOLKIT_RENDERER (cpu or gpu) picks the renderer, and
+      the record names it and the adapter wgpu picked.
   measure_chooser.py lines <toolkit-dir>
       The toolkit's lines, split by area, counted as tokei counts code, comments and blanks.
   measure_chooser.py report <toolkit-dir> <out.json>...
-      Both as Markdown tables, for docs/spikes/t1-own-toolkit.md.
+      The records and the lines as Markdown tables, for docs/spikes/t1-own-toolkit.md.
 
 Start-up time to the first frame: from the exec of the binary to the first `wl_surface.commit`
 of the window's surface (the one given to `xdg_wm_base.get_xdg_surface`) after an `attach` of a
 non-null buffer, as the client's own WAYLAND_DEBUG=1 trace sends it: libwayland prints it for
 both choosers, as the toolkit speaks Wayland through libwayland-client. The clock is this
-script's monotonic clock when the line arrives on the client's stderr. Tracing slows both clients by a similar amount, which is not
-measured; the memory is read in a launch without it.
+script's monotonic clock when the line arrives on the client's stderr. Tracing slows both
+clients by a similar amount, which is not measured; the memory is read in a launch without it.
 """
 
 import json
@@ -32,6 +34,9 @@ from pathlib import Path
 RUNS = 5
 MEMORY_AFTER_S = 60
 FIRST_FRAME_TIMEOUT_S = 30
+RENDERER = "ATHANOR_TOOLKIT_RENDERER"
+# The line athanor-toolkit prints on stderr once wgpu has picked an adapter.
+ADAPTER = "athanor-toolkit: vello_gpu on "
 
 # A request in either trace: libwayland's "[ts] {queue} -> iface#id.req(args)" (iface@id before
 # 1.24) or wayland-backend's "[ts] -> iface@id.req(args)".
@@ -162,8 +167,8 @@ def spawn(argv, env):
 
 def first_frame(argv, env=None, timeout=FIRST_FRAME_TIMEOUT_S):
     """Run argv traced until its first frame, then stop it. Returns (seconds, the first-frame
-    request, the window's buffer size). Raises RuntimeError when the client exits, or draws
-    nothing within `timeout`, first."""
+    request, the window's buffer size, the GPU adapter the client named or None). Raises
+    RuntimeError when the client exits, or draws nothing within `timeout`, first."""
     env = dict(os.environ if env is None else env, WAYLAND_DEBUG="1")
     start = time.monotonic()
     proc = spawn(argv, env)
@@ -173,6 +178,8 @@ def first_frame(argv, env=None, timeout=FIRST_FRAME_TIMEOUT_S):
 
         def drain():  # read to the end, so the client never blocks on a full pipe
             for line in proc.stderr:
+                if line.startswith(ADAPTER):
+                    result["adapter"] = line[len(ADAPTER) :].strip()
                 if not ended.is_set() and frame.feed(line):
                     result["seconds"] = time.monotonic() - start
                     result["line"] = line.strip()
@@ -182,7 +189,7 @@ def first_frame(argv, env=None, timeout=FIRST_FRAME_TIMEOUT_S):
         threading.Thread(target=drain, daemon=True).start()
         ended.wait(timeout)
         if "seconds" in result:
-            return result["seconds"], result["line"], frame.size
+            return result["seconds"], result["line"], frame.size, result.get("adapter")
         if ended.is_set():
             raise RuntimeError(
                 f"{argv[0]} exited with {proc.wait(10)} before its first frame"
@@ -224,7 +231,7 @@ def run(binary, out, runs):
     startups = []
     for index in range(runs):
         try:
-            seconds, line, size = first_frame([binary])
+            seconds, line, size, adapter = first_frame([binary])
         except RuntimeError as error:
             sys.exit(f"measure_chooser: {error} (run {index + 1})")
         startups.append(seconds)
@@ -239,6 +246,8 @@ def run(binary, out, runs):
     )
     record = {
         "binary": Path(binary).name,
+        "renderer": os.environ.get(RENDERER) or None,
+        "adapter": adapter,
         "stripped_bytes": stripped_size(binary),
         "startup_s": startups,
         "first_frame_request": line,
@@ -297,6 +306,11 @@ def lines(toolkit):
     return totals
 
 
+def label(record):
+    renderer = record.get("renderer")
+    return f"`{record['binary']}`" + (f" ({RENDERER}={renderer})" if renderer else "")
+
+
 def report(toolkit, outs):
     print(
         "| Chooser | Stripped binary | Start-up to first frame, median (min-max, runs) "
@@ -309,7 +323,7 @@ def report(toolkit, outs):
         ms = [s * 1000 for s in r["startup_s"]]
         size = r.get("window_buffer")
         print(
-            f"| `{r['binary']}` | {r['stripped_bytes'] / 1048576:.2f} MiB "
+            f"| {label(r)} | {r['stripped_bytes'] / 1048576:.2f} MiB "
             f"| {statistics.median(ms):.0f} ms ({min(ms):.0f}-{max(ms):.0f}, {len(ms)}) "
             f"| {f'{size[0]}x{size[1]}' if size else 'unknown'} "
             f"| {r['rss_kb'] / 1024:.1f} MiB | {r['pss_kb'] / 1024:.1f} MiB "
@@ -319,7 +333,14 @@ def report(toolkit, outs):
     print("The request each start-up time ends on, from the last launch:")
     print()
     for r in records:
-        print(f"- `{r['binary']}`: `{r['first_frame_request']}`")
+        print(f"- {label(r)}: `{r['first_frame_request']}`")
+    gpu = [r for r in records if r.get("adapter")]
+    if gpu:
+        print()
+        print("The adapter wgpu picked:")
+        print()
+        for r in gpu:
+            print(f"- {label(r)}: {r['adapter']}")
     print()
     print("| Area | Code | Of which tests | Comments | Blanks |")
     print("| --- | --- | --- | --- | --- |")
