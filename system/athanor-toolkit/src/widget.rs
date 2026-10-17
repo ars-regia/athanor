@@ -48,6 +48,27 @@ pub enum Kind {
         active: bool,
     },
     Field(Box<TextField>),
+    /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
+    /// does: the title centred and the window's buttons at the end edge. See [`Ui::add_title_bar`].
+    TitleBar,
+    WindowButton(WindowButton),
+}
+
+/// A button of the title bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowButton {
+    Minimize,
+    Close,
+}
+
+impl WindowButton {
+    /// The name assistive technologies read: GTK's for the same buttons.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minimize => "Minimize",
+            Self::Close => "Close",
+        }
+    }
 }
 
 pub struct Widget {
@@ -62,7 +83,7 @@ impl Widget {
     pub fn is_focusable(&self) -> bool {
         matches!(
             self.kind,
-            Kind::Button(_) | Kind::Toggle { .. } | Kind::Field(_)
+            Kind::Button(_) | Kind::Toggle { .. } | Kind::Field(_) | Kind::WindowButton(_)
         )
     }
 }
@@ -75,6 +96,8 @@ pub enum Event {
     Selected(WidgetId),
     /// A field's committed text changed.
     Edited(WidgetId),
+    /// A button of the title bar was activated; the driver acts on it.
+    Window(WindowButton),
 }
 
 /// A key, already translated from the keyboard layout by the driver.
@@ -100,6 +123,7 @@ pub struct Ui {
     pub rtl: bool,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
+    title_bar: Option<WidgetId>,
     size: (f32, f32),
 }
 
@@ -118,6 +142,7 @@ impl Ui {
             rtl,
             focus: None,
             text: TextContext::default(),
+            title_bar: None,
             size: (0.0, 0.0),
         }
     }
@@ -144,6 +169,29 @@ impl Ui {
     pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
         let field = TextField::new(name, text, self.theme.font_size, self.rtl);
         self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
+    /// the tree, as GTK's does. Its buttons come first in the Tab order too, where GTK's Tab
+    /// never reaches them, so the keyboard can minimize and close the window.
+    pub fn add_title_bar(&mut self) {
+        if self.title_bar.is_some() {
+            return;
+        }
+        let bar = self.add(Self::ROOT, Kind::TitleBar);
+        let root = &mut self.widgets[Self::ROOT].children;
+        root.pop();
+        root.insert(0, bar);
+        self.add(bar, Kind::Label(self.title.clone()));
+        self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        self.add(bar, Kind::WindowButton(WindowButton::Close));
+        self.title_bar = Some(bar);
+    }
+
+    /// Whether the point, in logical pixels, is on the title bar: where a press moves the window.
+    pub fn in_title_bar(&self, x: f32, y: f32) -> bool {
+        self.title_bar
+            .is_some_and(|bar| self.widgets[bar].rect.contains(x, y))
     }
 
     pub fn widget(&self, id: WidgetId) -> &Widget {
@@ -199,17 +247,32 @@ impl Ui {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let rtl = self.rtl;
+        let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let children = self.widgets[id].children.clone();
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
         let widget = &mut self.widgets[id];
         let (w, h) = match &mut widget.kind {
             Kind::Column | Kind::Group(_) => {
-                let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
-                let h = sizes.iter().map(|s| s.1).sum::<f32>() + spacing;
+                // The title bar spans the window above the root's padding.
+                let (bar, content) = match sizes.split_first() {
+                    Some((bar, rest)) if bar_first => (*bar, rest),
+                    _ => ((0.0, 0.0), &sizes[..]),
+                };
+                let spacing = gap * content.len().saturating_sub(1) as f32;
+                let w = content.iter().map(|s| s.0).fold(0.0, f32::max);
+                let h = content.iter().map(|s| s.1).sum::<f32>() + spacing;
                 let edge = if id == Self::ROOT { 2.0 * pad } else { 0.0 };
-                (w + edge, h + edge)
+                ((w + edge).max(bar.0), h + edge + bar.1)
             }
+            Kind::TitleBar => {
+                // Room for the buttons on both sides, so the centred title never meets them.
+                let title = sizes.first().map_or(0.0, |s| s.0);
+                let buttons = sizes.iter().skip(1).map(|s| s.0 + gap).sum::<f32>();
+                let h = sizes.iter().map(|s| s.1).fold(0.0, f32::max);
+                (title + 2.0 * buttons + 2.0 * pad, h + pad)
+            }
+            Kind::WindowButton(_) => (size + pad, size + pad),
             Kind::Row => {
                 let w = sizes.iter().map(|s| s.0).sum::<f32>() + spacing;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
@@ -262,9 +325,38 @@ impl Ui {
                     }
                 }
             }
+            Kind::TitleBar => {
+                let pad = self.theme.padding;
+                let Some((&title, buttons)) = children.split_first() else {
+                    return;
+                };
+                let r = self.widgets[title].rect;
+                self.place(title, x + (outer.w - r.w) / 2.0, y + (outer.h - r.h) / 2.0);
+                // From the end edge inwards, so Close sits at the edge.
+                let mut edge_x = if self.rtl { x + pad } else { x + outer.w - pad };
+                for &b in buttons.iter().rev() {
+                    let r = self.widgets[b].rect;
+                    let by = y + (outer.h - r.h) / 2.0;
+                    if self.rtl {
+                        self.place(b, edge_x, by);
+                        edge_x += r.w + gap;
+                    } else {
+                        edge_x -= r.w;
+                        self.place(b, edge_x, by);
+                        edge_x -= gap;
+                    }
+                }
+            }
             Kind::Column | Kind::Group(_) => {
                 let mut cy = y + edge;
-                for c in children {
+                let mut children = &children[..];
+                if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
+                    self.widgets[bar].rect.w = outer.w;
+                    self.place(bar, x, y);
+                    cy += self.widgets[bar].rect.h;
+                    children = &children[1..];
+                }
+                for &c in children {
                     let r = self.widgets[c].rect;
                     let cx = if self.rtl {
                         x + outer.w - edge - r.w
@@ -285,6 +377,7 @@ impl Ui {
         self.set_focus(Some(id));
         match self.widgets[id].kind {
             Kind::Button(_) => Some(Event::Clicked(id)),
+            Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Toggle { .. } => {
                 let siblings = self.widgets[id]
                     .parent
@@ -426,5 +519,35 @@ mod tests {
         // Activating the active toggle keeps it active: a radio group is never empty.
         ui.activate(c);
         assert!(ui.is_active(c));
+    }
+
+    #[test]
+    fn the_title_bar_spans_the_window_with_its_buttons_at_the_end_edge() {
+        for rtl in [false, true] {
+            let mut ui = crate::chooser::build(rtl).ui;
+            let plain = ui.layout();
+            ui.add_title_bar();
+            ui.add_title_bar();
+            let (w, h) = ui.layout();
+            let bar = ui.widget(Ui::ROOT).children[0];
+            let r = ui.widget(bar).rect;
+            assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");
+            assert_eq!(h, plain.1 + r.h, "rtl {rtl}: the bar adds its height once");
+            let parts = ui.widget(bar).children.clone();
+            assert_eq!(parts.len(), 3, "rtl {rtl}: the title and two buttons");
+            let (title, minimize, close) = (parts[0], parts[1], parts[2]);
+            let (m, c) = (ui.widget(minimize).rect, ui.widget(close).rect);
+            let pad = ui.theme.padding;
+            if rtl {
+                assert!(c.x == pad && m.x > c.x, "rtl: {m:?} {c:?}");
+            } else {
+                assert!(c.x + c.w == w - pad && m.x < c.x, "ltr: {m:?} {c:?}");
+            }
+            let t = ui.widget(title).rect;
+            assert!((t.center_x() - w / 2.0).abs() < 0.01 && !t.contains(m.x, m.y + 1.0));
+            assert!(ui.in_title_bar(w / 2.0, 1.0) && !ui.in_title_bar(w / 2.0, r.h + 1.0));
+            assert_eq!(crate::focus::chain(&ui)[..2], [minimize, close]);
+            assert_eq!(ui.activate(close), Some(Event::Window(WindowButton::Close)));
+        }
     }
 }

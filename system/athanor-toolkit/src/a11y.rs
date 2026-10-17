@@ -3,12 +3,17 @@
 
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo,
-    TreeUpdate,
+    Action, ActionData, ActionRequest, Node, NodeId, Orientation, Rect, Role, Toggled, TreeId,
+    TreeInfo, TreeUpdate,
 };
 
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id as u64)
+}
+
+/// The node of a field's text, beside the widgets' ids.
+pub fn text_run_id(id: WidgetId) -> NodeId {
+    NodeId(id as u64 | 1 << 32)
 }
 
 /// The node of widget `id`, with its bounds in physical pixels at `scale`. The match is
@@ -21,15 +26,23 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(ui.title.as_str());
             node
         }
-        Kind::Column | Kind::Row => Node::new(Role::GenericContainer),
+        Kind::Column | Kind::Row | Kind::TitleBar => Node::new(Role::GenericContainer),
         Kind::Group(name) => {
+            // A group stacks its children as a column, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Group);
             node.set_label(name.as_str());
+            node.set_orientation(Orientation::Vertical);
             node
         }
         Kind::Label(text) => {
             let mut node = Node::new(Role::Label);
             node.set_value(text.as_str());
+            node
+        }
+        Kind::WindowButton(button) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(button.name());
+            node.add_action(Action::Click);
             node
         }
         Kind::Button(label) => {
@@ -62,21 +75,36 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     if widget.is_focusable() {
         node.add_action(Action::Focus);
     }
-    let r = widget.rect;
-    node.set_bounds(Rect {
+    node.set_bounds(bounds(ui, id, scale));
+    let mut children: Vec<NodeId> = widget.children.iter().map(|&c| node_id(c)).collect();
+    if matches!(widget.kind, Kind::Field(_)) {
+        children.push(text_run_id(id));
+    }
+    node.set_children(children);
+    node
+}
+
+/// A field's committed text as one run, which AT-SPI's Text and EditableText interfaces read:
+/// AccessKit offers them only for a text input with a run.
+fn text_run(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
+    let text = ui.field_text(id)?;
+    let mut run = Node::new(Role::TextRun);
+    let lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
+    run.set_value(text);
+    run.set_character_lengths(lengths);
+    run.set_bounds(bounds(ui, id, scale));
+    Some((text_run_id(id), run))
+}
+
+/// Widget `id`'s rectangle in physical pixels at `scale`.
+fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
+    let r = ui.widget(id).rect;
+    Rect {
         x0: f64::from(r.x) * scale,
         y0: f64::from(r.y) * scale,
         x1: f64::from(r.x + r.w) * scale,
         y1: f64::from(r.y + r.h) * scale,
-    });
-    node.set_children(
-        widget
-            .children
-            .iter()
-            .map(|&c| node_id(c))
-            .collect::<Vec<_>>(),
-    );
-    node
+    }
 }
 
 /// The whole tree, as the adapter's first update and after every change.
@@ -87,6 +115,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     TreeUpdate {
         nodes: (0..ui.len())
             .map(|id| (node_id(id), node(ui, id, scale)))
+            .chain((0..ui.len()).filter_map(|id| text_run(ui, id, scale)))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -146,10 +175,12 @@ mod tests {
             },
         );
         let field = ui.field(Ui::ROOT, "Field", "text");
+        ui.add_title_bar();
         ui.layout();
 
         let mut update = tree_update(&ui, 1.0);
-        assert_eq!(update.nodes.len(), ui.len());
+        // Every widget, and the field's text run.
+        assert_eq!(update.nodes.len(), ui.len() + 1);
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
 
         // The check notices a widget whose node is gone or nameless.
@@ -202,6 +233,7 @@ mod tests {
             .iter()
             .filter(|&&g| node(g).role() == Role::Group)
         {
+            assert_eq!(node(*group).orientation(), Some(Orientation::Vertical));
             let toggles: Vec<_> = descendants(ui, *group)
                 .into_iter()
                 .filter_map(|id| node(id).toggled())
@@ -249,6 +281,65 @@ mod tests {
         assert!(text.starts_with("abx"), "{text:.8}");
         assert_eq!(text.chars().count(), Ui::FIELD_MAX_CHARS);
         assert!(crate::render::render(&mut ui, 1.0).is_ok());
+    }
+
+    #[test]
+    fn the_title_bar_reads_as_gtks() {
+        let mut ui = chooser::build(false).ui;
+        ui.add_title_bar();
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let bar = ui.widget(Ui::ROOT).children[0];
+        let parts: Vec<_> = ui
+            .widget(bar)
+            .children
+            .iter()
+            .map(|&id| &update.nodes[id].1)
+            .collect();
+        let read: Vec<_> = parts
+            .iter()
+            .map(|n| (n.role(), n.label().or(n.value()).unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (Role::Label, "Layout"),
+                (Role::Button, "Minimize"),
+                (Role::Button, "Close")
+            ]
+        );
+        assert!(parts[1..].iter().all(|n| n.supports_action(Action::Click)));
+    }
+
+    #[test]
+    fn a_field_reports_its_committed_text() {
+        let mut ui = Ui::new("Field", Theme::default(), false);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        ui.set_focus(Some(field));
+        let run = |ui: &Ui| {
+            let update = tree_update(ui, 1.0);
+            let value = |id| {
+                update
+                    .nodes
+                    .iter()
+                    .find(|(n, _)| *n == id)
+                    .and_then(|(_, node)| node.value().map(str::to_owned))
+            };
+            (value(node_id(field)), value(text_run_id(field)))
+        };
+
+        // A preedit is not text yet; the commit is.
+        ui.compose("ni", Some((2, 2)));
+        assert_eq!(run(&ui), (Some(String::new()), Some(String::new())));
+        ui.commit("你");
+        assert_eq!(run(&ui), (Some("你".into()), Some("你".into())));
+        let update = tree_update(&ui, 1.0);
+        let lengths = update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == text_run_id(field))
+            .map(|(_, node)| node.character_lengths().to_vec());
+        assert_eq!(lengths, Some(vec![3]));
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {

@@ -1,0 +1,20 @@
+Screen reader on.
+Layout
+Style grouping
+Island toggle button pressed.
+Bar toggle button not pressed.
+Essential toggle button not pressed.
+Panel grouping
+Top toggle button pressed.
+Bottom toggle button not pressed.
+Dock grouping
+Visible toggle button pressed.
+Auto-hide toggle button not pressed.
+None toggle button not pressed.
+Style grouping
+Island toggle button pressed.
+Bar toggle button not pressed.
+Essential toggle button not pressed.
+Panel grouping
+Top toggle button pressed.
+Screen reader off.

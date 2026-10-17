@@ -2,9 +2,9 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{Kind, Ui};
+use crate::widget::{Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
-use vello_cpu::kurbo::{Affine, Rect, RoundedRect, Shape, Stroke};
+use vello_cpu::kurbo::{Affine, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::Color;
 use vello_cpu::{Glyph, Pixmap, RenderContext, Resources};
 
@@ -49,6 +49,20 @@ fn draw_text(
                 .font_size(run.run().font_size())
                 .hint(true)
                 .fill_glyphs(glyphs)?;
+            // An input method's preedit is underlined, from the font's own metrics.
+            if let Some(underline) = &run.style().underline {
+                let metrics = run.run().font_metrics();
+                let size = underline.size.unwrap_or(metrics.underline_size).max(1.0);
+                let offset = underline.offset.unwrap_or(metrics.underline_offset);
+                let top = y + run.baseline() - offset;
+                let left = x + run.offset();
+                ctx.fill_rect(&Rect::new(
+                    f64::from(left),
+                    f64::from(top),
+                    f64::from(left + run.advance()),
+                    f64::from(top + size),
+                ));
+            }
         }
     }
     Ok(())
@@ -78,6 +92,43 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
         let r = widget.rect;
         match &mut widget.kind {
             Kind::Column | Kind::Row | Kind::Group(_) => {}
+            Kind::TitleBar => {
+                ctx.set_paint(color(t.title_bar));
+                ctx.fill_rect(&Rect::new(
+                    f64::from(r.x),
+                    f64::from(r.y),
+                    f64::from(r.x + r.w),
+                    f64::from(r.bottom()),
+                ));
+                ctx.set_paint(color(t.border));
+                ctx.fill_rect(&Rect::new(
+                    f64::from(r.x),
+                    f64::from(r.bottom() - 1.0),
+                    f64::from(r.x + r.w),
+                    f64::from(r.bottom()),
+                ));
+            }
+            // A round button with its mark drawn as lines, as GTK's symbolic icons.
+            Kind::WindowButton(button) => {
+                let (cx, cy) = (f64::from(r.center_x()), f64::from(r.y + r.h / 2.0));
+                ctx.set_paint(color(t.surface));
+                ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                let arm = f64::from(r.w) * 0.16;
+                let lines = match button {
+                    WindowButton::Minimize => {
+                        vec![Line::new((cx - arm, cy + arm), (cx + arm, cy + arm))]
+                    }
+                    WindowButton::Close => vec![
+                        Line::new((cx - arm, cy - arm), (cx + arm, cy + arm)),
+                        Line::new((cx + arm, cy - arm), (cx - arm, cy + arm)),
+                    ],
+                };
+                ctx.set_paint(color(t.text));
+                ctx.set_stroke(Stroke::new(1.5));
+                for line in lines {
+                    ctx.stroke_path(&line.to_path(0.1));
+                }
+            }
             Kind::Label(_) => {
                 if let Some(layout) = &widget.text {
                     draw_text(&mut ctx, &mut resources, layout, (r.x, r.y), t.text)?;
@@ -149,6 +200,44 @@ mod tests {
         let mut h = DefaultHasher::new();
         pixmap.data_as_u8_slice().hash(&mut h);
         h.finish()
+    }
+
+    /// A field holding "abc", composed or committed, drawn without focus so no caret shows.
+    fn field(composed: bool) -> Result<Pixmap, Error> {
+        let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
+        let field = ui.field(crate::Ui::ROOT, "Name", "");
+        ui.set_focus(Some(field));
+        if composed {
+            ui.compose("abc", None);
+        } else {
+            ui.commit("abc");
+        }
+        ui.set_focus(None);
+        render(&mut ui, 1.0)
+    }
+
+    #[test]
+    fn a_preedit_is_drawn_underlined() -> Result<(), Error> {
+        let (composed, committed) = (field(true)?, field(false)?);
+        let width = usize::from(composed.width());
+        let rows: Vec<usize> = composed
+            .data_as_u8_slice()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(committed.data_as_u8_slice().as_chunks::<4>().0)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| i / width)
+            .collect();
+        // The same glyphs, and one thin line more under them.
+        let (top, bottom) = (rows.iter().min(), rows.iter().max());
+        assert!(rows.len() >= 10, "{} pixels differ", rows.len());
+        assert!(
+            bottom.zip(top).is_some_and(|(b, t)| b - t <= 2),
+            "rows {top:?} to {bottom:?}"
+        );
+        Ok(())
     }
 
     #[test]
