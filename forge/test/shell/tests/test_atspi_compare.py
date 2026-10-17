@@ -81,6 +81,11 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("toggle button", "Bar")])
         self.assertEqual((len(lines), failures), (1, []))
 
+    def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
+        reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
+        lines, failures = compare.compare(reference, [node("button", "Close")])
+        self.assertEqual((len(lines), failures), (2, ["image 'Close': missing"]))
+
     def test_a_label_that_repeats_another_parents_name_is_its_own_element(self):
         reference = [node("frame", "Layout"), dict(node("label", "Layout"), depth=1)]
         lines, failures = compare.compare(reference, [node("frame", "Layout")])

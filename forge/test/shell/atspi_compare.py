@@ -45,12 +45,18 @@ def significant(node):
 
 def spoken(nodes):
     """The significant nodes, less the labels that repeat their button's name: a screen reader
-    speaks the two once, as the button's name (BUTTONS)."""
+    speaks the two once, as the button's name (BUTTONS). Any other child, an image for one,
+    stays an element of its own."""
     parents, out = [], []
     for node in nodes:
         del parents[node["depth"]:]
         parent = parents[-1] if parents else None
-        repeats = parent and parent["role"] in BUTTONS and node["name"] == parent["name"]
+        repeats = (
+            node["role"] == "label"
+            and parent
+            and parent["role"] in BUTTONS
+            and node["name"] == parent["name"]
+        )
         if significant(node) and not (node["name"] and repeats):
             out.append(node)
         parents.append(node)
