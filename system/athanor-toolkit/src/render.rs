@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn a_scale_that_is_not_positive_is_refused() {
-        let mut ui = chooser::build(false).ui;
+        let mut ui = chooser::build(&athanor_i18n::Catalog::empty(), false).ui;
         for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
             assert!(render(&mut ui, scale).is_err(), "scale {scale}");
         }
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn the_chooser_renders_deterministically_at_both_scales() -> Result<(), Error> {
-        let mut ui = chooser::build(false).ui;
+        let mut ui = chooser::build(&athanor_i18n::Catalog::empty(), false).ui;
         let w = ui.size().0.ceil();
         for scale in [1.0, 1.5] {
             let first = render(&mut ui, scale)?;

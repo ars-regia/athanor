@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn the_chooser_tree_has_roles_and_names() {
-        let chooser = chooser::build(false);
+        let chooser = chooser::build(&athanor_i18n::Catalog::empty(), false);
         assert_eq!(chooser.choices.len(), 8);
         let ui = &chooser.ui;
         let update = tree_update(ui, 1.0);
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn the_title_bar_reads_as_gtks() {
-        let mut ui = chooser::build(false).ui;
+        let mut ui = chooser::build(&athanor_i18n::Catalog::empty(), false).ui;
         ui.add_title_bar();
         ui.layout();
         let update = tree_update(&ui, 1.0);
