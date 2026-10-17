@@ -53,7 +53,8 @@ fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
     match value.as_deref().map(|v| v.to_str()) {
         None | Some(Some("cpu")) => Ok(false),
         Some(Some("gpu")) => Ok(true),
-        Some(other) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
+        Some(Some(other)) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
+        Some(None) => Err(format!("{RENDERER} is not valid UTF-8; it takes cpu or gpu").into()),
     }
 }
 
@@ -743,6 +744,10 @@ mod tests {
         for refused in ["", "GPU", "vulkan"] {
             assert!(wants_gpu(Some(refused.into())).is_err(), "{refused:?}");
         }
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = std::ffi::OsString::from_vec(vec![0x67, 0xff]);
+        let error = wants_gpu(Some(invalid)).unwrap_err().to_string();
+        assert!(error.contains("is not valid UTF-8"), "{error}");
     }
 
     #[test]
