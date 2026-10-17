@@ -4,25 +4,33 @@
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
-use smithay::backend::renderer::ImportDma;
 use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, Window};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
-use smithay::reexports::wayland_server::{Client, Resource};
+use smithay::reexports::calloop::Interest;
+use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{Serial, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    get_parent, is_sync_subsurface, with_states, CompositorClientState, CompositorHandler,
-    CompositorState,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+    SurfaceAttributes,
 };
-use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
+use smithay::wayland::dmabuf::{
+    get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
+};
+use smithay::wayland::drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
+use smithay::wayland::selection::data_device::{
+    set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
+};
+use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
@@ -50,6 +58,12 @@ impl CompositorHandler for State {
             Some(data) => &data.compositor_state,
             None => &UNKNOWN,
         }
+    }
+
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
+            state.wait_for_fence(dh, surface)
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -83,6 +97,78 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    /// Holds a commit with a new buffer until the buffer is ready: until its acquire point of
+    /// linux-drm-syncobj-v1 signals or, without one, its dmabuf's implicit fence; as anvil does.
+    /// It also counts the commit in the frame statistics.
+    fn wait_for_fence(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+        let (buffer, acquire) = with_states(surface, |states| {
+            let acquire = states
+                .cached_state
+                .get::<DrmSyncobjCachedState>()
+                .pending()
+                .acquire_point
+                .clone();
+            let buffer = match &states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .pending()
+                .buffer
+            {
+                Some(BufferAssignment::NewBuffer(buffer)) => Some(get_dmabuf(buffer).cloned().ok()),
+                _ => None,
+            };
+            (buffer, acquire)
+        });
+        let Some(dmabuf) = buffer else {
+            return;
+        };
+        if let Some(stats) = &mut self.frame_stats {
+            let pid = surface
+                .client()
+                .and_then(|client| client.get_credentials(dh).ok())
+                .map(|peer| peer.pid);
+            stats.commit(surface.id(), pid, dmabuf.is_some(), acquire.is_some());
+        }
+        let Some(client) = surface.client() else {
+            return;
+        };
+        let unblock = move |state: &mut State| {
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
+        };
+        if let Some(point) = acquire {
+            match point.generate_blocker() {
+                Ok((blocker, source)) => {
+                    match self.loop_handle.insert_source(source, move |_, _, state| {
+                        unblock(state);
+                        Ok(())
+                    }) {
+                        Ok(_) => add_blocker(surface, blocker),
+                        Err(error) => {
+                            tracing::warn!(error = %error.error, "an acquire point cannot be waited on")
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "an acquire point cannot be waited on"),
+            }
+        } else if let Some(dmabuf) = dmabuf {
+            // An error means the fence has already signalled: nothing to wait for.
+            if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
+                match self.loop_handle.insert_source(source, move |_, _, state| {
+                    unblock(state);
+                    Ok(())
+                }) {
+                    Ok(_) => add_blocker(surface, blocker),
+                    Err(error) => {
+                        tracing::warn!(error = %error.error, "a dmabuf's fence cannot be waited on")
+                    }
+                }
+            }
+        }
+    }
+
     /// Centres a window on the output at its first commit with a size. It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
     /// user's input, so a client cannot take the focus from another by opening one.
@@ -91,7 +177,7 @@ impl State {
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
             return;
         }
-        let Some(area) = self.space.output_geometry(&self.output) else {
+        let Some(area) = self.output_area() else {
             return;
         };
         if !window.user_data().insert_if_missing(|| Placed) {
@@ -139,7 +225,7 @@ impl State {
             return;
         };
         let (Some(output), Some(window)) = (
-            self.space.output_geometry(&self.output),
+            self.output_area(),
             self.space.element_geometry(&window),
         ) else {
             return;
@@ -241,7 +327,26 @@ impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
+
+    /// The clipboard follows the keyboard: only the focused client reads it.
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| surface.client());
+        set_data_device_focus(&self.display_handle, seat, client);
+    }
 }
+
+impl SelectionHandler for State {
+    type SelectionUserData = ();
+}
+
+impl DataDeviceHandler for State {
+    fn data_device_state(&mut self) -> &mut DataDeviceState {
+        &mut self.data_device_state
+    }
+}
+
+// ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
+impl WaylandDndGrabHandler for State {}
 
 // cursor-shape-v1 serves tablet tools too.
 impl TabletSeatHandler for State {
@@ -264,8 +369,8 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         notifier: ImportNotifier,
     ) {
-        match self.backend.renderer().import_dmabuf(&dmabuf, None) {
-            Ok(_) => {
+        match self.import_dmabuf(&dmabuf) {
+            Ok(()) => {
                 if let Err(error) = notifier.successful::<Self>() {
                     tracing::warn!(%error, "an imported dmabuf has no buffer");
                 }
@@ -278,9 +383,20 @@ impl DmabufHandler for State {
     }
 }
 
+impl DrmSyncobjHandler for State {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.syncobj_state.as_mut()
+    }
+}
+
 impl FractionalScaleHandler for State {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        let scale = self.output.current_scale().fractional_scale();
+        // ponytail: the first output's scale; per output once windows move between outputs.
+        let scale = self
+            .space
+            .outputs()
+            .next()
+            .map_or(1.0, |output| output.current_scale().fractional_scale());
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
         });

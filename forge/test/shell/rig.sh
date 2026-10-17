@@ -476,7 +476,8 @@ compositor-globals)
         bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
-        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1; do
+        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
+        wl_data_device_manager; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -486,7 +487,7 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 11 globals, and a seat with pointer and keyboard"
+    echo "compositor-globals: the 12 globals, and a seat with pointer and keyboard"
     ;;
 cargo)
     shift
