@@ -47,6 +47,11 @@ use std::ffi::OsString;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
+/// colour the desktop's hearth wallpaper starts from (system/athanor-style/calmo/tokens.toml).
+// ponytail: dark always; the session's light or dark theme when the compositor reads appearance.
+pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
+
 /// What draws the outputs.
 pub enum Backend {
     /// A window of a parent compositor.

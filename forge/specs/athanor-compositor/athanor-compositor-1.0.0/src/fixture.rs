@@ -5,7 +5,7 @@
 
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
-use crate::state::State;
+use crate::state::{State, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
@@ -44,9 +44,10 @@ const OUTPUTS: [VirtualOutput; 2] = [
 /// Pixels as `headless::FRAME_FORMAT` reads them back: R, G, B, A.
 const RED: [u8; 4] = [255, 0, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
-/// The background, 0.1 of full in each channel: 25.5, which Pixman truncates and GLES rounds.
+/// The background, `state::BACKGROUND` in bytes: whole multiples of 1/255, which Pixman and
+/// GLES both read back exactly.
 fn background(px: &[u8; 4]) -> bool {
-    px[..3].iter().all(|c| (25..=26).contains(c)) && px[3] == 255
+    px == &BACKGROUND.map(|c| (c * 255.0).round() as u8)
 }
 
 /// How long the compositor waits for the client.
@@ -465,4 +466,19 @@ fn headless_on_a_render_node() {
         std::env::var_os("ATHANOR_RENDER_NODE").expect("ATHANOR_RENDER_NODE names a render node"),
     );
     fixture(Some(&node));
+}
+
+/// The background is Calmo's dark `bg1` as the generator derives it from tokens.toml; the
+/// generator's own check keeps the sheet in step with the tokens.
+#[test]
+fn the_background_is_calmo_bg1() {
+    let sheet = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../system/athanor-style/calmo/generated/css/calmo-dark.css");
+    let sheet = std::fs::read_to_string(sheet).expect("calmo-dark.css");
+    let hex = sheet
+        .lines()
+        .find_map(|line| line.strip_prefix("@define-color ath_bg1 #")?.strip_suffix(';'))
+        .expect("ath_bg1 in calmo-dark.css");
+    let bytes = BACKGROUND.map(|c| (c * 255.0).round() as u8);
+    assert_eq!(format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2]), hex);
 }
