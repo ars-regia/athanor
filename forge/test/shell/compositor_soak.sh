@@ -79,13 +79,21 @@ report=$(sed 's/\x1b\[[0-9;]*m//g' "$out/compositor.log" |
     awk '/frame times: outputs drawn/ { block = "" } { block = block $0 "\n" } END { printf "%s", block }')
 grep 'frame times: outputs drawn' <<< "$report" || [ $? -eq 1 ]
 for i in $(seq "$n"); do
-    # Each client runs through exec, so its pid is the one the compositor logs.
-    line=$(grep "frame times: a client's commits.* pid=Some(${pids[$i]}) " <<< "$report" | head -n 1) || [ $? -eq 1 ]
-    mean=$(sed -n 's/.* mean_ms="\{0,1\}\([0-9.]*\).*/\1/p' <<< "$line")
-    if [ -n "$mean" ] && awk -v mean="$mean" 'BEGIN { exit !(mean < 2000 / 60) }'; then
-        echo "client $i: $line"
+    # Each client runs through exec, so its pid is the one the compositor logs. Every surface
+    # of the client counts, and each must have committed on at least half the frames of the
+    # 10 s window, two frames apart at most on average: a mean alone hides a client that
+    # committed a few times and then stalled.
+    lines=$(grep "frame times: a client's commits.* pid=Some(${pids[$i]}) " <<< "$report") || [ $? -eq 1 ]
+    if [ -n "$lines" ] && awk '{
+        frames = $0; sub(/.* frames=/, "", frames); sub(/ .*/, "", frames)
+        mean = $0; sub(/.* mean_ms="?/, "", mean); sub(/[" ].*/, "", mean)
+        if (frames + 0 < 300 || mean + 0 >= 2000 / 60) bad = 1
+    } END { exit bad }' <<< "$lines"; then
+        echo "client $i:"
+        echo "$lines"
     else
-        echo "client $i (pid ${pids[$i]}): no commits under two frames apart in the last report${line:+: $line}" >&2
+        echo "client $i (pid ${pids[$i]}): throttled or starved in the last report${lines:+:}" >&2
+        [ -z "$lines" ] || echo "$lines" >&2
         status=1
     fi
 done
