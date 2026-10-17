@@ -219,7 +219,7 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
 # list and a tray menu, the popovers of the four system modules against
 # system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
-    local surface=$1 open="" preset=float panel=top dock=visible settle=8
+    local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable=""
     local session=(python3 /repo/forge/test/shell/bar_session.py)
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
@@ -237,8 +237,9 @@ capture_bar() { # capture_bar <surface>
     # The system modules against the fixtures, which start before the bar: a longer settle.
     bar-network) open=network settle=12 session+=(--fixtures) ;;
     # The adapter already discovers, so the popover opens at its final size: cosmic-comp
-    # at a fractional scale leaves the edge column of a popover drawn before it grew.
-    bar-bluetooth) open=bluetooth settle=12 session+=(--fixtures --discovering) ;;
+    # at a fractional scale leaves the edge column of a popover drawn before it grew. Its
+    # bottom edge was still settling at 1.5 right-to-left (#545): capture until it is stable.
+    bar-bluetooth) open=bluetooth settle=12 stable=10 session+=(--fixtures --discovering) ;;
     bar-audio) open=audio settle=12 session+=(--fixtures) ;;
     bar-battery) open=battery settle=12 session+=(--fixtures) ;;
     # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
@@ -263,7 +264,7 @@ capture_bar() { # capture_bar <surface>
         if [ -n "$open" ]; then
             override+=(ATHANOR_BAR_OPEN="$open")
         fi
-        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_CONFIG_SEED="/out/seed-$tag" \
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE="$settle" RIG_STABLE="$stable" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY="$bar_overlay" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- "${session[@]}"
     done < <(python3 -B "$rig/cases.py" "$surface")

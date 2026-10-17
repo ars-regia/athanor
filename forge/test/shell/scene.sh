@@ -154,4 +154,26 @@ if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
     magick "${parts[@]}" +append "/out/$tag.png"
 else
     grim -o WINIT-0 "/out/$tag.png"
+    # RIG_STABLE=<n>: a popover can still be resizing at the capture. Capture again each
+    # second until two successive PNGs are identical, at most n times; the count goes to
+    # /out/<tag>-stable.txt, so a scene that settles late is visible, not absorbed.
+    if [ -n "${RIG_STABLE:-}" ]; then
+        for ((attempt = 1; attempt <= RIG_STABLE; attempt++)); do
+            sleep 1
+            grim -o WINIT-0 "$scratch/again.png"
+            # compare exits 0 when the pixels agree, 1 when they differ and 2 on an error.
+            rc=0
+            magick compare -metric AE "/out/$tag.png" "$scratch/again.png" null: \
+                2> "$scratch/compare.txt" || rc=$?
+            case $rc in
+                0) break ;;
+                1) mv "$scratch/again.png" "/out/$tag.png" ;;
+                *)
+                    cat "$scratch/compare.txt" >&2
+                    exit 1
+                    ;;
+            esac
+        done
+        echo "captures that differed from their successor: $((attempt - 1)) of at most $RIG_STABLE" > "/out/$tag-stable.txt"
+    fi
 fi
