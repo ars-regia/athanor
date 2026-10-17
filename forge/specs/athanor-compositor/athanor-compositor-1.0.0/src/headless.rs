@@ -345,6 +345,14 @@ where
         BACKGROUND,
     )
     .map_err(|error| format!("{error:?}"))?;
+    // Smithay releases a client's buffer when the renderer drops its texture, not when the GPU
+    // has finished sampling it: the frame is waited for here, before its frame callbacks invite
+    // the clients to reuse their buffers. Pixman's sync point has already signalled; on GLES
+    // this blocks the loop for one frame of GPU work, which only the headless backend can
+    // afford. The DRM backend (task 8) must not drop the sync point either: Smithay's
+    // DrmCompositor passes it to the KMS commit as the plane's IN_FENCE_FD when the fence can
+    // be exported, and waits as here when it cannot (as anvil does for its swapchain frame).
+    result.sync.wait()?;
     let damaged = result.damage.is_some();
     let states = result.states;
     let pixels = if read {
