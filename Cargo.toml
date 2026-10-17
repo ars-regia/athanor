@@ -52,7 +52,6 @@ libc = "0.2.189"
 
 # D-Bus & Inter-Process Communication
 zbus = { version = "5.18.0", features = ["tokio"] }
-zvariant = "5.15.0"
 
 # GUI, Display & Wayland Ecosystem
 gtk4 = { version = "0.11.4", features = ["v4_18"] }
