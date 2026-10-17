@@ -651,6 +651,16 @@ item = "SH5"
 purpose = "Calmo tokens and the generator of the shell's style"
 
 [[component]]
+path = "system/athanor-toolkit"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_own_stack.md"
+item = "OS7"
+branch = "own-stack-vision"
+purpose = "Athanor's own widget toolkit: Wayland driver, widgets, Parley text, AccessKit accessibility"
+
+[[component]]
 path = "system/athanor-trust-state"
 kind = "crate"
 area = "signing-update"
