@@ -9,7 +9,7 @@ use athanor_shelld::wire::WireNotification;
 use common::{Bus, APP_CGROUP, BAR_CGROUP};
 use futures_util::StreamExt;
 use zbus::{Connection, Proxy};
-use zvariant::Value;
+use zbus::zvariant::Value;
 
 async fn public(conn: &Connection) -> Proxy<'static> {
     Proxy::new(
