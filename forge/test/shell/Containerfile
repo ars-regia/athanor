@@ -47,6 +47,10 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
       adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
+# athanor-compositor's headless soak (doc_own_stack.md, C1 task 2) draws eglgears_wayland on
+# llvmpipe beside a GTK4 client.
+RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
+  && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
 # published one pinned by build-image.digest when that file exists: a change here takes effect
@@ -56,10 +60,12 @@ FROM rig AS build
 # writes the GNOME interface and accessibility schemas (gsettings-desktop-schemas).
 # athanor-greeter-ui reads lastlog2 through the system libsqlite3 (sqlite-devel).
 # athanor-toolkit's keyboard (smithay-client-toolkit) links libxkbcommon (libxkbcommon-devel).
+# athanor-compositor's headless backend links libgbm (mesa-libgbm-devel) and Pixman (pixman-devel).
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       rust cargo clippy gcc gcc-c++ clang-devel pkgconf-pkg-config \
       gtk4-devel glib2-devel gtk4-layer-shell-devel gsettings-desktop-schemas \
       speech-dispatcher-devel upower-devel pam-devel tpm2-tss-devel systemd-devel \
       pulseaudio-libs-devel tinysparql-devel poppler-glib-devel \
       libseccomp-devel fontconfig-devel sqlite-devel libxkbcommon-devel \
+      mesa-libgbm-devel pixman-devel \
   && dnf5 clean all

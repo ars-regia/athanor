@@ -4,22 +4,31 @@
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
-use smithay::backend::renderer::ImportDma;
 use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, Window};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
+use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
+use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
-use smithay::reexports::wayland_server::{Client, Resource};
+use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{Serial, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    get_parent, is_sync_subsurface, with_states, CompositorClientState, CompositorHandler,
-    CompositorState,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
 };
-use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
+use smithay::wayland::dmabuf::{
+    get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
+};
+use smithay::wayland::drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
+use smithay::wayland::selection::data_device::{
+    set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
+};
+use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
 };
@@ -32,6 +41,25 @@ use std::time::Duration;
 
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
+
+/// How many commits one client may hold waiting on a fence. Each holds an event source with a
+/// file descriptor and pins its buffer; a client keeps a few frames in flight per surface, and
+/// one that queues more without its fences signalling is flooding the compositor, which
+/// disconnects it rather than run out of file descriptors.
+pub const MAX_HELD_COMMITS: usize = 64;
+
+/// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
+/// commits. wayland-server sends no `wl_display.error` on `Client::kill`, and `post_error` reads
+/// the code against the interface of the object it is posted on, which for `wl_surface` defines
+/// no such error: the client sees its socket close, and the reason reaches `disconnected`.
+const NO_MEMORY: u32 = 2;
+
+/// A commit held on a fence: its client, and the event source that waits on the fence.
+pub struct HeldCommit {
+    client: ClientId,
+    seq: u64,
+    token: RegistrationToken,
+}
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
@@ -50,6 +78,12 @@ impl CompositorHandler for State {
             Some(data) => &data.compositor_state,
             None => &UNKNOWN,
         }
+    }
+
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
+            state.wait_for_fence(dh, surface)
+        });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -83,6 +117,114 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    /// Holds a commit with a new buffer until the buffer is ready: until its acquire point of
+    /// linux-drm-syncobj-v1 signals or, without one, its dmabuf's implicit fence; as anvil does.
+    /// It also counts the commit in the frame statistics.
+    fn wait_for_fence(&mut self, dh: &DisplayHandle, surface: &WlSurface) {
+        let (buffer, acquire) = with_states(surface, |states| {
+            let acquire = states
+                .cached_state
+                .get::<DrmSyncobjCachedState>()
+                .pending()
+                .acquire_point
+                .clone();
+            let buffer = match &states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .pending()
+                .buffer
+            {
+                Some(BufferAssignment::NewBuffer(buffer)) => Some(get_dmabuf(buffer).cloned().ok()),
+                _ => None,
+            };
+            (buffer, acquire)
+        });
+        let Some(dmabuf) = buffer else {
+            return;
+        };
+        if let Some(stats) = &mut self.frame_stats {
+            let pid = surface
+                .client()
+                .and_then(|client| client.get_credentials(dh).ok())
+                .map(|peer| peer.pid);
+            stats.commit(surface.id(), pid, dmabuf.is_some(), acquire.is_some());
+        }
+        if let Some(point) = acquire {
+            match point.generate_blocker() {
+                Ok((blocker, source)) => self.hold_commit(surface, blocker, source),
+                Err(error) => tracing::warn!(%error, "an acquire point cannot be waited on"),
+            }
+        } else if let Some(dmabuf) = dmabuf {
+            // An error means the fence has already signalled: nothing to wait for.
+            if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
+                self.hold_commit(surface, blocker, source);
+            }
+        }
+    }
+
+    /// Holds the pending commit of `surface` on `blocker` until `source` fires, as anvil does.
+    /// A client past `MAX_HELD_COMMITS` is disconnected instead (`NO_MEMORY` says how); a
+    /// client's held commits are dropped when it disconnects (`release_held`).
+    pub fn hold_commit<B, S>(&mut self, surface: &WlSurface, blocker: B, source: S)
+    where
+        B: Blocker + Send + 'static,
+        S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
+    {
+        let Some(client) = surface.client() else {
+            return;
+        };
+        let id = client.id();
+        if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
+            tracing::warn!(
+                ?id,
+                "a client holds too many commits on fences: disconnected"
+            );
+            client.kill(
+                &self.display_handle,
+                ProtocolError {
+                    code: NO_MEMORY,
+                    object_id: 1,
+                    object_interface: "wl_display".into(),
+                    message: format!("more than {MAX_HELD_COMMITS} commits wait on a fence"),
+                },
+            );
+            return;
+        }
+        let seq = self.next_held;
+        self.next_held += 1;
+        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
+            state.held.retain(|held| held.seq != seq);
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
+            Ok(())
+        };
+        match self.loop_handle.insert_source(source, unblock) {
+            Ok(token) => {
+                self.held.push(HeldCommit {
+                    client: id,
+                    seq,
+                    token,
+                });
+                add_blocker(surface, blocker);
+            }
+            Err(error) => tracing::warn!(error = %error.error, "a fence cannot be waited on"),
+        }
+    }
+
+    /// Drops the commits `client` holds on fences, with their event sources.
+    pub fn release_held(&mut self, client: &ClientId) {
+        let loop_handle = &self.loop_handle;
+        self.held.retain(|held| {
+            let keep = &held.client != client;
+            if !keep {
+                loop_handle.remove(held.token);
+            }
+            keep
+        });
+    }
+
     /// Centres a window on the output at its first commit with a size. It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
     /// user's input, so a client cannot take the focus from another by opening one.
@@ -91,7 +233,7 @@ impl State {
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
             return;
         }
-        let Some(area) = self.space.output_geometry(&self.output) else {
+        let Some(area) = self.output_area() else {
             return;
         };
         if !window.user_data().insert_if_missing(|| Placed) {
@@ -138,10 +280,9 @@ impl State {
         let Some(window) = self.window_for(&root) else {
             return;
         };
-        let (Some(output), Some(window)) = (
-            self.space.output_geometry(&self.output),
-            self.space.element_geometry(&window),
-        ) else {
+        let (Some(output), Some(window)) =
+            (self.output_area(), self.space.element_geometry(&window))
+        else {
             return;
         };
         // Relative to the popup's parent.
@@ -241,7 +382,30 @@ impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
+
+    /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of
+    /// the selection, and no other client is sent one. An offer a client already holds stays
+    /// readable after it loses the focus, for as long as the selection's source answers:
+    /// Smithay checks no focus on `wl_data_offer.receive` and keeps the offer's object data to
+    /// itself, so the compositor cannot withdraw it.
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| surface.client());
+        set_data_device_focus(&self.display_handle, seat, client);
+    }
 }
+
+impl SelectionHandler for State {
+    type SelectionUserData = ();
+}
+
+impl DataDeviceHandler for State {
+    fn data_device_state(&mut self) -> &mut DataDeviceState {
+        &mut self.data_device_state
+    }
+}
+
+// ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
+impl WaylandDndGrabHandler for State {}
 
 // cursor-shape-v1 serves tablet tools too.
 impl TabletSeatHandler for State {
@@ -264,8 +428,8 @@ impl DmabufHandler for State {
         dmabuf: Dmabuf,
         notifier: ImportNotifier,
     ) {
-        match self.backend.renderer().import_dmabuf(&dmabuf, None) {
-            Ok(_) => {
+        match self.import_dmabuf(&dmabuf) {
+            Ok(()) => {
                 if let Err(error) = notifier.successful::<Self>() {
                     tracing::warn!(%error, "an imported dmabuf has no buffer");
                 }
@@ -278,9 +442,20 @@ impl DmabufHandler for State {
     }
 }
 
+impl DrmSyncobjHandler for State {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.syncobj_state.as_mut()
+    }
+}
+
 impl FractionalScaleHandler for State {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        let scale = self.output.current_scale().fractional_scale();
+        // ponytail: the first output's scale; per output once windows move between outputs.
+        let scale = self
+            .space
+            .outputs()
+            .next()
+            .map_or(1.0, |output| output.current_scale().fractional_scale());
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional| fractional.set_preferred_scale(scale));
         });

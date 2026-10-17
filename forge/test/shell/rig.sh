@@ -17,6 +17,7 @@
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
 #   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser into <out>/bin as athanor-toolkit-chooser
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
+#   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
@@ -477,7 +478,8 @@ compositor-globals)
         bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
-        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1; do
+        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
+        wl_data_device_manager; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -487,7 +489,18 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 11 globals, and a seat with pointer and keyboard"
+    echo "compositor-globals: the 12 globals, and a seat with pointer and keyboard"
+    ;;
+compositor-soak)
+    # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
+    # the rig has no render node, so the compositor draws on Pixman and the clients on llvmpipe.
+    # mesa-demos installs eglgears_wayland under /usr/lib64/mesa, off PATH.
+    # compositor_soak.sh rewrites its logs in /out/compositor-soak.
+    require athanor-compositor build-compositor
+    in_rig "$(rig_image)" dbus-run-session -- /repo/forge/test/shell/compositor_soak.sh \
+        /out/compositor-soak "${RIG_SOAK:-600}" \
+        /out/bin/athanor-compositor --headless --output 1280x800 --output 800x600@1.5 -- \
+        'GDK_BACKEND=wayland exec python3 /repo/forge/test/shell/gtk_animation.py' 'exec /usr/lib64/mesa/eglgears_wayland'
     ;;
 cargo)
     shift
