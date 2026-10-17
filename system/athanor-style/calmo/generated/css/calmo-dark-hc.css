@@ -377,15 +377,32 @@ window.athanor-surface scale > trough > highlight {
 window.athanor-surface switch:checked,
 window.athanor-surface check:checked,
 window.athanor-surface check:indeterminate,
-window.athanor-surface radio:checked {
+window.athanor-surface radio:checked,
+window.athanor-surface radio:indeterminate {
     border-color: @ath_acc;
     background-image: none;
     background-color: @ath_acc;
     color: @ath_acc_ink;
 }
 
-window.athanor-surface entry:focus-within {
+/* This sheet overrides the Default theme's insensitive colours, so an insensitive control
+ * is dimmed as a whole, as libadwaita dims it. */
+window.athanor-surface scale:disabled,
+window.athanor-surface switch:disabled,
+window.athanor-surface check:disabled,
+window.athanor-surface radio:disabled {
+    opacity: 0.5;
+}
+
+window.athanor-surface entry:focus-within,
+window.athanor-surface spinbutton:focus-within {
     outline-color: @ath_acc_fg;
+}
+
+window.athanor-surface entry > text > selection:focus-within,
+window.athanor-surface spinbutton > text > selection:focus-within {
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
 }
 
 window.athanor-surface list row:selected {
