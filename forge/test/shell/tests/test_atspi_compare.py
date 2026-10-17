@@ -75,10 +75,16 @@ class CompareTest(unittest.TestCase):
         transcript = [node("panel", "Style", ["showing"]), node("label", "Style")]
         self.assertEqual(compare.compare(reference, transcript)[1], [])
 
-    def test_a_label_that_repeats_its_parent_is_the_parent(self):
+    # The two rules the maintainer accepted on 2026-10-17.
+    def test_a_label_that_repeats_its_buttons_name_is_the_button(self):
         reference = [node("toggle button", "Bar"), dict(node("label", "Bar"), depth=1)]
         lines, failures = compare.compare(reference, [node("toggle button", "Bar")])
         self.assertEqual((len(lines), failures), (1, []))
+
+    def test_a_label_that_repeats_another_parents_name_is_its_own_element(self):
+        reference = [node("frame", "Layout"), dict(node("label", "Layout"), depth=1)]
+        lines, failures = compare.compare(reference, [node("frame", "Layout")])
+        self.assertEqual((len(lines), failures), (2, ["label 'Layout': missing"]))
 
     def test_a_grouping_said_as_a_panel_is_a_note(self):
         lines, failures = compare.compare([node("grouping", "Style")], [node("panel", "Style")])

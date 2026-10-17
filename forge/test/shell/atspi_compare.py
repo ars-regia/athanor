@@ -26,8 +26,13 @@ REWORDED = {
     "enabled": {"sensitive"},
 }
 # Roles that a screen reader speaks alike. AccessKit 0.25 has no way to say "grouping": its
-# Role::Group reaches AT-SPI as a panel, which Orca names the same way.
+# Role::Group reaches AT-SPI as a panel. The maintainer decided on 2026-10-17 that AccessKit's
+# "panel" equals GTK's "grouping".
 SAME_ROLE = [{"button", "push button"}, {"frame", "window"}, {"grouping", "panel"}]
+# GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
+# repeats its button's name counts as part of the button; a label under any other parent is
+# its own element, as the title under the window.
+BUTTONS = {"button", "push button", "toggle button"}
 
 
 def significant(node):
@@ -39,13 +44,14 @@ def significant(node):
 
 
 def spoken(nodes):
-    """The significant nodes, less those that repeat their parent's name: GTK puts a label
-    inside each button, and a screen reader speaks it once, as the button's name."""
+    """The significant nodes, less the labels that repeat their button's name: a screen reader
+    speaks the two once, as the button's name (BUTTONS)."""
     parents, out = [], []
     for node in nodes:
         del parents[node["depth"]:]
         parent = parents[-1] if parents else None
-        if significant(node) and not (node["name"] and parent and parent["name"] == node["name"]):
+        repeats = parent and parent["role"] in BUTTONS and node["name"] == parent["name"]
+        if significant(node) and not (node["name"] and repeats):
             out.append(node)
         parents.append(node)
     return out
