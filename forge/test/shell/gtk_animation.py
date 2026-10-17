@@ -23,9 +23,10 @@ def draw(area, cr, width, height):
 
 def activate(app):
     window = Gtk.ApplicationWindow(application=app, title="gtk-animation")
-    # Smaller than eglgears_wayland's 300x300 and vkcube's 500x500, centred like them: the client
-    # mapped under it keeps a visible rim, so the compositor does not throttle it as occluded.
-    window.set_default_size(240, 180)
+    # Wider and shorter than eglgears_wayland's 300x300 and vkcube's 500x500, and centred like
+    # them, the two windows cross: whichever maps on top, the other keeps a visible part, so the
+    # compositor throttles neither as occluded, whatever order they start in.
+    window.set_default_size(640, 120)
     area = Gtk.DrawingArea()
     area.set_draw_func(draw)
     area.add_tick_callback(lambda widget, clock: widget.queue_draw() or True)

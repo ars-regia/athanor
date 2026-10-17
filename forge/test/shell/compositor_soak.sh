@@ -7,7 +7,9 @@
 #
 # Each client command is one string, run by bash with WAYLAND_DISPLAY set; its output goes to
 # <out>/client-<n>.log. The compositor's log is <out>/compositor.log. The soak fails when the
-# compositor or a client exits before the time is up, or when the compositor never listens.
+# compositor or a client exits before the time is up, when the compositor never listens, or when
+# the compositor's last frame times report has no line for a client with a mean commit interval
+# under two frames of 60 Hz: a client starved or throttled as occluded.
 set -euo pipefail
 
 out=$1 seconds=$2
@@ -72,9 +74,21 @@ for i in "${!pids[@]}"; do
 done
 
 echo "--- frame times, last report"
-last=$(grep 'frame times: outputs drawn' "$out/compositor.log" | tail -n 1) || [ $? -eq 1 ]
-echo "$last"
-grep 'frame times: a client' "$out/compositor.log" | tail -n "$n" || [ $? -eq 1 ]
+# The last report: from the last "outputs drawn" line on, without colour codes.
+report=$(sed 's/\x1b\[[0-9;]*m//g' "$out/compositor.log" |
+    awk '/frame times: outputs drawn/ { block = "" } { block = block $0 "\n" } END { printf "%s", block }')
+grep 'frame times: outputs drawn' <<< "$report" || [ $? -eq 1 ]
+for i in $(seq "$n"); do
+    # Each client runs through exec, so its pid is the one the compositor logs.
+    line=$(grep "frame times: a client's commits.* pid=Some(${pids[$i]}) " <<< "$report" | head -n 1) || [ $? -eq 1 ]
+    mean=$(sed -n 's/.* mean_ms="\{0,1\}\([0-9.]*\).*/\1/p' <<< "$line")
+    if [ -n "$mean" ] && awk -v mean="$mean" 'BEGIN { exit !(mean < 2000 / 60) }'; then
+        echo "client $i: $line"
+    else
+        echo "client $i (pid ${pids[$i]}): no commits under two frames apart in the last report${line:+: $line}" >&2
+        status=1
+    fi
+done
 echo "--- explicit sync"
 grep 'explicit sync' "$out/compositor.log" || [ $? -eq 1 ]
 echo "--- warnings and errors"
