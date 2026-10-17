@@ -539,6 +539,11 @@ enum Step {
     UnmapExclusive,
     /// The exclusive surface opens a popup that grabs the seat with this serial.
     Popup(u32),
+    /// A top-layer bar along the output's top edge, 30 high, with no exclusive zone, that never
+    /// takes the keyboard.
+    Bar,
+    /// The bar opens a popup that grabs the seat with this serial.
+    BarPopup(u32),
     /// The exclusive surface commits again, unchanged; the sender is told once the compositor
     /// has handled it.
     Recommit(mpsc::Sender<()>),
@@ -689,6 +694,7 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
         client,
     };
     let mut exclusive = None;
+    let mut bar = None;
     while let Ok(step) = steps.recv() {
         match step {
             Step::Exclusive => {
@@ -717,6 +723,19 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
             }
             Step::Popup(serial) => {
                 let (_, layer) = exclusive.clone().ok_or("no exclusive surface")?;
+                shell.popup(&layer, serial)?;
+            }
+            Step::Bar => {
+                bar = Some(shell.layer(
+                    "bar",
+                    Anchor::Top | Anchor::Left | Anchor::Right,
+                    30,
+                    0,
+                    KeyboardInteractivity::None,
+                )?);
+            }
+            Step::BarPopup(serial) => {
+                let (_, layer) = bar.clone().ok_or("no bar")?;
                 shell.popup(&layer, serial)?;
             }
             Step::Recommit(done) => {
@@ -883,6 +902,75 @@ fn an_exclusive_surface_keeps_the_keyboard_in_its_own_popup() {
             .get_keyboard()
             .is_some_and(|k| k.is_grabbed()),
         "the popup's grab goes on"
+    );
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// A click on a bar, whose interactivity is `none`, opens a popup that grabs the pointer but
+/// not the keyboard: the grab's end would hand the keyboard to the bar, which refuses it, so
+/// the window the user types in keeps it.
+#[test]
+fn a_bar_popup_leaves_the_keyboard_to_the_window() {
+    use smithay::input::pointer::MotionEvent;
+    let mut run = Running::start(None);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).is_some()
+    });
+    let window = focus(&run.state);
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state();
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+
+    steps.send(Step::Bar).expect("the shell's client");
+    let top = Point::from((f64::from(OUTPUTS[0].width) / 2.0, 15.0));
+    run.until(
+        "the bar is under the pointer",
+        |state| matches!(state.under(top), Some((Under::Layer(l), _)) if l.namespace() == "bar"),
+    );
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let under = run.state.surface_under(top);
+    let motion = MotionEvent {
+        location: top,
+        serial: SERIAL_COUNTER.next_serial(),
+        time: smithay::backend::input::InputTime::now(),
+    };
+    pointer.motion(&mut run.state, under, &motion);
+    pointer.frame(&mut run.state);
+
+    // A button pressed on the bar, while the window holds the keyboard.
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.button = Some((serial, shell_id));
+    steps
+        .send(Step::BarPopup(serial.into()))
+        .expect("the shell's client");
+    run.until("the popup's grab takes the pointer", |_| {
+        pointer.is_grabbed()
+    });
+    assert_eq!(focus(&run.state), window, "the window keeps the keyboard");
+    assert!(
+        run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|k| !k.is_grabbed()),
+        "the grab leaves the keyboard alone"
     );
 
     drop(steps);
