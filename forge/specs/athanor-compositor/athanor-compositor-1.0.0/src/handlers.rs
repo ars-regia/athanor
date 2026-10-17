@@ -25,13 +25,13 @@ use smithay::wayland::drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, Dr
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
-use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-};
 use smithay::wayland::selection::data_device::{
     set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
 };
 use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::shell::xdg::{
+    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+};
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
@@ -277,10 +277,9 @@ impl State {
         let Some(window) = self.window_for(&root) else {
             return;
         };
-        let (Some(output), Some(window)) = (
-            self.output_area(),
-            self.space.element_geometry(&window),
-        ) else {
+        let (Some(output), Some(window)) =
+            (self.output_area(), self.space.element_geometry(&window))
+        else {
             return;
         };
         // Relative to the popup's parent.

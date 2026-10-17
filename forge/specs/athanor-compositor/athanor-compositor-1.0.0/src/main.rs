@@ -68,7 +68,10 @@ fn virtual_output(value: &str) -> Result<VirtualOutput, Error> {
 fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
     let (mut headless, mut scale, mut node, mut outputs) = (false, None, None, Vec::new());
     while let Some(arg) = args.next() {
-        let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value\n{USAGE}"));
+        let mut value = || {
+            args.next()
+                .ok_or_else(|| format!("{arg} needs a value\n{USAGE}"))
+        };
         match arg.as_str() {
             "--headless" => headless = true,
             "--scale" => scale = Some(factor(&value()?)?),

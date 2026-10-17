@@ -241,7 +241,11 @@ fn client(
         queue.blocking_dispatch(&mut state)?;
     }
 
-    report.send(Ok(state.globals.iter().map(|(_, i, _)| i.clone()).collect()))?;
+    report.send(Ok(state
+        .globals
+        .iter()
+        .map(|(_, i, _)| i.clone())
+        .collect()))?;
     // The window lives while the connection does; the compositor reads its frames meanwhile.
     // A message asks for a request, which wakes the compositor to read from its clients; the
     // compositor drops its sender to say it is done, which ends the wait.
