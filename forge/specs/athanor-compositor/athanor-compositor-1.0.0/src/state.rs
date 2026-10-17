@@ -352,7 +352,10 @@ pub struct ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
+    fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
+        if let DisconnectReason::ProtocolError(error) = &reason {
+            tracing::info!(?client_id, %error, "a client was disconnected");
+        }
         // The receiver lives as long as the event loop: an error means the compositor is ending.
         if let Err(error) = self.gone.send(client_id) {
             tracing::warn!(%error, "a client's disconnection reached no event loop");

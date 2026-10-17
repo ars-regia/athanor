@@ -48,7 +48,10 @@ const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 /// disconnects it rather than run out of file descriptors.
 pub const MAX_HELD_COMMITS: usize = 64;
 
-/// `wl_display.error.no_memory`, which a server-side crate has no enum for.
+/// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
+/// commits. wayland-server sends no `wl_display.error` on `Client::kill`, and `post_error` reads
+/// the code against the interface of the object it is posted on, which for `wl_surface` defines
+/// no such error: the client sees its socket close, and the reason reaches `disconnected`.
 const NO_MEMORY: u32 = 2;
 
 /// A commit held on a fence: its client, and the event source that waits on the fence.
@@ -160,8 +163,8 @@ impl State {
     }
 
     /// Holds the pending commit of `surface` on `blocker` until `source` fires, as anvil does.
-    /// A client past `MAX_HELD_COMMITS` is disconnected with `wl_display.error.no_memory`
-    /// instead; a client's held commits are dropped when it disconnects (`release_held`).
+    /// A client past `MAX_HELD_COMMITS` is disconnected instead (`NO_MEMORY` says how); a
+    /// client's held commits are dropped when it disconnects (`release_held`).
     pub fn hold_commit<B, S>(&mut self, surface: &WlSurface, blocker: B, source: S)
     where
         B: Blocker + Send + 'static,
