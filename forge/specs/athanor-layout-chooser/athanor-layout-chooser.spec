@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-layout-chooser
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Athanor layout chooser
 License:        GPL-3.0-or-later
 
@@ -42,6 +42,10 @@ rm -rf locale-build
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-layout-chooser.mo
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
+  surface, and a red accent's fill carries white text at 4.5:1 (#571).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Built with the Calmo sheets of #570, which draw the shell's controls in the accent.
 

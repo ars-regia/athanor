@@ -188,4 +188,5 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
 | ADR-0119 | 0119 | [An upgrade does not keep ssh in the installer's public zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
 | ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | accepted | security, update, process |
-| ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | accepted | shell, security, process |
+| ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122 | shell, security, process |
+| ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | accepted | shell, security, process |
