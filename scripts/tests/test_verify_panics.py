@@ -1,5 +1,6 @@
 """Unit tests of the panics check of `verify.py`: a module declared `#[cfg(test)] mod name;`
-is test code, as a `#[cfg(test)]` item is, and code after that item is not (python3 -B -m unittest discover -s scripts/tests -v)."""
+is test code, as a `#[cfg(test)]` item is, and code after that item is not
+(python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
 import pathlib
@@ -52,6 +53,33 @@ class WithoutTestItemsTest(unittest.TestCase):
         )
         self.assertIn(".unwrap()", kept)
         self.assertNotIn("fixture", kept)
+
+    def test_production_code_is_never_blanked(self):
+        prod = '\nfn prod() { panic!("x"); }\n'
+        for before in (
+            "/// uses #[cfg(test)] for tests",
+            "// see #[cfg(test)] here",
+            "/* #[cfg(test)] */",
+            'const S: &str = "#[cfg(test)]";',
+            "struct S { a: u8, #[cfg(test)] b: u8, }",
+            "enum E { A, #[cfg(test)] B(u8), C }",
+            "fn f(#[cfg(test)] a: u8, b: u8) {}",
+            "fn g() -> S { S { a: 1, #[cfg(test)] b: 2 } }",
+            "#[cfg(test)] mod t { /* a /* b */ { */ }",
+            '#[cfg(test)] const C: &CStr = cr#"a"{b"#;',
+            "#[cfg(test)] const Q: [char; 2] = ['\\'', '{'];",
+            "#[cfg(test)] fn h<T, U>() where T: Copy, U: Copy { }",
+            "#[cfg(test)]\nmacro_rules! m { ($a:expr, $b:expr) => {}; }",
+        ):
+            with self.subTest(before=before):
+                self.assertIn('panic!("x")', verify.without_test_items(before + prod))
+
+    def test_test_items_with_commas_are_blanked_whole(self):
+        kept = verify.without_test_items(
+            "#[cfg(test)]\nfn h<T, U>(a: T, b: U) where T: Copy, U: Copy { a.unwrap(); }\n"
+            "#[cfg(test)]\nmatch x { _ => y.unwrap(), }\n"
+        )
+        self.assertNotIn("unwrap", kept)
 
 
 if __name__ == "__main__":

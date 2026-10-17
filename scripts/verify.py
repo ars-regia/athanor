@@ -1834,7 +1834,14 @@ def test_module_files(paths):
     return found
 
 
-RAW_STRING = re.compile(r'b?r(#*)"')
+RAW_STRING = re.compile(r'[bc]?r(#*)"')
+# What follows `#[cfg(test)]` when it applies to an item: more attributes, a visibility, then
+# the item's keyword. Otherwise it applies to a field, variant, argument or arm.
+TEST_ITEM = re.compile(
+    r"\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?"
+    r"(?:(?:fn|mod|impl|struct|enum|union|use|const|static|type|trait|extern|unsafe|async|let)\b"
+    r"|macro_rules!)"
+)
 
 
 def skip_rust(txt, i):
@@ -1843,8 +1850,16 @@ def skip_rust(txt, i):
         end = txt.find("\n", i)
         return len(txt) if end < 0 else end
     if txt.startswith("/*", i):
-        end = txt.find("*/", i + 2)
-        return len(txt) if end < 0 else end + 2
+        # Block comments nest.
+        depth, j = 1, i + 2
+        while depth and j < len(txt):
+            if txt.startswith("/*", j):
+                depth, j = depth + 1, j + 2
+            elif txt.startswith("*/", j):
+                depth, j = depth - 1, j + 2
+            else:
+                j += 1
+        return j
     raw = RAW_STRING.match(txt, i)
     if raw and not (i and (txt[i - 1].isalnum() or txt[i - 1] == "_")):
         end = txt.find('"' + raw.group(1), raw.end())
@@ -1855,19 +1870,21 @@ def skip_rust(txt, i):
             j += 2 if txt[j] == "\\" else 1
         return j + 1
     if txt[i] == "'":
-        # A character literal is one character ('{') or one escape ('\n', '\u{7b}'); anything
-        # else is a lifetime ('a), which has no closing quote.
+        # A character literal is one character ('{') or one escape ('\n', '\'', '\u{7b}');
+        # anything else is a lifetime ('a), which has no closing quote.
         if txt.startswith("'", i + 2) and txt[i + 1] != "\\":
             return i + 3
-        end = txt.find("'", i + 2)
+        end = txt.find("'", i + 3)
         if txt.startswith("\\", i + 1) and 0 < end - i <= 11:
             return end + 1
     return i
 
 
 def item_end(txt, i):
-    """The index past the item that starts at `i`: its attributes, then up to its `;` or the
-    brace that closes its body, outside strings, comments and brackets."""
+    """The index past what `#[cfg(test)]` at `i` applies to: an item, from its attributes to
+    its `;` or the brace that closes its body; a field, variant or argument, up to its `,` or
+    the bracket that closes the list it is in. Strings, comments and brackets are skipped."""
+    item = TEST_ITEM.match(txt, i) is not None
     depth, body = 0, False
     while i < len(txt):
         j = skip_rust(txt, i)
@@ -1875,18 +1892,16 @@ def item_end(txt, i):
             i = j
             continue
         c = txt[i]
-        if c in "([":
+        if c in "([{":
             depth += 1
-        elif c in ")]":
+            body = body or c == "{"
+        elif c in ")]}":
             depth -= 1
-        elif c == "{":
-            depth += 1
-            body = True
-        elif c == "}":
-            depth -= 1
-            if body and depth == 0:
+            if depth < 0:
+                return i
+            if c == "}" and body and depth == 0:
                 return i + 1
-        elif c == ";" and depth == 0 and not body:
+        elif depth == 0 and (c == ";" or c == "," and not item):
             return i + 1
         i += 1
     return len(txt)
@@ -1894,13 +1909,20 @@ def item_end(txt, i):
 
 def without_test_items(txt):
     """`txt` with each item under `#[cfg(test)]` blanked, newlines kept so that line numbers
-    hold. Code after a test module is production code, and stays."""
-    out, at = [], 0
-    while (start := txt.find("#[cfg(test)]", at)) >= 0:
-        end = item_end(txt, start + len("#[cfg(test)]"))
-        out.append(txt[at:start])
-        out.append(re.sub(r"[^\n]", " ", txt[start:end]))
-        at = end
+    hold. Code after a test item is production code, and stays; the marker counts only as
+    code, not inside a string or a comment."""
+    out, at, i = [], 0, 0
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j != i:
+            i = j
+        elif txt.startswith("#[cfg(test)]", i):
+            end = item_end(txt, i + len("#[cfg(test)]"))
+            out.append(txt[at:i])
+            out.append(re.sub(r"[^\n]", " ", txt[i:end]))
+            at = i = end
+        else:
+            i += 1
     out.append(txt[at:])
     return "".join(out)
 
