@@ -2406,8 +2406,11 @@ NVIDIA_GRANT = 'nvidia_device_nodes(Path::new("/dev"))'
 CAIRO_RENDERER = "GSK_RENDERER=cairo"
 DRM_BIND = re.compile(r"--dev-bind(?:-try)?\s+/dev/dri\s")
 NVIDIA_BINDS = ("--ro-bind-try /sys/module/nvidia /sys/module/nvidia",
-                "--ro-bind /dev/null /usr/bin/nvidia-modprobe")
+                "--ro-bind /usr/bin/true /usr/bin/nvidia-modprobe")
 USR_BIND = "--ro-bind /usr /usr"
+# A bind whose source is under /dev, other than a device bind, makes bwrap remount
+# the filesystem under /dev read-only, which SELinux refuses xdm_t: the greeter never starts.
+DEV_SOURCE_BIND = re.compile(r"--(?:ro-)?bind(?:-try)?\s+[\"']?/dev(?:[/\"'\s]|$)")
 
 
 def uncommented(text, marker):
@@ -2436,12 +2439,16 @@ def renders_with_cairo(source):
 
 def wrapper_problems(relative, text):
     """A bwrap wrapper that binds /dev/dri binds the NVIDIA module and masks nvidia-modprobe,
-    and passes its extra arguments after /usr, so that the mask lands on top of it."""
+    passes its extra arguments after /usr, so that the mask lands on top of it, and binds
+    nothing from /dev but devices."""
     code = uncommented(text, "#")
     if not DRM_BIND.search(code):
         return []
     problems = [f"{relative}: binds /dev/dri but lacks '{bind}'"
                 for bind in NVIDIA_BINDS if bind not in code]
+    problems += [f"{relative}: '{match.group(0).strip()}' binds from /dev without "
+                 f"--dev-bind: SELinux refuses xdm_t the read-only remount under /dev"
+                 for match in DEV_SOURCE_BIND.finditer(code)]
     invocation = code[code.find("exec bwrap"):]
     if '"$@"' in invocation and invocation.find('"$@"') < invocation.find(USR_BIND):
         problems.append(f"{relative}: passes \"$@\" before '{USR_BIND}', which would cover "

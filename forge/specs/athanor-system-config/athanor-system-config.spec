@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:70.fc43}
+Release:        %{?autorelease}%{!?autorelease:71.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -84,6 +84,11 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
+- athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
+  bwrap's read-only remount of devtmpfs is refused to xdm_t, and the greeter never started
+  on the -nvidia images.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-70
 - athanor-usbguard-internal reads a device's interfaces from its raw descriptors, every
   alternate setting and configuration included, as USBGuard matches them: its rules admitted no
