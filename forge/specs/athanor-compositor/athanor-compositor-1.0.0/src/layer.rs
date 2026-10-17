@@ -7,7 +7,9 @@
 
 use crate::state::State;
 use smithay::backend::renderer::utils::with_renderer_surface_state;
-use smithay::desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType};
+use smithay::desktop::{
+    find_popup_root_surface, layer_map_for_output, LayerSurface, WindowSurfaceType,
+};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::utils::SERIAL_COUNTER;
@@ -88,11 +90,19 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let focused = keyboard.current_focus().as_ref() == Some(surface);
+        let focus = keyboard.current_focus();
+        let focused = focus.as_ref() == Some(surface);
         if holds_exclusively(&layer) {
+            // The surface holds the keyboard itself or through its own popup, whose grab
+            // `grab` let it take: a commit leaves that grab alone.
+            let held = focused
+                || focus
+                    .and_then(|focus| self.popups.find_popup(&focus))
+                    .and_then(|popup| find_popup_root_surface(&popup).ok())
+                    .is_some_and(|root| &root == surface);
             // Only the surface `exclusive_layer` picks: a top-layer client committing each frame
             // does not take the keyboard from an overlay one.
-            if !focused && self.exclusive_layer().as_ref() == Some(surface) {
+            if !held && self.exclusive_layer().as_ref() == Some(surface) {
                 self.focus_exclusive(surface.clone());
             }
         } else if focused && !(layer.can_receive_keyboard_focus() && mapped(surface)) {
