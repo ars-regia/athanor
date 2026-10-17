@@ -28,7 +28,12 @@ fn scale(mut args: impl Iterator<Item = String>) -> Result<f64, Error> {
                     .filter(|s| s.is_finite() && (1.0..=4.0).contains(s))
                     .ok_or_else(|| format!("--scale {value}: a factor from 1 to 4"))?;
             }
-            other => return Err(format!("unknown argument {other}; usage: athanor-compositor [--scale <factor>]").into()),
+            other => {
+                return Err(format!(
+                    "unknown argument {other}; usage: athanor-compositor [--scale <factor>]"
+                )
+                .into())
+            }
         }
     }
     Ok(scale)
