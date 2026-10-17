@@ -5,7 +5,7 @@
 use crate::state::{State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
 };
 use smithay::input::keyboard::FilterResult;
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
@@ -20,6 +20,10 @@ impl State {
                 };
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                match event.state() {
+                    KeyState::Pressed => self.grab_serials.key_press = Some(serial),
+                    KeyState::Released => self.grab_serials.key_release = Some(serial),
+                }
                 keyboard.input::<(), _>(
                     self,
                     event.key_code(),
@@ -62,6 +66,9 @@ impl State {
                 // so a token made from the click that focused a window is in range.
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                if event.state() == ButtonState::Pressed {
+                    self.grab_serials.button = Some(serial);
+                }
                 pointer.button(
                     self,
                     &ButtonEvent {

@@ -300,7 +300,7 @@ impl State {
             return;
         }
         if let Some(surface) = self.exclusive_layer() {
-            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+            self.focus_exclusive(surface);
             return;
         }
         let top = self
@@ -342,7 +342,10 @@ impl State {
         root: &WlSurface,
     ) -> Option<(Point<i32, Logical>, Rectangle<i32, Logical>)> {
         if let Some(window) = self.window_for(root) {
-            return Some((self.space.element_geometry(&window)?.loc, self.output_area()?));
+            return Some((
+                self.space.element_geometry(&window)?.loc,
+                self.output_area()?,
+            ));
         }
         self.space.outputs().find_map(|output| {
             let area = self.space.output_geometry(output)?;
@@ -405,9 +408,13 @@ impl XdgShellHandler for State {
     }
 
     /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
-    /// does. Only a client the user is already with, holding the pointer or the keyboard, gets
-    /// one: a client cannot take the keyboard from another by opening a popup. A grab refused
-    /// leaves the popup shown without it, as a popover a client opens at start is.
+    /// does. Only a client the user is with gets one, and only for an input event the user
+    /// made: it names the serial of the last button press while it holds the pointer, or of
+    /// the last key press or release while it holds the keyboard (`GrabSerials`, as mutter
+    /// checks them). A client cannot take the keyboard from another by opening a popup, and
+    /// while a layer surface holds the keyboard exclusively only its own popups' grab takes
+    /// it; any other takes the pointer only. A grab refused leaves the popup shown without it,
+    /// as a popover a client opens at start is.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
@@ -421,15 +428,23 @@ impl XdgShellHandler for State {
         let held = |focus: Option<WlSurface>| {
             client.is_some() && focus.and_then(|s| s.client()).map(|c| c.id()) == client
         };
-        if !(keyboard.as_ref().is_some_and(|k| held(k.current_focus()))
-            || pointer.as_ref().is_some_and(|p| held(p.current_focus())))
-        {
+        let serials = &self.grab_serials;
+        let clicked = serials.button == Some(serial)
+            && pointer.as_ref().is_some_and(|p| held(p.current_focus()));
+        let typed = (serials.key_press == Some(serial) || serials.key_release == Some(serial))
+            && keyboard.as_ref().is_some_and(|k| held(k.current_focus()));
+        if !(clicked || typed) {
             return;
         }
+        // The grab's end hands the keyboard to the popups' root: only an exclusive surface's
+        // own popups may take it, so that it comes back to that surface.
+        let exclusive_elsewhere = self
+            .exclusive_layer()
+            .is_some_and(|surface| surface != root);
         let Ok(mut grab) = self.popups.grab_popup(root, popup, &seat, serial) else {
             return;
         };
-        if let Some(keyboard) = keyboard {
+        if let Some(keyboard) = keyboard.filter(|_| !exclusive_elsewhere) {
             let previous = grab.previous_serial().unwrap_or(serial);
             if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
             {

@@ -34,6 +34,8 @@ impl WlrLayerShellHandler for State {
             .as_ref()
             .and_then(Output::from_resource)
             .or_else(|| self.space.outputs().next().cloned());
+        // ponytail: no output is removed yet; task 8 (output hot-plug) closes or moves the layers
+        // of an output that goes, which today would stay in its map, unseen and never closed.
         let Some(output) = output else {
             // Nothing to show it on: the protocol's answer is `closed`.
             surface.send_close();
@@ -88,12 +90,27 @@ impl State {
         };
         let focused = keyboard.current_focus().as_ref() == Some(surface);
         if holds_exclusively(&layer) {
-            if !focused {
-                keyboard.set_focus(self, Some(surface.clone()), SERIAL_COUNTER.next_serial());
+            // Only the surface `exclusive_layer` picks: a top-layer client committing each frame
+            // does not take the keyboard from an overlay one.
+            if !focused && self.exclusive_layer().as_ref() == Some(surface) {
+                self.focus_exclusive(surface.clone());
             }
         } else if focused && !(layer.can_receive_keyboard_focus() && mapped(surface)) {
             self.refocus(surface);
         }
+    }
+
+    /// Gives the keyboard to `surface`, the exclusive layer. A popup grab that holds the
+    /// keyboard ends first: while it holds it, Smithay lets no other surface have the focus,
+    /// and at its end hands the focus to the popup's root.
+    pub fn focus_exclusive(&mut self, surface: WlSurface) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard.is_grabbed() {
+            keyboard.unset_grab(self);
+        }
+        keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
     }
 
     /// The surface that holds the keyboard exclusively: the top one of the mapped exclusive
