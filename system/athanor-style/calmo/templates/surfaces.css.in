@@ -340,6 +340,7 @@ window.athanor-surface scale > trough > highlight {
 
 window.athanor-surface switch:checked,
 window.athanor-surface check:checked,
+window.athanor-surface check:indeterminate,
 window.athanor-surface radio:checked {
     border-color: @ath_acc;
     background-image: none;
@@ -352,8 +353,8 @@ window.athanor-surface entry:focus-within {
 }
 
 window.athanor-surface list row:selected {
-    background-color: @ath_acc_soft;
-    color: @ath_acc_soft_ink;
+    background-color: @ath_acc;
+    color: @ath_acc_ink;
 }
 
 /* The control center (doc_control_center.md) and the launcher (doc_launcher.md): one card
