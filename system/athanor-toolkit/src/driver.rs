@@ -333,18 +333,22 @@ impl Shell {
             Some(rects) => {
                 let region = Region::new(&self.compositor)?;
                 for r in rects {
-                    region.add(r.x as i32, r.y as i32, r.w.ceil() as i32, r.h.ceil() as i32);
+                    // Whole pixels that cover the widget: the origin down, the far edge up.
+                    let (x, y) = (r.x.floor(), r.y.floor());
+                    let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
+                    region.add(x as i32, y as i32, w as i32, h as i32);
                 }
                 Some(region)
             }
             None => None,
         };
-        if let Some(surface) = self.get_mut(id) {
-            surface
-                .wl_surface()
-                .set_input_region(region.as_ref().map(Region::wl_region));
-            surface.dirty = true;
-        }
+        let surface = self
+            .get_mut(id)
+            .ok_or_else(|| format!("no open surface {id:?}"))?;
+        surface
+            .wl_surface()
+            .set_input_region(region.as_ref().map(Region::wl_region));
+        surface.dirty = true;
         Ok(())
     }
 
