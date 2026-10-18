@@ -666,6 +666,7 @@ dependencies = [
 name = "athanor-style"
 version = "1.0.0"
 dependencies = [
+ "gio",
  "glib",
  "gtk4",
  "gtk4-layer-shell",
