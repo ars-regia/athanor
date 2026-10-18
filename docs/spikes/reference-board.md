@@ -52,13 +52,15 @@ Gaps and their causes:
   which was not running in the VM.
 - Mint's and elementary's live sessions do not lock, and elementary's demo mode shows no OSD.
 - Windows 11, Plasma and Cinnamon have no dock apart from their panel.
-- macOS lacks the OSD, the power dialog, the window switcher, Mission Control, the clipboard and
-  the control centre's expanded modules: Apple's guide has no image of them.
+- macOS lacks the OSD, the power dialog, the window switcher, Mission Control and the clipboard,
+  and its dock is seen only in the desktop image: Apple's guide has no image of the others.
 
 ## 3. Distances from the screen edges
 
 Measured on the captures by scanning one row or column from the output's edge to the first pixel of
-the surface's dominant colour. `space.edge` is 6 in the visual language.
+the surface's dominant colour. `space.edge` is 6 in the visual language. The figures are estimates:
+±1 px for Athanor, where soft edges blur the first pixel, and ±2 px for the references, where
+shadows count.
 
 | Athanor surface | Measured | `space.edge` | Matches |
 | --- | --- | --- | --- |
@@ -78,34 +80,41 @@ the surface's dominant colour. `space.edge` is 6 in the visual language.
 | elementary OS 8.1 | 12 from the right, 2 below the bar | 14 from the right, 28 below the bar |
 | Linux Mint 22.3 | 24 from the right, 17 above the panel (volume) | 20 from the right, 10 from the top |
 
-Every reference that hangs a popover from a bar keeps it within 5 px of the bar; Athanor's control
-centre sits 23 px below it.
+GNOME, Plasma, COSMIC and elementary keep the control centre within about 5 px of the bar, Mint's volume
+popover sits 17 px from it, and Athanor's control centre 23 px.
 
 ## 4. Findings from source and behaviour
 
-1. **Motion and shape tokens.** Noctalia defines durations as three tokens (`animFast` 100,
+Each finding says whether it was read in the sources of section 1 (source) or seen in the VMs
+(observed).
+
+1. **Motion and shape tokens** (source). Noctalia defines durations as three tokens (`animFast` 100,
    `animNormal` 200, `animSlow` 400 ms) and radii as a scale (3, 6, 9, 12), with spacing 4, 8, 12,
    16 (`src/ui/style.h`). niri animates moves and resizes with springs (`src/animation/spring.rs`),
-   so an animation interrupted halfway continues from its velocity instead of restarting a curve.
-2. **Computed contrast.** Noctalia corrects generated colours with `ensureContrast(fg, bg, 4.5)`
-   (`src/theme/fixed_palette.cpp:145`), tested in `tests/scheme_test.cpp`.
-3. **Accessibility.** Of the Quickshell shells, only DMS gives its controls Qt accessible names and
-   roles (`Accessible.name` in 149 files); Noctalia, end-4, Caelestia and Omarchy give none.
-   Whether Orca reads DMS's layer surfaces was not tested.
-4. **One shell process, one IPC.** Omarchy and DMS keep the bar, menus, OSD, notifications, lock and
+   whose restart keeps the spring's initial velocity (`src/animation/mod.rs`, `restarted`); whether
+   every caller hands over the current velocity was not traced.
+2. **Computed contrast** (source). Noctalia derives its on-container and on-fixed colours with
+   `ensureContrast(fg, bg, 4.5)` (`src/theme/fixed_palette.cpp:266-295`), tested in
+   `tests/scheme_test.cpp`.
+3. **Accessibility** (source). Of the Quickshell shells, only DMS gives its controls Qt accessible
+   names and roles (`Accessible.name` in 149 files); end-4, Caelestia and Omarchy give none.
+   Noctalia 5 is a native C++ shell without Qt, and no AT-SPI or AccessKit code was found in its
+   `src`. Whether Orca reads DMS's layer surfaces was not tested.
+4. **One shell process, one IPC** (source and observed). Omarchy and DMS keep the bar, menus, OSD, notifications, lock and
    wallpaper picker in one Quickshell process, driven by `qs ipc call <target> <function>`.
-5. **Shortcuts without processes.** In Omarchy's Lua configuration a key calls the global shortcut
-   the shell registered (`omarchy:menu.root`) and starts a command only when the shell has not
+5. **Shortcuts without processes** (source). In Omarchy's Lua configuration a key calls the global shortcut
+   the shell registered (`omarchy:menu.root`; the `omarchy:` prefix is built in `helpers.lua`) and starts a command only when the shell has not
    registered it.
-6. **Layers in the overview.** On niri, DMS's bar disappears in the overview: the `top` layer is not
+6. **Layers in the overview** (observed). On niri, DMS's bar disappears in the overview: the `top` layer is not
    drawn there.
-7. **An OSD that depends on another program.** COSMIC's volume OSD reads audio through
+7. **An OSD that depends on another program** (observed). COSMIC's volume OSD reads audio through
    `cosmic-settings`' varlink service; without that process the volume key shows nothing and the
    panel reports the audio as muted.
-8. **Privileged calls.** GNOME refuses `org.gnome.Shell.ShowOSD` to a caller it does not know
-   (`AccessDenied`); Plasma exposes the overview and the logout prompt on D-Bus to any client of the
+8. **Privileged calls** (source for GNOME, observed for Plasma). GNOME refuses
+   `org.gnome.Shell.ShowOSD` to a caller it does not know (`AccessDenied`, through its sender
+   check); Plasma exposes the overview and the logout prompt on D-Bus to any client of the
    session (`org.kde.kglobalaccel ... invokeShortcut Overview`, `org.kde.LogoutPrompt`).
-9. **Configuration breaks across versions.** With Hyprland 0.56 and its Lua configuration, HyDE's
+9. **Configuration breaks across versions** (observed). With Hyprland 0.56 and its Lua configuration, HyDE's
    autostart stayed empty: bar, notifications and wallpaper did not start.
 
 ## 5. Proposals
@@ -125,7 +134,7 @@ For the toolkit:
 - Durations, radii and spacing are theme tokens, not per-widget constants (finding 1); the Calmo
   palette checks contrast when it derives a colour (finding 2).
 - The OSD reads its state from the system service, never from another application (finding 7).
-- Every surface keeps the accessibility tree and its Orca transcript (OS8): it is where only one of
-  the popular shells tries at all (finding 3).
+- Every surface keeps the accessibility tree and its Orca transcript (OS8): among the popular shells
+  only DMS was found trying (finding 3).
 - Popovers hang within a few pixels of the bar, and the control centre's and notification's right
   edges follow `space.edge` (section 3), when those surfaces move to the toolkit.
