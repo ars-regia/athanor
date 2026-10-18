@@ -216,6 +216,7 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
         keyboard: None,
         keyboard_focus: None,
         pointer: None,
+        // Optional: without it, the pointer keeps the compositor's cursor.
         cursor_shape: CursorShapeManager::bind(&globals, &qh).ok(),
         cursor_shape_device: None,
         pointer_seat: None,
