@@ -93,6 +93,9 @@ placed patches 5 and 6 in 1.1.
 - 0.10 is a different base from the one the 0.9 hardware session judged: the checks the rebase
   moves (kernel, package set, compositor) run again on the 0.10 build, as ADR-0115 says of the
   rebase.
+- Documents that say the security-class updates start in 1.0 (`doc_update_trust.md` UT13,
+  `doc_shell.md`, `doc_bar.md`, `docs/compliance/`) keep their words until their next revision;
+  ADR-0120, amended by this record, is the reference.
 - The 1.0 milestone of the issue tracker carries the work of 1.0; #124, #125, #126 and #543
   move to a 0.10 milestone.
 - On approval, this record's status becomes `accepted`, in its front matter and in the index, and
