@@ -50,8 +50,8 @@ The maintainer took these decisions on 2026-10-19:
 7. **Scope.** Revision 3 applies only to Athanor's toolkit (`athanor-toolkit`) and its generated
    theme. The GTK shell keeps today's tokens until it is removed. Revision 2's unapplied tokens
    (VL12 step 1, #574) are applied to the toolkit only.
-8. **Application library.** A Launchpad-style grid in pages with page dots, full screen over the
-   blurred wallpaper, with the groups of `doc_launcher.md` LA7 as folders.
+8. **Application library.** A Launchpad-style grid in pages of 7 × 5 with page dots, full screen
+   over the blurred wallpaper, with the groups of `doc_launcher.md` LA7 as folders.
 
 On the same day the maintainer confirmed three points of the draft as decisions:
 
@@ -72,7 +72,7 @@ pill opening the control center; the bar growing taller as the text grows, and i
 zone; the clock as `body` with tabular figures; the springs' stiffness of 800 and unit mass; the
 entry curve (0.2, 0, 0, 1) and the exit in two thirds of the entry time; software rendering
 meaning M0; M1's blur redone at each change of wallpaper; M2's blur drawn by the compositor; and
-the library's 7 × 5 pages and its opaque form in M0. Where and when the tier's frame time is
+the library's opaque form in M0. Where and when the tier's frame time is
 measured, and its thresholds, stay open (spike VL-S5).
 
 The alternatives weighed were opaque surfaces everywhere, transparency tied only to high contrast
