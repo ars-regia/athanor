@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Athanor's image, installer, forge and kernel move from Fedora 43 to Fedora 45, and a release 0.x carrying the move is published before **2026-12-02**, the end of life of Fedora 43 (ADR-0121). If the Fedora 45 image is not green by the **mid-November decision point** (proposed: 2026-11-16), the same tasks run against Fedora 44 instead (ADR-0078).
+**Goal:** Athanor's image, installer, forge and kernel move from Fedora 43 to Fedora 45, and release 0.10 "base" (ADR-0123) carries the move before **2026-12-02**, the end of life of Fedora 43 (ADR-0121). If the Fedora 45 image is not green by the **decision point of 2026-11-16** (confirmed by the maintainer, M5), the same tasks run against Fedora 44 instead (ADR-0078).
 
-**Architecture:** the move is done in four stages. First come small preparatory changes that leave the Fedora 43 image byte-for-byte the same: a tier publication guard, release-aware tooling, installer definitions and the S1 harness. They can merge before 0.9 ships. Second, one atomic cut-over pull request changes the base, the NVIDIA userspace stage, the installer syntax and the one builder library that changes soname. It is first proven on a branch build and in a local ISO test, and it merges after the 0.9 tag (ADR-0115). Third, S1 runs on the cut-over image: a Fedora 43 to Fedora 45 update and rollback, with Secure Boot, the MOK chain, swtpm and the four checks of D39. Fourth, the kernel source, the runner guest, the test rig and the kernel builder follow, each in its own pull request. The Azoth kernel is not rebuilt for the cut-over. Fedora 45 ships the same 7.2 series (7.2.11-300.fc45 against 7.2.11-100.fc43), so the signed Azoth kernel installs on either base.
+**Architecture:** four stages. First, preparatory pull requests on `iso-v0`: a tier publication guard, release-aware tooling, installer definitions, a check on fork releases, the SELinux check and the prerequisites of the S1 spike. All of them leave the Fedora 43 image unchanged except the polkit rebase (task 4b), which changes polkit on purpose. Second, the cut-over (task 7) is assembled on the branch `rebase/fedora-45`: the base, the NVIDIA userspace stage, the two builder libraries whose soname changes (`libdisplay-info`, OpenSSL), the fork releases, the installer syntax and the SELinux removals. None of these parts can reach `iso-v0` alone. Third, the move is made green on that branch, before anything merges: a branch build, a local ISO test on the laptop, and S1 on the desktop, following `docs/spikes/s1-bootc-fedora45.md` (task 8). Only then does task 7 merge, so the base in `system/Containerfile` stays Fedora 43 until the move is green, as ADR-0078 requires. Fourth, the kernel source, the runner guest, the test rig and the kernel builder follow, each in its own pull request. The Azoth kernel is not rebuilt for the cut-over. Fedora 45 ships the same 7.2 series (7.2.11-300.fc45 against 7.2.11-100.fc43), so the signed Azoth kernel installs on either base.
 
 **Tech Stack:** bootc on `quay.io/fedora-ostree-desktops/base-atomic`, the forge's Nix builder, bootc-image-builder, Anaconda, greenboot-rs, shim and MOK, QEMU with OVMF and swtpm, GitHub Actions on hosted runners and the self-hosted KVM runner.
 
@@ -12,23 +12,23 @@
 
 ## Global Constraints
 
-- Branch every task from `origin/iso-v0` and report its commit. One logical change per pull request. The one exception is task 7, whose parts cannot be merged apart without breaking the image; its commits still split by part.
-- Tasks 1 to 6 must leave the Fedora 43 image unchanged. Their check includes `system/package-set.sh` or the `check_image_rpms` comparison where they touch the build.
-- Task 7 merges only after the 0.9 tag. `:latest` and `:stable` move only through `release.yml` and `promote-stable.yml`, so a red `iso-v0` build after the merge reaches no user.
+- Branch every task from `origin/iso-v0` and report its commit. One logical change per pull request. The one exception is task 7, whose parts cannot be merged apart without breaking the image; its commits still split by part, and how it merges is decision M10.
+- Tasks 1, 2, 3, 4a, 5, 6 and 13 leave the Fedora 43 image unchanged; where they touch the build, their check includes the `check_image_rpms` comparison. Task 4b changes polkit on the Fedora 43 image on purpose (M2).
+- Task 7 merges only after the 0.9 tag (ADR-0115), and only once it is green on its branch (ADR-0078, M5). `:latest` moves only through `release.yml`, whose jobs wait on the `signing` environment (reviewer `hr-mes`, `.github/settings/environments.json`), and `:stable` only through `promote-stable.yml`.
 - Host budget:
-  - The desktop's single VM is booked for the 0.9 acceptance. Desktop work stays at 4 threads or fewer and never runs a VM until that acceptance ends.
-  - The laptop (8 cores) carries the local ISO tests and S1. Its RAM and VM availability are still open; see Q9.
+  - The desktop (16 cores, 31 GB, one VM at a time) carries S1, after the 0.9 acceptance frees its VM slot (M7). Until then, desktop work stays at 4 threads or fewer and runs no VM.
+  - The laptop (8 cores, 7 GB of RAM) carries builds and the local ISO test only (M7).
   - The KVM runner carries only the kernel jobs.
   - Cargo targets and scratch files go under `/var/tmp`.
 - Tool versions are locked: lock files are regenerated with `lock.sh generate` or `system/nvidia/lock.py`, never edited by hand.
 - Markdown under `docs/`, `scripts/verify.py` and `forge/config/packages.json` change only through exact-match edits, then `git diff --numstat`.
-- Stop and ask before editing these: `pins.env` (the Fedora key fingerprint is a trust anchor), the polkit fork, and any workflow job that uses a signing environment.
+- Stop and ask before editing these: `pins.env` (the Fedora key fingerprint is a trust anchor) and any workflow job that uses a signing environment. The polkit fork touches authentication: M2 sets its direction, and its diff is shown to the maintainer before review.
 
 ## Review Focus
 
-1. **Task 1's guard.** It must stop a branch run from moving a tier `:latest`. The run's own image must still take its tiers by digest.
-2. **Task 7's soname move** (`libdisplay-info` .so.2 to .so.3) is atomic with the base. `check_rpm_sonames.sh` is green on the branch build, and no Athanor RPM requires `libdisplay-info.so.2`.
-3. **Cross-base rollback.** The S1 results must name the shim, GRUB and SELinux policy store that a rolled-back Fedora 43 deployment boots with, not assume them.
+1. **Task 1's guard** fails closed: without `GITHUB_REF` it publishes nothing, never `:latest`. A branch run must not move a tier `:latest`, and the run's own image must still take its tiers by digest.
+2. **Task 7's soname moves** (`libdisplay-info` .so.2 to .so.3, OpenSSL `libssl.so.3` to `.so.4`) are atomic with the base. `check_rpm_sonames.sh` is green on the branch build, and no Athanor RPM requires `libdisplay-info.so.2` or `libssl.so.3`.
+3. **Cross-base rollback.** The S1 answers (spike items 1, 4 and 6) must name the shim, GRUB and SELinux policy store that a rolled-back Fedora 43 deployment boots with, not assume them.
 4. **Estimates stay marked.** Every statement marked *(estimated)* below is either confirmed or corrected by the task that touches it.
 
 ## Facts as of 2026-10-18
@@ -48,16 +48,16 @@ Sources: the Koji `f45`, `f44` and `f43-updates` tags (`getLatestBuilds`), Bodhi
 | kernel | 7.2.11-100 | 7.2.11-300 | 7.2.11-200 | Same series. Azoth stays for the cut-over; the source moves in task 9 |
 | systemd | 258.11 | 262 | 259.9 | D25: 262 matters for the 1.1 chain only |
 | libdisplay-info | 0.2.0 (.so.2) | 0.3.0 (.so.3 only) | 0.3.0 | The `flake.nix` target moves to 0.3.0 with the base (task 7) |
-| openssl | 3.5.9 | 4.0.3; `openssl3-libs` 3.5.8 compat ships `libssl.so.3` | 3.5.9 | Nix-linked binaries need either the compat package or OpenSSL 4 (decision M3) |
-| polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork's exit condition is met; the #447 patch is the open question (M2) |
-| shim / grub2 | 15.8-3 / 2.12-43 | 16.1-7 / 2.12-81 | 16.1-7 / 2.12 | SBAT and MOK chain under shim 16.1 (S1-6) |
-| selinux-policy | 43.10 | 45.20 | 44.11 | Three local modules to re-check (task 5) |
+| openssl | 3.5.9 | 4.0.3; `openssl3-libs` 3.5.8 compat ships `libssl.so.3` | 3.5.9 | The Nix target moves to OpenSSL 4 inside the cut-over; no compat package (M3, decided). Fedora 43 has no OpenSSL 4 (`f43-updates`: `openssl-3.5.9-1.fc43`, no `openssl4`), so the move cannot land before the base |
+| polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork is rebased onto 127-5 and keeps the #447 patch and the agent-helper 0755 change (M2, decided; task 4b). With its current release, Fedora's 127-5.fc45 would replace it |
+| shim / grub2 | 15.8-3 / 2.12-43 | 16.1-7 / 2.12-81 | 16.1-7 / 2.12 | SBAT and MOK chain under shim 16.1 (spike item 6) |
+| selinux-policy | 43.10 | 45.20 | 44.11 | Eight modules to validate against the new policy (task 5) |
 | anaconda / pykickstart | 43.44 / 3.66 | 45.29 / 3.77 | 44.30 | `KICKSTART_SYNTAX`, the workaround comments |
 | llvm / clang | 21.1.8 | 23.1.2 | 22.1.8 | Only if the kernel builder moves (task 12) |
-| gtk4 / libadwaita | 4.20.4 / 1.8.8 | 4.24.1 / 1.10.0 | 4.22.5 | Shell rendering, dead keys, rig goldens (task 11) |
+| gtk4 / libadwaita | 4.20.4 / 1.8.8 | 4.24.1 / 1.10.0 | 4.22.5 | Shell rendering, dead keys (task 7 console check), rig goldens (task 11) |
 | bootc / rpm-ostree | 1.16.13 / 2026.1 | 1.16.13 (1.17.1 testing) / 2026.3 | 1.16.13 | — |
 | greenboot-rs / cosmic-comp | 0.16.4-0.fc43 / 1.10.0-2.fc43 | 0.16.4-0.fc45 / 1.10.0-2.fc45 | same with fc44 | Fedora's fc45 builds sort above the `fc43.athanorN` forks |
-| podman / dnf5 / glibc | 5.8.8 / 5.2.18 / 2.42 | 6.1.3 / 5.4.6 / 2.44 | — | Container storage across rollback (S1-8) |
+| podman / dnf5 / glibc | 5.8.8 / 5.2.18 / 2.42 | 6.1.3 / 5.4.6 / 2.44 | — | Container storage across rollback (spike item 4, `podman` stage) |
 
 ## Inventory of Fedora release pins
 
@@ -65,31 +65,31 @@ The two columns at the right say which task moves each pin and how much of it do
 
 | Where | Pin | Task | Note |
 | --- | --- | --- | --- |
-| `system/Containerfile:69` | `fedora:43@sha256:4566e9af…` (stage `nvidia-rpms`) | 7 | `run_spec_build.sh:25` takes its build image from this file |
-| `system/Containerfile:80` | `base-atomic:43@sha256:c946cad3…` | 7 | `check_idempotency.sh:119-127` reads the digest here |
+| `system/Containerfile:69` | `fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8` (stage `nvidia-rpms`) | 7 | `run_spec_build.sh:25` takes the first such line as the image of `check_rpm_sonames.sh` |
+| `system/Containerfile:80` | `base-atomic:43@sha256:c946cad35a99cb3a79f3cdd877f554f1cf5ef151d8eff50b9789ec80629641b8` | 7 | `check_idempotency.sh:119-127` reads the digest here |
 | `system/Containerfile:82-83` | `ARG FEDORA_VERSION=43` | 7 | `build-image.sh:138-144` builds the version label `43.YYYYMMDD.SERIAL` |
 | `call-dag-compile.yml:22`, `call-build-builder.yml:13` | `FEDORA_VERSION: 43` | 13 | No reader in the repository: dead |
-| `forge/specs/azoth/{builder,nvidia}/Containerfile`, `boot/Containerfile:13,25` | `fedora:43@sha256:005ce311…` | 12 | Kernel builder; the locks are tied to it |
-| `forge/specs/azoth/signer/Containerfile:11` | `fedora:43@sha256:a60334b2…` | 12 | — |
+| `forge/specs/azoth/{builder,nvidia}/Containerfile`, `boot/Containerfile:13,25` | `fedora:43@sha256:005ce311c13eaa639de9d9c52e470f10652c7371561697fb8c1c6e852e23c481` | 12 | Kernel builder; the locks are tied to it |
+| `forge/specs/azoth/signer/Containerfile:11` | `fedora:43@sha256:a60334b24af6818e9ccf199d188b5ddef1c3d7f549470b560d9b744c78c2c58b` | 12 | — |
 | Toolchain locks under `forge/specs/azoth/` | `fc43` NVRs (builder 285, nvidia 114, boot 114, signer 90, `schbench.lock` 15) | 12 | Regenerated, never edited |
-| `forge/specs/azoth/KERNEL.md:46-47`, `pins.env` (not read: the gate blocks it) | `FEDORA_KERNEL_NVR 7.2.9-100.fc43`, `FEDORA_KEY_FPR c6e7…5531` (the Fedora 43 key) | 9 | The Fedora 45 key is `4F50A6114CD5C6976A7F1179655A4B02F577861E`; the Fedora 44 key is `36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6` |
+| `forge/specs/azoth/KERNEL.md:46-47`, `pins.env` (not read: the gate blocks it) | `FEDORA_KERNEL_NVR 7.2.9-100.fc43`, `FEDORA_KEY_FPR c6e7f081cf80e13146676e88829b606631645531` (the Fedora 43 key) | 9 | The Fedora 45 key is `4F50A6114CD5C6976A7F1179655A4B02F577861E`; the Fedora 44 key is `36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6` |
 | `forge/specs/azoth/SOURCES/sources.sha256:1-2` | `kernel-7.2.9-100.fc43.src.rpm` and `.sig` | 9 | `build.sh:60-61` derives the key file from the NVR's `fcNN` |
 | `forge/specs/azoth/kernel-local:62-70` | `KMALLOC_PARTITION_RANDOM` ("the clang of Fedora 43") | 12 | Removed when the builder reaches clang 23 |
 | `forge/specs/azoth/bump.py:27,71,72,219-266,254,566` | `FEDORA_RELEASES`, the `\.fc43$` regex, Bodhi `F43`, the PR text | 2 | The bump bot moves digests, never tags |
-| `forge/specs/cosmic-comp/cosmic-comp.spec:7` | `fedora_release 2.fc43` | 4 | — |
-| `forge/specs/greenboot-rs/greenboot-rs.spec:11` | `fedora_release 0.fc43` | 4 | — |
-| `forge/specs/polkit/polkit.spec:46` | `2.fc43.2.athanor3` | M2 | Exit condition at :35-38 |
-| `forge/specs/athanor-system-config/athanor-system-config.spec:5,13` | `71.fc43`, `Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2` | 4 | — |
+| `forge/specs/cosmic-comp/cosmic-comp.spec:7` | `fedora_release 2.fc43` | 7 | Rewritten by `bump.py cosmic-comp` (task 2); checked by task 4a |
+| `forge/specs/greenboot-rs/greenboot-rs.spec:11` | `fedora_release 0.fc43` | 7 | No bump tool; checked by task 4a |
+| `forge/specs/polkit/polkit.spec:46` | `2.fc43.2.athanor3` | 4b, 7 | Exit condition at :35-38 is rewritten by task 4b |
+| `forge/specs/athanor-system-config/athanor-system-config.spec:5,13` | `71.fc43`, `Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2` | 7 | On Fedora 45, Fedora's own `1.10.0-2.fc45` would satisfy this `Requires`, so it must name the fork's fc45 release; checked by task 4a |
 | `forge/specs/athanor-base-config/SOURCES/usr/lib/os-release` | `VERSION 43`, `VERSION_ID=43`, `PLATFORM_ID="platform:f43"`, `CPE_NAME` | 7 | BIB selects its definitions by `VERSION_ID` |
 | `system/disk_config/defs/athanor-43.yaml` | the installer package set | 3 | Mounted by `forge/scripts/build_iso.sh` |
 | `scripts/verify.py:870-873` | `KICKSTART_SYNTAX = "F43"` | 7 | — |
 | `system/disk_config/iso.toml:254,258`, `system/athanor-install.ks:261,265`, `scripts/devvm/devvm.ks:86,90`, `forge/test/iso/collaudo.ks:289,293` | workarounds for "branch fedora-43" of Anaconda | 7 | Re-verified on Anaconda 45 |
 | `system/nvidia/lock.py:67,77` and `system/nvidia/locks/*.lock` | negativo17 `fedora-43`, RPM Fusion `updates/43` | 7 | Both Fedora 45 repositories answer HTTP 200 |
 | `flake.nix:38-44` | `libdisplay-info-target` 0.2.0 | 7 | `libdisplay-info-sys` 0.3 accepts versions below 0.4.0 |
-| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5 | 45.20 makes the power-profiles domain enforcing |
-| `scripts/devvm/acceptance/images.sh:71` | version label `43.${created}` | 6c | A cross-base run needs 43 and 45 |
+| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
+| `scripts/devvm/acceptance/images.sh:71` | version label `43.${created}` | — | Cosmetic: machines order images by `created`, never by the version string (`system/build-image.sh:135-137`) |
 | `forge/test/shell/kvm/guest.sh:16`, `scripts/devvm/shelld-acceptance.sh:112`, `scripts/devvm/lock-acceptance.sh:30` | 43 in text and in the kernel choice | 11 / 7 | — |
-| `forge/test/shell/Containerfile:8` | `fedora@sha256:0b52d7c6…` (Fedora 43) | 11 | The goldens depend on its GTK |
+| `forge/test/shell/Containerfile:8` | `fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809` (Fedora 43) | 11 | The goldens depend on its GTK |
 | `scripts/runner/runner.env:11` (not read: the gate blocks it) | Fedora Cloud Base 43 guest | 10 | The value comes from grep output only |
 | 21 test files (the lists in `forge/scripts/tests`, `forge/specs/azoth/tests`, `scripts/ci/tests`, `scripts/tests`, `system/nvidia/tests`, `system/tests`) | `fc43` and `F43` fixtures | where read | Fixtures that do not read the Containerfile stay as sample data |
 | `rpmfusion.repo`, `forge/assets/repos/fedora-nvidia.repo` | `$releasever` | — | They follow the base |
@@ -102,117 +102,176 @@ No mock or Koji build configuration exists in the repository. Koji is used only 
 - `forge/scripts/publish_tiers.sh:25-28` pushes `athanor-forge-tierN-repo:latest` from any branch.
   - The run's own image reads its tiers by digest, so it is not affected.
   - But `system/tier-digests.sh:29` makes local builds and `system-image-check.yml` read `:latest`. A Fedora 45 branch run would therefore put Fedora 45 RPMs under every Fedora 43 pull request. Task 1 comes first for this reason.
+  - `publish_tiers.sh` runs inside the builder container (`call-system-image.yml:46-62`, through `aggregate_tier_repos.sh:34`), which receives only `GITHUB_TOKEN`, `GITHUB_ACTOR` and `GITHUB_REPOSITORY_OWNER`. `GITHUB_REF` is unset there, so a guard in the script needs the workflow to pass it in.
 - Branch runs cannot use the signing environments:
   - `.github/settings/environments.json` lets only `iso-v0` and `main` use `signing`, `signing-images`, `signing-kernel`, `release` and `bots`;
   - `system/trusted-run.sh` trusts only runs on `iso-v0`, so `accept.yml`, release and promote all refuse a branch build.
-  - Consequence: a branch build is accepted only locally (`forge/test/iso/run_iso_test.sh`), and the first CI-accepted Fedora 45 image is the `iso-v0` run after task 7 merges.
+  - Consequence: a branch build is accepted only locally (`forge/test/iso/run_iso_test.sh` on the laptop, the S1 spike on the desktop). The first CI-accepted Fedora 45 image is the `iso-v0` run after task 7 merges, which is why task 7 merges only once the branch is green.
 - The orchestrator dispatches `release.yml` only on `iso-v0` (`athanor-forge-orchestrator.yml:386`). The ISO's `:latest` moves on `main` only.
 
 ---
 
 ### Task 1: tier `:latest` moves only on the default branches
 
-- [ ] In `publish_tiers.sh`, push `:latest` only when `GITHUB_REF` is `refs/heads/iso-v0` or `refs/heads/main`.
-  - Otherwise push `:run-$GITHUB_RUN_ID`, and compare the content hash against that tag.
-  - Write the digest as today.
-  - The rolling aggregate follows the same rule.
-- [ ] A unit test with `skopeo` and `buildah` stubbed on `PATH` asserts the pushed reference for both refs.
-- [ ] Check: `shellcheck forge/scripts/publish_tiers.sh && python3 -B -m unittest discover -s forge/scripts/tests`.
+- [ ] `call-system-image.yml`, step "Aggregate the tier repositories and publish their images" (:46-62): add `GITHUB_REF: ${{ github.ref }}` to the step's `env` and `-e GITHUB_REF="${GITHUB_REF}"` to its `podman run`. This is a workflow change: follow `.github/workflows/AGENTS.md` (YAML stays glue, the decision lives in the script; run `actionlint` and the `verify.py` checks below).
+- [ ] `publish_tiers.sh` takes the tag from `GITHUB_REF`:
+  - `latest` for `refs/heads/iso-v0` and `refs/heads/main`;
+  - `branch-<name>` for any other ref, where `<name>` is the ref without `refs/heads/` (or without `refs/` for any other kind), lower-cased, with every character outside `[a-z0-9._-]` replaced by `-`;
+  - an unset or empty `GITHUB_REF` is an error, exit 2: fail closed, never `:latest`.
+- [ ] The content-hash comparison reads the tag it is about to push. A branch run therefore deduplicates against the previous run of the same branch, and the first run of a branch always pushes. The run's digest file is written as today.
+- [ ] The `branch-*` tags stay in the registry until removed. Deleting registry images is in the "Stop and ask" list, so the card of task 7 gives the maintainer the command that deletes the `branch-rebase-fedora-45` tags.
+- [ ] A unit test with `skopeo` and `buildah` stubbed on `PATH` asserts the pushed reference for `refs/heads/iso-v0`, `refs/heads/main`, `refs/heads/rebase/fedora-45` and `refs/pull/618/merge`, and exit 2 with `GITHUB_REF` unset.
+- [ ] Check: `actionlint .github/workflows/call-system-image.yml && python3 scripts/verify.py workflows ci docs registry && bash -n forge/scripts/publish_tiers.sh && shellcheck forge/scripts/publish_tiers.sh && python3 -B -m unittest discover -s forge/scripts/tests`.
 - Runs on: laptop. Depends on: nothing.
 
 ### Task 2: `bump.py` follows the base release
 
-- [ ] Read the Fedora release from `system/Containerfile`, the `base-atomic:NN` tag, instead of the literals:
-  - `FEDORA_RELEASES` becomes (N, N+1);
-  - the cosmic-comp regex becomes `\.fc{N}$`;
-  - the Bodhi release becomes `F{N}`;
-  - the rewrite of `fedora_release` and the PR text use N too.
-  Read the code before changing it: the purpose of the second release in `FEDORA_RELEASES` is not yet verified.
-- [ ] Update `forge/specs/azoth/tests/test_bump_*` and add one case for N=45.
+Forks keep spelling out Fedora's release with its dist tag (`%global fedora_release 2.fc43`). The Nix builder defines no `%dist` (`cosmic-comp.spec:6`), and 26 specs rely on an empty `%{?dist}` (`athanor-update.spec:7` among them): a builder-wide `%dist` would rename every one of their NVRs. What changes is where the release number comes from. Task 4a checks it.
+
+- [ ] `bump.py` reads N from `ARG FEDORA_VERSION` in `system/Containerfile`, the line `build-image.sh:138` already reads. It then derives:
+  - `FEDORA_RELEASES` (:72) as (`F{N}`, `F{N+1}`);
+  - `COSMIC_COMP_RE` (:71) as `\.fc{N}$`;
+  - the Bodhi release (:219-266) as `F{N}`;
+  - the rewrite of `%global fedora_release` (:254) as `{release}.fc{N}`, so a bump never reverts what task 7 sets;
+  - the pull request text (:566).
+- [ ] The existing tests keep N=43. New cases point the script at a temporary `Containerfile` with `ARG FEDORA_VERSION=45`.
 - [ ] Check: `python3 -B -m unittest discover -s forge/specs/azoth/tests`.
 - Runs on: laptop. Depends on: nothing.
 
 ### Task 3: installer definitions for every supported release
 
-- [ ] Add `system/disk_config/defs/athanor-45.yaml`. Start from `athanor-43.yaml` and check each package name against Fedora 45: `dnf repoquery --releasever=45` in `fedora:45@sha256:cdfc05e9…`.
+- [ ] Add `system/disk_config/defs/athanor-45.yaml`. Start from `athanor-43.yaml` and check each package name against Fedora 45: `podman run --rm FEDORA45 dnf -q repoquery --qf '%{name}\n' <names>`, where FEDORA45 is the pinned image below.
 - [ ] Add a test in `system/tests` that fails when no `athanor-<FEDORA_VERSION>.yaml` exists for the `ARG FEDORA_VERSION` of `system/Containerfile`. This makes the missing file a check, not a memory.
 - [ ] Check: `python3 -B -m unittest discover -s system/tests`.
 - Runs on: laptop. Depends on: nothing.
 - *(estimated)* BIB looks for the exact `<ID>-<VERSION_ID>.yaml` and does not fall back to `athanor-43.yaml`.
 
-### Task 4: forked packages take the release from the base
+FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42` in every command of this plan.
 
-- [ ] The forge builder defines `%dist .fc<N>`, with N read from `system/Containerfile`.
-- [ ] The literals in `cosmic-comp.spec:7`, `greenboot-rs.spec:11` and `athanor-system-config.spec:5,13` become `%{?dist}`. The polkit spec waits for M2.
-- [ ] On Fedora 43 every NVR stays the same. Check: `rpmspec -q --qf '%{NVR}\n' --define 'dist .fc43' <spec>` on each of the three specs prints the NVR shipped today; `python3 scripts/verify.py specs` passes.
+### Task 4a: every fork names the base's release
+
+- [ ] Add `scripts/tests/test_fork_releases.py`. Across every `forge/specs/*/*.spec`, each `fcNN` must equal the `ARG FEDORA_VERSION` of `system/Containerfile`. It looks in three kinds of line:
+  - `%global fedora_release`;
+  - `Release:`, the `%{!?autorelease:…}` form included;
+  - a versioned `Requires:`.
+  Changelog lines are ignored.
+- [ ] Today this covers `cosmic-comp`, `greenboot-rs`, `polkit` and `athanor-system-config`, all at 43: the test is green and no NVR changes. In task 7 it stays red until every one of them names fc45, and that is its purpose.
+- [ ] Check: `python3 -B -m unittest discover -s scripts/tests`.
 - Runs on: laptop. Depends on: nothing.
-- *(estimated)* The Nix builder can set `%dist` in one place. If it cannot, the three literals change inside task 7 instead.
+
+### Task 4b: polkit rebased onto Fedora's 127-5 (M2)
+
+- [ ] `forge/specs/polkit/polkit.spec`: move to the source and the Fedora patches of 127-5. Keep:
+  - `athanor-agent-helper-cancel-before-answer.patch` (#447, polkit-org/polkit#713) and the `%check` that drives it;
+  - the agent-helper 0755 change;
+  - the drop-ins and the preset.
+- [ ] The release becomes `5.fc43.athanor1`. This is Fedora's 127-5 with the dist tag of the current base, following the rule of `polkit.spec:20-26`: it sorts above every Fedora 43 build today. Task 7 moves it to `5.fc45.athanor1`, which sorts above Fedora's 127-5.fc45 and below any later Fedora build.
+- [ ] Rewrite the exit condition (:35-38): drop the fork when Fedora's polkit carries both changes, not when the base reaches a given Fedora release.
+- [ ] Check:
+  - `bash forge/scripts/run_spec_build.sh ghcr.io/ars-regia/athanor-builder:latest specs/polkit` (the `%check` and `check_rpm_sonames.sh` both pass);
+  - `python3 scripts/verify.py polkit polkit-subject polkit-model`;
+  - on the desktop after the 0.9 acceptance, `scripts/devvm/lock-acceptance.sh` with its expected polkit release updated.
+- Runs on: laptop for the build, desktop for the lock acceptance. Depends on: nothing.
 
 ### Task 5: SELinux modules against policy 45.20
 
-- [ ] Build `forge/specs/athanor-selinux` with `selinux-policy-devel` 45.20 in `fedora:45@sha256:cdfc05e9…`.
-- [ ] For `athanor_powerprofiles_passwd.te`, `athanor_pcscd_cgroup.te` and `athanor_systemd_pstore.te`, record whether 45.20 already grants the rule. Remove what is now upstream, but only in task 7, which is where the base changes.
-- [ ] Check: `podman run --rm -v "$PWD/forge/specs/athanor-selinux:/m:Z" -w /m fedora:45@sha256:cdfc05e9… sh -c 'dnf -y -q install selinux-policy-devel && make -f /usr/share/selinux/devel/Makefile'` exits 0.
-- Runs on: laptop, `taskset -c 0-3`. Depends on: nothing.
+The spec only compiles: `checkmodule -M -m -C` (`athanor-selinux.spec:40`) does not check a module against any policy. The modules meet the policy when the image build loads them with `semodule -i` (`system/Containerfile:220-222`). The check repeats both steps on a copy, against Fedora 45's policy store. It fails if no module is compiled, and it writes nothing into the checkout:
 
-### Task 6: the S1 harness (three pull requests)
+```
+podman run --rm --security-opt label=disable \
+  -v "$PWD/forge/specs/athanor-selinux/SOURCES:/src:ro" \
+  registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42 \
+  sh -euc 'dnf -y -q install checkpolicy policycoreutils selinux-policy-targeted
+    rpm -q selinux-policy-targeted
+    w=$(mktemp -d); cp /src/*.te /src/*.cil "$w"; cd "$w"
+    test "$(ls *.te | wc -l)" -gt 0
+    for t in *.te; do checkmodule -M -m -C -o "${t%.te}.cil" "$t"; done
+    test "$(ls *.cil | wc -l)" -eq 8
+    semodule -n -i *.cil
+    test "$(semodule -l | grep -cE "^(athanor_|bootupd_lsblk)")" -eq 8'
+```
 
-- **6a. Firmware.**
-  - [ ] `scripts/devvm/start.sh` gains `DEVVM_SECURE_BOOT=1`: secboot OVMF with the Microsoft keys and MOK enrolment, as `run_iso_test.sh` already does with `SECURE_BOOT=1`.
-  - [ ] It also gains `DEVVM_TPM=1`: an `swtpm socket --tpm2` per VM, under the state directory.
-  - [ ] Check: `bash -n scripts/devvm/start.sh && shellcheck scripts/devvm/*.sh`.
-- **6b. The D39 probes.** A stage `d39` in `scripts/devvm/acceptance/run.sh` records four things before an update, after it, and after the rollback:
-  - [ ] `getent passwd`/`group` of a user created on v1, with that user's `shadow` line hashed;
-  - [ ] `/etc/machine-id`;
-  - [ ] a NetworkManager keyfile created on v1;
-  - [ ] `semanage boolean -l -C`, `semanage fcontext -l -C` and `semodule -l`.
-  - [ ] It fails on any difference that ADR-0106 does not allow.
-  - [ ] Check: `bash -n scripts/devvm/acceptance/run.sh && shellcheck scripts/devvm/acceptance/*.sh`.
-- **6c. Cross-base and power loss.**
-  - [ ] `images.sh` takes the version major from the base it builds on, instead of `43.` at :71.
-  - [ ] `ACC_BASE_OLD` names v1's base, so v1 can be a Fedora 43 image and v2 a Fedora 45 one.
-  - [ ] A `hardcut` stage kills QEMU (`quit` on the monitor, not the `power_cycle` of `lib.sh:85`) halfway through staging, then checks that v1 boots and that the next update completes.
-  - [ ] Every stage writes its timings to `report`.
-  - [ ] Check: as for 6b.
-- Runs on: laptop. Depends on: nothing (they can merge before 0.9).
+- [ ] As a control, the same command with Fedora 43's image (`registry.fedoraproject.org/fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8`) passes first. The 8 is the number of modules in the spec's `%install`; a module added later raises it.
+- [ ] For `athanor_powerprofiles_passwd`, `athanor_pcscd_cgroup` and `athanor_systemd_pstore`, run `sesearch -A` (`setools-console`) against 45.20 and record whether the policy now grants the rule. What is now upstream is removed in task 7, where the base changes.
+- [ ] Check: the command above exits 0 on Fedora 45 and on Fedora 43.
+- Runs on: laptop. Depends on: nothing.
 
-### Task 7: the cut-over to Fedora 45
+### Task 6: the prerequisites of the S1 spike
 
-- [ ] `system/Containerfile`:
-  - `base-atomic:45@sha256:<digest of the final release>` and `ARG FEDORA_VERSION=45`;
-  - the `nvidia-rpms` stage on `fedora:45@sha256:…`.
-- [ ] `system/nvidia/lock.py:67,77` → `fedora-45` and `updates/45`. Regenerate the three locks. Confirm that the NVIDIA driver versions equal those the Azoth kmods are built for (Q5).
-- [ ] `os-release`: `VERSION`, `VERSION_ID`, `PRETTY_NAME`, `CPE_NAME` and `PLATFORM_ID` → 45.
-- [ ] `flake.nix:38-44`: `libdisplay-info-target` → 0.3.0, with the comment naming Fedora 45.
-- [ ] `scripts/verify.py:870-873`: `KICKSTART_SYNTAX = "F45"`. `ksvalidator` passes on every kickstart.
-- [ ] The Anaconda workaround comments (inventory row) are re-verified on Anaconda 45.29 in the ISO test below. A workaround that is no longer needed is removed; one that is still needed names `fedora-45`.
-- [ ] The SELinux removals found in task 5. The literals of task 4, if `%dist` was not possible there. Polkit, as M2 decides.
-- [ ] Tests that read the Containerfile are updated. The others keep their fixtures.
-- [ ] Prove it on the branch before review:
-  1. `workflow_dispatch` the orchestrator on the branch; task 1 must have merged first. `check_rpm_sonames.sh` is green, and the system image builds by run id.
-  2. On the laptop, run `SECURE_BOOT=1 forge/test/iso/run_iso_test.sh <branch ISO> /var/tmp/f45-iso`: verdict `secure-boot`, greeter reached.
-- [ ] Check: `just check` on the laptop (`-j 4`); then the branch run's id, and the `greeter.txt` and `secure-boot` verdict of the ISO test, quoted in the pull request.
-- Runs on: hosted runners, plus the laptop for the ISO test.
-- Depends on: tasks 1, 3, 5, the decisions M2 and M3, Fedora 45 final (2026-10-20), and the 0.9 tag before merge.
+S1 already has its procedure: `docs/spikes/s1-bootc-fedora45.md`. It covers:
+- item 0, what Fedora 45 ships;
+- item 1, the four D39 subjects, phase 4 across the Fedora 43 → 45 upgrade included;
+- item 2, greenboot and boot counting;
+- item 3, power loss and a crash before confirmation (C2, C4);
+- item 4, the acceptance harness across bases;
+- item 6, Secure Boot, the MOK chain and the ESP;
+- item 7, the measurements.
 
-### Task 8: S1 on the cut-over image (no pull request; results in `docs/spikes/s1-fedora-45.md`)
+Its section 3 holds the swtpm and secboot OVMF commands. The plan builds no second procedure; this task closes the prerequisites listed in the spike's section 5.
 
-These runs use the harness of task 6 on the laptop, about 70 minutes per run *(estimated from the README)*. Each measurement has a Fedora 43 → Fedora 43 baseline run with the same harness, so every number is read against that baseline, not against an absolute value.
+- [ ] Point 4, one pull request:
+  - `images.sh` and `run.sh` take the registry container's name from a variable (`ACC_REGISTRY_NAME`, default `athanor-acc-registry`);
+  - `local-image.sh` reads `ACC_PORT` and `ACC_REGISTRY`.
+  Check: `shellcheck scripts/devvm/*.sh scripts/devvm/acceptance/*.sh && grep -q ACC_PORT scripts/devvm/local-image.sh`. The `grep` is the spike's own refusal step.
+- [ ] Point 3: the maintainer confirms the line of `devvm.env` that derives the state directory (M11). If the line does not do that, the dev VM scripts gain a state-directory variable, as a pull request of the same form.
+- [ ] Section 1 of the spike takes the Fedora 45 final digests, in place of the beta of 2026-10-09, and so does the `sed` line of its section 3. This is a pull request touching only `docs/spikes/`, which has no owner (ADR-0107).
+- [ ] Secure Boot and swtpm stay as the spike's QEMU lines. A `start.sh` option is added only if the run shows it is worth keeping, as the spike says.
+- Runs on: laptop. Depends on: Fedora 45 final, for the digest change.
 
-| # | What | How | Pass |
-| --- | --- | --- | --- |
-| S1-1 | Update 43 → 45 | `run.sh` with `ACC_BASE_OLD` (43) and `ACC_BASE` (45) | Every stage green |
-| S1-2 | Download size | `system/upgrade-bytes.sh` on the two digests, and bytes received by the guest during `download` | Recorded; compared with the 43 → 43 baseline |
-| S1-3 | Staging, reboot to greeter, rollback times | Stage timings of 6c | Recorded; a rollback-to-greeter time beyond twice the baseline is a finding |
-| S1-4 | D39 checks across update and rollback | Stage `d39` | No difference outside ADR-0106 |
-| S1-5 | Greenboot fallback | A health check failing on v2. GRUB boot counting returns to v1 (`goback`, `greenboot`) | v1 boots; `rollbackQueued` set |
-| S1-6 | Secure Boot and the MOK chain under shim 16.1 | `DEVVM_SECURE_BOOT=1`. Record `mokutil --sb-state`, `mokutil --list-enrolled`, `/sys/kernel/security/lockdown`, `bootupctl status` and the SBAT level, before and after the update and after the rollback | The Azoth kernel boots under both shims; a signed module loads |
-| S1-7 | TPM | `DEVVM_TPM=1`. Record `tpm2_pcrread sha256:0,4,7,9,11` at each boot | Recorded; a PCR7 change is reported against Q2 |
-| S1-8 | Power loss during staging | Stage `hardcut` | v1 boots, `bootc status` is consistent, the next update completes |
-| S1-9 | Fresh install | Task 7's ISO test, final digest | Greeter reached, `secure-boot` verdict |
-| S1-10 | Shell on GTK 4.24 | On the console, by the maintainer: bar, dock, launcher and greeter; dead keys with `us(intl)` (`GTK_IM_MODULE=simple`, #332) | No regression the maintainer sees |
+### Task 7: the cut-over, green on its branch before it merges
 
-- Runs on: laptop. Depends on: task 6, and task 7 built on a branch or merged.
+The branch is `rebase/fedora-45`, from `origin/iso-v0`, with one pull request to `iso-v0`. That pull request stays a draft until the branch is green. It has one commit per part:
+
+1. **Base.** `system/Containerfile` takes `base-atomic:45` at the digest that `skopeo inspect --format '{{.Digest}}' docker://quay.io/fedora-ostree-desktops/base-atomic:45` prints on the day, and `ARG FEDORA_VERSION=45`. `os-release` takes `VERSION`, `VERSION_ID`, `PRETTY_NAME`, `CPE_NAME` and `PLATFORM_ID` 45.
+2. **NVIDIA userspace.**
+   - The `nvidia-rpms` stage moves to FEDORA45. This also moves the image of `check_rpm_sonames.sh`.
+   - `system/nvidia/lock.py:67,77` → `fedora-45` and `updates/45`, and the three locks are regenerated.
+   - The driver versions must equal those the Azoth kmods are built for (Q5).
+3. **`libdisplay-info`.** In `flake.nix:38-44`, `libdisplay-info-target` → 0.3.0, with the comment naming Fedora 45.
+4. **OpenSSL 4 for the Nix target (M3).**
+   - It is its own pull request against `rebase/fedora-45`, reviewed on its own (M10).
+   - It cannot land on `iso-v0` alone: Fedora 43 has no OpenSSL 4.
+   - Whether the pinned `nixpkgs` (rev `34ab9907`, 2026-08-31) carries OpenSSL 4 is Q3.
+5. **Fork releases.**
+   - `python3 forge/specs/azoth/bump.py cosmic-comp apply <dir>` writes Fedora 45's stable build (needs task 2).
+   - `greenboot-rs.spec:11` → `0.fc45`.
+   - `polkit.spec` → `5.fc45.athanor1`.
+   - `athanor-system-config.spec` → a release in fc45 that sorts above `71.fc43`, and `Requires: cosmic-comp >=` the fork's fc45 release.
+   - Task 4a's test is green again.
+6. **Installer.**
+   - `scripts/verify.py:870-873` → `KICKSTART_SYNTAX = "F45"`, with `ksvalidator` passing on every kickstart.
+   - Each Anaconda workaround (inventory row) is re-verified in the ISO test below. One no longer needed is removed; one still needed names `fedora-45`.
+7. **SELinux.** The removals found in task 5.
+8. **Tests.** Those that read the Containerfile are updated; the others keep their fixtures.
+
+Green, all on the branch and before the merge (ADR-0078; the definition M5 confirms):
+
+- [ ] **Branch build.** `athanor-agent gh workflow run athanor-forge-orchestrator.yml --ref rebase/fedora-45 -R ars-regia/athanor`; task 1 must have merged first.
+  - `check_rpm_sonames.sh` is green for every spec.
+  - The system image and the ISO are published by run id.
+  - If the run stops at a job that needs a signing environment, see Q6.
+- [ ] **Laptop ISO test.** `SECURE_BOOT=1 MEMORY_MIB=4096 VCPUS=4 forge/test/iso/run_iso_test.sh <branch ISO> /var/tmp/f45-iso`, with the verdict case `secure-boot` and `greeter.txt` reporting the greeter. The 4 GiB guest is for a 7 GB host *(estimated sufficient)*; if it is not, the test moves to the desktop after S1.
+- [ ] **Desktop S1.** The spike's items pass on the branch image (task 8).
+- [ ] **Console, by the maintainer.**
+  - On the branch image: bar, dock, launcher and greeter on GTK 4.24 and libadwaita 1.10.
+  - Dead keys with `us(intl)` (`GTK_IM_MODULE=simple`, #332).
+- [ ] **Local checks.** `just check` on the laptop at 4 jobs.
+
+Then the pull request leaves draft and goes to the card. After the merge, the `iso-v0` run and `accept.yml` are the first CI acceptance. Release 0.10 is dispatched by that build and waits on the `signing` environment, so nothing moves `:latest` without the maintainer. If the `iso-v0` run fails where the branch passed, revert the squashed commit before any release is approved: the base returns to Fedora 43 in one commit.
+
+- Runs on: hosted runners, the laptop and the desktop.
+- Depends on: tasks 1, 2, 3, 4a, 4b, 5 and 8; decision M10; Fedora 45 final (2026-10-20); the 0.9 tag before the merge.
+
+### Task 8: S1 on the branch image (results in the spike)
+
+- [ ] Follow `docs/spikes/s1-bootc-fedora45.md`, sections 2 to 4, unchanged, on the desktop (M7): one VM at a time, the runner guest stopped for each sitting (M11), and `uptime` before each start.
+- [ ] Input: `ACC_BASE` names the image of the task 7 branch run, by digest. The spike's own route, a local build with only the base lines changed, stays for the items that can run before the branch image exists. With fc43 tier RPMs on a Fedora 45 base, that route installs only the chain's packages, as its section 3 says.
+- [ ] Two additions, written into the spike in the same pull request as the answers:
+  - item 7 also measures a Fedora 43 `v1` → `v2` run, as the baseline every Fedora 45 number is read against;
+  - item 6 records `tpm2_pcrread sha256:0,4,7,9,11` at each boot (Q2).
+- [ ] The answers go into the spike's `**Answer.**` lines, through a pull request touching only `docs/spikes/` (no owner, ADR-0107).
+- [ ] Check, for M5: items 0, 2, 4 and 6 (S1-a, S1-b, S1-c, S1-e) pass; item 1 passes for the four subjects across the update and across phase 4. The rollback rule of item 1 phase 3 is the one the spike expects today's bootc to fail, so it is recorded, not required. Items 3, 6 (S1-d) and 7 are recorded.
+- Runs on: desktop, about 2 hours of builds and 4 hours of VM time over two or three sittings (the spike's estimate). Depends on: task 6, the task 7 branch run, the 0.9 acceptance ending, and M11.
 
 ### Task 9: kernel source from Fedora 45
 
@@ -227,11 +286,11 @@ These runs use the harness of task 6 on the laptop, about 70 minutes per run *(e
 - [ ] Change the runner guest base. The file is under `scripts/runner/`; edit it with the maintainer, because the gate blocks reading it.
 - [ ] Rebuild with `scripts/runner/build-image.sh`.
 - [ ] Check: one `kernel-weekly.yml` run green on the new guest.
-- Runs on: desktop, as the runner host, after the 0.9 acceptance frees the VM slot. Depends on: nothing. Due before 2026-12-02.
+- Runs on: desktop, as the runner host, between S1 sittings. Depends on: nothing. Due before 2026-12-02.
 
 ### Task 11: test rig on Fedora 45
 
-- [ ] `forge/test/shell/Containerfile:8` → `fedora:45@sha256:…`. Re-pin `rig-image.digest` and regenerate the goldens.
+- [ ] `forge/test/shell/Containerfile:8` → FEDORA45, or the newest Fedora 45 digest on the day. Re-pin `rig-image.digest` and regenerate the goldens.
 - [ ] Explain every golden difference: the GTK 4.24 and libadwaita 1.10 changes, one by one.
 - [ ] Also update `forge/test/shell/kvm/guest.sh:16` and the text of `shelld-acceptance.sh:112`.
 - [ ] Check: `forge/test/shell/rig.sh build-image`, then `rig.sh surface` for every scene.
@@ -255,46 +314,48 @@ These runs use the harness of task 6 on the laptop, about 70 minutes per run *(e
 
 | When | What |
 | --- | --- |
-| 2026-10-19 to 10-24 | Tasks 1, 2, 3, 13; tasks 4 and 5 started |
-| 2026-10-20 | Fedora 45 final; task 7 takes that day's `base-atomic:45` digest |
-| 2026-10-26 to 11-06 | Task 6 merged; task 7 green on a branch; S1-9 |
-| 0.9 tag (date set by the 0.9 acceptance) | Task 7 merges; S1-1 to S1-10 |
-| **2026-11-16** | Decision point (M5): is Fedora 45 green? If not, switch to Fedora 44 |
-| By 2026-11-25 | Tasks 9 and 10; release 0.x with the rebase (M4) |
+| 2026-10-19 to 10-24 | Tasks 1, 2, 3, 4a, 5 and 13 |
+| 2026-10-20 | Fedora 45 final; task 6 takes its digests, and task 7's branch opens with that day's `base-atomic:45` |
+| 2026-10-26 to 11-06 | Task 4b; the parts of task 7, the OpenSSL 4 pull request among them; the branch build green; the laptop ISO test |
+| After the 0.9 acceptance frees the desktop | Task 8, S1 on the branch image |
+| **2026-11-16** | Decision point (M5): green on the branch → task 7 merges; otherwise the Fedora 44 fallback |
+| By 2026-11-25 | The `iso-v0` run and `accept.yml` green; release 0.10 "base"; tasks 9 and 10 |
 | 2026-12-02 | Fedora 43 end of life |
 | After the release | Tasks 11 and 12 |
 
 ## What the maintainer decides or does
 
 - **M1 — the Fedora key pin.** Approve the change of `FEDORA_KEY_FPR` to the Fedora 45 key in task 9. Approve the `signing-kernel` environment for tasks 9 and 12.
-- **M2 — the polkit fork.** Choose one:
-  - (a) Drop it: Fedora 45 ships 127-5, and the exit condition at `polkit.spec:35-38` is met. The cancel-before-answer patch of #447 and the agent-helper 0755 change are then lost, unless they are upstream.
-  - (b) Rebase it onto 127-5.fc45 and keep both until upstream has them.
-  - The drop-ins and the preset can move to `athanor-system-config` in either case.
-  - This is in the "Stop and ask" area: it touches authentication.
-- **M3 — OpenSSL.** Nix-linked binaries need `libssl.so.3`. Choose one:
-  - keep it on Fedora 45 through `openssl3-libs` (compat, 3.5.8);
-  - or move the Nix target to OpenSSL 4 in its own pull request.
-  The compat path is the smaller change; its support period in Fedora is unverified.
-- **M4 — the release.** Which 0.x number carries the rebase. Approve `signing-images` and `release` for it.
-- **M5 — the decision point.** Confirm 2026-11-16, and the definition of green: task 7 built on `iso-v0`, S1-1, S1-4, S1-5, S1-6 and S1-9 pass.
+- **M2 — the polkit fork.** *Decided 2026-10-19:* rebase the fork onto 127-5.fc45 and keep the #447 cancel-before-answer patch and the agent-helper 0755 change until upstream has them (task 4b, task 7 part 5).
+- **M3 — OpenSSL.** *Decided 2026-10-19:* the Nix target moves to OpenSSL 4 in its own pull request, without `openssl3-libs`. Fedora 43 has no OpenSSL 4, so that pull request is merged into the cut-over branch and reaches `iso-v0` with task 7 (M10).
+- **M4 — the release.** *Decided by ADR-0123 (accepted, PR #617):* the rebase ships as release 0.10 "base". Still needed: the approvals of `signing` (release) and `signing-images` for it, and of `release` when it is promoted to `:stable`.
+- **M5 — the decision point.** *Confirmed 2026-10-19:* 2026-11-16. Green is reached on the branch, before task 7 merges: the branch build, the laptop ISO test, the console check and the S1 items listed in task 8.
 - **M6 — D39.** Close D39 and #124 on the S1 results, or name what is missing.
-- **M7 — the laptop.** Make it available for the ISO test and S1 (about 15 runs of about 70 minutes *(estimated)*), with its RAM confirmed (Q9).
+- **M7 — hosts.** *Decided 2026-10-19:* S1 runs on the desktop (16 cores, 31 GB, one VM at a time) after the 0.9 acceptance. The laptop (8 cores, 7 GB) does builds and the ISO test only.
 - **M8 — reviews.** Approve each pull request at its card.
 - **M9 — the runner guest.** Make the task 10 change together with the agent: the agent cannot read that file.
+- **M10 — how the cut-over merges.** *Needs a record (a decision in `DECISIONS.md`, or an amendment to ADR-0123).* Its parts cannot reach `iso-v0` one by one: each breaks either the Fedora 43 image or the Fedora 45 one. Under the merge rule of `CLAUDE.md`, a pull request into `rebase/fedora-45`, a base with no required check, cannot be merged by the agent. The proposal has three parts:
+  - task 7 is one pull request to `iso-v0`, squashed, with one commit per part;
+  - the OpenSSL 4 change (M3) is a pull request stacked on `rebase/fedora-45`, which the maintainer merges into that branch;
+  - the branch takes `iso-v0` by merge, never by rebase, and the final diff is checked against the squash trap of `.github/workflows/AGENTS.md`.
+  The alternative is a ruleset on `rebase/*` that requires `gate`, so that the merge rule covers the stacked pull requests too.
+- **M11 — S1 on the desktop** (the spike's section 5, points 1 to 3):
+  - the desktop on an image with QEMU and OVMF (#321);
+  - the runner guest stopped for each S1 sitting;
+  - the line of `devvm.env` that derives the state directory, confirmed, because the gate keeps the agent from reading it.
 
 ## Risks
 
 - **Soname breaks beyond `libdisplay-info`.** `check_rpm_sonames.sh` in the branch run is the guard. If a builder library cannot follow the base, the builder needs a per-release target *(estimated: not needed)*.
-- **The Fedora 43 kernel on a Fedora 45 base.** The Azoth `7.2.9-100.fc43` RPM is installed on a Fedora 45 userspace until task 9 lands *(estimated: compatible, same series; S1-9 confirms)*.
-- **shim 16.1 and the ESP.** bootc does not roll back the ESP. A Fedora 45 shim and GRUB may stay in place while a Fedora 43 deployment boots, or the ESP may keep shim 15.8 if nothing runs `bootupctl update` (Q1). SBAT revocations and NX requirements in shim 16 are unverified for the Azoth kernel. S1-6 settles this.
-- **The SELinux policy store across rollback.** 45.20 to 43.10, with local customisations (S1-4). The power-profiles domain becomes enforcing.
-- **Container storage.** podman 6 against 5 across a rollback (`podman` stage of S1).
-- **Anaconda 45 with `ostreecontainer`.** The workarounds may have changed or become unnecessary (task 7, S1-9).
+- **The Fedora 43 kernel on a Fedora 45 base.** The Azoth `7.2.9-100.fc43` RPM is installed on a Fedora 45 userspace until task 9 lands *(estimated: compatible, same series; the task 7 ISO test confirms)*.
+- **shim 16.1 and the ESP.** bootc does not roll back the ESP. A Fedora 45 shim and GRUB may stay in place while a Fedora 43 deployment boots, or the ESP may keep shim 15.8 if nothing runs `bootupctl update` (Q1). SBAT revocations and NX requirements in shim 16 are unverified for the Azoth kernel. Spike item 6 (S1-a to S1-e) settles this.
+- **The SELinux policy store across rollback.** 45.20 to 43.10, with local customisations (spike item 1). The power-profiles domain becomes enforcing.
+- **Container storage.** podman 6 against 5 across a rollback (the `podman` stage of spike item 4).
+- **Anaconda 45 with `ostreecontainer`.** The workarounds may have changed or become unnecessary (task 7's ISO test).
 - **Expiring base digests.** Tags carry `quay.expires-after=4w`, so a pinned digest that no tag keeps may be collected. The digest bump bot keeps it current *(estimated)*.
-- **CI acceptance comes late.** It begins only after task 7 merges, because `trusted-run.sh` refuses branch builds. A red `iso-v0` window is expected; it moves no user-facing tag.
-- **Host capacity.** One VM at a time on the desktop; the laptop is unproven for VMs.
-- **Shell rendering and input.** GTK 4.24 and libadwaita 1.10 in the image, while the rig stays on Fedora 43 until task 11 (S1-10).
+- **CI acceptance comes late.** It begins only after task 7 merges, because `trusted-run.sh` refuses branch builds. The branch criteria of task 7 are the protection. A failure that only the `iso-v0` run finds is reverted before any release is approved.
+- **Host capacity.** The desktop carries S1, the runner guest and the kernel jobs, one VM at a time. The laptop's 7 GB leave a 4 GiB guest for the ISO test *(estimated)*.
+- **Shell rendering and input.** GTK 4.24 and libadwaita 1.10 in the image, while the rig stays on Fedora 43 until task 11 (task 7's console check).
 
 ## Fedora 44 fallback
 
@@ -306,16 +367,22 @@ If M5 finds Fedora 45 not green, the tasks run unchanged with 44 in place of 45:
 - `KICKSTART_SYNTAX = "F44"`;
 - negativo17 `fedora-44`.
 
-Fedora 44 also ships `libdisplay-info` 0.3.0, so the `flake.nix` change stays. OpenSSL remains 3.5.9, so M3 does not arise; polkit is 127-2.fc44.2, so M2 does. Its end of life is around 2027-05 *(estimated)*, so a second rebase to Fedora 45 or 46 follows in the first half of 2027. Tasks 1 to 6 are release-neutral and are not lost.
+Fedora 44 also ships `libdisplay-info` 0.3.0, so the `flake.nix` change stays. It ships OpenSSL 3.5.9 only, so the OpenSSL 4 part of task 7 is left out (M3 applies to Fedora 45). Polkit is 127-2.fc44.2, so the rebased fork takes the release `5.fc44.athanor1`. Its end of life is 2027-06-02 (ADR-0078), so a second rebase follows in the first half of 2027. Tasks 1 to 6 are release-neutral and are not lost.
+
+When the fallback starts:
+
+- **Before task 7 merges**, the expected case under M5: the cut-over branch is retargeted to 44, and the branch criteria run again. `iso-v0` never leaves Fedora 43 until they pass.
+- **After task 7 merges, before release 0.10 is approved**: revert the squashed commit, so `iso-v0` returns to Fedora 43, then proceed as above.
+- **After release 0.10 has reached machines**: there is no move back to Fedora 43 and no move to Fedora 44. Machines order images by `created` (`system/build-image.sh:135-137`), so a newer Fedora 43 or 44 build would be offered as an update: a base downgrade that nothing has tested. Fixes go forward on Fedora 45. Any other course needs its own S1 run and a recorded decision.
 
 ## Open questions
 
-- **Q1.** Does Athanor update the ESP (shim and GRUB) through `bootupctl`, and when? If never, Fedora 45 systems keep shim 15.8.
+- **Q1.** Does Athanor update the ESP (shim and GRUB) through `bootupctl`, and when? If never, Fedora 45 systems keep shim 15.8. Spike item 6, S1-d, records it.
 - **Q2.** Is any secret sealed to PCR7, for example TPM-bound LUKS? A shim change would then require re-sealing.
-- **Q3.** Is `openssl3-libs` in `base-atomic:45` by default, or pulled in only by our RPMs' requirements?
+- **Q3.** Does the pinned `nixpkgs` (rev `34ab9907`) carry OpenSSL 4, or does M3 need a `nixpkgs` bump in its own pull request first?
 - **Q4.** How exactly does BIB select a definitions file (task 3)?
 - **Q5.** Do negativo17 `fedora-45` and RPM Fusion `updates/45` carry the same NVIDIA driver versions as the Fedora 43 locks, for the open, legacy and container-toolkit variants?
-- **Q6.** Does a branch `workflow_dispatch` of the orchestrator reach the system image without any job that needs a signing environment? If not, task 7's branch proof uses `build_rolling_local.sh` and `system/build-image.sh` on the laptop.
+- **Q6.** Does a branch `workflow_dispatch` of the orchestrator reach the system image without any job that needs a signing environment? If not, the branch image comes from `scripts/devvm/local-image.sh` on the laptop, as the spike's section 3 builds it.
 - **Q7.** Does the `fedora:43` kernel builder carry `RPM-GPG-KEY-fedora-45-primary`?
-- **Q8.** Does `athanor-update` order updates by the version label (`43.` against `45.`) or by creation time? A Fedora 44 fallback after any Fedora 45 build would otherwise look like a downgrade.
-- **Q9.** How much RAM does the laptop have? `run_iso_test.sh` defaults to 6 GiB and the dev VM to 8 GiB.
+- **Q8.** *Answered:* images are ordered by `created`, never by the version string (`system/build-image.sh:135-137`). The `43.`/`45.` label is cosmetic; see the Fedora 44 fallback for what this means after a release.
+- **Q9.** Does a 4 GiB guest complete the ISO install on the 7 GB laptop? `run_iso_test.sh` defaults to 6 GiB.
