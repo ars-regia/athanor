@@ -245,7 +245,7 @@ capture_chooser() {
 
 # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
 # athanor-compositor, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
-# the toolkit draws at 2 and the compositor scales it down.
+# the toolkit draws at 1.5 itself, through wp_fractional_scale_v1 and wp_viewporter.
 capture_toolkit_chooser() {
     require athanor-compositor build-compositor
     require athanor-toolkit-chooser build-toolkit
