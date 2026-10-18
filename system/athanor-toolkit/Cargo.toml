@@ -10,13 +10,18 @@ accesskit = "0.25"
 accesskit_unix = "0.24"
 parley = "0.12"
 vello_cpu = "0.3"
-# ATHANOR_TOOLKIT_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
-# wgpu reaches through libwayland-client's pointers (wayland-backend's system backend).
-vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"] }
-wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
-wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"] }
+vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"], optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"], optional = true }
+wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], optional = true }
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
 wayland-client = { workspace = true }
+
+[features]
+# ATHANOR_TOOLKIT_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
+# wgpu reaches through libwayland-client's pointers (wayland-backend's system backend). Off by
+# default: vello_cpu drew the chooser faster and in less memory on every machine T1 measured,
+# and the path adds 4.3 MiB to the binary (docs/spikes/t1-own-toolkit.md).
+gpu = ["dep:vello_gpu", "dep:wgpu", "dep:wayland-backend"]
 
 [dev-dependencies]
 # The chooser example reads the GTK chooser's catalogue, as the GTK chooser does.
