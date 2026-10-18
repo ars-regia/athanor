@@ -37,7 +37,7 @@ word for word; nothing is added or dropped.
    Reverses #570."
 4. **Motion.** "Springs without bounce for moves and resizes, a firmer entry curve. With reduced
    motion: fades of about 100 ms, like macOS."
-5. **Bar.** "A 32 px full-width strip, with the status icons in a pill at a pitch of 28 and the
+5. **Bar.** "A 32 px full-width strip, with the status icons in one pill at a pitch of 28 and the
    clock of regular weight. The islands remain an option."
 6. **Dock.** Asked the size of the dock's icons, the maintainer answered
    "48, 40 on small screens + intellihide".
@@ -49,9 +49,9 @@ word for word; nothing is added or dropped.
 On the same day the maintainer confirmed three points of the draft as decisions:
 
 9. **The dock's default and knob.** The dock's default stays visible, and its `auto-hide` knob
-   means intellihide: the dock hides only while a window overlaps it, never on a timer.
-10. **Forced opacity.** High contrast and tier M0 force reduced transparency on without rewriting
-    the stored key, and Settings shows the switch on and insensitive.
+   means intellihide: the dock hides only while a window overlaps it.
+10. **Forced opacity.** High contrast and the opaque tier force reduced transparency on without
+    rewriting the stored key, and Settings shows the switch on and insensitive.
 11. **The running-application dot** is in the accent, an explicit exception to decision 3.
 
 The alternatives weighed were opaque surfaces everywhere, transparency tied only to high contrast
@@ -78,6 +78,12 @@ marks each "(proposed, revision 3)".
   compositor draws M2's blur. Software rendering means M0. With `reduce-transparency` on, every
   overlay surface is drawn as in M0. Where and when the tier's frame time is measured, and its
   thresholds, stay open (spike VL-S5).
+- **Form and failure.** The toolkit bar is a strip attached to its edge, with the attached-corner
+  rule; the dock floats. High contrast is always M0. A change of `reduce-transparency`, of high
+  contrast or of the wallpaper applies within one second, without a restart. Until the
+  measurement of spike VL-S5 exists, the overlay surfaces are drawn in M0, and under cosmic-comp
+  M2 is never chosen. A frame-time measurement that fails or does not finish gives M0, and a
+  wallpaper that cannot be read or blurred leaves M1's surfaces drawn as in M0.
 - **Accent.** Purple stands for the accent the user chose. The running-application dot sits under
   its icon in `acc_fg`. An "on" tile is a `chip` tile with an `acc` icon disc and an `acc_ink` glyph; a
   selected row is `chip`; the ring is `acc_fg`; a slider's highlight and a field's caret are
@@ -90,7 +96,8 @@ marks each "(proposed, revision 3)".
 - **Bar.** Drawn elements are 28 px and the input zone of each stays the bar's 32 px; the clock is
   `body` at weight 400 with tabular figures; the status pill opens the control center; the bar
   grows taller as the text grows; islands keep revision 2's 36 px height.
-- **Dock.** A small screen is an output up to 800 px tall in logical pixels. Intellihide needs
+- **Dock.** A small screen is an output up to 800 px tall in logical pixels. Intellihide never
+  hides the dock on a timer, and it needs
   Athanor's own compositor; until then the dock does not hide. The running-application dot is 4 px,
   there are 12 px between icons, and the island holds the icon plus 6 + 6 px.
 - **Application library.** It follows Launchpad, with 7 columns by 5 rows on a page; opaque in M0; each cell holds a 96 px icon over a one-line label.
