@@ -85,7 +85,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
   | `accent-computed` | `org.athanor.desktop.appearance`   | string `#rrggbb`             | `""`      | the corrected colour of the wallpaper mode, written by the apply function |
   | `reduce-transparency` | `org.athanor.desktop.appearance` | boolean | `false` | the overlay surfaces drawn opaque (VL13; revision 3) |
 
-  `reduce-transparency` is a setting of its own (maintainer decision of 2026-10-19, ADR-0124): GNOME has no key for it, and macOS keeps it apart from contrast and motion. High contrast and tier M0 force its effect on (VL13).
+  `reduce-transparency` is a setting of its own (maintainer decision of 2026-10-19, ADR-0124): GNOME has no key for it, and macOS keeps it apart from contrast and motion. High contrast and tier M0 force its effect on without rewriting the stored choice (VL13; maintainer decision of 2026-10-19).
 
   GSettings notifies every change, and GTK already reads it. The factory `accent-color` is a vendor default shipped by `athanor-system-config`, as `icon-theme` is below.
 
@@ -144,9 +144,9 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
 - **Spacing and radii are in `px`,** as in libadwaita: they do not scale with text.
 - **Revision 3, in the toolkit shell** (maintainer decision of 2026-10-19, ADR-0124, and the recommended values of #616):
   - **Corners are continuous:** a superellipse of the token's radius, with a circular corner of the same radius as the fallback where the renderer cannot draw one. The radii keep the scale and the concentric rule above, with these values: the dock 22 px (icon highlights of 16 px at a 6 px inset); control center tiles, a full pill for a 1×1 tile and 18 px for a 2×1 tile; the panels of the control center, the notification center and the launcher 30 px (tiles of 18 px at a 12 px inset).
-  - **The bar** is a full-width strip by default, 32 px tall at the default text scale and taller as the text grows; islands stay an option, with the radii above. Its drawn elements are 28 px and the input zone of each stays the bar's full 32 px, above the 24 × 24 px minimum of WCAG 2.2 success criterion 2.5.8. The status icons, 16 px, sit at a 28 px pitch in one pill that opens the control center.
-  - **The dock** shows icons of 48 px, and of 40 px on an output up to 800 px tall in logical pixels, where a 60 px island and its shadow would take a tenth of the height. The island holds the icon plus 6 + 6 px, with 12 px between icons. Every running application has a 4 px dot under its icon, in `acc_fg` (VL10).
-  - **The dock's intellihide.** The dock hides only while a window overlaps it, never on a timer. It needs window geometry that only Athanor's own compositor gives the shell (`doc_own_stack.md` OS3); until then the toolkit dock does not hide.
+  - **The bar** (maintainer decision of 2026-10-19) is a full-width strip by default, 32 px tall; islands stay an option, with the radii above. Its drawn elements are 28 px and the input zone of each stays the bar's full 32 px, above the 24 × 24 px minimum of WCAG 2.2 success criterion 2.5.8. The status icons sit at a 28 px pitch in one pill. Recommended values (#616), not decisions: the bar grows taller as the text grows; the status icons are 16 px; the pill opens the control center.
+  - **The dock** (maintainer decision of 2026-10-19) shows icons of 48 px, and of 40 px on an output up to 800 px tall in logical pixels. Every running application has a dot under its icon in `acc_fg`: the maintainer's explicit exception, confirmed on 2026-10-19, to the accent's measure of VL10. Recommended values (#616), not decisions: the dot is 4 px; the island holds the icon plus 6 + 6 px, so 60 px, whose island and shadow would take a tenth of a short output's height; 12 px between icons.
+  - **The dock's intellihide** (maintainer decisions of 2026-10-19). The dock's default stays visible, and its `auto-hide` knob means intellihide: the dock hides only while a window overlaps it, never on a timer. It needs window geometry that only Athanor's own compositor gives the shell (`doc_own_stack.md` OS3); until then the toolkit dock does not hide.
   - **The control center** is built of modules: 1×1 tiles of 64 px, 2×1 tiles, and full-width sliders under a `heading` title, with 12 px between modules. A tile's icon sits in a 36 px disc with a 20 px glyph.
   - **The application library** is a Launchpad-style grid: pages of 7 columns by 5 rows with page dots, full screen over the blurred wallpaper (VL13, tiers M1 and M2) or opaque (tier M0), with the groups of `doc_launcher.md` LA7 shown as folders. Each cell holds a 96 px icon over a one-line label.
   - **Icon sizes** come from `[size.icon]` (VL10): the bar 16 px (the grid of the Adwaita symbolic icons), the dock 48 px (40 px on short outputs), a launcher row 32 px, the library 96 px, a notification 40 px, a control center disc 36 px with a 20 px glyph.
@@ -187,7 +187,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
   - **New `[size.icon]`:** `bar = 16`, `dock = 48`, `dock_compact = 40` (outputs up to 800 px tall), `launcher_row = 32`, `library = 96`, `notification = 40`, `cc_disc = 36`, `cc_glyph = 20`.
   - **New `[material]`:** `alpha_light = 0.90`, `alpha_dark = 0.88`, `blur = 20` (px, a dual Kawase blur at half resolution), `saturate = 1.2`, `highlight = 0.10` (VL9). VL11 bounds the alphas from below and the saturation from above.
   - **`[motion]` adds:** `enter_curve = [0.2, 0, 0, 1]`, `exit_ratio = 0.667`, `spring_damping = 1.0`, `spring_stiffness = 800` and `reduced_fade = 100` (ms). `curve` stays libadwaita's.
-- **The accent's measure** (revision 3, toolkit shell; maintainer decision of 2026-10-19, ADR-0124). An "on" tile is a `chip` tile with an `acc` icon disc and an `acc_ink` glyph; a selected row is `chip`; the `acc_fg` ring appears only on keyboard focus. This reverses, for the toolkit, the maintainer's decision of 2026-10-17 in #570, which filled the active tile of the control center with the accent and Calmo's ink and the launcher's selected row with the accent; the GTK shell keeps the rules of #570 until it is removed. `acc_fg` keeps the lines, indicators and thin fills listed above.
+- **The accent's measure** (revision 3, toolkit shell; maintainer decision of 2026-10-19, ADR-0124). An "on" tile is a `chip` tile with an `acc` icon disc and an `acc_ink` glyph; a selected row is `chip`; the `acc_fg` ring appears only on keyboard focus. This reverses, for the toolkit, the maintainer's decision of 2026-10-17 in #570, which filled the active tile of the control center with the accent and Calmo's ink and the launcher's selected row with the accent; the GTK shell keeps the rules of #570 until it is removed. In the toolkit the accent appears only on an "on" tile's icon disc and on the keyboard focus ring; a focused field's border is that ring and keeps `acc_fg` as the ring. The one exception is the dock's running-application dot, in `acc_fg` by the maintainer's explicit confirmation of 2026-10-19 (VL7). A slider's highlight and a field's caret are neutral, in the variant's inks, and their pairs are declared and checked at 3:1 (VL11). The list of `acc_fg` uses above stays the GTK shell's.
 
 **VL11. Verification.**
 
@@ -224,10 +224,10 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
 4. **The wallpaper accent and the hearth set:** `material-colors`, the OKLCH correction, the eighteen hearth images.
 5. **The bench's checks:** pixel contrast, edge offsets, frame-timed durations, the comparison board. The first signature of the maintainer closes the document's gate.
 
-Revision 3 adds three steps for the toolkit. Steps 1 and 3 no longer reach the GTK shell (VL1): their values reach only the toolkit's theme, under step 6, and #574 moves with them.
+Revision 3 adds three steps for the toolkit. For the GTK shell, revision 2 stays the approved text and the GTK shell keeps what its steps have already given it (VL1); the values of VL10 that it does not already have, the remainder of step 1 (#574), go only to the toolkit's theme, under step 6.
 
 6. **The toolkit's theme:** the theme of `athanor-toolkit` generated from the tokens, with the values of VL10 and its revision 3 tables, `ink3` retuned, the composited contrast check and the extended motion test.
-7. **Materials:** the frame-time measurement and the tier choice in Athanor's compositor, M1's wallpaper snapshot, M2's live blur, and `reduce-transparency` in the schema of VL4 (spike VL-S5 opens this step).
+7. **Materials:** the frame-time measurement and the tier choice (where and when the frame time is measured is spike VL-S5), M1's wallpaper snapshot, M2's live blur, and `reduce-transparency` in the schema of VL4 (spike VL-S5 opens this step).
 8. **The surfaces,** one at a time, starting with the dock (#616). Each is judged on the board beside the reference that beats it in #616, not only beside the GTK surface it replaces (`doc_shell_standard.md` ST8).
 
 **VL13. Materials in tiers** (revision 3; maintainer decision of 2026-10-19, ADR-0124).
@@ -237,8 +237,8 @@ Revision 3 adds three steps for the toolkit. Steps 1 and 3 no longer reach the G
   - **M0, opaque:** the surface as revision 2 draws it, with the `line` border.
   - **M1, translucent over a wallpaper snapshot** blurred once per wallpaper change with `material.blur` and `material.saturate`, under the surface at `material.alpha_light` or `material.alpha_dark`. It costs one blur per change of wallpaper; above a window it shows the wallpaper, not the window.
   - **M2, live blur in the compositor:** what lies under the surface, windows included, blurred with the same tokens whenever it changes. It costs a blur per damaged frame under the surface and one more buffer per output, about 8 MB at 1920 × 1080 in RGBA.
-- **The tier is chosen at run time,** from a frame time measured at the compositor's start, never from the GPU's vendor or name. Software rendering means M0, without a measurement. The measurement and its thresholds are spike VL-S5.
-- **Reduce transparency.** With `reduce-transparency` on (VL4), every overlay surface is drawn as in M0. High contrast and tier M0 force it on: Settings shows the switch on and insensitive while either holds, and the stored choice is not rewritten, so it returns when neither holds.
+- **The tier is chosen at run time,** from a measured frame time, never from the GPU's vendor or name. Software rendering means M0, without a measurement. Where and when the frame time is measured, and its thresholds, are open under spike VL-S5.
+- **Reduce transparency.** With `reduce-transparency` on (VL4), every overlay surface is drawn as in M0. High contrast and tier M0 force it on: Settings shows the switch on and insensitive while either holds, and the stored choice is not rewritten, so it returns when neither holds (maintainer decision of 2026-10-19).
 - **High contrast** is always M0, with the `line` border, and keeps the full accent where a component needs 3:1 against its background.
 - **Contrast holds in every tier.** The alphas and the inks are bounded by the composited check of VL11; the pixel measurement of the bench stays.
 - **Changes apply live:** a change of `reduce-transparency`, of high contrast or of the wallpaper applies within one second, without a restart, as `doc_accessibility.md` AX9 requires of high contrast.
@@ -252,7 +252,7 @@ Revision 3 adds three steps for the toolkit. Steps 1 and 3 no longer reach the G
 - **A failed write to `CosmicTheme`** is logged and leaves the shell, which reads the GNOME keys, unaffected; only cosmic-comp's borders and indicators lag (VL4, spike VL-S1).
 - **Without our portal backend**, xdg-desktop-portal-gtk reads `color-scheme` and `high-contrast` from the same keys and serves no accent (section 1).
 - **A frame-time measurement that fails or does not finish** gives tier M0 (VL13).
-- **Under a compositor that neither measures nor blurs,** cosmic-comp today, the toolkit's overlay surfaces are drawn in M0 (VL13, spike VL-S5).
+- **Until the measurement of spike VL-S5 exists,** the toolkit's overlay surfaces are drawn in M0; under cosmic-comp, which does not blur for them, M2 is never chosen (VL13).
 - **A wallpaper that cannot be read or blurred** leaves M1's surfaces drawn as in M0 until the next change of wallpaper (VL13).
 - **Without window geometry from the compositor** the toolkit dock does not hide (VL7).
 
@@ -278,7 +278,7 @@ Revision 3 adds three steps for the toolkit. Steps 1 and 3 no longer reach the G
   - **`doc_control_center.md` CC4 and CC6:** the panel is built of the modules of VL7; CC6's one- and two-cell tiles fit them.
   - **`doc_notification_center.md`:** a notification carries its application's colour icon at 40 px, a `heading` title and a `body` text (VL6, VL8).
   - **`doc_settings.md`:** a "Reduce transparency" switch writes `reduce-transparency` through the apply function of VL4, shown on and insensitive under high contrast and tier M0 (VL13).
-  - **`doc_own_stack.md`:** Athanor's compositor measures the frame time at its start and chooses the tier, draws M2's live blur, and gives the shell the window geometry of the dock's intellihide.
+  - **`doc_own_stack.md`:** Athanor's compositor takes the part of the tier measurement that spike VL-S5 gives it, draws M2's live blur, and gives the shell the window geometry of the dock's intellihide.
 
 ## 4. Open doubts
 
@@ -309,12 +309,16 @@ Revision 3 adds three steps for the toolkit. Steps 1 and 3 no longer reach the G
   - Changing the accent, the variant or the contrast in one place changes the shell, a libadwaita application and a Flatpak application together, without restarting any of them (the Flatpak once `doc_portal.md` delivers the backend).
   - With the factory settings the shell is purple and light, and a libadwaita application shows purple.
   - With `text-scaling-factor` at 1.25 the shell's text grows like the applications'.
-  - With `enable-animations` off no GTK surface animates, and the toolkit's surfaces only fade (revision 3).
-  - With `reduce-transparency` or high contrast on, every overlay surface of the toolkit is opaque within one second, and the switch cannot be turned off while high contrast is on (revision 3).
-  - On Athanor's compositor, the toolkit dock hides only while a window overlaps it (revision 3).
+  - With `enable-animations` off no surface animates.
   - The bar and the dock float 6 px from the edges with the radii of VL7.
   - The shield is present at the end of the bar in every state, a verified system included (VL8 as amended on 2026-10-06; BR6).
-  - The comparison board of VL11 is signed, and each toolkit surface is signed beside the reference that beats it in #616 (revision 3).
+  - The comparison board of VL11 is signed.
+- **On the reference laptop, for the toolkit's surfaces only (revision 3), judged by the maintainer.** These replace the criteria above where they differ; the GTK shell is judged against the criteria above, as revision 2 wrote them.
+  - With `enable-animations` off the toolkit's surfaces only fade: no frame changes a position or a size.
+  - With `reduce-transparency` or high contrast on, every overlay surface of the toolkit is opaque within one second, and the switch cannot be turned off while high contrast is on.
+  - The bar is a strip attached to its edge, 32 px tall by default; the dock floats 6 px from its edge with the radii of VL7, and stays visible by default.
+  - On Athanor's compositor, with the `auto-hide` knob, the dock hides only while a window overlaps it.
+  - Each toolkit surface is signed on the board beside the reference that beats it in #616.
 
 ## 6. Decisions taken
 
@@ -330,13 +334,13 @@ Decisions 1 to 6 were taken by the maintainer on 2026-10-05 (the status line of 
 8. **The foreground accent and the red fill** (VL10 as amended; 2026-10-17, #571). Choice: lines, rings, indicators and thin fills take a per-variant foreground accent that reaches 3:1 on every shell surface, filled controls keep the preset, and a preset on which no ink reaches 4.5:1 is darkened until white does, which today moves only red. Reason: the dark surfaces cannot be retuned far enough for the factory purple to reach 3:1, and on libadwaita's red neither white (4.36:1) nor Calmo's near-black (4.28:1) reaches 4.5:1. Alternatives set aside: black text on red (4.82:1), which keeps the preset exactly but draws a harsher control unlike libadwaita's; and accepting 4.36:1 as a permanent exception of the contrast check.
 9. **Revision 3** (2026-10-19, ADR-0124, #616). Choices, each on the analysis of the references that win the 0.9 board:
    1. **Materials in tiers** (VL13): M0, M1 and M2 for the overlay surfaces, chosen at run time from a measured frame time and never from the GPU's vendor or name; software rendering means M0; the bar stays opaque. Alternative set aside: opaque surfaces everywhere, which keeps contrast simplest and loses every overlay to its reference.
-   2. **Reduce transparency** (VL4, VL13): a key of its own, `reduce-transparency`, forced on by high contrast and tier M0. Alternative set aside: transparency tied only to high contrast and to the hardware, which leaves a user who wants opaque surfaces without high contrast no choice.
+   2. **Reduce transparency** (VL4, VL13): a key of its own, `reduce-transparency`, forced on by high contrast and tier M0 without rewriting the stored choice, with the switch shown on and insensitive (confirmed on 2026-10-19). Alternative set aside: transparency tied only to high contrast and to the hardware, which leaves a user who wants opaque surfaces without high contrast no choice.
    3. **The accent's measure** (VL10): an "on" tile is `chip` with an `acc` disc and an `acc_ink` glyph, a selected row is `chip`, the `acc_fg` ring only on keyboard focus. It reverses the decision of 2026-10-17 in #570 for the toolkit.
    4. **Motion** (VL9): critically damped springs for moves and resizes, the shell's entry curve (0.2, 0, 0, 1) with exits in two thirds of the entry time, and only opacity fades of about 100 ms under reduced motion. Alternative set aside: every duration at zero under reduced motion, as in revision 2, which macOS does not do and which WCAG 2.3.3 does not ask of opacity.
    5. **The bar** (VL7): a full-width 32 px strip by default, islands as an option, 28 px drawn elements with a 32 px input zone, status icons at a 28 px pitch in one pill, the clock `body` 400 with tabular figures.
-   6. **The dock** (VL7): 48 px icons, 40 px on outputs up to 800 px tall; intellihide, which needs Athanor's compositor; a 4 px dot for every running application; 12 px between icons; an island of the icon plus 6 + 6 px. Alternative set aside: auto-hide by default on short outputs.
+   6. **The dock** (VL7): 48 px icons, 40 px on outputs up to 800 px tall; visible by default, with the `auto-hide` knob meaning intellihide, which hides the dock only while a window overlaps it, never on a timer, and needs Athanor's compositor (confirmed on 2026-10-19); a running-application dot in `acc_fg`, the maintainer's explicit exception to item 3 (confirmed on 2026-10-19). Alternative set aside: auto-hide by default on short outputs.
    7. **Scope** (VL1): revision 3 binds only `athanor-toolkit` and its generated theme, and revision 2's unapplied tokens (#574) go to the toolkit only. Alternative set aside: applying revision 2's tokens to the GTK shell first, which redraws surfaces that are being replaced.
    8. **The application library** (VL7): a Launchpad-style grid of 7 × 5 pages with page dots, full screen over the blurred wallpaper or opaque in M0, the groups of LA7 as folders. Alternative set aside: categories in a scrolling view, as macOS 26 does.
 
-   The rest of revision 3 adopts the recommended values of the analysis in #616: continuous corners and the radii, `[size.icon]`, the control center's modules, the use of the type scale, application icons in colour, the inner highlight, the composited contrast check and the `[material]` tokens.
+   The rest of revision 3 adopts the recommended values of the analysis in #616: continuous corners and the radii, `[size.icon]`, the control center's modules, the use of the type scale, application icons in colour, the inner highlight, the composited contrast check and the `[material]` tokens; and, item by item, the dock's 4 px dot, its 12 px between icons and its island of the icon plus 6 + 6 px, the status pill opening the control center, and the bar growing taller as the text grows. Where and when the tier's frame time is measured stays open (VL-S5).
 
