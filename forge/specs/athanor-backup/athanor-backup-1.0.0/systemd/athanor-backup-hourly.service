@@ -5,8 +5,9 @@ RequiresMountsFor=/var/home
 
 [Service]
 Type=oneshot
-# The snapshot subvolume is created here, with full privileges and outside the mount
-# namespace below ("+"): the home root is read-only to every other command of this unit.
+# The snapshot subvolume is created here, with full privileges ("+"): the home root is
+# read-only to every other command of this unit. "+" lifts the sandbox settings below but
+# not the check that each ReadWritePaths= path exists.
 ExecStartPre=+/usr/bin/athanor-backup init
 ExecStart=/usr/bin/athanor-backup create
 ExecStart=/usr/bin/athanor-backup prune
@@ -16,10 +17,12 @@ MemoryHigh=48M
 MemoryMax=64M
 
 # Snapshotting needs CAP_FOWNER on the source subvolume, deleting one CAP_SYS_ADMIN.
-# The live homes stay read-only: only the snapshot subvolume is writable.
+# The live homes stay read-only: only the snapshot subvolume is writable. "-" lets the
+# namespace skip it while it does not exist: the first ExecStartPre= above creates it, and
+# systemd builds the namespace for that command too.
 CapabilityBoundingSet=CAP_FOWNER CAP_SYS_ADMIN
 ProtectSystem=strict
-ReadWritePaths=/var/home/.snapshots
+ReadWritePaths=-/var/home/.snapshots
 PrivateTmp=true
 PrivateNetwork=true
 NoNewPrivileges=yes

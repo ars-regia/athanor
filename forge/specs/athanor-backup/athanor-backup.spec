@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/%{name}/%{name}-%{version}
 Name:           athanor-backup
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        Hourly btrfs snapshots of /var/home with retention and restore
 
 License:        GPL-3.0-or-later
@@ -38,6 +38,10 @@ install -D -m 0644 %{crate_dir}/systemd/athanor-backup-hourly.service %{buildroo
 /usr/lib/systemd/system/athanor-backup-hourly.service
 
 %changelog
+* Sun Oct 18 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- The hourly unit marks the snapshot subvolume optional in ReadWritePaths=: systemd sets
+  up the mount namespace before `athanor-backup init` can create the subvolume, so on a
+  /var/home without one every run failed with 226/NAMESPACE and no snapshot was taken.
 * Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - Create the snapshot subvolume from the hourly unit (`athanor-backup init`) instead
   of tmpfiles.d: a `v` line yields a plain directory when / is not a btrfs subvolume,
