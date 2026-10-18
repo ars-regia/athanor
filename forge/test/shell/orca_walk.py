@@ -1,11 +1,14 @@
 #!/usr/bin/python3
-"""orca_walk.py <transcript> <tabs>
+"""orca_walk.py <transcript> <key>...
 
 doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface. Run as
 RIG_HOLD beside the surface. Starts Orca with a debug file, waits until it has presented the
-focused window, presses Tab <tabs> times through wtype's virtual keyboard, quits Orca through
-its D-Bus service (Orca writes its debug file out when it exits), and writes every utterance,
-one per line, to <transcript>. The debug file stays beside it as <transcript>.log.
+focused window, presses each <key> through wtype's virtual keyboard, quits Orca through its
+D-Bus service (Orca writes its debug file out when it exits), and writes every utterance, one
+per line, to <transcript>. The debug file stays beside it as <transcript>.log.
+
+A key is an XKB key name, with modifiers before it joined by "+" ("shift+F10"), and "*N"
+after it presses it N times ("Tab*11").
 """
 
 import re
@@ -43,7 +46,18 @@ def run(command):
     )
 
 
-def walk(orca, tabs):
+def presses(keys):
+    """wtype's arguments for each press of `keys`, in order."""
+    for key in keys:
+        key, _, times = key.partition("*")
+        *modifiers, name = key.split("+")
+        press = [arg for modifier in modifiers for arg in ("-M", modifier)] + ["-k", name]
+        press += [arg for modifier in reversed(modifiers) for arg in ("-m", modifier)]
+        for _ in range(int(times or 1)):
+            yield key, press
+
+
+def walk(orca, keys):
     """Waits for Orca, walks the surface and quits Orca; returns why it failed, or None."""
     deadline = time.monotonic() + STARTUP
     while not owned():
@@ -51,9 +65,9 @@ def walk(orca, tabs):
             return f"Orca did not take {SERVICE}"
         time.sleep(0.5)
     time.sleep(3 * PAUSE)
-    for _ in range(tabs):
-        if error := run(["wtype", "-k", "Tab"]):
-            return f"wtype did not press Tab: {error}"
+    for key, press in presses(keys):
+        if error := run(["wtype", *press]):
+            return f"wtype did not press {key}: {error}"
         time.sleep(PAUSE)
     quit_orca = [
         "busctl",
@@ -74,10 +88,10 @@ def walk(orca, tabs):
 
 
 def main(argv):
-    if len(argv) != 2:
+    if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2
-    transcript, tabs = Path(argv[0]), int(argv[1])
+    transcript, keys = Path(argv[0]), argv[1:]
     log = transcript.with_suffix(transcript.suffix + ".log")
     log.unlink(missing_ok=True)
     with open(transcript.with_suffix(transcript.suffix + ".stderr"), "w") as stderr:
@@ -86,7 +100,7 @@ def main(argv):
         )
         # Orca never outlives the walk, whichever way the walk ends.
         try:
-            error = walk(orca, tabs)
+            error = walk(orca, keys)
         finally:
             if orca.poll() is None:
                 orca.kill()

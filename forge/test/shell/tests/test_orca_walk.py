@@ -37,6 +37,18 @@ def done(returncode, stderr=""):
     return subprocess.CompletedProcess([], returncode, "", stderr)
 
 
+class PressesTest(unittest.TestCase):
+    def test_modifiers_wrap_the_key_and_a_count_repeats_it(self):
+        self.assertEqual(
+            list(walk.presses(["Tab*2", "shift+F10"])),
+            [
+                ("Tab", ["-k", "Tab"]),
+                ("Tab", ["-k", "Tab"]),
+                ("shift+F10", ["-M", "shift", "-k", "F10", "-m", "shift"]),
+            ],
+        )
+
+
 class WalkTest(unittest.TestCase):
     def run_walk(self, orca, run):
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:
@@ -48,7 +60,7 @@ class WalkTest(unittest.TestCase):
             ]:
                 stack.enter_context(mock.patch(f"orca_walk.{target}", value))
             stderr = stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
-            status = walk.main([f"{out}/orca.txt", "2"])
+            status = walk.main([f"{out}/orca.txt", "Tab*2"])
         return status, stderr.getvalue()
 
     def test_a_failed_quit_kills_orca_and_says_why(self):

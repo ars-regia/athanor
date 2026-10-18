@@ -1,0 +1,30 @@
+Lettore schermo attivo.
+Avvio applicazioni button.
+Spazi di lavoro button.
+Impostazioni di COSMIC contratto button.
+opens popup
+contratto
+CC Window: cc-window-1 contratto button.
+In esecuzione.
+opens popup
+contratto
+org.athanor.CcWindow2: cc-window-2 contratto button.
+In esecuzione.
+opens popup
+contratto
+Applicazioni button.
+Avvio applicazioni button.
+Spazi di lavoro button.
+Impostazioni di COSMIC contratto button.
+opens popup
+CC Window: cc-window-1 contratto button.
+In esecuzione.
+opens popup
+cc-window-1 button.
+Nuova finestra button.
+Aggiungi al dock button.
+CC Window: cc-window-1 contratto button.
+In esecuzione.
+opens popup
+contratto
+Lettore schermo disattivato.

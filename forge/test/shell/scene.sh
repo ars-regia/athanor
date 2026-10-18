@@ -147,7 +147,10 @@ if ! kill -0 "$client" 2> /dev/null; then
     exit 1
 fi
 if [ -n "${RIG_HOLD:-}" ]; then
+    # Split into words, never expanded as a pattern: a key such as "Tab*9" is not a glob.
+    set -f
     $RIG_HOLD
+    set +f
 fi
 
 # 5. One PNG, from inside the compositor; two outputs side by side, left to right.
