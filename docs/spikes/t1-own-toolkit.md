@@ -11,9 +11,10 @@ Results of milestone T1 of `doc_own_stack.md` (section 5), plan
   every machine measured, the NVIDIA desktop included. `vello_gpu` stays in the crate behind the
   `gpu` cargo feature, off by default.
 - **Accessibility:** the chooser passes the AT-SPI and Orca comparisons in English and Italian.
-  One gap is AccessKit's: a group is exposed as `panel`, where GTK exposes `grouping`, so Orca says
-  "panel". The comparison counts the two roles as equal by the maintainer's decision of
-  2026-10-17, not because Orca speaks them alike (section "AccessKit gaps").
+  One difference is in the role mapping: a group is exposed as `panel`, as W3C Core-AAM 1.2
+  prescribes and AccessKit follows, where GTK exposes `grouping`, so Orca says "panel". The
+  comparison counts the two roles as equal by the maintainer's decision of 2026-10-17, not
+  because Orca speaks them alike (section "AccessKit gaps").
 - **Cost:** 2532 lines of Rust, 510 of them tests. Against GTK, the chooser starts in 22 ms
   against 302 ms and holds 18 MiB against 270 MiB on the NVIDIA desktop. The binary is larger,
   as the toolkit links its Rust dependencies statically where GTK maps 150 shared objects.
@@ -231,7 +232,7 @@ each with a test.
 
 | Gap | Met where | Upstream | Effect |
 | --- | --- | --- | --- |
-| `Role::Group` (and `Role::RadioGroup`) map to AT-SPI `panel`, not `grouping` (`accesskit_atspi_common` 0.21.0, `node.rs`) | Task 5: the chooser's three groups | No issue found on 2026-10-18; to be opened | Orca says "panel" / "pannello" where GTK gives "grouping" / "raggruppamento" |
+| `Role::Group` (and `Role::RadioGroup`) map to AT-SPI `panel`, not `grouping` (`accesskit_atspi_common` 0.21.0, `node.rs`; unchanged on AccessKit's main on 2026-10-18) | Task 5: the chooser's three groups | None to open: W3C Core-AAM 1.2 maps the ARIA roles `group` and `radiogroup` to AT-SPI `ROLE_PANEL`, so AccessKit follows the standard and GTK departs from it | Orca says "panel" / "pannello" where GTK gives "grouping" / "raggruppamento" |
 | No Collection interface: Orca's structural navigation fails | Not exercised by the chooser | AccessKit#603 (pull request #758) | Known from revision 1; meets the first surface with headings or lists to jump between |
 | A combo box's value and expanded state do not reach the reader | Not exercised: the chooser has no combo box | AccessKit#824 | Known from revision 1 |
 
@@ -243,10 +244,10 @@ translated role names, as the Italian run shows, so this was not a loss here.
 1. Section 7: the toolkit's renderer is decided, `vello_cpu`, with `vello_gpu` behind a feature
    and the conditions above for turning it on.
 2. Section 1.3: the Vello paragraph says what T1 measured on NVIDIA's driver and on llvmpipe.
-3. Section 4 (OS7) and section 8: the group role joins the AccessKit gaps carried until upstream
-   takes them. OS8 says whether a role spoken differently ("panel" for "grouping") holds a surface
-   back; T1 counted it as a note, by the maintainer's decision of 2026-10-17 recorded in
-   `atspi_compare.py`, although Orca speaks the two roles differently.
+3. Section 4 (OS7) and section 8: the group role is recorded as a difference from GTK;
+   AccessKit follows W3C Core-AAM 1.2. OS8 says whether a role spoken differently ("panel" for
+   "grouping") holds a surface back; T1 counted it as a note, by the maintainer's decision of
+   2026-10-17 recorded in `atspi_compare.py`, although Orca speaks the two roles differently.
 4. The title bar's Minimize and Close are named in English under Italian in both choosers; the
    toolkit's title bar, which it draws itself (maintainer decision of 2026-10-17), takes its strings from
    `athanor-i18n` before the first surface moves.
