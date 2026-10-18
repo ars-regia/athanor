@@ -2,7 +2,7 @@
 id: ADR-0099
 title: "Desktop specs review (batch 4): accessibility, overview, visual language"
 date: 2026-10-08
-status: accepted
+status: amended by ADR-0124
 issues: []
 areas: [shell, session, security, desktop]
 ---
