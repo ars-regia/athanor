@@ -784,19 +784,14 @@ case $(wc -l < {count}) in
         self.first_run_leaves_1_1_pending(sync="/usr/bin/sleep 0.4\n")
 
     def test_the_bound_is_measured_on_the_time_since_boot(self):
-        # The stand-in for sleep(1) returns at once and moves the time since boot on by 0.1 s:
-        # the bound of 0.3 s is three waits, whatever the wall clock does meanwhile.
+        # The stand-in for sleep(1) returns at once and moves the time since boot on by 0.1 s
+        # (`environment`): the bound of 0.3 s is three waits from the time the script starts at,
+        # whatever the wall clock does meanwhile.
         self.device("1-1", "0c45", "6a10", [], configured=False)
-        uptime = self.work / "uptime"
+        uptime = self.work / "uptime-clock"
         uptime.write_text("12.00 40.00\n")
         waits = self.work / "waits"
-        sleep = f'''echo >> {waits}
-read -r up _ < {uptime}
-c=$((10#${{up/./}} + 10))
-printf '%d.%02d 0.00\\n' $((c / 100)) $((c % 100)) > {uptime}
-'''
-        env = dict(self.environment(None, sleep, 3), ATHANOR_UPTIME=str(uptime))
-        done = subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, timeout=30)
+        done = self.run_script(sleep=f"echo >> {waits}\n", check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
         self.assertEqual(len(waits.read_text().splitlines()), 3)
         self.assertEqual(uptime.read_text(), "12.30 0.00\n")
