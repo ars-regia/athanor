@@ -62,6 +62,7 @@ AREAS = {
     "examples/chooser/tree.rs": "chooser (example)",
     "examples/field.rs": "test clients (examples)",
     "examples/input_method.rs": "test clients (examples)",
+    "examples/layer.rs": "test clients (examples)",
 }
 
 
