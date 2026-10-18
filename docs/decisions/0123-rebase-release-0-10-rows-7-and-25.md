@@ -53,7 +53,7 @@ placed patches 5 and 6 in 1.1.
      life, and takes the name ADR-0105 gave the release that carried the rebase.
    - Option B: **0.95 "base"**. It reads as "between 0.9 and 1.0" to a person who reads versions as
      decimals, and leaves less obvious room for releases after it.
-   - Option C: **0.9.1**. Rejected in this proposal: a change of Fedora base is not a patch
+   - Option C: **0.9.1**. Rejected: a change of Fedora base is not a patch
      release, and BRN4 reserves `release/<version>` maintenance for fixes.
 2. **Row 7 ships in 0.10, with key 2.**
    - Option A, recommended: **in 0.10**. 0.10 is the key-2 release on `:stable` and 1.0 the release
@@ -71,7 +71,7 @@ placed patches 5 and 6 in 1.1.
    decision point of ADR-0078 (mid-November 2026), 0.10 ships without it, and a pull request
    naming this record moves the row to the release that follows. This item holds with option A
    of items 2 and 3.
-5. **Reading of ADR-0121 decision 5, for confirmation.** The own compositor's acceptance holds
+5. **Reading of ADR-0121 decision 5, confirmed.** The own compositor's acceptance holds
    OS4 in full, as `doc_own_stack.md` section 6 step 4 says: release 1.0 has the compositor's
    trusted path for credential prompts and its keyboard monitor that answers Orca alone. Athanor's
    own session lock, polkit agent and SystemPrompter (`doc_lock_and_prompts.md` LP18) and the
@@ -94,9 +94,9 @@ placed patches 5 and 6 in 1.1.
   moves (kernel, package set, compositor) run again on the 0.10 build, as ADR-0115 says of the
   rebase.
 - Documents that say the security-class updates start in 1.0 (`doc_update_trust.md` UT13,
-  `doc_shell.md`, `doc_bar.md`, `docs/compliance/`) keep their words until their next revision;
+  `doc_shell.md`, `doc_bar.md`, `doc_first_run.md`, `docs/compliance/`) keep their words until their next revision;
   ADR-0120, amended by this record, is the reference.
 - The 1.0 milestone of the issue tracker carries the work of 1.0; #124, #125, #126 and #543
   move to a 0.10 milestone.
-- On approval, this record's status becomes `accepted`, in its front matter and in the index, and
-  the status lines of ADR-0105, ADR-0115 and ADR-0120 name it.
+- This record is `accepted` in its front matter and in the index, and the status lines of
+  ADR-0105, ADR-0115 and ADR-0120 name it.
