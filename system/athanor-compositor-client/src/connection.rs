@@ -1,5 +1,6 @@
-//! The connection: GTK's own `wl_display` (doc_shell.md, P4), a private event queue on it,
-//! and the protocol events turned into our own types.
+//! The connection: GTK's own `wl_display` (doc_shell.md, P4), or a plain Wayland connection
+//! for a surface drawn without GTK, a private event queue on it, and the protocol events
+//! turned into our own types.
 //!
 //! The queue is read from the GLib main loop by a source of its own, libwayland's pattern for
 //! a second queue on a shared display. The socket has other readers: GDK's source, the EGL
@@ -19,11 +20,16 @@ use std::os::unix::net::UnixStream;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use athanor_layout::placement::Output;
+#[cfg(feature = "gtk")]
 use gdk4_wayland::prelude::*;
-use gtk4::{gdk, gio, glib};
+#[cfg(feature = "gtk")]
+use gtk4::gdk;
 use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::globals::{registry_queue_init, GlobalList, GlobalListContents};
-use wayland_client::protocol::{wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm};
+#[cfg(feature = "gtk")]
+use wayland_client::protocol::wl_shm;
+use wayland_client::protocol::{wl_keyboard, wl_output, wl_registry, wl_seat};
 use wayland_client::{
     event_created_child, Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum,
 };
@@ -31,7 +37,9 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
+#[cfg(feature = "gtk")]
 use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
+#[cfg(feature = "gtk")]
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
@@ -95,26 +103,38 @@ pub(crate) fn fresh() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
-/// The shell's view of the compositor. Every call happens on the GTK main thread.
+/// The shell's view of the compositor. Every call happens on the thread that runs GLib's
+/// default main context: GTK's main thread, or the thread of a calloop loop that runs it.
 pub struct Client {
     pub(crate) inner: Rc<Inner>,
 }
 
 type Handler = Box<dyn FnMut(&Client, &Event)>;
+type OutputsHandler = Box<dyn Fn(Vec<Output>)>;
+
+/// GDK's display, for a client connected through it, and its `closed` handler.
+#[cfg(feature = "gtk")]
+struct Gdk {
+    display: gdk::Display,
+    closed_handler: glib::SignalHandlerId,
+}
 
 pub(crate) struct Inner {
-    display: gdk::Display,
+    #[cfg(feature = "gtk")]
+    gdk: RefCell<Option<Gdk>>,
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
     handler: RefCell<Option<Handler>>,
     delivering: Cell<bool>,
+    outputs_handler: RefCell<Option<OutputsHandler>>,
+    /// The outputs the outputs handler last received.
+    last_outputs: RefCell<Vec<Output>>,
     /// A failure met while looking at the queue outside `pump`, reported by the next `pump`.
     failure: RefCell<Option<Error>>,
     /// Set for good when the display closes: every later call returns [`Error::Closed`].
     closed: Cell<bool>,
-    closed_handler: Option<glib::SignalHandlerId>,
     source: glib::Source,
 }
 
@@ -122,8 +142,9 @@ impl Drop for Inner {
     fn drop(&mut self) {
         // Idempotent: the source may have removed itself after a failure or a close.
         self.source.destroy();
-        if let Some(handler) = self.closed_handler.take() {
-            self.display.disconnect(handler);
+        #[cfg(feature = "gtk")]
+        if let Some(gdk) = self.gdk.get_mut().take() {
+            gdk.display.disconnect(gdk.closed_handler);
         }
     }
 }
@@ -132,6 +153,7 @@ impl Client {
     /// Binds what the compositor offers and reads the initial state. A global the
     /// compositor does not offer is not an error: its part of the API stays empty, and its
     /// actions return [`Error::Unavailable`].
+    #[cfg(feature = "gtk")]
     pub fn connect(display: &gdk::Display) -> Result<Client, Error> {
         let wayland = display
             .downcast_ref::<gdk4_wayland::WaylandDisplay>()
@@ -141,7 +163,29 @@ impl Client {
             .backend()
             .upgrade()
             .ok_or_else(|| Error::Connection("the display has no live backend".into()))?;
-        let connection = Connection::from_backend(backend);
+        let client = Self::attach(Connection::from_backend(backend))?;
+        let closing = Rc::downgrade(&client.inner);
+        let closed_handler = display.connect_closed(move |_, _| {
+            if let Some(inner) = closing.upgrade() {
+                inner.close();
+            }
+        });
+        client.inner.gdk.replace(Some(Gdk {
+            display: display.clone(),
+            closed_handler,
+        }));
+        Ok(client)
+    }
+
+    /// As [`Client::connect`], on a Wayland connection the caller made, for a surface drawn
+    /// without GTK. The queue is still read from GLib's default main context: a calloop loop
+    /// runs that context through `glib_loop::GlibSource`. Such a connection has no
+    /// `closed` signal; a failure of the socket ends the reading, as with GDK.
+    pub fn connect_wayland(connection: &Connection) -> Result<Client, Error> {
+        Self::attach(connection.clone())
+    }
+
+    fn attach(connection: Connection) -> Result<Client, Error> {
         let (globals, mut queue) = registry_queue_init::<State>(&connection)
             .map_err(|err| Error::Connection(err.to_string()))?;
         let qh = queue.handle();
@@ -161,25 +205,20 @@ impl Client {
             .acquire()
             .map_err(|err| Error::Connection(err.to_string()))?;
         let fd = connection.backend().poll_fd().as_raw_fd();
-        let inner = Rc::new_cyclic(|weak: &std::rc::Weak<Inner>| {
-            let closing = weak.clone();
-            Inner {
-                display: display.clone(),
-                connection,
-                qh,
-                queue: RefCell::new(queue),
-                state: RefCell::new(state),
-                handler: RefCell::new(None),
-                delivering: Cell::new(false),
-                failure: RefCell::new(None),
-                closed: Cell::new(false),
-                closed_handler: Some(display.connect_closed(move |_, _| {
-                    if let Some(inner) = closing.upgrade() {
-                        inner.close();
-                    }
-                })),
-                source: queue_source::attach(weak.clone(), fd, &context),
-            }
+        let inner = Rc::new_cyclic(|weak: &std::rc::Weak<Inner>| Inner {
+            #[cfg(feature = "gtk")]
+            gdk: RefCell::new(None),
+            connection,
+            qh,
+            queue: RefCell::new(queue),
+            state: RefCell::new(state),
+            handler: RefCell::new(None),
+            delivering: Cell::new(false),
+            outputs_handler: RefCell::new(None),
+            last_outputs: RefCell::new(Vec::new()),
+            failure: RefCell::new(None),
+            closed: Cell::new(false),
+            source: queue_source::attach(weak.clone(), fd, &context),
         });
         Ok(Client { inner })
     }
@@ -188,6 +227,22 @@ impl Client {
     /// may call any method of the client, actions included. Connecting again replaces it.
     pub fn connect_events(&self, handler: impl FnMut(&Client, &Event) + 'static) {
         self.inner.handler.replace(Some(Box::new(handler)));
+    }
+
+    /// The outputs as `wl_output` describes them, in the order the compositor announced
+    /// them, in logical pixels: the current mode, turned by the output's transform and
+    /// divided by its integer scale. Under a fractional scale the size is the one of the
+    /// next integer scale; its shape, and whether it is sized, are exact.
+    pub fn outputs(&self) -> Vec<Output> {
+        self.inner.state.borrow().outputs()
+    }
+
+    /// The handler receives every output each time one is added or removed, or changes
+    /// size, rotation, scale or connector, as `outputs::watch` does for GDK's monitors.
+    /// Connecting again replaces it.
+    pub fn connect_outputs(&self, handler: impl Fn(Vec<Output>) + 'static) {
+        self.inner.last_outputs.replace(self.outputs());
+        self.inner.outputs_handler.replace(Some(Box::new(handler)));
     }
 
     pub fn windows(&self) -> Vec<Window> {
@@ -341,17 +396,14 @@ impl Client {
 
     /// An `xdg_activation_v1` token from the surface that received the last input event,
     /// so the window it starts takes the focus. GDK waits for the token on its own queue;
-    /// what it read for ours meanwhile is dispatched here.
+    /// what it read for ours meanwhile is dispatched here. A client on a plain connection
+    /// has none: the token needs the last input event's serial, which the application
+    /// that owns the surfaces holds.
     pub fn activation_token(&self, app: Option<&gio::AppInfo>) -> Option<String> {
         if self.inner.closed.get() {
             return None;
         }
-        let token = self
-            .inner
-            .display
-            .app_launch_context()
-            .startup_notify_id(app, &[])
-            .map(String::from);
+        let token = self.inner.startup_notify_id(app);
         if let Err(err) = self.pump() {
             tracing::warn!("reading from the compositor after the activation token failed: {err}");
         }
@@ -372,7 +424,8 @@ impl Client {
 
     /// The compositor's socket as `WAYLAND_DISPLAY` names it for a client the shell starts:
     /// the path this connection is connected to. A connection inherited through
-    /// `WAYLAND_SOCKET` has no path; GDK's name for the display is then the only one.
+    /// `WAYLAND_SOCKET` has no path; GDK's name for the display is then the only one, and a
+    /// plain connection has none.
     pub(crate) fn display_name(&self) -> Result<String, Error> {
         self.inner.live()?;
         let fd = self
@@ -385,10 +438,11 @@ impl Client {
         let peer = UnixStream::from(fd)
             .peer_addr()
             .map_err(|err| Error::Connection(err.to_string()))?;
-        Ok(peer
-            .as_pathname()
+        peer.as_pathname()
             .and_then(|path| path.to_str())
-            .map_or_else(|| self.inner.display.name().to_string(), str::to_owned))
+            .map(str::to_owned)
+            .or_else(|| self.inner.display_name())
+            .ok_or_else(|| Error::Connection("the connection has no socket path".into()))
     }
 
     fn toplevel_request(
@@ -432,8 +486,37 @@ impl Inner {
         Ok(self.state.borrow())
     }
 
+    #[cfg(feature = "gtk")]
+    fn startup_notify_id(&self, app: Option<&gio::AppInfo>) -> Option<String> {
+        self.gdk.borrow().as_ref().and_then(|gdk| {
+            gdk.display
+                .app_launch_context()
+                .startup_notify_id(app, &[])
+                .map(String::from)
+        })
+    }
+
+    #[cfg(not(feature = "gtk"))]
+    fn startup_notify_id(&self, _: Option<&gio::AppInfo>) -> Option<String> {
+        None
+    }
+
+    #[cfg(feature = "gtk")]
+    fn display_name(&self) -> Option<String> {
+        self.gdk
+            .borrow()
+            .as_ref()
+            .map(|gdk| gdk.display.name().to_string())
+    }
+
+    #[cfg(not(feature = "gtk"))]
+    fn display_name(&self) -> Option<String> {
+        None
+    }
+
     /// GDK closes the display: libwayland's connection goes with it, so the source stops
     /// polling its descriptor and nothing touches the connection again.
+    #[cfg(feature = "gtk")]
     fn close(&self) {
         self.closed.set(true);
         self.source.destroy();
@@ -489,7 +572,26 @@ impl Inner {
         }
         self.flush()?;
         self.deliver();
+        self.deliver_outputs();
         Ok(())
+    }
+
+    /// Hands the outputs to their handler when they differ from what it last received, with
+    /// no borrow held. A nested call finds the handler taken and leaves the change to the
+    /// outer one.
+    fn deliver_outputs(&self) {
+        let Some(handler) = self.outputs_handler.take() else {
+            return;
+        };
+        let outputs = self.state.borrow().outputs();
+        if *self.last_outputs.borrow() != outputs {
+            self.last_outputs.replace(outputs.clone());
+            handler(outputs);
+        }
+        let mut slot = self.outputs_handler.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(handler);
+        }
     }
 
     /// Hands the collected events to the handler with no borrow held, so the handler may
@@ -534,12 +636,11 @@ mod queue_source {
     use std::ptr;
     use std::rc::{Rc, Weak};
 
-    use gtk4::glib;
-    use gtk4::glib::ffi::{
+    use glib::ffi::{
         g_source_add_unix_fd, g_source_new, g_source_query_unix_fd, gboolean, gpointer, GSource,
         GSourceFunc, GSourceFuncs, G_IO_ERR, G_IO_HUP, G_IO_IN, G_SOURCE_CONTINUE, G_SOURCE_REMOVE,
     };
-    use gtk4::glib::translate::{from_glib_full, IntoGlib};
+    use glib::translate::{from_glib_full, IntoGlib};
 
     use super::Inner;
 
@@ -676,8 +777,12 @@ pub(crate) struct Globals {
     keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     a11y: Option<CosmicA11yManagerV1>,
     security_context: Option<WpSecurityContextManagerV1>,
+    /// The window pictures, GDK textures: bound only with the `gtk` feature.
+    #[cfg(feature = "gtk")]
     pub(crate) shm: Option<wl_shm::WlShm>,
+    #[cfg(feature = "gtk")]
     pub(crate) capture_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
+    #[cfg(feature = "gtk")]
     pub(crate) image_copy: Option<ExtImageCopyCaptureManagerV1>,
 }
 
@@ -701,9 +806,10 @@ pub(crate) struct State {
     /// Each group's outputs, in the order they entered, GDK's objects included.
     groups: HashMap<ObjectId, Vec<ObjectId>>,
     group_of: HashMap<WorkspaceId, ObjectId>,
-    /// Output globals by registry name, and their connector names.
+    /// Output globals by registry name, their connector names, and their modes.
     outputs: HashMap<u32, wl_output::WlOutput>,
     output_names: HashMap<ObjectId, String>,
+    output_modes: HashMap<ObjectId, OutputMode>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
     keyboard_layouts: Vec<String>,
@@ -711,6 +817,7 @@ pub(crate) struct State {
     accessibility: Accessibility,
     events: Vec<Event>,
     /// The window pictures in flight, by call.
+    #[cfg(feature = "gtk")]
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
 }
 
@@ -750,8 +857,11 @@ impl State {
             // Version 3 deprecates the screen filter events of version 2.
             a11y: bind(globals, qh, 2..=2),
             security_context: bind(globals, qh, 1..=1),
+            #[cfg(feature = "gtk")]
             shm: bind(globals, qh, 1..=1),
+            #[cfg(feature = "gtk")]
             capture_sources: bind(globals, qh, 1..=1),
+            #[cfg(feature = "gtk")]
             image_copy: bind(globals, qh, 1..=1),
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
@@ -770,6 +880,28 @@ impl State {
     ) {
         let output = registry.bind::<wl_output::WlOutput, _, _>(name, version.min(4), qh, ());
         self.outputs.insert(name, output);
+    }
+
+    fn outputs(&self) -> Vec<Output> {
+        let mut names: Vec<_> = self.outputs.keys().copied().collect();
+        names.sort_unstable();
+        names
+            .iter()
+            .filter_map(|name| self.outputs.get(name))
+            .map(|output| {
+                let (width, height) = self
+                    .output_modes
+                    .get(&output.id())
+                    .copied()
+                    .unwrap_or_default()
+                    .logical();
+                Output {
+                    connector: self.output_names.get(&output.id()).cloned(),
+                    width,
+                    height,
+                }
+            })
+            .collect()
     }
 
     fn toplevel_manager(&self) -> Result<&ZcosmicToplevelManagerV1, Error> {
@@ -853,6 +985,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
             wl_registry::Event::GlobalRemove { name } => {
                 if let Some(output) = state.outputs.remove(&name) {
                     state.output_names.remove(&output.id());
+                    state.output_modes.remove(&output.id());
                     if output.version() >= 3 {
                         output.release();
                     }
@@ -872,9 +1005,48 @@ impl Dispatch<wl_output::WlOutput, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_output::Event::Name { name } = event {
-            state.output_names.insert(output.id(), name);
+        let mode = state.output_modes.entry(output.id()).or_default();
+        match event {
+            wl_output::Event::Name { name } => {
+                state.output_names.insert(output.id(), name);
+            }
+            wl_output::Event::Mode {
+                flags: WEnum::Value(flags),
+                width,
+                height,
+                ..
+            } if flags.contains(wl_output::Mode::Current) => mode.size = (width, height),
+            wl_output::Event::Scale { factor } => mode.scale = factor,
+            wl_output::Event::Geometry {
+                transform: WEnum::Value(transform),
+                ..
+            } => mode.transform = Some(transform),
+            _ => {}
         }
+    }
+}
+
+/// What `wl_output` says of an output's size: its current mode, scale and transform.
+#[derive(Clone, Copy, Debug, Default)]
+struct OutputMode {
+    size: (i32, i32),
+    scale: i32,
+    transform: Option<wl_output::Transform>,
+}
+
+impl OutputMode {
+    /// The logical size: the mode turned by the transform, divided by the scale.
+    fn logical(self) -> (i32, i32) {
+        use wl_output::Transform;
+        let (width, height) = self.size;
+        let (width, height) = match self.transform {
+            Some(Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270) => {
+                (height, width)
+            }
+            _ => (width, height),
+        };
+        let scale = self.scale.max(1);
+        (width / scale, height / scale)
     }
 }
 
@@ -1063,6 +1235,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
             }
             ext_foreign_toplevel_handle_v1::Event::Closed => {
                 // A capture ends before the handle it was made from does.
+                #[cfg(feature = "gtk")]
                 state.captures.retain(|_, capture| {
                     if capture.window != *id {
                         return true;
@@ -1330,5 +1503,21 @@ mod tests {
         assert!(tolerate_would_block(io(ErrorKind::WouldBlock)).is_ok());
         assert!(tolerate_would_block(io(ErrorKind::BrokenPipe)).is_err());
         assert!(tolerate_would_block(io(ErrorKind::ConnectionReset)).is_err());
+    }
+
+    #[test]
+    fn the_logical_size_turns_with_the_transform_and_divides_by_the_scale() {
+        use wl_output::Transform;
+        let mode = |transform, scale| OutputMode {
+            size: (2560, 1600),
+            scale,
+            transform,
+        };
+        assert_eq!(mode(None, 0).logical(), (2560, 1600));
+        assert_eq!(mode(Some(Transform::Normal), 2).logical(), (1280, 800));
+        assert_eq!(mode(Some(Transform::_90), 2).logical(), (800, 1280));
+        assert_eq!(mode(Some(Transform::Flipped270), 1).logical(), (1600, 2560));
+        assert_eq!(mode(Some(Transform::_180), 1).logical(), (2560, 1600));
+        assert_eq!(OutputMode::default().logical(), (0, 0));
     }
 }

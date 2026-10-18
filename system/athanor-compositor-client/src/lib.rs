@@ -3,14 +3,16 @@
 //! context (doc_bar.md, BR2). Wayland and COSMIC types stay inside this crate; the shell
 //! sees only the types of [`model`].
 
-pub mod clock;
+#[cfg(feature = "gtk")]
 mod capture;
+pub mod clock;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
 mod keymap;
 mod launch;
 pub mod model;
+#[cfg(feature = "gtk")]
 pub mod outputs;
 mod protocols;
 pub mod shortcuts;
