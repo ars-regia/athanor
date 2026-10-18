@@ -1,7 +1,7 @@
 //! One layer surface per output, created once, pinned to its output and never destroyed,
 //! unmapped or moved (Global Constraints; Task 2). Hidden, it is a 1×1 background surface
-//! with no child, no input and no keyboard; shown, an overlay over the whole output that
-//! takes the keyboard.
+//! that draws one cleared pixel and takes no input and no keyboard; shown, an overlay over
+//! the whole output that takes the keyboard.
 
 use gtk4::prelude::*;
 use gtk4::{cairo, gdk};
@@ -22,6 +22,26 @@ fn empty_input(window: &gtk4::ApplicationWindow) {
     if let Some(surface) = window.surface() {
         surface.set_input_region(Some(&cairo::Region::create()));
     }
+}
+
+/// The hidden surface's only child. A window with nothing to draw yields no render node, so
+/// GTK commits no frame and the compositor keeps showing the last one: the closed launcher
+/// stayed on screen, and the surface never shrank to 1×1. A cleared pixel makes GTK commit a
+/// transparent frame (the bar's notification popups do the same).
+fn blank() -> gtk4::DrawingArea {
+    let blank = gtk4::DrawingArea::builder()
+        .content_width(1)
+        .content_height(1)
+        .can_target(false)
+        .accessible_role(gtk4::AccessibleRole::Presentation)
+        .build();
+    blank.set_draw_func(|_, cr, _, _| {
+        cr.set_operator(cairo::Operator::Clear);
+        if let Err(err) = cr.paint() {
+            tracing::warn!(error = %err, "cannot clear the hidden surface");
+        }
+    });
+    blank
 }
 
 impl Surface {
@@ -48,7 +68,7 @@ impl Surface {
         // The input region belongs to the GdkSurface, which exists once the window is
         // realized; before that, `window.surface()` is None and the call would do nothing.
         surface.window.connect_realize(|window| {
-            if window.child().is_none() {
+            if window.layer() == Layer::Background {
                 empty_input(window);
             }
         });
@@ -62,7 +82,7 @@ impl Surface {
     }
 
     pub fn hide(&self) {
-        self.window.set_child(None::<&gtk4::Widget>);
+        self.window.set_child(Some(&blank()));
         self.window.set_layer(Layer::Background);
         self.window.set_keyboard_mode(KeyboardMode::None);
         for edge in EDGES {

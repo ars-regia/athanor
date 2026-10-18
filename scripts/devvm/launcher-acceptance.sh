@@ -168,6 +168,11 @@ search() {
     done
 }
 
+# frame NAME: the session's output as a PPM in the screenshot directory; same_frame
+# compares two of them, so a closed launcher whose last frame stays on screen fails.
+frame() { mkdir -p "$SHOTS" && in_session grim -t ppm - > "$SHOTS/$1.ppm"; }
+same_frame() { python3 "$HERE/same_frame.py" "$SHOTS/$1.ppm" "$SHOTS/$2.ppm"; }
+
 launcher_journal() { in_session "journalctl --user -u athanor-launcher --since @$1 --no-pager -o cat"; }
 decoder_journal() { in_session "journalctl --user -t systemd --since @$1 --no-pager -o cat -u 'athanor-preview-*'"; }
 shown_count() { launcher_journal "$1" | awk '/^shown ms=/ { n++ } END { print n + 0 }'; }
@@ -286,6 +291,7 @@ EOF
 stage_activation() {
     local since pid ms count
     stop_clean
+    frame before-show || fail "grim could not capture the session before the first Show"
     since=$(now)
     in_session gdbus call --session --dest os.athanor.Launcher1 --object-path /os/athanor/Launcher1 \
         --method os.athanor.Launcher1.Show > /dev/null || fail "gdbus Show: the bus did not activate the launcher"
@@ -300,6 +306,10 @@ stage_activation() {
     check_shortcuts
     # Super: hide it, press Super, and the journal gets a second 'shown'.
     close_launcher || fail "the launcher does not close"
+    # The tree says hidden even when the compositor still shows the last frame: the pixels decide.
+    # wait_until discards stderr: on a failure the last comparison runs again to say why.
+    wait_until 5 eval 'frame after-close && same_frame before-show after-close' ||
+        fail "the closed launcher stays on screen, $(same_frame before-show after-close 2>&1) (.scratch/launcher-acceptance/after-close.ppm)"
     count=$(shown_count "$since")
     type_keys @super
     if wait_until 5 shown; then
