@@ -736,6 +736,17 @@ impl Ime {
     fn done(&mut self, serial: u32) -> (Pending, bool) {
         (std::mem::take(&mut self.pending), serial == self.commits)
     }
+
+    /// Whether a focused field wants `enable` (`Some(true)`) or `disable` (`Some(false)`), or
+    /// nothing changes; counts the `commit` that sends it.
+    fn change(&mut self, field: bool) -> Option<bool> {
+        if field == self.enabled {
+            return None;
+        }
+        self.enabled = field;
+        self.commits = self.commits.wrapping_add(1);
+        Some(field)
+    }
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -938,7 +949,7 @@ impl App {
                 let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
                 Some(ui.widget(id).rect)
             });
-        if field.is_some() == self.ime.enabled {
+        if self.ime.change(field.is_some()).is_none() {
             return;
         }
         if let Some(r) = field {
@@ -949,8 +960,16 @@ impl App {
             text_input.disable();
         }
         text_input.commit();
-        self.ime.commits = self.ime.commits.wrapping_add(1);
-        self.ime.enabled = field.is_some();
+    }
+
+    /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
+    /// send for a surface that is gone: the next `enter` then sends `enable` again.
+    fn close(&mut self, id: SurfaceId) {
+        self.shell.close(id);
+        if self.ime.entered == Some(id) {
+            self.ime.entered = None;
+            self.sync_text_input();
+        }
     }
 
     /// Applies what the input method sent since the last `done`, in the protocol's order: the
@@ -1103,7 +1122,7 @@ impl OutputHandler for App {
         output: wl_output::WlOutput,
     ) {
         if let Some(id) = self.outputs.left(&output) {
-            self.shell.close(id);
+            self.close(id);
         }
     }
 }
@@ -1115,7 +1134,7 @@ impl LayerShellHandler for App {
         };
         let id = surface.id;
         self.outputs.closed(id);
-        self.shell.close(id);
+        self.close(id);
     }
 
     fn configure(
@@ -1539,6 +1558,23 @@ mod tests {
             "a stale done still applies its text"
         );
         assert!(ime.done(2).1);
+    }
+
+    #[test]
+    fn a_field_on_a_new_surface_is_enabled_after_the_old_one_closes() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        let mut ime = Ime {
+            entered: Some(a),
+            ..Ime::default()
+        };
+        assert_eq!(ime.change(true), Some(true));
+        // `a` closes without a `leave`: App::close ends its text input.
+        ime.entered = None;
+        assert_eq!(ime.change(false), Some(false));
+        ime.entered = Some(b);
+        assert_eq!(ime.change(true), Some(true), "no enable for the new field");
+        assert_eq!(ime.commits, 3);
+        assert_eq!(ime.change(true), None);
     }
 
     #[test]
