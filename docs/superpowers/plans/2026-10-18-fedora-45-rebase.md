@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch every task from `origin/iso-v0` and report its commit. One logical change per pull request. The one exception is task 7, whose parts cannot be merged apart without breaking the image; its commits still split by part, and how it merges is decision M10.
+- Branch every task from `origin/iso-v0` and report its commit. One logical change per pull request. The one exception is task 7, whose parts cannot be merged apart without breaking the image; its parts land on `rebase/fedora-45` as reviewed pull requests, and the branch reaches `iso-v0` as one pull request (M10, ADR-0125).
 - Tasks 1, 2, 3, 4a, 5, 6 and 13 leave the Fedora 43 image unchanged; where they touch the build, their check includes the `check_image_rpms` comparison. Task 4b changes polkit on the Fedora 43 image on purpose (M2).
 - Task 7 merges only after the 0.9 tag (ADR-0115), and only once it is green on its branch (ADR-0078, M5). `:latest` moves only through `release.yml`, whose jobs wait on the `signing` environment (reviewer `hr-mes`, `.github/settings/environments.json`), and `:stable` only through `promote-stable.yml`.
 - Host budget:
@@ -120,7 +120,8 @@ No mock or Koji build configuration exists in the repository. Koji is used only 
   - an unset or empty `GITHUB_REF` is an error, exit 2: fail closed, never `:latest`.
 - [ ] The content-hash comparison reads the tag it is about to push. A branch run therefore deduplicates against the previous run of the same branch, and the first run of a branch always pushes. The run's digest file is written as today.
 - [ ] The `branch-*` tags stay in the registry until removed. Deleting registry images is in the "Stop and ask" list, so the card of task 7 gives the maintainer the command that deletes the `branch-rebase-fedora-45` tags.
-- [ ] A unit test with `skopeo` and `buildah` stubbed on `PATH` asserts the pushed reference for `refs/heads/iso-v0`, `refs/heads/main`, `refs/heads/rebase/fedora-45` and `refs/pull/618/merge`, and exit 2 with `GITHUB_REF` unset.
+- [ ] [doc_ci.md](../../architecture/doc_ci.md) says at :60 that tier repositories get `latest` only. It changes to name the `branch-<name>` tags and the fail-closed rule. `doc_ci.md` is an approved specification (revision 2, approved 2026-10-09), so the pull request asks the maintainer to approve the change and names the revision it creates (ADR-0074).
+- [ ] `forge/scripts/tests/test_publish_tiers.py` already stubs `skopeo`, `buildah` and `createrepo_c`, and its stubs and expected references assume `:latest` (:39, :52, :149, :169, :179). Its stubs change to strip any tag, its environment sets `GITHUB_REF`, and new cases assert the pushed reference for `refs/heads/iso-v0`, `refs/heads/main`, `refs/heads/rebase/fedora-45` and `refs/pull/618/merge`, and exit 2 with `GITHUB_REF` unset.
 - [ ] Check: `actionlint .github/workflows/call-system-image.yml && python3 scripts/verify.py workflows ci docs registry && bash -n forge/scripts/publish_tiers.sh && shellcheck forge/scripts/publish_tiers.sh && python3 -B -m unittest discover -s forge/scripts/tests`.
 - Runs on: laptop. Depends on: nothing.
 
@@ -178,11 +179,13 @@ FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd78
 The spec only compiles: `checkmodule -M -m -C` (`athanor-selinux.spec:40`) does not check a module against any policy. The modules meet the policy when the image build loads them with `semodule -i` (`system/Containerfile:220-222`). The check repeats both steps on a copy, against Fedora 45's policy store. It fails if no module is compiled, and it writes nothing into the checkout:
 
 ```
-podman run --rm --security-opt label=disable \
+base=registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42
+policy=45.20
+podman run --rm --security-opt label=disable -e POLICY="$policy" \
   -v "$PWD/forge/specs/athanor-selinux/SOURCES:/src:ro" \
-  registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42 \
+  "$base" \
   sh -euc 'dnf -y -q install checkpolicy policycoreutils selinux-policy-targeted
-    rpm -q selinux-policy-targeted
+    test "$(rpm -q --qf "%{VERSION}" selinux-policy-targeted)" = "$POLICY"
     w=$(mktemp -d); cp /src/*.te /src/*.cil "$w"; cd "$w"
     test "$(ls *.te | wc -l)" -gt 0
     for t in *.te; do checkmodule -M -m -C -o "${t%.te}.cil" "$t"; done
@@ -191,9 +194,9 @@ podman run --rm --security-opt label=disable \
     test "$(semodule -l | grep -cE "^(athanor_|bootupd_lsblk)")" -eq 8'
 ```
 
-- [ ] As a control, the same command with Fedora 43's image (`registry.fedoraproject.org/fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8`) passes first. The 8 is the number of modules in the spec's `%install`; a module added later raises it.
+- [ ] As a control, the same command with `base` set to Fedora 43's image (`registry.fedoraproject.org/fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8`) and `policy=43.10` passes first. The version test fails if the image's repositories resolve another policy, so the check never passes against a policy it did not name. The 8 is the number of modules in the spec's `%install`; a module added later raises it.
 - [ ] For `athanor_powerprofiles_passwd`, `athanor_pcscd_cgroup` and `athanor_systemd_pstore`, run `sesearch -A` (`setools-console`) against 45.20 and record whether the policy now grants the rule. What is now upstream is removed in task 7, where the base changes.
-- [ ] Check: the command above exits 0 on Fedora 45 and on Fedora 43.
+- [ ] Check: the command above exits 0 with `policy=45.20` on Fedora 45 and with `policy=43.10` on Fedora 43.
 - Runs on: laptop. Depends on: nothing.
 
 ### Task 6: the prerequisites of the S1 spike
@@ -204,15 +207,17 @@ S1 already has its procedure: `docs/spikes/s1-bootc-fedora45.md`. It covers:
 - item 2, greenboot and boot counting;
 - item 3, power loss and a crash before confirmation (C2, C4);
 - item 4, the acceptance harness across bases;
+- item 5, the manifest and verification path: the signature policy and `containerPolicy` on Fedora 45, and the `migrate`, `refuse` and `older` stages;
 - item 6, Secure Boot, the MOK chain and the ESP;
 - item 7, the measurements.
 
 Its section 3 holds the swtpm and secboot OVMF commands. The plan builds no second procedure; this task closes the prerequisites listed in the spike's section 5.
 
-- [ ] Point 4, one pull request:
-  - `images.sh` and `run.sh` take the registry container's name from a variable (`ACC_REGISTRY_NAME`, default `athanor-acc-registry`);
-  - `local-image.sh` reads `ACC_PORT` and `ACC_REGISTRY`.
-  Check: `shellcheck scripts/devvm/*.sh scripts/devvm/acceptance/*.sh && grep -q ACC_PORT scripts/devvm/local-image.sh`. The `grep` is the spike's own refusal step.
+- [ ] Point 4, one pull request. Two scripts fix the acceptance registry; `run.sh` never names it:
+  - `scripts/devvm/local-image.sh:66-68` hard-codes the container `athanor-acc-registry`, the host port 5000 and the image prefix `localhost:5000/acc` (:61). With only `ACC_PORT=5001` it starts or reuses the maintainer's registry on 5000;
+  - `scripts/devvm/acceptance/images.sh:40-50` reads `ACC_PORT` (from `lib.sh:10`) but fixes the container name and the systemd user unit, both `athanor-acc-registry`.
+  Both read the container and unit name from one variable set in `lib.sh` (`ACC_REGISTRY_NAME`, default `athanor-acc-registry`), and `local-image.sh` sources the port and the prefix from the same place instead of its own literals.
+  Check: `shellcheck scripts/devvm/*.sh scripts/devvm/acceptance/*.sh && ! grep -nE 'athanor-acc-registry|:5000:|localhost:5000' scripts/devvm/local-image.sh scripts/devvm/acceptance/images.sh`. The `grep` is the spike's own refusal step: no literal name or port is left outside `lib.sh`.
 - [ ] Point 3: the maintainer confirms the line of `devvm.env` that derives the state directory (M11). If the line does not do that, the dev VM scripts gain a state-directory variable, as a pull request of the same form.
 - [ ] Section 1 of the spike takes the Fedora 45 final digests, in place of the beta of 2026-10-09, and so does the `sed` line of its section 3. This is a pull request touching only `docs/spikes/`, which has no owner (ADR-0107).
 - [ ] Secure Boot and swtpm stay as the spike's QEMU lines. A `start.sh` option is added only if the run shows it is worth keeping, as the spike says.
@@ -229,7 +234,7 @@ The branch is `rebase/fedora-45`, from `origin/iso-v0`, with one pull request to
    - The driver versions must equal those the Azoth kmods are built for (Q5).
 3. **`libdisplay-info`.** In `flake.nix:38-44`, `libdisplay-info-target` → 0.3.0, with the comment naming Fedora 45.
 4. **OpenSSL 4 for the Nix target (M3).**
-   - It is its own pull request against `rebase/fedora-45`, reviewed on its own (M10).
+   - It is its own pull request against `rebase/fedora-45`, under the `rebase-branches` ruleset and the merge rule of `CLAUDE.md` (M10, ADR-0125).
    - It cannot land on `iso-v0` alone: Fedora 43 has no OpenSSL 4.
    - Whether the pinned `nixpkgs` (rev `34ab9907`, 2026-08-31) carries OpenSSL 4 is Q3.
 5. **Fork releases.**
@@ -247,6 +252,8 @@ The branch is `rebase/fedora-45`, from `origin/iso-v0`, with one pull request to
 Green, all on the branch and before the merge (ADR-0078; the definition M5 confirms):
 
 - [ ] **Branch build.** `athanor-agent gh workflow run athanor-forge-orchestrator.yml --ref rebase/fedora-45 -R ars-regia/athanor`; task 1 must have merged first.
+  - Why the dispatch works without a trigger change: the 404 that `.github/workflows/AGENTS.md` and the orchestrator's comment at :5-6 describe applies to a workflow present only on a non-default branch. The orchestrator is on `iso-v0`, the default branch (`gh api repos/ars-regia/athanor --jq .default_branch`, read 2026-10-19), so it is registered, and `--ref` runs the copy of the file on `rebase/fedora-45`. No run of this repository has yet been dispatched on another branch (the last 100 `workflow_dispatch` runs, read 2026-10-19), so the first dispatch is the test. The push trigger stays `[main, iso-v0]`: pushes to the branch start nothing, and each branch build is dispatched.
+  - If the dispatch answers 404 or runs `iso-v0`'s copy, stop and ask: adding `rebase/**` to the orchestrator's triggers changes a workflow with `signing-kernel` and `signing-images` jobs, which `.github/workflows/AGENTS.md` puts under "Stop and ask". The plan does not make that change on its own.
   - `check_rpm_sonames.sh` is green for every spec.
   - The system image and the ISO are published by run id.
   - If the run stops at a job that needs a signing environment, see Q6.
@@ -260,7 +267,7 @@ Green, all on the branch and before the merge (ADR-0078; the definition M5 confi
 Then the pull request leaves draft and goes to the card. After the merge, the `iso-v0` run and `accept.yml` are the first CI acceptance. Release 0.10 is dispatched by that build and waits on the `signing` environment, so nothing moves `:latest` without the maintainer. If the `iso-v0` run fails where the branch passed, revert the squashed commit before any release is approved: the base returns to Fedora 43 in one commit.
 
 - Runs on: hosted runners, the laptop and the desktop.
-- Depends on: tasks 1, 2, 3, 4a, 4b, 5 and 8; decision M10; Fedora 45 final (2026-10-20); the 0.9 tag before the merge.
+- Depends on: tasks 1, 2, 3, 4a, 4b, 5 and 8; decision M10, ADR-0125 merged and its `rebase-branches` ruleset applied; Fedora 45 final (2026-10-20); the 0.9 tag before the merge.
 
 ### Task 8: S1 on the branch image (results in the spike)
 
@@ -270,7 +277,7 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
   - item 7 also measures a Fedora 43 `v1` → `v2` run, as the baseline every Fedora 45 number is read against;
   - item 6 records `tpm2_pcrread sha256:0,4,7,9,11` at each boot (Q2).
 - [ ] The answers go into the spike's `**Answer.**` lines, through a pull request touching only `docs/spikes/` (no owner, ADR-0107).
-- [ ] Check, for M5: items 0, 2, 4 and 6 (S1-a, S1-b, S1-c, S1-e) pass; item 1 passes for the four subjects across the update and across phase 4. The rollback rule of item 1 phase 3 is the one the spike expects today's bootc to fail, so it is recorded, not required. Items 3, 6 (S1-d) and 7 are recorded.
+- [ ] Check, for M5: items 0, 2, 4, 5 and 6 (S1-a, S1-b, S1-c, S1-e) pass, item 5 meaning that Fedora 45 enforces the shipped signature policy and `containerPolicy` and that its three stages behave as the spike expects; item 1 passes for the four subjects across the update and across phase 4. The rollback rule of item 1 phase 3 is the one the spike expects today's bootc to fail, so it is recorded, not required. Items 3, 6 (S1-d) and 7 are recorded.
 - Runs on: desktop, about 2 hours of builds and 4 hours of VM time over two or three sittings (the spike's estimate). Depends on: task 6, the task 7 branch run, the 0.9 acceptance ending, and M11.
 
 ### Task 9: kernel source from Fedora 45
@@ -278,8 +285,8 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 - [ ] The kernel bump (task 2 must have merged first) moves `FEDORA_KERNEL_NVR` to the newest `7.2.x-300.fc45` and `FEDORA_KEY_FPR` to `4F50A6114CD5C6976A7F1179655A4B02F577861E`. It also updates `sources.sha256` and `KERNEL.md:46-47`.
 - [ ] Confirm that the builder image carries `RPM-GPG-KEY-fedora-45-primary` (Q7), because `build.sh:61` reads it.
 - [ ] Check: `kernel-build.yml` green on `iso-v0` after the `signing-kernel` approval, and `python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check`.
-- Runs on: KVM runner. Depends on: task 2 and decision M1.
-- Due before 2026-12-02: Fedora 43 kernels stop then.
+- Runs on: KVM runner. Depends on: tasks 2 and 7, and decision M1. `bump.py` reads `ARG FEDORA_VERSION` (task 2), which stays 43 on `iso-v0` until task 7 merges.
+- Due before 2026-12-02: Fedora 43 kernels stop then. With task 7 due after M5 (2026-11-16), the window is about two weeks; if task 7 slips past it, the kernel bump is made on `rebase/fedora-45` as one of its parts.
 
 ### Task 10: runner guest on Fedora Cloud 45
 
@@ -327,18 +334,14 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 
 - **M1 — the Fedora key pin.** Approve the change of `FEDORA_KEY_FPR` to the Fedora 45 key in task 9. Approve the `signing-kernel` environment for tasks 9 and 12.
 - **M2 — the polkit fork.** *Decided 2026-10-19:* rebase the fork onto 127-5.fc45 and keep the #447 cancel-before-answer patch and the agent-helper 0755 change until upstream has them (task 4b, task 7 part 5).
-- **M3 — OpenSSL.** *Decided 2026-10-19:* the Nix target moves to OpenSSL 4 in its own pull request, without `openssl3-libs`. Fedora 43 has no OpenSSL 4, so that pull request is merged into the cut-over branch and reaches `iso-v0` with task 7 (M10).
+- **M3 — OpenSSL.** *Decided 2026-10-19:* the Nix target moves to OpenSSL 4 in its own pull request, without `openssl3-libs`. Fedora 43 has no OpenSSL 4, so that pull request is merged into the cut-over branch and reaches `iso-v0` with task 7 (M10, ADR-0125).
 - **M4 — the release.** *Decided by ADR-0123 (accepted, PR #617):* the rebase ships as release 0.10 "base". Still needed: the approvals of `signing` (release) and `signing-images` for it, and of `release` when it is promoted to `:stable`.
-- **M5 — the decision point.** *Confirmed 2026-10-19:* 2026-11-16. Green is reached on the branch, before task 7 merges: the branch build, the laptop ISO test, the console check and the S1 items listed in task 8.
+- **M5 — the decision point.** *Confirmed 2026-10-19:* 2026-11-16. Green is reached on the branch, before task 7 merges: the branch build, the laptop ISO test, the console check and the S1 items listed in task 8, item 5 (the signature policy and `containerPolicy` on Fedora 45) among them.
 - **M6 — D39.** Close D39 and #124 on the S1 results, or name what is missing.
 - **M7 — hosts.** *Decided 2026-10-19:* S1 runs on the desktop (16 cores, 31 GB, one VM at a time) after the 0.9 acceptance. The laptop (8 cores, 7 GB) does builds and the ISO test only.
 - **M8 — reviews.** Approve each pull request at its card.
 - **M9 — the runner guest.** Make the task 10 change together with the agent: the agent cannot read that file.
-- **M10 — how the cut-over merges.** *Needs a record (a decision in `DECISIONS.md`, or an amendment to ADR-0123).* Its parts cannot reach `iso-v0` one by one: each breaks either the Fedora 43 image or the Fedora 45 one. Under the merge rule of `CLAUDE.md`, a pull request into `rebase/fedora-45`, a base with no required check, cannot be merged by the agent. The proposal has three parts:
-  - task 7 is one pull request to `iso-v0`, squashed, with one commit per part;
-  - the OpenSSL 4 change (M3) is a pull request stacked on `rebase/fedora-45`, which the maintainer merges into that branch;
-  - the branch takes `iso-v0` by merge, never by rebase, and the final diff is checked against the squash trap of `.github/workflows/AGENTS.md`.
-  The alternative is a ruleset on `rebase/*` that requires `gate`, so that the merge rule covers the stacked pull requests too.
+- **M10 — how the cut-over merges.** *Decided 2026-10-19, ADR-0125 (`docs/decisions/0125-rebase-integration-branches.md`, PR #620), amending BRN3 and BRN5 of ADR-0098:* a ruleset `rebase-branches` protects `rebase/*` and requires `gate` and the review of a code owner, so the merge rule of `CLAUDE.md` applies unchanged to every pull request into `rebase/fedora-45`. The parts of task 7 cannot reach `iso-v0` one by one, since each breaks either the Fedora 43 image or the Fedora 45 one, so they land on `rebase/fedora-45` as reviewed pull requests, and the branch reaches `iso-v0` as one pull request. The branch takes `iso-v0` by merge, never by rebase, and the final diff is checked against the squash trap of `.github/workflows/AGENTS.md`. The ruleset takes effect when the maintainer applies the repository settings; until then no pull request into `rebase/fedora-45` is merged.
 - **M11 — S1 on the desktop** (the spike's section 5, points 1 to 3):
   - the desktop on an image with QEMU and OVMF (#321);
   - the runner guest stopped for each S1 sitting;
