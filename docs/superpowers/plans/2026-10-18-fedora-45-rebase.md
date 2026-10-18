@@ -234,7 +234,7 @@ The branch is `rebase/fedora-45`, from `origin/iso-v0`, with one pull request to
    - The driver versions must equal those the Azoth kmods are built for (Q5).
 3. **`libdisplay-info`.** In `flake.nix:38-44`, `libdisplay-info-target` → 0.3.0, with the comment naming Fedora 45.
 4. **OpenSSL 4 for the Nix target (M3).**
-   - It is its own pull request against `rebase/fedora-45`, under the `rebase-branches` ruleset and the merge rule of `CLAUDE.md` (M10, ADR-0125).
+   - It is its own pull request against `rebase/fedora-45`, under the `rebase-branches` and `rebase-review` rulesets and the merge rule of `CLAUDE.md` (M10, ADR-0125).
    - It cannot land on `iso-v0` alone: Fedora 43 has no OpenSSL 4.
    - Whether the pinned `nixpkgs` (rev `34ab9907`, 2026-08-31) carries OpenSSL 4 is Q3.
 5. **Fork releases.**
@@ -267,7 +267,7 @@ Green, all on the branch and before the merge (ADR-0078; the definition M5 confi
 Then the pull request leaves draft and goes to the card. After the merge, the `iso-v0` run and `accept.yml` are the first CI acceptance. Release 0.10 is dispatched by that build and waits on the `signing` environment, so nothing moves `:latest` without the maintainer. If the `iso-v0` run fails where the branch passed, revert the squashed commit before any release is approved: the base returns to Fedora 43 in one commit.
 
 - Runs on: hosted runners, the laptop and the desktop.
-- Depends on: tasks 1, 2, 3, 4a, 4b, 5 and 8; decision M10, ADR-0125 merged and its `rebase-branches` ruleset applied; Fedora 45 final (2026-10-20); the 0.9 tag before the merge.
+- Depends on: tasks 1, 2, 3, 4a, 4b, 5 and 8; decision M10, ADR-0125 merged and its `rebase-branches` and `rebase-review` rulesets applied; Fedora 45 final (2026-10-20); the 0.9 tag before the merge.
 
 ### Task 8: S1 on the branch image (results in the spike)
 
@@ -341,7 +341,7 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 - **M7 — hosts.** *Decided 2026-10-19:* S1 runs on the desktop (16 cores, 31 GB, one VM at a time) after the 0.9 acceptance. The laptop (8 cores, 7 GB) does builds and the ISO test only.
 - **M8 — reviews.** Approve each pull request at its card.
 - **M9 — the runner guest.** Make the task 10 change together with the agent: the agent cannot read that file.
-- **M10 — how the cut-over merges.** *Decided 2026-10-19, ADR-0125 (`docs/decisions/0125-rebase-integration-branches.md`, PR #620), amending BRN3 and BRN5 of ADR-0098:* a ruleset `rebase-branches` protects `rebase/*` and requires `gate` and the review of a code owner, so the merge rule of `CLAUDE.md` applies unchanged to every pull request into `rebase/fedora-45`. The parts of task 7 cannot reach `iso-v0` one by one, since each breaks either the Fedora 43 image or the Fedora 45 one, so they land on `rebase/fedora-45` as reviewed pull requests, and the branch reaches `iso-v0` as one pull request. The branch takes `iso-v0` by merge, never by rebase, and the final diff is checked against the squash trap of `.github/workflows/AGENTS.md`. The ruleset takes effect when the maintainer applies the repository settings; until then no pull request into `rebase/fedora-45` is merged.
+- **M10 — how the cut-over merges.** *Decided 2026-10-19, ADR-0125 (`docs/decisions/0125-rebase-integration-branches.md`, PR #620), amending BRN3 and BRN5 of ADR-0098:* the rulesets `rebase-branches` (`gate`, no force push, no bypass) and `rebase-review` (the review of a code owner) protect `rebase/*`, so the merge rule of `CLAUDE.md` applies unchanged to every pull request into `rebase/fedora-45`. The parts of task 7 cannot reach `iso-v0` one by one, since each breaks either the Fedora 43 image or the Fedora 45 one, so they land on `rebase/fedora-45` as reviewed pull requests, and the branch reaches `iso-v0` as one pull request. The branch takes `iso-v0` by merge, never by rebase, and the final diff is checked against the squash trap of `.github/workflows/AGENTS.md`. The ruleset takes effect when the maintainer applies the repository settings; until then no pull request into `rebase/fedora-45` is merged.
 - **M11 — S1 on the desktop** (the spike's section 5, points 1 to 3):
   - the desktop on an image with QEMU and OVMF (#321);
   - the runner guest stopped for each S1 sitting;
