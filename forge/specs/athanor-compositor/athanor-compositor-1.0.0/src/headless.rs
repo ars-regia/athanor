@@ -3,14 +3,14 @@
 //! GLES, and offers linux-dmabuf with its feedback and linux-drm-syncobj-v1 when the node can
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
-use crate::state::{new_output, Backend, State, BACKGROUND};
+use crate::lock::Lock;
+use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::gbm::GbmDevice;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::{DrmDeviceFd, DrmNode};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::RenderElementStates;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
@@ -19,7 +19,6 @@ use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::backend::renderer::{
     Bind, ExportMem, ImportAll, ImportDma, Offscreen, Renderer, Texture,
 };
-use smithay::desktop::space::render_output;
 use smithay::desktop::{Space, Window};
 use smithay::output::Output;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -241,7 +240,7 @@ impl State {
         let mut frames = Vec::with_capacity(headless.outputs.len());
         for index in 0..headless.outputs.len() {
             let started = Instant::now();
-            match headless.draw(index, &self.space, false) {
+            match headless.draw(index, &self.space, self.lock.as_ref(), false) {
                 Ok(drawn) => {
                     frames.push((headless.outputs[index].output.clone(), drawn));
                     if let Some(stats) = &mut self.frame_stats {
@@ -253,8 +252,14 @@ impl State {
                 }
             }
         }
+        let all_drawn = frames.len() == headless.outputs.len();
         for (output, drawn) in frames {
             self.frame_done(&output, &drawn.states, drawn.damaged, frame_target, period);
+        }
+        self.serve_captures();
+        // A lock is confirmed only once every output shows it.
+        if all_drawn {
+            self.locked_drawn();
         }
         self.space.refresh();
         self.popups.cleanup();
@@ -277,8 +282,26 @@ impl Headless {
         Ok(())
     }
 
+    /// Draws `window` off screen at scale 1 and reads it back (`capture::read_window`).
+    pub fn read_window(&mut self, window: &Window) -> Result<Vec<u8>, Error> {
+        match &mut self.gpu {
+            Gpu::Gbm { manager, node, .. } => {
+                crate::capture::read_window::<_, GlesTexture>(gles(manager, node)?, window)
+            }
+            Gpu::Pixman { renderer, .. } => {
+                crate::capture::read_window::<_, Image>(renderer, window)
+            }
+        }
+    }
+
     /// Draws output `index`, and reads its pixels back when `read`.
-    fn draw(&mut self, index: usize, space: &Space<Window>, read: bool) -> Result<Drawn, Error> {
+    fn draw(
+        &mut self,
+        index: usize,
+        space: &Space<Window>,
+        lock: Option<&Lock>,
+        read: bool,
+    ) -> Result<Drawn, Error> {
         let virt = self
             .outputs
             .get_mut(index)
@@ -291,24 +314,31 @@ impl Headless {
                 buffers,
             } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(gles(manager, node)?, buffer, virt, space, read)?
+                draw(gles(manager, node)?, buffer, virt, space, lock, read)
             }
             Gpu::Pixman { renderer, buffers } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(renderer, buffer, virt, space, read)?
+                draw(renderer, buffer, virt, space, lock, read)
             }
         };
+        // The tracker counts a failed frame as drawn: a new one draws the next frame whole, so
+        // a lock is confirmed only once it is in the buffer.
+        let drawn = drawn.inspect_err(|_| {
+            virt.damage_tracker = OutputDamageTracker::from_output(&virt.output);
+        })?;
         virt.drawn = true;
         Ok(drawn)
     }
 }
 
-/// Draws the space on `virt` into `buffer`, and reads the frame back when `read`.
+/// Draws the space on `virt` into `buffer`, or only its lock surface while `lock` holds the
+/// session, and reads the frame back when `read`.
 fn draw<R, T>(
     renderer: &mut R,
     buffer: &mut T,
     virt: &mut Virtual,
     space: &Space<Window>,
+    lock: Option<&Lock>,
     read: bool,
 ) -> Result<Drawn, Error>
 where
@@ -318,16 +348,14 @@ where
 {
     let age = usize::from(virt.drawn);
     let mut target = renderer.bind(buffer)?;
-    let result = render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
-        &virt.output,
+    let view = View::of(space, lock, &virt.output);
+    let result = draw_view(
         renderer,
         &mut target,
-        1.0,
+        &virt.output,
         age,
-        [space],
-        &[],
+        view,
         &mut virt.damage_tracker,
-        BACKGROUND,
     )
     .map_err(|error| format!("{error:?}"))?;
     // Smithay releases a client's buffer when the renderer drops its texture, not when the GPU
@@ -462,7 +490,7 @@ impl State {
             return Err("only the headless backend reads frames back".into());
         };
         headless
-            .draw(index, &self.space, true)?
+            .draw(index, &self.space, self.lock.as_ref(), true)?
             .pixels
             .ok_or_else(|| "the frame was not read back".into())
     }

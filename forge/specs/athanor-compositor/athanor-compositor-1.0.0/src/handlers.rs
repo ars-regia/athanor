@@ -11,12 +11,15 @@ use smithay::desktop::{
 use smithay::input::pointer::Focus;
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
+use smithay::output::Output;
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
 use smithay::reexports::wayland_server::backend::ClientId;
-use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_seat, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::protocol::{
+    wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
+};
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
@@ -26,15 +29,21 @@ use smithay::wayland::dmabuf::{
     get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
 };
 use smithay::wayland::drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState};
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
+use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
+use smithay::wayland::security_context::{
+    SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
+};
 use smithay::wayland::selection::data_device::{
     set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
 };
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
@@ -245,6 +254,13 @@ impl State {
         if !window.user_data().insert_if_missing(|| Placed) {
             return;
         }
+        if let Some(toplevel) = window.toplevel() {
+            let (title, app_id) = names(toplevel);
+            let handle = self
+                .foreign_toplevel_state
+                .new_toplevel::<Self>(title, app_id);
+            window.user_data().insert_if_missing(|| handle);
+        }
         let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
         let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
         let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
@@ -273,14 +289,11 @@ impl State {
                 toplevel.send_pending_configure();
             }
         }
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return;
-        };
         let target = self
             .exclusive_layer()
             .or_else(|| window.toplevel().map(|t| t.wl_surface().clone()));
-        if let Some(surface) = target {
-            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+        if target.is_some() {
+            self.set_keyboard_focus(target);
         }
     }
 
@@ -299,6 +312,12 @@ impl State {
         {
             return;
         }
+        self.focus_top();
+    }
+
+    /// Gives the keyboard to the surface that holds it exclusively, else to the top window the
+    /// user can see, else to nothing.
+    pub fn focus_top(&mut self) {
         if let Some(surface) = self.exclusive_layer() {
             self.focus_exclusive(surface);
             return;
@@ -314,7 +333,7 @@ impl State {
             .cloned();
         match top {
             Some(window) => self.focus(&window),
-            None => keyboard.set_focus(self, None, SERIAL_COUNTER.next_serial()),
+            None => self.set_keyboard_focus(None),
         }
     }
 
@@ -380,10 +399,21 @@ impl XdgShellHandler for State {
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
+                self.foreign_toplevel_state.remove_toplevel(handle);
+            }
             self.space.unmap_elem(&window);
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
+    }
+
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        self.rename(&surface);
+    }
+
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        self.rename(&surface);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -418,6 +448,10 @@ impl XdgShellHandler for State {
     /// exclusively only for its own popups; any other grab takes the pointer only. A grab
     /// refused leaves the popup shown without it, as a popover a client opens at start is.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        // While locked, the keyboard and the pointer stay with the lock surfaces.
+        if self.lock.is_some() {
+            return;
+        }
         let Some(seat) = Seat::<Self>::from_resource(&seat) else {
             return;
         };
@@ -510,7 +544,35 @@ impl TabletSeatHandler for State {
     type ToolFocus = WlSurface;
 }
 
-impl OutputHandler for State {}
+impl OutputHandler for State {
+    fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
+        self.workspace_output_bound(&output, &wl_output);
+    }
+}
+
+impl SecurityContextHandler for State {
+    /// Clients connecting through the context's listener carry it: they see none of the
+    /// privileged globals (`unconfined`).
+    fn context_created(&mut self, source: SecurityContextListenerSource, context: SecurityContext) {
+        let inserted = self
+            .loop_handle
+            .insert_source(source, move |stream, _, state| {
+                let data = state.contained_client_state(Some(context.clone()));
+                if let Err(error) = state.display_handle.insert_client(stream, data) {
+                    tracing::warn!(%error, "a sandboxed client could not be added");
+                }
+            });
+        if let Err(error) = inserted {
+            tracing::warn!(error = %error.error, "a security context cannot be listened on");
+        }
+    }
+}
+
+impl IdleNotifierHandler for State {
+    fn idle_notifier_state(&mut self) -> &mut IdleNotifierState<Self> {
+        &mut self.idle_notifier_state
+    }
+}
 
 // A pointer target needs it; no client gets a lock or a confinement yet.
 impl PointerConstraintsHandler for State {}
@@ -603,6 +665,38 @@ impl XdgActivationHandler for State {
             if let Some(window) = self.window_for(&surface) {
                 self.focus(&window);
             }
+        }
+    }
+}
+
+/// The title and the app id `toplevel` has set, empty when it has set none.
+fn names(toplevel: &ToplevelSurface) -> (String, String) {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .map(|role| {
+                (
+                    role.title.clone().unwrap_or_default(),
+                    role.app_id.clone().unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default()
+    })
+}
+
+impl State {
+    /// Sends the foreign toplevel list `toplevel`'s new title and app id.
+    fn rename(&mut self, toplevel: &ToplevelSurface) {
+        let Some(window) = self.window_for(toplevel.wl_surface()) else {
+            return;
+        };
+        if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
+            let (title, app_id) = names(toplevel);
+            handle.send_title(&title);
+            handle.send_app_id(&app_id);
+            handle.send_done();
         }
     }
 }

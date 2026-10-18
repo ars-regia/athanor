@@ -2,14 +2,18 @@
 //! C1). It runs nested, on the winit backend, in a parent compositor, or headless, on virtual
 //! outputs drawn off screen (OS6).
 
-#![forbid(unsafe_code)]
+// One function writes a client's wl_shm buffer through a raw pointer (`capture::copy_into`).
+#![deny(unsafe_code)]
 
+mod capture;
 mod handlers;
 mod headless;
 mod input;
 mod layer;
+mod lock;
 mod state;
 mod winit;
+mod workspace;
 
 use headless::VirtualOutput;
 use smithay::reexports::calloop::EventLoop;

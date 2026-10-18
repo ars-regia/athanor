@@ -11,19 +11,45 @@ use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::desktop::layer_map_for_output;
 use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
 use smithay::utils::{Point, SERIAL_COUNTER};
+use smithay::wayland::security_context::SecurityContext;
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::fs::FileExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_surface,
 };
-use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle};
+use wayland_client::{
+    delegate_noop, event_created_child, Connection, Dispatch, Proxy, QueueHandle, WEnum,
+};
+use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
+    ext_foreign_toplevel_handle_v1, ext_foreign_toplevel_list_v1,
+};
+use wayland_protocols::ext::idle_notify::v1::client::{
+    ext_idle_notification_v1, ext_idle_notifier_v1,
+};
+use wayland_protocols::ext::image_capture_source::v1::client::{
+    ext_foreign_toplevel_image_capture_source_manager_v1, ext_image_capture_source_v1,
+};
+use wayland_protocols::ext::image_copy_capture::v1::client::{
+    ext_image_copy_capture_frame_v1, ext_image_copy_capture_manager_v1,
+    ext_image_copy_capture_session_v1,
+};
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1,
+};
+use wayland_protocols::ext::workspace::v1::client::{
+    ext_workspace_group_handle_v1, ext_workspace_handle_v1, ext_workspace_manager_v1,
+};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -83,7 +109,39 @@ struct Client {
     /// The serial, width and height of the last configure of a layer surface.
     layer_configure: Option<(u32, u32, u32)>,
     frame_done: bool,
+    /// Roundtrips answered (`Local::roundtrip`).
+    synced: u32,
+    /// The windows of the foreign toplevel list.
+    listed: Vec<Listed>,
+    /// The buffer size of the last capture session, once its constraints are done.
+    capture_size: Option<(u32, u32)>,
+    /// The capture sessions stopped.
+    stopped: Vec<ObjectId>,
+    /// The last capture frame: ready, or failed with its reason.
+    captured: Option<Result<(), u32>>,
+    locked: bool,
+    /// The serial, width and height of the last configure of a lock surface.
+    lock_configure: Option<(u32, u32, u32)>,
+    /// `idled` and `resumed`, in order.
+    idle: Vec<&'static str>,
+    /// Each workspace group: the outputs and the workspaces that entered it.
+    groups: Vec<(ObjectId, Vec<ObjectId>, Vec<ObjectId>)>,
+    /// Each workspace and its last state.
+    workspaces: Vec<(ObjectId, Option<ext_workspace_handle_v1::State>)>,
+    workspaces_done: bool,
 }
+
+/// A window of the foreign toplevel list as the client has seen it.
+struct Listed {
+    handle: ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+    title: String,
+    app_id: String,
+    done: bool,
+    closed: bool,
+}
+
+/// The user data of a `wl_display.sync` that counts as a roundtrip.
+struct Synced;
 
 impl Client {
     fn bind<I>(
@@ -201,6 +259,244 @@ delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 delegate_noop!(Client: xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
+delegate_noop!(Client: ignore wl_output::WlOutput);
+delegate_noop!(Client: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1);
+delegate_noop!(Client: ext_image_capture_source_v1::ExtImageCaptureSourceV1);
+delegate_noop!(Client: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1);
+delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+delegate_noop!(Client: ext_idle_notifier_v1::ExtIdleNotifierV1);
+
+impl Dispatch<wl_callback::WlCallback, Synced> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_callback::WlCallback,
+        _: wl_callback::Event,
+        _: &Synced,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        client.synced += 1;
+    }
+}
+
+impl Dispatch<ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+        event: ext_foreign_toplevel_list_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event {
+            client.listed.push(Listed {
+                handle: toplevel,
+                title: String::new(),
+                app_id: String::new(),
+                done: false,
+                closed: false,
+            });
+        }
+    }
+
+    event_created_child!(Client, ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1, [
+        ext_foreign_toplevel_list_v1::EVT_TOPLEVEL_OPCODE => (ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1, ()),
+    ]);
+}
+
+impl Dispatch<ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        handle: &ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+        event: ext_foreign_toplevel_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_foreign_toplevel_handle_v1::Event;
+        let Some(listed) = client.listed.iter_mut().find(|l| &l.handle == handle) else {
+            return;
+        };
+        match event {
+            Event::Title { title } => listed.title = title,
+            Event::AppId { app_id } => listed.app_id = app_id,
+            Event::Done => listed.done = true,
+            Event::Closed => listed.closed = true,
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        session: &ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+        event: ext_image_copy_capture_session_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_image_copy_capture_session_v1::Event;
+        match event {
+            Event::BufferSize { width, height } => client.capture_size = Some((width, height)),
+            Event::Stopped => client.stopped.push(session.id()),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1,
+        event: ext_image_copy_capture_frame_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_image_copy_capture_frame_v1::Event;
+        match event {
+            Event::Ready => client.captured = Some(Ok(())),
+            Event::Failed { reason } => {
+                let reason = match reason {
+                    WEnum::Value(reason) => u32::from(reason),
+                    WEnum::Unknown(reason) => reason,
+                };
+                client.captured = Some(Err(reason));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_v1::ExtSessionLockV1,
+        event: ext_session_lock_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_session_lock_v1::Event::Locked = event {
+            client.locked = true;
+        }
+    }
+}
+
+impl Dispatch<ext_session_lock_surface_v1::ExtSessionLockSurfaceV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+        event: ext_session_lock_surface_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_session_lock_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
+            client.lock_configure = Some((serial, width, height));
+        }
+    }
+}
+
+impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_idle_notification_v1::ExtIdleNotificationV1,
+        event: ext_idle_notification_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_idle_notification_v1::Event::Idled => client.idle.push("idled"),
+            ext_idle_notification_v1::Event::Resumed => client.idle.push("resumed"),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_workspace_manager_v1::ExtWorkspaceManagerV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &ext_workspace_manager_v1::ExtWorkspaceManagerV1,
+        event: ext_workspace_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_workspace_manager_v1::Event;
+        match event {
+            Event::WorkspaceGroup { workspace_group } => {
+                client
+                    .groups
+                    .push((workspace_group.id(), Vec::new(), Vec::new()));
+            }
+            Event::Workspace { workspace } => client.workspaces.push((workspace.id(), None)),
+            Event::Done => client.workspaces_done = true,
+            _ => {}
+        }
+    }
+
+    event_created_child!(Client, ext_workspace_manager_v1::ExtWorkspaceManagerV1, [
+        ext_workspace_manager_v1::EVT_WORKSPACE_GROUP_OPCODE => (ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1, ()),
+        ext_workspace_manager_v1::EVT_WORKSPACE_OPCODE => (ext_workspace_handle_v1::ExtWorkspaceHandleV1, ()),
+    ]);
+}
+
+impl Dispatch<ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        group: &ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1,
+        event: ext_workspace_group_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_workspace_group_handle_v1::Event;
+        let Some((_, outputs, workspaces)) = client
+            .groups
+            .iter_mut()
+            .find(|(id, _, _)| *id == group.id())
+        else {
+            return;
+        };
+        match event {
+            Event::OutputEnter { output } => outputs.push(output.id()),
+            Event::WorkspaceEnter { workspace } => workspaces.push(workspace.id()),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_workspace_handle_v1::ExtWorkspaceHandleV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        workspace: &ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+        event: ext_workspace_handle_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let ext_workspace_handle_v1::Event::State {
+            state: WEnum::Value(state),
+        } = event
+        {
+            if let Some((_, last)) = client
+                .workspaces
+                .iter_mut()
+                .find(|(id, _)| *id == workspace.id())
+            {
+                *last = Some(state);
+            }
+        }
+    }
+}
 
 /// A new file, already unlinked, for a client's buffers.
 fn unlinked() -> Result<std::fs::File, Error> {
@@ -979,5 +1275,560 @@ fn a_bar_popup_leaves_the_keyboard_to_the_window() {
         .join()
         .expect("the shell's client thread")
         .expect("the shell's client");
+    run.stop();
+}
+
+/// A client in the test's own thread, for the protocols of C1 task 4: the test runs the
+/// compositor's loop and the client's queue in turn (`pump`).
+struct Local {
+    connection: Connection,
+    queue: wayland_client::EventQueue<Client>,
+    registry: wl_registry::WlRegistry,
+    client: Client,
+    /// Its id in the compositor.
+    id: ClientId,
+    /// The buffers' files, open while their buffers are.
+    files: Vec<std::fs::File>,
+}
+
+impl Local {
+    /// Connects to the compositor, inside `context` if any, and lists the globals.
+    fn connect(run: &mut Running, context: Option<SecurityContext>) -> Self {
+        let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+        let data = run.state.contained_client_state(context);
+        let id = run
+            .state
+            .display_handle
+            .insert_client(server_end, data)
+            .expect("client")
+            .id();
+        let connection = Connection::from_socket(client_end).expect("connection");
+        let queue = connection.new_event_queue();
+        let registry = connection.display().get_registry(&queue.handle(), ());
+        let mut local = Self {
+            connection,
+            queue,
+            registry,
+            client: Client::default(),
+            id,
+            files: Vec::new(),
+        };
+        local.roundtrip(run);
+        local
+    }
+
+    /// Runs the compositor and the client in turn until `done` holds.
+    fn pump(&mut self, run: &mut Running, what: &str, done: impl Fn(&Client, &State) -> bool) {
+        let started = Instant::now();
+        loop {
+            self.connection.flush().expect("flush");
+            if let Some(guard) = self.queue.prepare_read() {
+                match guard.read() {
+                    Ok(_) => {}
+                    Err(WaylandError::Io(error))
+                        if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(error) => panic!("{what}: {error}"),
+                }
+            }
+            self.queue
+                .dispatch_pending(&mut self.client)
+                .expect("client dispatch");
+            if done(&self.client, &run.state) {
+                return;
+            }
+            assert!(started.elapsed() < TIMEOUT, "{what}: not in time");
+            run.event_loop
+                .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+                .expect("dispatch");
+        }
+    }
+
+    /// Until the compositor has handled every request sent so far.
+    fn roundtrip(&mut self, run: &mut Running) {
+        let synced = self.client.synced;
+        self.connection.display().sync(&self.queue.handle(), Synced);
+        self.pump(run, "a roundtrip", |client, _| client.synced > synced);
+    }
+
+    fn bind<I>(&self, version: u32) -> I
+    where
+        I: Proxy + 'static,
+        Client: Dispatch<I, ()>,
+    {
+        self.client
+            .bind(&self.registry, &self.queue.handle(), version)
+            .expect("bind")
+    }
+
+    /// Whether the client sees the global `interface`.
+    fn sees(&self, interface: &str) -> bool {
+        self.client.globals.iter().any(|(_, i, _)| i == interface)
+    }
+
+    /// A buffer of `width` by `height` pixels in XRGB8888, each `bgrx`, and its file.
+    fn buffer(
+        &mut self,
+        shm: &wl_shm::WlShm,
+        width: i32,
+        height: i32,
+        bgrx: [u8; 4],
+    ) -> (wl_buffer::WlBuffer, std::fs::File) {
+        let mut file = unlinked().expect("buffer file");
+        let pixels = usize::try_from(width * height).expect("size");
+        file.write_all(&bgrx.repeat(pixels)).expect("pixels");
+        let qh = self.queue.handle();
+        let pool = shm.create_pool(file.as_fd(), width * height * 4, &qh, ());
+        let buffer = pool.create_buffer(
+            0,
+            width,
+            height,
+            width * 4,
+            wl_shm::Format::Xrgb8888,
+            &qh,
+            (),
+        );
+        pool.destroy();
+        let kept = file.try_clone().expect("buffer file");
+        self.files.push(file);
+        (buffer, kept)
+    }
+}
+
+/// The globals of C1 task 4, each offered once.
+const TASK4_GLOBALS: [&str; 7] = [
+    "ext_foreign_toplevel_list_v1",
+    "ext_workspace_manager_v1",
+    "ext_image_copy_capture_manager_v1",
+    "ext_foreign_toplevel_image_capture_source_manager_v1",
+    "wp_security_context_manager_v1",
+    "ext_session_lock_manager_v1",
+    "ext_idle_notifier_v1",
+];
+
+/// The fixture's window and the id of its client.
+fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
+    let window = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+    let id = window
+        .toplevel()
+        .and_then(|t| t.wl_surface().client())
+        .expect("the fixture's client")
+        .id();
+    (window, id)
+}
+
+/// The globals of task 4 are offered once each; a client inside a security context sees only
+/// the idle notifier among them (spike Q4: the privileged ones are refused to sandboxes).
+#[test]
+fn task4_standard_globals_are_offered() {
+    let mut run = Running::start(None);
+    for global in TASK4_GLOBALS {
+        let count = run.globals.iter().filter(|g| *g == global).count();
+        assert_eq!(count, 1, "{global}");
+    }
+    let (_, creator) = fixture_window(&run);
+    let context = SecurityContext {
+        sandbox_engine: Some("org.flatpak".into()),
+        app_id: Some("org.example.App".into()),
+        instance_id: None,
+        creator_client_id: creator,
+    };
+    let sandboxed = Local::connect(&mut run, Some(context));
+    for global in TASK4_GLOBALS {
+        let expected = global == "ext_idle_notifier_v1";
+        assert_eq!(
+            sandboxed.sees(global),
+            expected,
+            "{global} inside a context"
+        );
+    }
+    assert!(sandboxed.sees("wl_compositor"), "the core stays");
+    run.stop();
+}
+
+/// A window appears in the foreign toplevel list with its title and app id, follows a new
+/// title, and is closed when the window is destroyed; the others stay.
+#[test]
+fn task4_a_window_is_listed_and_unlisted() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    local.pump(&mut run, "the fixture's window is listed", |client, _| {
+        client.listed.iter().any(|l| l.done && l.title == "fixture")
+    });
+
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let toplevel = xdg.get_toplevel(&qh, ());
+    toplevel.set_title("Probe".into());
+    toplevel.set_app_id("org.athanor.Probe".into());
+    surface.commit();
+    local.pump(&mut run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let named = |title: &'static str| {
+        move |client: &Client, _: &State| {
+            client
+                .listed
+                .iter()
+                .any(|l| l.done && l.title == title && l.app_id == "org.athanor.Probe")
+        }
+    };
+    local.pump(&mut run, "the window is listed", named("Probe"));
+
+    toplevel.set_title("Probe 2".into());
+    local.pump(&mut run, "the new title is listed", named("Probe 2"));
+
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    local.pump(&mut run, "the window is unlisted", |client, _| {
+        client
+            .listed
+            .iter()
+            .any(|l| l.title == "Probe 2" && l.closed)
+    });
+    let fixture = local.client.listed.iter().find(|l| l.title == "fixture");
+    assert!(
+        fixture.is_some_and(|l| !l.closed),
+        "the fixture's window stays"
+    );
+    run.stop();
+}
+
+/// A window is captured into the client's wl_shm buffer, red above blue as it draws itself;
+/// locking the session stops the capture, and a new session is refused while locked (OS4).
+#[test]
+fn task4_a_window_is_captured_and_refused_while_locked() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let sources: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1 =
+        local.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = local.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
+    local.pump(&mut run, "the fixture's window is listed", |client, _| {
+        client.listed.iter().any(|l| l.done && l.title == "fixture")
+    });
+    let qh = local.queue.handle();
+    let handle = local
+        .client
+        .listed
+        .iter()
+        .find(|l| l.title == "fixture")
+        .map(|l| l.handle.clone())
+        .expect("the fixture's handle");
+    let source = sources.create_source(&handle, &qh, ());
+    let session = copy.create_session(&source, Options::empty(), &qh, ());
+    local.pump(&mut run, "the session has its constraints", |client, _| {
+        client.capture_size.is_some()
+    });
+    assert_eq!(
+        local.client.capture_size,
+        Some((WIDTH as u32, HEIGHT as u32))
+    );
+
+    let (buffer, file) = local.buffer(&shm, WIDTH, HEIGHT, [0x55; 4]);
+    let frame = session.create_frame(&qh, ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, WIDTH, HEIGHT);
+    frame.capture();
+    local.pump(&mut run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(local.client.captured, Some(Ok(())), "the frame is ready");
+    let at = |x: i32, y: i32| {
+        let mut px = [0; 4];
+        let offset = u64::try_from((y * WIDTH + x) * 4).expect("offset");
+        file.read_exact_at(&mut px, offset).expect("the buffer");
+        px
+    };
+    // XRGB8888 in memory: B, G, R, X.
+    assert_eq!(at(WIDTH / 2, HEIGHT / 4)[..3], [0, 0, 255], "top half red");
+    assert_eq!(
+        at(WIDTH / 2, HEIGHT * 3 / 4)[..3],
+        [255, 0, 0],
+        "bottom half blue"
+    );
+    frame.destroy();
+
+    let _lock = locks.lock(&qh, ());
+    let stopped = session.id();
+    local.pump(&mut run, "locking stops the session", |client, _| {
+        client.stopped.contains(&stopped)
+    });
+    let refused = copy.create_session(&source, Options::empty(), &qh, ());
+    let refused = refused.id();
+    local.pump(
+        &mut run,
+        "a session is refused while locked",
+        |client, _| client.stopped.contains(&refused),
+    );
+    run.stop();
+}
+
+/// The lock surface of output 0, as the compositor holds it.
+fn surface_on_server(state: &State) -> WlSurface {
+    let output = state.space.outputs().next().expect("an output");
+    state
+        .lock
+        .as_ref()
+        .and_then(|lock| lock.surface_on(output))
+        .expect("a lock surface")
+        .clone()
+}
+
+/// A window that closes while it is captured stops the session: the next frame fails with
+/// `stopped` and the session receives `stopped`, as the failure reason promises.
+#[test]
+fn task4_a_closed_window_stops_its_capture() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let sources: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1 =
+        local.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = local.bind(1);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let toplevel = xdg.get_toplevel(&qh, ());
+    toplevel.set_title("Probe".into());
+    surface.commit();
+    local.pump(&mut run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.pump(&mut run, "the window is listed", |client, _| {
+        client.listed.iter().any(|l| l.done && l.title == "Probe")
+    });
+    let handle = local
+        .client
+        .listed
+        .iter()
+        .find(|l| l.title == "Probe")
+        .map(|l| l.handle.clone())
+        .expect("the window's handle");
+    let source = sources.create_source(&handle, &qh, ());
+    let session = copy.create_session(&source, Options::empty(), &qh, ());
+    local.pump(&mut run, "the session has its constraints", |client, _| {
+        client.capture_size.is_some()
+    });
+
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    let (target, _) = local.buffer(&shm, WIDTH, HEIGHT, [0x55; 4]);
+    let frame = session.create_frame(&qh, ());
+    frame.attach_buffer(&target);
+    frame.capture();
+    let stopped = session.id();
+    local.pump(&mut run, "the session is stopped", |client, _| {
+        client.stopped.contains(&stopped)
+    });
+    // ext_image_copy_capture_frame_v1.failure_reason.stopped
+    assert_eq!(
+        local.client.captured,
+        Some(Err(2)),
+        "the frame fails stopped"
+    );
+    run.stop();
+}
+
+/// While locked only the lock surface is drawn, on its output, and only it has the keyboard and
+/// the pointer, whatever is clicked or focused and though the pointer has not moved; unlocking
+/// gives both back to the window.
+#[test]
+fn task4_the_lock_hides_and_takes_the_keyboard() {
+    use smithay::input::pointer::MotionEvent;
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let window_surface = window.toplevel().expect("a toplevel").wl_surface().clone();
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).as_ref() == Some(&window_surface)
+    });
+    let (w, h) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let centre = Point::from((
+        f64::from(w) / 2.0,
+        f64::from(h) / 2.0 - f64::from(HEIGHT) / 4.0,
+    ));
+    // The pointer rests on the window, and does not move again.
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let under = run.state.surface_under(centre);
+    let motion = MotionEvent {
+        location: centre,
+        serial: SERIAL_COUNTER.next_serial(),
+        time: smithay::backend::input::InputTime::now(),
+    };
+    pointer.motion(&mut run.state, under, &motion);
+    pointer.frame(&mut run.state);
+    assert_eq!(pointer.current_focus().as_ref(), Some(&window_surface));
+
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
+    let qh = local.queue.handle();
+    let lock = locks.lock(&qh, ());
+    local.pump(&mut run, "the session is locked", |client, _| client.locked);
+    assert_eq!(focus(&run.state), None, "no surface has the keyboard");
+
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    local.pump(&mut run, "the lock surface is configured", |client, _| {
+        client.lock_configure.is_some()
+    });
+    let (serial, width, height) = local.client.lock_configure.expect("a configure");
+    assert_eq!(
+        (width, height),
+        (OUTPUTS[0].width as u32, OUTPUTS[0].height as u32)
+    );
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = local.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = local.id.clone();
+    let locker_has_it = move |state: &State| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    };
+    local.pump(&mut run, "the lock surface has the keyboard", |_, state| {
+        locker_has_it(state)
+    });
+    // Its buffer committed.
+    local.roundtrip(&mut run);
+    assert_eq!(
+        pointer.current_focus().as_ref(),
+        Some(&surface_on_server(&run.state)),
+        "a click goes to the lock surface, not the window under it"
+    );
+
+    let first = run.state.capture(0).expect("frame of output 0");
+    assert_eq!(
+        pixel(&first, w, w / 2, h / 2 - HEIGHT / 4),
+        [0, 0, 0, 255],
+        "the window is hidden"
+    );
+    let second = run.state.capture(1).expect("frame of output 1");
+    assert!(
+        second.as_chunks::<4>().0.iter().all(background),
+        "an output without a lock surface shows the background only"
+    );
+    assert!(
+        run.state.under(centre).is_none(),
+        "nothing under the pointer"
+    );
+    run.state.click_focus(centre);
+    run.state.focus(&window);
+    run.state.focus_top();
+    assert!(
+        locker_has_it(&run.state),
+        "the keyboard stays with the lock surface"
+    );
+
+    lock.unlock_and_destroy();
+    local.pump(&mut run, "unlocking gives the keyboard back", |_, state| {
+        focus(state).as_ref() == Some(&window_surface)
+    });
+    assert_eq!(
+        pointer.current_focus().as_ref(),
+        Some(&window_surface),
+        "and the pointer"
+    );
+    let first = run.state.capture(0).expect("frame of output 0");
+    assert_eq!(
+        pixel(&first, w, w / 2, h / 2 - HEIGHT / 4),
+        RED,
+        "the window is back"
+    );
+    run.stop();
+}
+
+/// The idle notification fires after its timeout, and input resumes it.
+#[test]
+fn task4_idle_fires_and_input_resets_it() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = local.bind(1);
+    let started = Instant::now();
+    let _notification = notifier.get_idle_notification(100, &seat, &local.queue.handle(), ());
+    local.pump(&mut run, "the user is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    assert!(
+        started.elapsed() >= Duration::from_millis(100),
+        "not before the timeout"
+    );
+    run.state.activity();
+    local.pump(&mut run, "input resumes", |client, _| {
+        client.idle == ["idled", "resumed"]
+    });
+    run.stop();
+}
+
+/// Each output is a workspace group with one workspace, active, that the client's own
+/// `wl_output` of that output has entered.
+#[test]
+fn task4_each_output_has_an_active_workspace() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let qh = local.queue.handle();
+    let outputs: Vec<wl_output::WlOutput> = local
+        .client
+        .globals
+        .iter()
+        .filter(|(_, interface, _)| interface == "wl_output")
+        .map(|(name, _, version)| local.registry.bind(*name, (*version).min(4), &qh, ()))
+        .collect();
+    assert_eq!(outputs.len(), OUTPUTS.len());
+    local.roundtrip(&mut run);
+    let _manager: ext_workspace_manager_v1::ExtWorkspaceManagerV1 = local.bind(1);
+    local.pump(&mut run, "the workspaces are sent", |client, _| {
+        client.workspaces_done
+    });
+
+    let client = &local.client;
+    assert_eq!(client.groups.len(), OUTPUTS.len(), "one group per output");
+    let mut entered: Vec<ObjectId> = Vec::new();
+    for (_, outputs_in, workspaces_in) in &client.groups {
+        assert_eq!(outputs_in.len(), 1, "a group stands for one output");
+        entered.extend(outputs_in.iter().cloned());
+        assert_eq!(workspaces_in.len(), 1, "one workspace per group");
+        let state = client
+            .workspaces
+            .iter()
+            .find(|(id, _)| *id == workspaces_in[0])
+            .and_then(|(_, state)| *state);
+        assert_eq!(state, Some(ext_workspace_handle_v1::State::Active));
+    }
+    let bound: Vec<ObjectId> = outputs.iter().map(Proxy::id).collect();
+    assert!(
+        bound.iter().all(|id| entered.contains(id)),
+        "each output has its group"
+    );
     run.stop();
 }

@@ -493,7 +493,7 @@ build-toolkit)
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 task 1: what a client of athanor-compositor binds.
+    # doc_own_stack.md, C1 tasks 1 and 4: what a client of athanor-compositor binds.
     require athanor-compositor build-compositor
     rm -f "$out/compositor-globals.txt"
     in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
@@ -502,7 +502,9 @@ compositor-globals)
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
-        wl_data_device_manager zwlr_layer_shell_v1; do
+        wl_data_device_manager zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1 \
+        ext_image_copy_capture_manager_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
+        wp_security_context_manager_v1 ext_session_lock_manager_v1 ext_idle_notifier_v1; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -512,7 +514,7 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 13 globals, and a seat with pointer and keyboard"
+    echo "compositor-globals: the 20 globals, and a seat with pointer and keyboard"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;

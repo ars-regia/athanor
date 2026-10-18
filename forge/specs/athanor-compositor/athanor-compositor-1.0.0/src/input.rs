@@ -24,6 +24,7 @@ impl State {
     }
 
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        self.activity();
         match event {
             InputEvent::Keyboard { event, .. } => {
                 let Some(keyboard) = self.seat.get_keyboard() else {

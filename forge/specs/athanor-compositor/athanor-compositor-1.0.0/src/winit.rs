@@ -1,15 +1,13 @@
 //! The nested backend: a window of the parent compositor is the output; its events are input,
 //! resizes and the redraws that paint the space.
 
-use crate::state::{new_output, Backend, State, BACKGROUND};
+use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::winit::{WinitEvent, WinitGraphicsBackend};
 use smithay::desktop::layer_map_for_output;
-use smithay::desktop::space::render_output;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
@@ -93,38 +91,45 @@ impl State {
         let age = nested.backend.buffer_age().unwrap_or(0);
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
-                render_output::<_, WaylandSurfaceRenderElement<GlesRenderer>, _, _>(
-                    &output,
+                let view = View::of(&self.space, self.lock.as_ref(), &output);
+                draw_view(
                     renderer,
                     &mut framebuffer,
-                    1.0,
+                    &output,
                     age,
-                    [&self.space],
-                    &[],
+                    view,
                     &mut nested.damage_tracker,
-                    BACKGROUND,
                 )
                 .map(|result| (result.damage.cloned(), result.states))
                 .map_err(|error| error.to_string())
             }
             Err(error) => Err(error.to_string()),
         };
-        match rendered {
-            Ok((damage, states)) => {
-                if let Some(damage) = &damage {
-                    if let Err(error) = nested.backend.submit(Some(damage)) {
-                        tracing::warn!(%error, "a frame could not be submitted");
-                    }
-                }
-                self.frame_done(
-                    &output,
-                    &states,
-                    damage.is_some(),
-                    frame_target,
-                    frame_period,
-                );
+        let shown = match &rendered {
+            Ok((Some(damage), _)) => nested
+                .backend
+                .submit(Some(damage))
+                .inspect_err(|error| tracing::warn!(%error, "a frame could not be submitted"))
+                .is_ok(),
+            Ok((None, _)) => true,
+            Err(error) => {
+                tracing::warn!(%error, "the output could not be drawn");
+                false
             }
-            Err(error) => tracing::warn!(%error, "the output could not be drawn"),
+        };
+        if !shown {
+            // The tracker counts a failed frame as shown: a new one draws the next frame whole,
+            // so a lock is confirmed only once it is on screen.
+            nested.damage_tracker = OutputDamageTracker::from_output(&output);
+        }
+        if let Ok((damage, states)) = rendered {
+            let presented = shown && damage.is_some();
+            self.frame_done(&output, &states, presented, frame_target, frame_period);
+        }
+        self.serve_captures();
+        // A lock is confirmed only once the output shows it: drawn and submitted.
+        if shown {
+            self.locked_drawn();
         }
         self.space.refresh();
         self.popups.cleanup();
