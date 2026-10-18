@@ -167,12 +167,13 @@ class InternalSnapshot(unittest.TestCase):
 
     def run_script(self, sync=None, sleep=None, check=True, wait_tenths=50):
         """Runs the script; `sync` and `sleep` are bodies of stand-ins for sync(1) and sleep(1),
-        put first on PATH. A device is recorded on the second pass that reads it the same, so the
-        default bound leaves room for a slow machine; the cases that reach it set a short one."""
+        put first on PATH. The bound is counted in waits, on the clock of `environment`, so a
+        bound of 0.3 s is three waits however loaded the machine is (#610)."""
         env = self.environment(sync, sleep, wait_tenths)
         return subprocess.run([LIBEXEC], env=env, capture_output=True, text=True, check=check, timeout=30)
 
     def environment(self, sync, sleep, wait_tenths):
+        uptime = self.work / "uptime-clock"
         env = dict(
             os.environ,
             ATHANOR_USB_SYSFS=str(self.sysfs),
@@ -180,16 +181,24 @@ class InternalSnapshot(unittest.TestCase):
             ATHANOR_USBGUARD_MARKER=str(self.marker),
             ATHANOR_USBGUARD_PENDING=str(self.pending),
             ATHANOR_USBGUARD_WAIT_TENTHS=str(wait_tenths),
+            ATHANOR_UPTIME=str(uptime),
             LC_ALL="C",  # the messages bash gives in English
         )
+        if not uptime.exists():
+            uptime.write_text("0.00 0.00\n")
+        # The time since boot moves only when the script waits, by the 0.1 s it asks for: the
+        # wall clock of a loaded machine cannot end a wait before a device is read twice.
+        tick = f"""read -r up _ < {uptime}
+c=$((10#${{up/./}} + 10))
+printf '%d.%02d 0.00\\n' $((c / 100)) $((c % 100)) > {uptime}
+"""
         bin_dir = self.work / "bin"
-        for name, body in (("sync", sync), ("sleep", sleep)):
+        bin_dir.mkdir(exist_ok=True)
+        for name, body in (("sync", sync), ("sleep", tick + (sleep or ""))):
             if body is not None:
-                bin_dir.mkdir(exist_ok=True)
                 (bin_dir / name).write_text("#!/bin/bash\n" + body)
                 (bin_dir / name).chmod(0o755)
-        if bin_dir.exists():
-            env["PATH"] = f"{bin_dir}:{env['PATH']}"
+        env["PATH"] = f"{bin_dir}:{env['PATH']}"
         return env
 
     def on_wait(self, *steps):
@@ -217,11 +226,11 @@ case $(wc -l < {count}) in
             (d / interface_name(name, number)).mkdir()
         (d / "bConfigurationValue").write_text("1\n")
 
-    def first_run_leaves_1_1_pending(self):
+    def first_run_leaves_1_1_pending(self, sync=None):
         """A first run in which 1-1 never configures and 1-2 is admitted."""
         self.device("1-1", "0c45", "6a10", [], configured=False)
         self.device("1-2", "058f", "9540", [("0b", "00", "00")])
-        done = self.run_script(check=False, wait_tenths=3)
+        done = self.run_script(sync=sync, check=False, wait_tenths=3)
         self.assert_not_done(done, "1-1")
         self.assertEqual(self.pending.read_text(), 'runs 1\n1-1 0c45:6a10 ""\n')
         return done
@@ -617,9 +626,9 @@ case $(wc -l < {count}) in
     def test_a_pending_device_never_connected_is_waited_for_until_the_bound(self):
         self.pending.parent.mkdir()
         self.pending.write_text("runs 1\n1-2 058f:9540\n")
-        start = time.monotonic()
         done = self.run_script(check=False, wait_tenths=3)
-        self.assertGreaterEqual(time.monotonic() - start, 0.3)
+        # Three waits of 0.1 s on the clock of `environment`: the whole bound.
+        self.assertEqual((self.work / "uptime-clock").read_text(), "0.30 0.00\n")
         self.assert_not_done(done, "1-2")
         self.assertIn("<3>1-2 did not settle within 0.3 s: not connected", done.stderr)
         self.assertEqual(self.pending.read_text(), "runs 2\n1-2 058f:9540\n")
@@ -767,6 +776,12 @@ case $(wc -l < {count}) in
         self.assertTrue(self.marker.exists())
         self.assertFalse(self.pending.exists())
         self.assertFalse(self.rules.exists())
+
+    def test_a_slow_pass_does_not_use_up_the_bound(self):
+        # The first pass writes the pending file, durably: here each sync(1) takes 0.4 s of wall
+        # clock, more than the whole bound, as on a loaded CI machine (#610). The bound counts
+        # waits, so 1-2 is still read on a second pass and admitted.
+        self.first_run_leaves_1_1_pending(sync="/usr/bin/sleep 0.4\n")
 
     def test_the_bound_is_measured_on_the_time_since_boot(self):
         # The stand-in for sleep(1) returns at once and moves the time since boot on by 0.1 s:
