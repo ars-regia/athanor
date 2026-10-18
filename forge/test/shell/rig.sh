@@ -15,7 +15,8 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe into <out>/bin
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin,
+#                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
 #   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
@@ -483,8 +484,10 @@ build-toolkit)
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-toolkit --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-toolkit --all-targets --features gpu -- -D warnings \
                  && cargo test --locked -p athanor-toolkit \
-                 && cargo build --release --locked -p athanor-toolkit --example chooser --example field --example input_method \
+                 && cargo test --locked -p athanor-toolkit --features gpu \
+                 && cargo build --release --locked -p athanor-toolkit --features gpu --example chooser --example field --example input_method \
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method'

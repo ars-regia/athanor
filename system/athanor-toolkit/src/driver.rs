@@ -3,6 +3,7 @@
 //! text-input-v3, and the AccessKit adapter on AT-SPI.
 
 use crate::a11y::tree_update;
+#[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::render::{layout, render, Error};
 use crate::widget::{Event, Key, Ui, WindowButton};
@@ -45,14 +46,16 @@ use wayland_client::{
 /// What the application does with each event; it may change the widgets.
 pub type Handler = Box<dyn FnMut(&mut Ui, Event)>;
 
-/// The variable that picks the renderer: `cpu` (the default) or `gpu`.
+/// The variable that picks the renderer: `cpu` (the default) or `gpu`, which only a build with
+/// the `gpu` feature takes.
 pub const RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
 
 /// Whether [`RENDERER`]'s value asks for the GPU. Anything but `cpu`, `gpu` or unset is refused.
 fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
     match value.as_deref().map(|v| v.to_str()) {
         None | Some(Some("cpu")) => Ok(false),
-        Some(Some("gpu")) => Ok(true),
+        Some(Some("gpu")) if cfg!(feature = "gpu") => Ok(true),
+        Some(Some("gpu")) => Err(format!("{RENDERER} is gpu; this build has no gpu feature").into()),
         Some(Some(other)) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
         Some(None) => Err(format!("{RENDERER} is not valid UTF-8; it takes cpu or gpu").into()),
     }
@@ -82,6 +85,9 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     window.set_title(ui.title.as_str());
     window.set_app_id(app_id);
     window.commit();
+    #[cfg(not(feature = "gpu"))]
+    debug_assert!(!gpu, "wants_gpu refuses gpu without the feature");
+    #[cfg(feature = "gpu")]
     let gpu = if gpu {
         // SAFETY: `app` owns the wgpu surface and drops it before the window, by the order of
         // App's fields.
@@ -114,6 +120,7 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     );
 
     let mut app = App {
+        #[cfg(feature = "gpu")]
         gpu,
         qh: qh.clone(),
         registry: RegistryState::new(&globals),
@@ -285,6 +292,7 @@ impl DeactivationHandler for Deactivation {
 struct App {
     /// Drawing through wgpu when [`RENDERER`] asks for it; first, so that it drops before the
     /// window's surface it draws on.
+    #[cfg(feature = "gpu")]
     gpu: Option<Gpu>,
     /// For the frame callbacks that pace drawing.
     qh: QueueHandle<App>,
@@ -408,6 +416,7 @@ impl App {
         let surface = self.window.wl_surface();
         // Takes effect with the next commit: vello_gpu's present, or the driver's below.
         surface.frame(&self.qh, FrameCallbackData(surface.clone()));
+        #[cfg(feature = "gpu")]
         if let Some(gpu) = &mut self.gpu {
             // Presenting commits the surface, with the scale set here.
             surface.set_buffer_scale(self.scale);
@@ -771,7 +780,7 @@ mod tests {
     fn the_renderer_variable_takes_cpu_or_gpu_only() {
         assert!(!wants_gpu(None).unwrap());
         assert!(!wants_gpu(Some("cpu".into())).unwrap());
-        assert!(wants_gpu(Some("gpu".into())).unwrap());
+        assert_eq!(wants_gpu(Some("gpu".into())).ok(), cfg!(feature = "gpu").then_some(true));
         for refused in ["", "GPU", "vulkan"] {
             assert!(wants_gpu(Some(refused.into())).is_err(), "{refused:?}");
         }

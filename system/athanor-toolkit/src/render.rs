@@ -79,6 +79,7 @@ macro_rules! canvas {
 }
 
 canvas!(RenderContext, vello_cpu::Resources);
+#[cfg(feature = "gpu")]
 canvas!(vello_gpu::Scene, vello_gpu::Resources);
 
 fn color(c: Rgba) -> Color {
