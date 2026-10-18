@@ -3,13 +3,19 @@
 //! predate the lint gate and keep their warnings silenced until recovery is re-skinned
 //! and they are deleted (doc_shell.md, SH4).
 //!
-//! Without the `gtk` feature only `appearance` and `variant` remain: what a surface drawn
-//! without GTK reads.
+//! Without the `gtk` feature only `appearance`, `variant` and `dock` remain: what a surface
+//! drawn without GTK reads.
 
 pub mod appearance;
 #[cfg(feature = "gtk")]
 pub mod calmo;
 pub mod variant;
+
+/// The dock's measures in pixels, from `calmo/tokens.toml`: the GTK dock reads them through
+/// the stylesheet, a dock drawn without GTK from here.
+pub mod dock {
+    include!("../calmo/generated/dock.rs");
+}
 
 #[cfg(feature = "gtk")]
 #[allow(clippy::all, warnings)]
