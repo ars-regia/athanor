@@ -157,9 +157,16 @@ pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     // Whole logical pixels: an integer buffer scale then divides the buffer, as wl_surface
     // requires, and the background covers every pixel.
     let (w, h) = ui.layout();
-    let width = u16::try_from((w.ceil() * scale).ceil() as u32)?;
-    let height = u16::try_from((h.ceil() * scale).ceil() as u32)?;
-    Ok((width, height))
+    Ok((physical(w, scale)?, physical(h, scale)?))
+}
+
+/// `logical` pixels, rounded up to whole ones, in physical pixels at `scale`, as
+/// wp_fractional_scale_v1 computes them: in integers from the scale's 120ths, rounding half away
+/// from zero. Integer scales give an exact multiple.
+fn physical(logical: f32, scale: f32) -> Result<u16, Error> {
+    let scale120 = ((scale * 120.0).round() as u64).max(1);
+    let logical = logical.ceil() as u64;
+    Ok(u16::try_from((logical * scale120 + 60) / 120)?)
 }
 
 /// Draws the window, laid out by [`layout`], on `ctx` at `scale`.
@@ -324,6 +331,18 @@ mod tests {
             bottom.zip(top).is_some_and(|(b, t)| b - t <= 2),
             "rows {top:?} to {bottom:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_physical_size_rounds_as_the_fractional_scale_protocol_does() -> Result<(), Error> {
+        // 101 at 1.25 is 126.25: 126, where a ceiling gives 127.
+        assert_eq!(physical(101.0, 150.0 / 120.0)?, 126);
+        // 100 at 1.2 is 120, where 1.2 in f32 times 100 rounds up to 121.
+        assert_eq!(physical(100.0, 144.0 / 120.0)?, 120);
+        // Half a pixel rounds away from zero; integer scales multiply.
+        assert_eq!(physical(101.0, 1.5)?, 152);
+        assert_eq!(physical(99.5, 2.0)?, 200);
         Ok(())
     }
 

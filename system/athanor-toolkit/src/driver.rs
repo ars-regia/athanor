@@ -1,22 +1,38 @@
-//! The Wayland driver on smithay-client-toolkit: one xdg-toplevel drawn in shared memory by
-//! vello_cpu or through wgpu by vello_gpu, the keyboard and the pointer, the input method through
-//! text-input-v3, and the AccessKit adapter on AT-SPI.
+//! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows and wlr-layer-shell
+//! surfaces, several in one process, each drawn in shared memory by vello_cpu or through wgpu by
+//! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
+//! through text-input-v3, and one AccessKit adapter on AT-SPI per surface.
 
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::render::{layout, render, Error};
-use crate::widget::{Event, Key, Ui, WindowButton};
+use crate::widget::{Event, Key, Rect, Ui, WindowButton};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
+use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
+    Shape, WpCursorShapeDeviceV1,
+};
+use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1::{self, WpFractionalScaleManagerV1},
+    wp_fractional_scale_v1::{self, WpFractionalScaleV1},
+};
 use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::{
     zwp_text_input_manager_v3::{self, ZwpTextInputManagerV3},
     zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3},
 };
+use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::{
+    wp_viewport::{self, WpViewport},
+    wp_viewporter::{self, WpViewporter},
+};
+pub use smithay_client_toolkit::{
+    output::OutputInfo,
+    shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer},
+};
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState, FrameCallbackData},
+    compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
     delegate_registry,
     dispatch2::Dispatch2,
     output::{OutputHandler, OutputState},
@@ -24,10 +40,14 @@ use smithay_client_toolkit::{
     registry_handlers,
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
-        pointer::{PointerEvent, PointerEventKind, PointerHandler, BTN_LEFT},
+        pointer::{
+            cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
+            BTN_LEFT,
+        },
         Capability, SeatHandler, SeatState,
     },
     shell::{
+        wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         xdg::{
             window::{DecorationMode, Window, WindowConfigure, WindowDecorations, WindowHandler},
             XdgShell,
@@ -43,7 +63,7 @@ use wayland_client::{
     Connection, QueueHandle,
 };
 
-/// What the application does with each event; it may change the widgets.
+/// What a single window does with each event; it may change the widgets. See [`run_window`].
 pub type Handler = Box<dyn FnMut(&mut Ui, Event)>;
 
 /// The variable that picks the renderer: `cpu` (the default) or `gpu`, which only a build with
@@ -55,14 +75,90 @@ fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
     match value.as_deref().map(|v| v.to_str()) {
         None | Some(Some("cpu")) => Ok(false),
         Some(Some("gpu")) if cfg!(feature = "gpu") => Ok(true),
-        Some(Some("gpu")) => Err(format!("{RENDERER} is gpu; this build has no gpu feature").into()),
+        Some(Some("gpu")) => {
+            Err(format!("{RENDERER} is gpu; this build has no gpu feature").into())
+        }
         Some(Some(other)) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
         Some(None) => Err(format!("{RENDERER} is not valid UTF-8; it takes cpu or gpu").into()),
     }
 }
 
+/// A surface of the application, for as long as it is open. Never reused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SurfaceId(u64);
+
+/// How a surface is shown: the same widgets, in a window or on a layer of the shell.
+pub enum Role {
+    /// An xdg-toplevel, which draws its own title bar.
+    Window { app_id: String },
+    /// A wlr-layer-shell surface on the output the compositor picks.
+    Layer(LayerOptions),
+}
+
+/// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets.
+pub struct LayerOptions {
+    pub layer: Layer,
+    pub namespace: String,
+    pub anchor: Anchor,
+    /// Top, right, bottom, left, in logical pixels.
+    pub margin: [i32; 4],
+    pub exclusive_zone: i32,
+    pub keyboard: KeyboardInteractivity,
+    /// The part of the surface that takes the pointer, in logical pixels; `None` is all of it.
+    pub input_region: Option<Vec<Rect>>,
+}
+
+/// What runs on the driver: the surfaces it opens, and what it does with their events.
+pub trait Application {
+    /// The surfaces to open at start, before any output is known: a window, say.
+    fn start(&mut self) -> Vec<(Ui, Role)> {
+        Vec::new()
+    }
+
+    /// The layer surface for `output`, asked when the output is announced, and when it changes
+    /// while it has none; `None` leaves it without one. The driver keeps at most one on each
+    /// output, closes it when the output leaves or the compositor closes it, and asks again for
+    /// an output that comes back.
+    fn output(&mut self, _output: &OutputInfo) -> Option<(Ui, LayerOptions)> {
+        None
+    }
+
+    /// An output that has the application's `surface` changed: its scale, mode or position.
+    /// The surface follows the scale by itself.
+    fn output_changed(&mut self, _shell: &mut Shell, _surface: SurfaceId, _output: &OutputInfo) {}
+
+    /// An event of the widgets of `surface`. The application may change the widgets of any
+    /// surface through `shell`.
+    fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event);
+}
+
 /// Opens `ui` in a window and runs until the user closes it.
-pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
+pub fn run_window(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
+    struct Single {
+        window: Option<(Ui, Role)>,
+        on_event: Handler,
+    }
+    impl Application for Single {
+        fn start(&mut self) -> Vec<(Ui, Role)> {
+            self.window.take().into_iter().collect()
+        }
+        fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
+            if let Some(ui) = shell.ui_mut(surface) {
+                (self.on_event)(ui, event);
+            }
+        }
+    }
+    let role = Role::Window {
+        app_id: app_id.to_owned(),
+    };
+    run(Single {
+        window: Some((ui, role)),
+        on_event,
+    })
+}
+
+/// Runs `application` until its window closes, or until an error.
+pub fn run(application: impl Application + 'static) -> Result<(), Error> {
     let gpu = wants_gpu(std::env::var_os(RENDERER))?;
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
@@ -71,90 +167,465 @@ pub fn run(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> {
     WaylandSource::new(conn.clone(), queue)
         .insert(event_loop.handle())
         .map_err(|e| e.error.to_string())?;
-
-    let compositor = CompositorState::bind(&globals, &qh)?;
-    let xdg_shell = XdgShell::bind(&globals, &qh)?;
-    let shm = Shm::bind(&globals, &qh)?;
-    // Optional: without it, text comes from the keyboard alone.
-    let text_input_manager = globals.bind(&qh, 1..=1, TextInput).ok();
-    let surface = compositor.create_surface(&qh);
-    // The window draws its own title bar, as GTK does, so assistive technologies find the
-    // title and the window's buttons in its tree; a compositor that insists on drawing them
-    // says so in the first configure.
-    let window = xdg_shell.create_window(surface, WindowDecorations::RequestClient, &qh);
-    window.set_title(ui.title.as_str());
-    window.set_app_id(app_id);
-    window.commit();
     #[cfg(not(feature = "gpu"))]
     debug_assert!(!gpu, "wants_gpu refuses gpu without the feature");
-    #[cfg(feature = "gpu")]
-    let gpu = if gpu {
-        // SAFETY: `app` owns the wgpu surface and drops it before the window, by the order of
-        // App's fields.
-        #[allow(unsafe_code)]
-        let gpu = unsafe { Gpu::new(&conn, window.wl_surface()) }
-            .map_err(|e| format!("{RENDERER}=gpu: {e}"))?;
-        eprintln!("athanor-toolkit: vello_gpu on {}", gpu.adapter);
-        Some(gpu)
-    } else {
-        None
-    };
 
-    // The adapter calls its handlers on its own thread: the first tree comes from the last
-    // update drawn, and actions travel to the event loop.
-    let initial = Arc::new(Mutex::new(tree_update(&ui, 1.0)));
+    // The adapters call their handlers on their own thread: actions travel to the event loop.
     let (actions, receiver) = channel::channel();
     event_loop
         .handle()
         .insert_source(receiver, |event, _, app: &mut App| {
-            if let channel::Event::Msg(request) = event {
-                let event = app.ui.do_action(&request);
-                app.changed(event);
+            if let channel::Event::Msg((id, request)) = event {
+                let event = app
+                    .shell
+                    .get_mut(id)
+                    .and_then(|surface| surface.ui.do_action(&request));
+                app.changed(id, event);
             }
         })
         .map_err(|e| e.error.to_string())?;
-    let a11y = accesskit_unix::Adapter::new(
-        Activation(Arc::clone(&initial)),
-        Actions(actions),
-        Deactivation,
-    );
 
-    let mut app = App {
+    let shm = Shm::bind(&globals, &qh)?;
+    let shell = Shell {
+        #[cfg(feature = "gpu")]
+        conn: conn.clone(),
         #[cfg(feature = "gpu")]
         gpu,
         qh: qh.clone(),
+        pool: SlotPool::new(4096, &shm)?,
+        compositor: CompositorState::bind(&globals, &qh)?,
+        // Each is required only by the surfaces of its role, and refused when one is opened.
+        xdg_shell: XdgShell::bind(&globals, &qh).ok(),
+        layer_shell: LayerShell::bind(&globals, &qh).ok(),
+        // Optional: without them, the integer scale of wl_surface.
+        fractional_scale: globals.bind(&qh, 1..=1, Scaling).ok(),
+        viewporter: globals.bind(&qh, 1..=1, Scaling).ok(),
+        actions,
+        next: 0,
+        surfaces: Vec::new(),
+        exit: false,
+    };
+    let mut app = App {
+        application: Box::new(application),
+        shell,
+        outputs: PerOutput::default(),
         registry: RegistryState::new(&globals),
         seat: SeatState::new(&globals, &qh),
         output: OutputState::new(&globals, &qh),
-        pool: SlotPool::new(4096, &shm)?,
         shm,
-        window,
         keyboard: None,
+        keyboard_focus: None,
         pointer: None,
+        // Optional: without it, the pointer keeps the compositor's cursor.
+        cursor_shape: CursorShapeManager::bind(&globals, &qh).ok(),
+        cursor_shape_device: None,
         pointer_seat: None,
-        text_input_manager,
+        // Optional: without it, text comes from the keyboard alone.
+        text_input_manager: globals.bind(&qh, 1..=1, TextInput).ok(),
         text_input: None,
         ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
-        scale: 1,
-        configured: false,
-        frame_pending: false,
-        redraw: false,
-        exit: false,
-        ui,
-        on_event,
-        a11y,
-        initial,
         error: None,
     };
-    while !app.exit {
+    for (ui, role) in app.application.start() {
+        app.shell.open(ui, role, None)?;
+    }
+    while !app.shell.exit {
         event_loop.dispatch(None, &mut app)?;
         if let Some(error) = app.error.take() {
             return Err(error);
         }
     }
     Ok(())
+}
+
+/// The layer shell, or why a layer surface cannot be had: the check doc_shell.md SH4 asks of
+/// every layer surface. The driver speaks the protocol itself, so a surface it opens on this
+/// global is a layer surface; without the global there is none, and nothing degrades to a window.
+fn require_layer_shell(layer_shell: Option<&LayerShell>) -> Result<&LayerShell, Error> {
+    layer_shell.ok_or_else(|| {
+        "not a layer surface: the compositor does not offer zwlr_layer_shell_v1".into()
+    })
+}
+
+/// Which surface the application has on which output: at most one on each (the class of defect
+/// of #600). Generic, so that its tests feed it without a compositor.
+struct PerOutput<O, S>(Vec<(O, S)>);
+
+impl<O, S> Default for PerOutput<O, S> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
+    /// An output announced or changed. When it has a surface, returns it, and opens none; when it
+    /// has none, `open` may give it one.
+    fn seen(
+        &mut self,
+        output: O,
+        open: impl FnOnce(&O) -> Result<Option<S>, Error>,
+    ) -> Result<Option<S>, Error> {
+        if let Some((_, surface)) = self.0.iter().find(|(o, _)| *o == output) {
+            return Ok(Some(*surface));
+        }
+        if let Some(surface) = open(&output)? {
+            self.0.push((output, surface));
+        }
+        Ok(None)
+    }
+
+    /// An output left: its surface, for the driver to close.
+    fn left(&mut self, output: &O) -> Option<S> {
+        let at = self.0.iter().position(|(o, _)| o == output)?;
+        Some(self.0.remove(at).1)
+    }
+
+    /// The compositor closed `surface`: its output has none until it changes or comes back.
+    fn closed(&mut self, surface: S) {
+        self.0.retain(|(_, s)| *s != surface);
+    }
+}
+
+/// The surfaces open, and what opening one takes. The application reaches the widgets of each
+/// through it.
+pub struct Shell {
+    #[cfg(feature = "gpu")]
+    conn: Connection,
+    /// [`RENDERER`] asks for vello_gpu.
+    #[cfg(feature = "gpu")]
+    gpu: bool,
+    qh: QueueHandle<App>,
+    pool: SlotPool,
+    compositor: CompositorState,
+    xdg_shell: Option<XdgShell>,
+    layer_shell: Option<LayerShell>,
+    fractional_scale: Option<WpFractionalScaleManagerV1>,
+    viewporter: Option<WpViewporter>,
+    actions: Sender<(SurfaceId, ActionRequest)>,
+    next: u64,
+    surfaces: Vec<Surface>,
+    /// A window was closed: [`run`] returns.
+    exit: bool,
+}
+
+impl Shell {
+    /// The surfaces open, in the order they were opened.
+    pub fn surfaces(&self) -> impl Iterator<Item = SurfaceId> + '_ {
+        self.surfaces.iter().map(|s| s.id)
+    }
+
+    pub fn ui(&self, id: SurfaceId) -> Option<&Ui> {
+        self.surfaces.iter().find(|s| s.id == id).map(|s| &s.ui)
+    }
+
+    /// The widgets of `id`, which the driver draws again after the event.
+    pub fn ui_mut(&mut self, id: SurfaceId) -> Option<&mut Ui> {
+        let surface = self.get_mut(id)?;
+        surface.dirty = true;
+        Some(&mut surface.ui)
+    }
+
+    /// Sets the part of a layer surface that takes the pointer, in logical pixels; `None` is all
+    /// of it. Takes effect with the next frame.
+    pub fn set_input_region(&mut self, id: SurfaceId, rects: Option<&[Rect]>) -> Result<(), Error> {
+        let region = match rects {
+            Some(rects) => {
+                let region = Region::new(&self.compositor)?;
+                for r in rects {
+                    // Whole pixels that cover the widget: the origin down, the far edge up.
+                    let (x, y) = (r.x.floor(), r.y.floor());
+                    let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
+                    region.add(x as i32, y as i32, w as i32, h as i32);
+                }
+                Some(region)
+            }
+            None => None,
+        };
+        let surface = self
+            .get_mut(id)
+            .ok_or_else(|| format!("no open surface {id:?}"))?;
+        surface
+            .wl_surface()
+            .set_input_region(region.as_ref().map(Region::wl_region));
+        surface.dirty = true;
+        Ok(())
+    }
+
+    fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
+        self.surfaces.iter_mut().find(|s| s.id == id)
+    }
+
+    fn find(&mut self, wl: &wl_surface::WlSurface) -> Option<&mut Surface> {
+        self.surfaces.iter_mut().find(|s| s.wl_surface() == wl)
+    }
+
+    /// Opens `ui` as `role`, on `output` for a layer surface. It is drawn at its first configure.
+    fn open(
+        &mut self,
+        mut ui: Ui,
+        role: Role,
+        output: Option<&wl_output::WlOutput>,
+    ) -> Result<SurfaceId, Error> {
+        let id = SurfaceId(self.next);
+        let qh = &self.qh;
+        let wl = self.compositor.create_surface(qh);
+        // Fractional scale needs the viewport, which maps the buffer onto the logical size.
+        let fractional = match (&self.fractional_scale, &self.viewporter) {
+            (Some(scale), Some(viewporter)) => Some((
+                scale.get_fractional_scale(&wl, qh, Scaling),
+                viewporter.get_viewport(&wl, qh, Scaling),
+            )),
+            _ => None,
+        };
+        let mut input_region = None;
+        let shown = match role {
+            Role::Window { app_id } => {
+                let xdg_shell = self
+                    .xdg_shell
+                    .as_ref()
+                    .ok_or("the compositor does not offer xdg_wm_base")?;
+                // The window draws its own title bar, as GTK does, so assistive technologies
+                // find the title and the window's buttons in its tree; a compositor that insists
+                // on drawing them says so in the first configure.
+                let window = xdg_shell.create_window(wl, WindowDecorations::RequestClient, qh);
+                window.set_title(ui.title.as_str());
+                window.set_app_id(app_id);
+                Shown::Window(window)
+            }
+            Role::Layer(options) => {
+                let layer_shell = require_layer_shell(self.layer_shell.as_ref())?;
+                let surface = layer_shell.create_layer_surface(
+                    qh,
+                    wl,
+                    options.layer,
+                    Some(options.namespace),
+                    output,
+                );
+                surface.set_anchor(options.anchor);
+                let [top, right, bottom, left] = options.margin;
+                surface.set_margin(top, right, bottom, left);
+                surface.set_exclusive_zone(options.exclusive_zone);
+                surface.set_keyboard_interactivity(options.keyboard);
+                input_region = options.input_region;
+                Shown::Layer(surface)
+            }
+        };
+        #[cfg(feature = "gpu")]
+        let gpu = if self.gpu {
+            // SAFETY: the surface owns the wgpu surface and drops it before its wl_surface, by
+            // the order of Surface's fields.
+            #[allow(unsafe_code)]
+            let gpu = unsafe { Gpu::new(&self.conn, shown.wl_surface()) }
+                .map_err(|e| format!("{RENDERER}=gpu: {e}"))?;
+            eprintln!("athanor-toolkit: vello_gpu on {}", gpu.adapter);
+            Some(gpu)
+        } else {
+            None
+        };
+        // The first tree comes from the last update drawn.
+        let initial = Arc::new(Mutex::new(tree_update(&ui, 1.0)));
+        let a11y = accesskit_unix::Adapter::new(
+            Activation(Arc::clone(&initial)),
+            Actions(id, self.actions.clone()),
+            Deactivation,
+        );
+        // A layer surface asks for its widgets' size before the first configure.
+        let size = match &shown {
+            Shown::Layer(surface) => {
+                layout(&mut ui, 1.0)?;
+                let size = logical_size(&ui);
+                surface.set_size(size.0, size.1);
+                size
+            }
+            Shown::Window(_) => (0, 0),
+        };
+        self.next += 1;
+        self.surfaces.push(Surface {
+            #[cfg(feature = "gpu")]
+            gpu,
+            id,
+            fractional,
+            shown,
+            ui,
+            a11y,
+            initial,
+            scale: 1.0,
+            size,
+            configured: false,
+            frame_pending: false,
+            redraw: false,
+            dirty: false,
+        });
+        if input_region.is_some() {
+            self.set_input_region(id, input_region.as_deref())?;
+        }
+        if let Some(surface) = self.get_mut(id) {
+            surface.wl_surface().commit();
+        }
+        Ok(id)
+    }
+
+    /// Closes the surface `id`.
+    fn close(&mut self, id: SurfaceId) {
+        self.surfaces.retain(|s| s.id != id);
+    }
+
+    /// Draws the surfaces whose widgets changed.
+    fn draw_dirty(&mut self) -> Result<(), Error> {
+        for surface in &mut self.surfaces {
+            if surface.dirty {
+                surface.draw(&mut self.pool, &self.qh)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The widgets' size in whole logical pixels, never empty.
+fn logical_size(ui: &Ui) -> (u32, u32) {
+    let (w, h) = ui.size();
+    ((w.ceil() as u32).max(1), (h.ceil() as u32).max(1))
+}
+
+enum Shown {
+    Window(Window),
+    Layer(LayerSurface),
+}
+
+impl Shown {
+    fn wl_surface(&self) -> &wl_surface::WlSurface {
+        match self {
+            Shown::Window(window) => window.wl_surface(),
+            Shown::Layer(surface) => surface.wl_surface(),
+        }
+    }
+}
+
+struct Surface {
+    /// Drawing through wgpu when [`RENDERER`] asks for it; first, so that it drops before the
+    /// wl_surface it draws on.
+    #[cfg(feature = "gpu")]
+    gpu: Option<Gpu>,
+    id: SurfaceId,
+    /// wp_fractional_scale_v1 and the viewport it draws through, when the compositor offers both.
+    fractional: Option<(WpFractionalScaleV1, WpViewport)>,
+    shown: Shown,
+    ui: Ui,
+    a11y: accesskit_unix::Adapter,
+    initial: Arc<Mutex<TreeUpdate>>,
+    /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
+    /// integer one.
+    scale: f32,
+    /// The logical size last asked of a layer surface.
+    size: (u32, u32),
+    configured: bool,
+    /// A frame is committed and its callback has not come: the next one waits for it, so that
+    /// drawing never runs ahead of the compositor, which throttles a covered surface.
+    frame_pending: bool,
+    /// The state changed while a frame was pending: the callback draws it.
+    redraw: bool,
+    /// The widgets changed since the last draw.
+    dirty: bool,
+}
+
+impl Drop for Surface {
+    fn drop(&mut self) {
+        // Before the wl_surface, which the fields drop after this.
+        if let Some((scale, viewport)) = self.fractional.take() {
+            scale.destroy();
+            viewport.destroy();
+        }
+    }
+}
+
+impl Surface {
+    fn wl_surface(&self) -> &wl_surface::WlSurface {
+        self.shown.wl_surface()
+    }
+
+    fn draw(&mut self, pool: &mut SlotPool, qh: &QueueHandle<App>) -> Result<(), Error> {
+        self.dirty = false;
+        if !self.configured {
+            return Ok(());
+        }
+        if self.frame_pending {
+            // Lay out now, so that the accessibility tree follows the state at once; the
+            // pixels follow at the frame callback.
+            layout(&mut self.ui, self.scale)?;
+            self.publish_tree();
+            self.redraw = true;
+            return Ok(());
+        }
+        self.redraw = false;
+        self.frame_pending = true;
+        let surface = self.wl_surface().clone();
+        // Takes effect with the next commit: vello_gpu's present, or the driver's below.
+        surface.frame(qh, FrameCallbackData(surface.clone()));
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            layout(&mut self.ui, self.scale)?;
+            self.place();
+            // Presenting commits the surface, with the state placed here.
+            if let Some(gpu) = &mut self.gpu {
+                gpu.draw(&mut self.ui, self.scale)?;
+            }
+            // A present wgpu dropped as Outdated or Lost commits nothing and reports nothing:
+            // without this commit the frame callback would never come, and the surface would
+            // never draw again. After a present that did commit, this one is empty.
+            surface.commit();
+            self.publish_tree();
+            return Ok(());
+        }
+        let pixmap = render(&mut self.ui, self.scale)?;
+        let (w, h) = (i32::from(pixmap.width()), i32::from(pixmap.height()));
+        let (buffer, canvas) = pool.create_buffer(w, h, w * 4, wl_shm::Format::Argb8888)?;
+        // vello_cpu writes premultiplied RGBA bytes; ARGB8888 is BGRA in memory.
+        for (dst, src) in canvas
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(pixmap.data_as_u8_slice().as_chunks::<4>().0)
+        {
+            *dst = [src[2], src[1], src[0], src[3]];
+        }
+        self.place();
+        surface.damage_buffer(0, 0, w, h);
+        buffer.attach_to(&surface)?;
+        surface.commit();
+        self.publish_tree();
+        Ok(())
+    }
+
+    /// Sets, for the next commit, how the buffer drawn at `scale` maps onto the surface, and a
+    /// layer surface's size when its widgets' changed.
+    fn place(&mut self) {
+        let size = logical_size(&self.ui);
+        if let Shown::Layer(surface) = &self.shown {
+            if size != self.size {
+                surface.set_size(size.0, size.1);
+                self.size = size;
+            }
+        }
+        match &self.fractional {
+            Some((_, viewport)) => {
+                self.wl_surface().set_buffer_scale(1);
+                viewport.set_destination(size.0 as i32, size.1 as i32);
+            }
+            // The integer scale divides the buffer: `layout` draws whole logical pixels.
+            None => self.wl_surface().set_buffer_scale(self.scale as i32),
+        }
+    }
+
+    /// Hands the tree of the surface just drawn to the accessibility adapter.
+    fn publish_tree(&mut self) {
+        let update = tree_update(&self.ui, f64::from(self.scale));
+        if let Ok(mut initial) = self.initial.lock() {
+            initial.clone_from(&update);
+        }
+        self.a11y.update_if_active(|| update);
+    }
 }
 
 struct Activation(Arc<Mutex<TreeUpdate>>);
@@ -165,23 +636,93 @@ impl ActivationHandler for Activation {
     }
 }
 
-struct Actions(Sender<ActionRequest>);
+struct Actions(SurfaceId, Sender<(SurfaceId, ActionRequest)>);
 
 impl ActionHandler for Actions {
     fn do_action(&mut self, request: ActionRequest) {
-        // The receiver lives as long as the event loop; once it is gone the window is closing
+        // The receiver lives as long as the event loop; once it is gone the driver is ending
         // and there is nothing left to act on.
-        let _ = self.0.send(request);
+        let _ = self.1.send((self.0, request));
     }
 }
 
 struct Deactivation;
 
-/// The text-input-v3 state of the window.
+impl DeactivationHandler for Deactivation {
+    fn deactivate_accessibility(&mut self) {}
+}
+
+/// The user data of wp_fractional_scale_v1 and wp_viewporter's objects.
+struct Scaling;
+
+impl Dispatch2<WpFractionalScaleManagerV1, App> for Scaling {
+    fn event(
+        &self,
+        _: &mut App,
+        _: &WpFractionalScaleManagerV1,
+        _: wp_fractional_scale_manager_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
+}
+
+impl Dispatch2<WpFractionalScaleV1, App> for Scaling {
+    fn event(
+        &self,
+        app: &mut App,
+        proxy: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            let Some(surface) = app
+                .shell
+                .surfaces
+                .iter_mut()
+                .find(|s| s.fractional.as_ref().is_some_and(|(f, _)| f == proxy))
+            else {
+                return;
+            };
+            // The protocol's unit: 120ths.
+            surface.scale = scale as f32 / 120.0;
+            surface.dirty = true;
+            let id = surface.id;
+            app.changed(id, None);
+        }
+    }
+}
+
+impl Dispatch2<WpViewporter, App> for Scaling {
+    fn event(
+        &self,
+        _: &mut App,
+        _: &WpViewporter,
+        _: wp_viewporter::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
+}
+
+impl Dispatch2<WpViewport, App> for Scaling {
+    fn event(
+        &self,
+        _: &mut App,
+        _: &WpViewport,
+        _: wp_viewport::Event,
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+    }
+}
+
+/// The text-input-v3 state of the seat.
 #[derive(Default)]
 struct Ime {
-    /// The compositor sent `enter` for our surface and no `leave` since.
-    entered: bool,
+    /// The surface the compositor sent `enter` for, and no `leave` since.
+    entered: Option<SurfaceId>,
     /// We sent `enable` and no `disable` since.
     enabled: bool,
     /// The `commit` requests sent so far, which a `done` that answers the latest state names.
@@ -195,6 +736,17 @@ impl Ime {
     /// object's state.
     fn done(&mut self, serial: u32) -> (Pending, bool) {
         (std::mem::take(&mut self.pending), serial == self.commits)
+    }
+
+    /// Whether a focused field wants `enable` (`Some(true)`) or `disable` (`Some(false)`), or
+    /// nothing changes; counts the `commit` that sends it.
+    fn change(&mut self, field: bool) -> Option<bool> {
+        if field == self.enabled {
+            return None;
+        }
+        self.enabled = field;
+        self.commits = self.commits.wrapping_add(1);
+        Some(field)
     }
 }
 
@@ -257,12 +809,12 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
     ) {
         use zwp_text_input_v3::Event;
         match event {
-            Event::Enter { .. } => {
-                app.ime.entered = true;
+            Event::Enter { surface } => {
+                app.ime.entered = app.shell.find(&surface).map(|s| s.id);
                 app.sync_text_input();
             }
             Event::Leave { .. } => {
-                app.ime.entered = false;
+                app.ime.entered = None;
                 app.sync_text_input();
             }
             Event::PreeditString {
@@ -285,26 +837,22 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
     }
 }
 
-impl DeactivationHandler for Deactivation {
-    fn deactivate_accessibility(&mut self) {}
-}
-
 struct App {
-    /// Drawing through wgpu when [`RENDERER`] asks for it; first, so that it drops before the
-    /// window's surface it draws on.
-    #[cfg(feature = "gpu")]
-    gpu: Option<Gpu>,
-    /// For the frame callbacks that pace drawing.
-    qh: QueueHandle<App>,
+    application: Box<dyn Application>,
+    shell: Shell,
+    /// The layer surface the application has on each output.
+    outputs: PerOutput<wl_output::WlOutput, SurfaceId>,
     registry: RegistryState,
     seat: SeatState,
     output: OutputState,
     shm: Shm,
-    pool: SlotPool,
-    window: Window,
     keyboard: Option<wl_keyboard::WlKeyboard>,
+    /// The surface that has the keyboard.
+    keyboard_focus: Option<SurfaceId>,
     pointer: Option<wl_pointer::WlPointer>,
-    /// The seat of the pointer, which moving the window by its title bar names.
+    cursor_shape: Option<CursorShapeManager>,
+    cursor_shape_device: Option<WpCursorShapeDeviceV1>,
+    /// The seat of the pointer, which moving a window by its title bar names.
     pointer_seat: Option<wl_seat::WlSeat>,
     text_input_manager: Option<ZwpTextInputManagerV3>,
     text_input: Option<ZwpTextInputV3>,
@@ -314,64 +862,98 @@ struct App {
     /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
-    scale: i32,
-    configured: bool,
-    /// A frame is committed and its callback has not come: the next one waits for it, so that
-    /// drawing never runs ahead of the compositor, which throttles a covered window.
-    frame_pending: bool,
-    /// The state changed while a frame was pending: the callback draws it.
-    redraw: bool,
-    exit: bool,
-    ui: Ui,
-    on_event: Handler,
-    a11y: accesskit_unix::Adapter,
-    initial: Arc<Mutex<TreeUpdate>>,
     /// An error raised inside a callback, returned by [`run`].
     error: Option<Error>,
 }
 
 impl App {
-    /// Hands an event to the application, then redraws and updates the accessibility tree and
-    /// the input method.
-    fn changed(&mut self, event: Option<Event>) {
-        self.update(event);
-        if !self.exit {
+    fn fail(&mut self, error: Error) {
+        self.error = Some(error);
+        self.shell.exit = true;
+    }
+
+    /// Hands an event of `id`'s widgets to the application, then redraws and updates the
+    /// accessibility trees and the input method.
+    fn changed(&mut self, id: SurfaceId, event: Option<Event>) {
+        self.update(id, event);
+        if !self.shell.exit {
             self.sync_text_input();
         }
     }
 
-    /// Hands an event to the application, then redraws and updates the accessibility tree.
-    fn update(&mut self, event: Option<Event>) {
+    /// Hands an event of `id`'s widgets to the application, then redraws what changed and
+    /// updates the accessibility trees.
+    fn update(&mut self, id: SurfaceId, event: Option<Event>) {
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        // The event came from these widgets, which it changed.
+        surface.dirty = true;
         match event {
-            Some(Event::Window(WindowButton::Minimize)) => self.window.set_minimized(),
+            Some(Event::Window(WindowButton::Minimize)) => {
+                if let Shown::Window(window) = &surface.shown {
+                    window.set_minimized();
+                }
+            }
             Some(Event::Window(WindowButton::Close)) => {
-                self.exit = true;
+                self.shell.exit = true;
                 return;
             }
-            Some(event) => (self.on_event)(&mut self.ui, event),
+            Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
-        if let Err(error) = self.draw() {
-            self.error = Some(error);
-            self.exit = true;
+        if let Err(error) = self.shell.draw_dirty() {
+            self.fail(error);
         }
     }
 
-    /// Enables the input method while the window has the keyboard and a field the focus, and
-    /// disables it otherwise.
+    /// An output announced or changed: the application's surface on it follows, or one opens.
+    fn output_seen(&mut self, output: wl_output::WlOutput) {
+        let Some(info) = self.output.info(&output) else {
+            return;
+        };
+        let App {
+            application,
+            shell,
+            outputs,
+            ..
+        } = self;
+        let seen = outputs.seen(output, |output| {
+            application
+                .output(&info)
+                .map(|(ui, options)| shell.open(ui, Role::Layer(options), Some(output)))
+                .transpose()
+        });
+        match seen {
+            Ok(Some(id)) => {
+                self.application.output_changed(&mut self.shell, id, &info);
+                if let Err(error) = self.shell.draw_dirty() {
+                    self.fail(error);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => self.fail(error),
+        }
+    }
+
+    /// Enables the input method while a surface has it and a field the focus, and disables it
+    /// otherwise.
     fn sync_text_input(&mut self) {
         let Some(text_input) = &self.text_input else {
             return;
         };
         let field = self
-            .ui
-            .focus()
-            .filter(|&id| self.ime.entered && self.ui.field_text(id).is_some());
-        if field.is_some() == self.ime.enabled {
+            .ime
+            .entered
+            .and_then(|id| self.shell.ui(id))
+            .and_then(|ui| {
+                let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
+                Some(ui.widget(id).rect)
+            });
+        if self.ime.change(field.is_some()).is_none() {
             return;
         }
-        if let Some(id) = field {
-            let r = self.ui.widget(id).rect;
+        if let Some(r) = field {
             text_input.enable();
             text_input.set_content_type(ContentHint::None, ContentPurpose::Normal);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
@@ -379,8 +961,16 @@ impl App {
             text_input.disable();
         }
         text_input.commit();
-        self.ime.commits = self.ime.commits.wrapping_add(1);
-        self.ime.enabled = field.is_some();
+    }
+
+    /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
+    /// send for a surface that is gone: the next `enter` then sends `enable` again.
+    fn close(&mut self, id: SurfaceId) {
+        self.shell.close(id);
+        if self.ime.entered == Some(id) {
+            self.ime.entered = None;
+            self.sync_text_input();
+        }
     }
 
     /// Applies what the input method sent since the last `done`, in the protocol's order: the
@@ -388,84 +978,30 @@ impl App {
     /// answers an older state sends no new state; the next one that answers the latest does.
     fn text_input_done(&mut self, serial: u32) {
         let (Pending { preedit, commit }, current) = self.ime.done(serial);
-        let event = commit.and_then(|text| self.ui.commit(&printable(&text)));
+        let Some(id) = self.ime.entered else {
+            return;
+        };
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        let event = commit.and_then(|text| surface.ui.commit(&printable(&text)));
         let (preedit, cursor) = preedit.unwrap_or_default();
         let (preedit, cursor) = printable_preedit(&preedit, cursor);
-        self.ui.compose(&preedit, cursor);
+        surface.ui.compose(&preedit, cursor);
         if current {
-            self.changed(event);
+            self.changed(id, event);
         } else {
-            self.update(event);
+            self.update(id, event);
         }
-    }
-
-    fn draw(&mut self) -> Result<(), Error> {
-        if !self.configured {
-            return Ok(());
-        }
-        if self.frame_pending {
-            // Lay out now, so that the accessibility tree follows the state at once; the
-            // pixels follow at the frame callback.
-            layout(&mut self.ui, self.scale as f32)?;
-            self.publish_tree();
-            self.redraw = true;
-            return Ok(());
-        }
-        self.redraw = false;
-        self.frame_pending = true;
-        let surface = self.window.wl_surface();
-        // Takes effect with the next commit: vello_gpu's present, or the driver's below.
-        surface.frame(&self.qh, FrameCallbackData(surface.clone()));
-        #[cfg(feature = "gpu")]
-        if let Some(gpu) = &mut self.gpu {
-            // Presenting commits the surface, with the scale set here.
-            surface.set_buffer_scale(self.scale);
-            gpu.draw(&mut self.ui, self.scale as f32)?;
-            // A present wgpu dropped as Outdated or Lost commits nothing and reports nothing:
-            // without this commit the frame callback would never come, and the window would
-            // never draw again. After a present that did commit, this one is empty.
-            self.window.commit();
-            self.publish_tree();
-            return Ok(());
-        }
-        let pixmap = render(&mut self.ui, self.scale as f32)?;
-        let (w, h) = (i32::from(pixmap.width()), i32::from(pixmap.height()));
-        let (buffer, canvas) = self
-            .pool
-            .create_buffer(w, h, w * 4, wl_shm::Format::Argb8888)?;
-        // vello_cpu writes premultiplied RGBA bytes; ARGB8888 is BGRA in memory.
-        for (dst, src) in canvas
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(pixmap.data_as_u8_slice().as_chunks::<4>().0)
-        {
-            *dst = [src[2], src[1], src[0], src[3]];
-        }
-        surface.set_buffer_scale(self.scale);
-        surface.damage_buffer(0, 0, w, h);
-        buffer.attach_to(surface)?;
-        self.window.commit();
-        self.publish_tree();
-        Ok(())
-    }
-
-    /// Hands the tree of the window just drawn to the accessibility adapter.
-    fn publish_tree(&mut self) {
-        let update = tree_update(&self.ui, f64::from(self.scale));
-        if let Ok(mut initial) = self.initial.lock() {
-            initial.clone_from(&update);
-        }
-        self.a11y.update_if_active(|| update);
     }
 
     /// A key held down: as pressed again, except Enter, and Space outside a field, which
     /// activate once.
     fn repeat(&mut self, event: KeyEvent) {
         let in_field = self
-            .ui
-            .focus()
-            .is_some_and(|id| self.ui.field_text(id).is_some());
+            .keyboard_focus
+            .and_then(|id| self.shell.ui(id))
+            .is_some_and(|ui| ui.focus().is_some_and(|id| ui.field_text(id).is_some()));
         let activates = match event.keysym {
             Keysym::Return | Keysym::KP_Enter => true,
             Keysym::space => !in_field,
@@ -493,8 +1029,14 @@ impl App {
                 _ => return,
             },
         };
-        let event = self.ui.key(key);
-        self.changed(event);
+        let Some(id) = self.keyboard_focus else {
+            return;
+        };
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        let event = surface.ui.key(key);
+        self.changed(id, event);
     }
 }
 
@@ -503,13 +1045,18 @@ impl CompositorHandler for App {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
+        wl: &wl_surface::WlSurface,
         factor: i32,
     ) {
-        // ponytail: integer buffer scale; fractional scale (wp_fractional_scale_v1 with
-        // wp_viewporter) comes with the scaling milestone.
-        self.scale = factor.max(1);
-        self.changed(None);
+        let Some(surface) = self.shell.find(wl) else {
+            return;
+        };
+        // The fractional scale, when there is one, is the scale.
+        if surface.fractional.is_none() {
+            surface.scale = factor.max(1) as f32;
+            let id = surface.id;
+            self.changed(id, None);
+        }
     }
 
     fn transform_changed(
@@ -521,10 +1068,14 @@ impl CompositorHandler for App {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {
-        self.frame_pending = false;
-        if self.redraw {
-            self.update(None);
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, wl: &wl_surface::WlSurface, _: u32) {
+        let Some(surface) = self.shell.find(wl) else {
+            return;
+        };
+        surface.frame_pending = false;
+        if surface.redraw {
+            let id = surface.id;
+            self.update(id, None);
         }
     }
 
@@ -552,35 +1103,86 @@ impl OutputHandler for App {
         &mut self.output
     }
 
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        self.output_seen(output);
+    }
 
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn update_output(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        self.output_seen(output);
+    }
 
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        if let Some(id) = self.outputs.left(&output) {
+            self.close(id);
+        }
+    }
 }
 
-impl WindowHandler for App {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.exit = true;
+impl LayerShellHandler for App {
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface) {
+        let Some(surface) = self.shell.find(layer.wl_surface()) else {
+            return;
+        };
+        let id = surface.id;
+        self.outputs.closed(id);
+        self.close(id);
     }
 
     fn configure(
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &Window,
+        layer: &LayerSurface,
+        _: LayerSurfaceConfigure,
+        _: u32,
+    ) {
+        let Some(surface) = self.shell.find(layer.wl_surface()) else {
+            return;
+        };
+        // ponytail: the surface keeps its widgets' size whatever the compositor suggests;
+        // stretching to a size configured along both anchors of an edge comes with the dock.
+        surface.configured = true;
+        let id = surface.id;
+        self.changed(id, None);
+    }
+}
+
+impl WindowHandler for App {
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
+        self.shell.exit = true;
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        window: &Window,
         configure: WindowConfigure,
         _: u32,
     ) {
+        let Some(surface) = self.shell.find(window.wl_surface()) else {
+            return;
+        };
         // ponytail: once drawn, the title bar stays if the compositor later takes the
         // decorations over; no compositor of Athanor's switches modes on a mapped window.
         if configure.decoration_mode == DecorationMode::Client {
-            self.ui.add_title_bar();
+            surface.ui.add_title_bar();
         }
         // ponytail: the window keeps the widgets' natural size whatever the compositor
         // suggests; stretching to the configured size comes with the layout milestone.
-        self.configured = true;
-        self.changed(None);
+        surface.configured = true;
+        let id = surface.id;
+        self.changed(id, None);
     }
 }
 
@@ -618,14 +1220,19 @@ impl SeatHandler for App {
                 self.pointer_seat = Some(seat.clone());
                 self.seat
                     .get_pointer(qh, &seat)
-                    .map(|p| self.pointer = Some(p))
+                    .map(|p| {
+                        self.cursor_shape_device = self
+                            .cursor_shape
+                            .as_ref()
+                            .map(|manager| manager.get_shape_device(&p, qh));
+                        self.pointer = Some(p);
+                    })
                     .map_err(Into::into)
             }
             _ => Ok(()),
         };
         if let Err(error) = result {
-            self.error = Some(error);
-            self.exit = true;
+            self.fail(error);
         }
     }
 
@@ -643,6 +1250,9 @@ impl SeatHandler for App {
                 }
             }
             Capability::Pointer => {
+                if let Some(device) = self.cursor_shape_device.take() {
+                    device.destroy();
+                }
                 if let Some(pointer) = self.pointer.take() {
                     pointer.release();
                 }
@@ -660,12 +1270,15 @@ impl KeyboardHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
-        _: &wl_surface::WlSurface,
+        wl: &wl_surface::WlSurface,
         _: u32,
         _: &[u32],
         _: &[Keysym],
     ) {
-        self.a11y.update_window_focus_state(true);
+        self.keyboard_focus = self.shell.find(wl).map(|surface| {
+            surface.a11y.update_window_focus_state(true);
+            surface.id
+        });
     }
 
     fn leave(
@@ -673,10 +1286,13 @@ impl KeyboardHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
-        _: &wl_surface::WlSurface,
+        wl: &wl_surface::WlSurface,
         _: u32,
     ) {
-        self.a11y.update_window_focus_state(false);
+        if let Some(surface) = self.shell.find(wl) {
+            surface.a11y.update_window_focus_state(false);
+        }
+        self.keyboard_focus = None;
     }
 
     fn press_key(
@@ -734,22 +1350,35 @@ impl PointerHandler for App {
         events: &[PointerEvent],
     ) {
         for event in events {
-            if let PointerEventKind::Press {
-                button: BTN_LEFT,
-                serial,
-                ..
-            } = event.kind
-            {
-                let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                // A press on the title bar outside its buttons moves the window.
-                if self.ui.hit(x, y).is_none() && self.ui.in_title_bar(x, y) {
-                    if let Some(seat) = &self.pointer_seat {
-                        self.window.move_(seat, serial);
+            match event.kind {
+                PointerEventKind::Enter { serial } => {
+                    if let Some(device) = &self.cursor_shape_device {
+                        device.set_shape(serial, Shape::Default);
                     }
-                    continue;
                 }
-                let event = self.ui.click(x, y);
-                self.changed(event);
+                PointerEventKind::Press {
+                    button: BTN_LEFT,
+                    serial,
+                    ..
+                } => {
+                    let Some(surface) = self.shell.find(&event.surface) else {
+                        continue;
+                    };
+                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
+                    // A press on a window's title bar outside its buttons moves the window.
+                    if let Shown::Window(window) = &surface.shown {
+                        if surface.ui.hit(x, y).is_none() && surface.ui.in_title_bar(x, y) {
+                            if let Some(seat) = &self.pointer_seat {
+                                window.move_(seat, serial);
+                            }
+                            continue;
+                        }
+                    }
+                    let event = surface.ui.click(x, y);
+                    let id = surface.id;
+                    self.changed(id, event);
+                }
+                _ => {}
             }
         }
     }
@@ -780,7 +1409,10 @@ mod tests {
     fn the_renderer_variable_takes_cpu_or_gpu_only() {
         assert!(!wants_gpu(None).unwrap());
         assert!(!wants_gpu(Some("cpu".into())).unwrap());
-        assert_eq!(wants_gpu(Some("gpu".into())).ok(), cfg!(feature = "gpu").then_some(true));
+        assert_eq!(
+            wants_gpu(Some("gpu".into())).ok(),
+            cfg!(feature = "gpu").then_some(true)
+        );
         for refused in ["", "GPU", "vulkan"] {
             assert!(wants_gpu(Some(refused.into())).is_err(), "{refused:?}");
         }
@@ -788,6 +1420,129 @@ mod tests {
         let invalid = std::ffi::OsString::from_vec(vec![0x67, 0xff]);
         let error = wants_gpu(Some(invalid)).unwrap_err().to_string();
         assert!(error.contains("is not valid UTF-8"), "{error}");
+    }
+
+    #[test]
+    fn without_the_layer_shell_there_is_no_layer_surface() {
+        let error = require_layer_shell(None).err().map(|e| e.to_string());
+        assert_eq!(
+            error.as_deref(),
+            Some("not a layer surface: the compositor does not offer zwlr_layer_shell_v1")
+        );
+    }
+
+    /// An output as the compositor announces it: its global name and its scale.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Output {
+        name: u32,
+        scale: f32,
+    }
+
+    /// The outputs and surfaces of a fake driver: what [`PerOutput`] opened and closed.
+    #[derive(Default)]
+    struct Fake {
+        outputs: PerOutput<u32, u32>,
+        /// Open surfaces: (surface, output, the scale it was opened or last changed at).
+        open: Vec<(u32, u32, f32)>,
+        next: u32,
+    }
+
+    impl Fake {
+        fn seen(&mut self, output: Output) {
+            let Fake {
+                outputs,
+                open,
+                next,
+            } = self;
+            let existing = outputs
+                .seen(output.name, |&name| {
+                    *next += 1;
+                    open.push((*next, name, output.scale));
+                    Ok(Some(*next))
+                })
+                .unwrap();
+            if let Some(surface) = existing {
+                for s in open.iter_mut().filter(|s| s.0 == surface) {
+                    s.2 = output.scale;
+                }
+            }
+        }
+
+        fn left(&mut self, name: u32) {
+            if let Some(surface) = self.outputs.left(&name) {
+                self.open.retain(|s| s.0 != surface);
+            }
+        }
+
+        fn closed(&mut self, surface: u32) {
+            self.outputs.closed(surface);
+            self.open.retain(|s| s.0 != surface);
+        }
+
+        /// Exactly one surface on each of `outputs`, at its scale, and none elsewhere.
+        fn one_each(&self, outputs: &[Output]) {
+            for output in outputs {
+                let on: Vec<_> = self.open.iter().filter(|s| s.1 == output.name).collect();
+                assert_eq!(on.len(), 1, "output {}: {on:?}", output.name);
+                assert_eq!(on[0].2, output.scale, "output {}", output.name);
+            }
+            assert_eq!(self.open.len(), outputs.len(), "{:?}", self.open);
+        }
+    }
+
+    #[test]
+    fn every_output_has_one_surface_as_outputs_come_go_and_change_scale() {
+        let mut fake = Fake::default();
+        let a = Output {
+            name: 1,
+            scale: 1.0,
+        };
+        let b = Output {
+            name: 2,
+            scale: 1.0,
+        };
+        fake.seen(a);
+        fake.seen(b);
+        fake.one_each(&[a, b]);
+        // wl_output's done after the scale's change: the same surface, at 1.5.
+        let first = fake.open[1].0;
+        let b = Output { scale: 1.5, ..b };
+        fake.seen(b);
+        fake.one_each(&[a, b]);
+        assert_eq!(
+            fake.open[1].0, first,
+            "a scale change opened a second surface"
+        );
+        // Removed, as cosmic-comp does when an output is disabled (#600).
+        fake.left(b.name);
+        fake.one_each(&[a]);
+        // Added again: a new global, and a new surface.
+        let b = Output { name: 3, ..b };
+        fake.seen(b);
+        fake.one_each(&[a, b]);
+        fake.seen(b);
+        fake.one_each(&[a, b]);
+        // An output that leaves twice, or one never seen, closes nothing more.
+        fake.left(2);
+        fake.left(9);
+        fake.one_each(&[a, b]);
+        // The compositor closes a surface: its output gets one again at its next change.
+        let closed = fake.open[0].0;
+        fake.closed(closed);
+        fake.one_each(&[b]);
+        fake.seen(a);
+        fake.one_each(&[a, b]);
+    }
+
+    #[test]
+    fn an_output_the_application_leaves_bare_is_asked_again_at_its_change() {
+        let mut outputs = PerOutput::<u32, u32>::default();
+        assert_eq!(outputs.seen(1, |_| Ok(None)).ok(), Some(None));
+        assert_eq!(outputs.seen(1, |_| Ok(Some(7))).ok(), Some(None));
+        assert_eq!(outputs.seen(1, |_| Ok(Some(8))).ok(), Some(Some(7)));
+        // A surface that fails to open leaves the output bare.
+        assert!(outputs.seen(2, |_| Err("refused".into())).is_err());
+        assert_eq!(outputs.left(&2), None);
     }
 
     #[test]
@@ -804,6 +1559,23 @@ mod tests {
             "a stale done still applies its text"
         );
         assert!(ime.done(2).1);
+    }
+
+    #[test]
+    fn a_field_on_a_new_surface_is_enabled_after_the_old_one_closes() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        let mut ime = Ime {
+            entered: Some(a),
+            ..Ime::default()
+        };
+        assert_eq!(ime.change(true), Some(true));
+        // `a` closes without a `leave`: App::close ends its text input.
+        ime.entered = None;
+        assert_eq!(ime.change(false), Some(false));
+        ime.entered = Some(b);
+        assert_eq!(ime.change(true), Some(true), "no enable for the new field");
+        assert_eq!(ime.commits, 3);
+        assert_eq!(ime.change(true), None);
     }
 
     #[test]

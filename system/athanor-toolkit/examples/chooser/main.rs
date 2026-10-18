@@ -31,7 +31,7 @@ fn main() -> ExitCode {
             }
         }
     };
-    match driver::run(chooser.ui, "athanor-layout-chooser", Box::new(on_event)) {
+    match driver::run_window(chooser.ui, "athanor-layout-chooser", Box::new(on_event)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("athanor-layout-chooser: {error}");
