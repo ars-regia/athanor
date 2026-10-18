@@ -61,6 +61,30 @@ export_from /etc/vconsole.conf 'A-Za-z0-9_.@:,-' \
     XKBLAYOUT=XKB_DEFAULT_LAYOUT XKBVARIANT=XKB_DEFAULT_VARIANT \
     XKBMODEL=XKB_DEFAULT_MODEL XKBOPTIONS=XKB_DEFAULT_OPTIONS
 
+# A layout or variant libxkbcommon cannot compile makes cosmic-comp abort, since its own
+# fallback reads the same variables, and the greeter would never come up. Each layout
+# must have its symbols file and each variant its section there; otherwise the greeter
+# keeps plain us and says why in the journal. An unknown model or option still compiles.
+symbols=/usr/share/X11/xkb/symbols
+layouts=
+if [ -n "${XKB_DEFAULT_LAYOUT-}${XKB_DEFAULT_VARIANT-}" ]; then
+    layouts=${XKB_DEFAULT_LAYOUT:-us},
+fi
+variants=${XKB_DEFAULT_VARIANT-},
+while [ -n "$layouts" ]; do
+    layout=${layouts%%,*}
+    variant=${variants%%,*}
+    layouts=${layouts#*,}
+    variants=${variants#*,}
+    if [ ! -f "$symbols/$layout" ] ||
+        { [ -n "$variant" ] && ! grep -qF "xkb_symbols \"$variant\"" "$symbols/$layout"; }; then
+        unset XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_MODEL XKB_DEFAULT_OPTIONS
+        echo "keyboard layout ${layout}(${variant}) of /etc/vconsole.conf is unknown; using us" |
+            systemd-cat -t athanor-greeter -p warning
+        break
+    fi
+done
+
 # GTK 4.20's wayland input-method module, which GTK 4 picks whenever the compositor
 # offers text-input-v3, composes nothing by itself: with no input method running,
 # dead keys and Compose sequences are dropped (US-International loses every accent).
