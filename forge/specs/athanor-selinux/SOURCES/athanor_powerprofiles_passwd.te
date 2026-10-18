@@ -1,0 +1,19 @@
+module athanor_powerprofiles_passwd 1.0;
+
+require {
+    type powerprofiles_t;
+    type passwd_file_t;
+    class file { getattr open read };
+}
+
+# power-profiles-daemon reads /etc/passwd at every boot of a machine with a battery (#599):
+# getattr, open and read of passwd_file_t, denied by selinux-policy-targeted 43.10. Fedora 43
+# ships powerprofiles_t as a permissive domain, so the read goes through and only the denial
+# is logged; Fedora's rawhide policy makes the domain enforcing ("Remove 14 permissive
+# domains", fedora-selinux/selinux-policy 963c9ea0) and grants no read of passwd_file_t, so
+# there the read would fail. The three permissions denied are a subset of what
+# auth_read_passwd grants (no lock, no ioctl); passwd_file_t holds no password hash, which
+# lives in shadow_t.
+#
+# Drop this module once the Fedora release the image is built on grants the read.
+allow powerprofiles_t passwd_file_t:file { getattr open read };
