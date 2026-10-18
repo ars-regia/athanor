@@ -23,16 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import orca_walk  # noqa: E402
-from atspi_check import find_application  # noqa: E402
-from bar_e2e import (  # noqa: E402
-    RUNNING_WINDOW_BUTTON,
-    WINDOW,
-    buttons,
-    buttons_matching,
-    check,
-    wait_for,
-)
-from bar_session import PID_FILE, READY_FILE  # noqa: E402
 
 MINIMISED = re.compile("cc-window-2")
 WINDOW_FOCUSED = re.compile(r"cc-window-1(?: frame| cornice)?")
@@ -46,6 +36,18 @@ def spoken_by_the_dock(lines):
 def prepare(Atspi, name, started):
     """Sets the row up and gives the dock the focus; returns whether it did. The processes it
     starts are appended to `started`."""
+    # Imported here, not at the top: they load GLib, and the unit tests run without it.
+    from atspi_check import find_application
+    from bar_e2e import (
+        RUNNING_WINDOW_BUTTON,
+        WINDOW,
+        buttons,
+        buttons_matching,
+        check,
+        wait_for,
+    )
+    from bar_session import PID_FILE, READY_FILE
+
     if not check("READY=1 on NOTIFY_SOCKET", wait_for(READY_FILE.exists, 10)):
         return False
     app = find_application(Atspi, name)

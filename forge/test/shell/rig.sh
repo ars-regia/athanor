@@ -56,6 +56,13 @@ out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
 # The dock the atspi and orca scenes run, as a path inside the rig.
 dock_bin=${ATHANOR_DOCK_BIN:-/out/bin/athanor-dock}
 dock_app=${dock_bin##*/}
+# RIG_HOLD is split into words, so the name it carries must be one word.
+case $dock_app in
+'' | *[[:space:]]*)
+    echo "rig.sh: ATHANOR_DOCK_BIN must end in a file name without spaces, not '$dock_bin'" >&2
+    exit 2
+    ;;
+esac
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
