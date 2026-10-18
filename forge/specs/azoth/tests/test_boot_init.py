@@ -18,6 +18,13 @@ def function(name):
     return match.group(0)
 
 
+def function_line(name):
+    """The line of init that assigns the variable `name`."""
+    match = re.search(rf"^{name}=.*$", INIT.read_text(), re.M)
+    assert match, f"init does not assign {name}"
+    return match.group(0)
+
+
 class BootAssertions(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -59,6 +66,38 @@ class BootAssertions(unittest.TestCase):
 
     def test_a_controller_that_only_contains_memory_fails(self):
         self.assertNotEqual(self.run_check("memcg", controllers="cpu memory_hotplug\n").returncode, 0)
+
+    def run_insmod(self, errno, exit_code, message):
+        """insmod_expect against a stub insmod that prints `message` (kmod's format) and
+        exits with `exit_code`; returns the result and how many times the stub ran."""
+        calls = self.dir / "calls"
+        stub = self.dir / "insmod"
+        stub.write_text(f'#!/bin/sh\necho "$1" >> "{calls}"\necho "{message}" >&2\nexit {exit_code}\n')
+        stub.chmod(0o755)
+        script = f'K3_INSMOD_BIN="{stub}"\nK3_MODULES="{self.dir}"\n{function_line("insmod")}\n{function("insmod_expect")}\ninsmod_expect 0-nvidia.ko {errno}\n'
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True)
+        return result, calls.read_text().splitlines() if calls.exists() else []
+
+    def test_the_expected_errno_passes_and_loads_once(self):
+        result, calls = self.run_insmod("ENODEV", 1, "insmod: ERROR: could not insert module m: No such device")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(calls, [f"{self.dir}/0-nvidia.ko"])
+
+    def test_a_module_that_loads_when_a_failure_is_expected_fails(self):
+        result, _ = self.run_insmod("ENODEV", 0, "")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_another_errno_fails(self):
+        result, _ = self.run_insmod("EKEYREJECTED", 1, "insmod: ERROR: could not insert module m: No such device")
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_the_rejected_key_passes(self):
+        result, _ = self.run_insmod("EKEYREJECTED", 1, "insmod: ERROR: could not insert module m: Key was rejected by service")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_module_expected_to_load_passes(self):
+        result, _ = self.run_insmod("0", 0, "")
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_init_runs_both_checks_and_mounts_what_they_read(self):
         text = INIT.read_text()

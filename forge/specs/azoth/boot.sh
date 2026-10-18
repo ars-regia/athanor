@@ -112,6 +112,11 @@ install_binary() { # install_binary PATH: the binary and its libraries
 # price of `bpftool feature probe` done with the real tool. keyctl: the keyring assertions.
 install_binary /usr/sbin/bpftool
 install_binary /usr/bin/keyctl
+# kmod's insmod for the module checks: the busybox one retries a failed finit_module with
+# init_module, so each expected failure would load the module twice; kmod falls back only
+# on ENOSYS.
+install_binary /usr/bin/kmod
+ln -s ../bin/kmod "$R/usr/sbin/insmod"
 install -m 755 "$HERE/boot/init" "$R/init"
 # The modules under test, numbered: two branches share the same nvidia.ko. The k3.insmod
 # parameter lists file:errno and goes into the command line of every case.
