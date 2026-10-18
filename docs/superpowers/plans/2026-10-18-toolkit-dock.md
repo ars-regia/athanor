@@ -33,7 +33,7 @@
 
 OS9: the harness comes before the surface. The GTK dock has goldens for the twelve cases but no Orca transcript.
 
-- [ ] `orca_walk.py` and `rig.sh orca` accept `dock` (`atspi_check.py` and `rig.sh atspi dock` already do): a scripted walk through the dock's buttons (launcher, workspaces, library, favourites, a running app, a minimised one), its context menu opened with `<Shift>F10` and closed with Escape, in English and in Italian.
+- [ ] `orca_walk.py` and `rig.sh orca` accept `dock`, and `rig.sh atspi dock` records a transcript (`ATSPI_TRANSCRIPT`) and compares it with `atspi_compare.py`, as the chooser's branch does; today it runs only the four-widget count of `atspi_check.py`. Both take the dock's binary from `ATHANOR_DOCK_BIN` (task 6). A scripted walk through the dock's buttons (launcher, workspaces, library, favourites, a running app, a minimised one), its context menu opened with `<Shift>F10` and closed with Escape, in English and in Italian.
 - [ ] Record the GTK dock's transcripts as references under `forge/test/shell/golden/orca/` and `golden/atspi/`, beside the chooser's.
 - [ ] Check: `rig.sh orca dock` and `rig.sh orca dock it` against the GTK dock reproduce the references.
 
@@ -43,11 +43,12 @@ GTK goes; GLib and GIO stay. The launch path (`launch.rs`: `gio::AppInfo`, `Desk
 
 - [ ] `athanor-apps`: a default `gtk` feature holds `row`, `menu`, `openers`, `timing` and the `Host` trait; `model`, `favorites` and `i18n` build without it.
 - [ ] `athanor-compositor-client`: the launch code unchanged in behaviour; a connection made from a plain `wayland_client::Connection` beside today's one made from a `gdk::Display`, and outputs read from `wl_output` beside today's `gdk::Monitor`; the `gdk` paths behind a default `gtk` feature. Process launch is a hunk of the merge card: the diff of `launch.rs` is limited to its imports.
-- [ ] `athanor-style`: a default `gtk` feature holds what needs `gtk4` (the CSS provider, `gdk` colours); the dock's tokens (radius 18, the 6 px float margin, `acc_fg` for the running indicator, the light and dark palettes) and `Appearance` (scheme and accent, live) build without it.
+- [ ] `athanor-style`: a default `gtk` feature holds what needs `gtk4` (the CSS provider of `appearance.rs`'s `load()`, `calmo.rs`, `glass.rs` and the engines); `Appearance` (scheme and accent, live, on `gio::Settings`) builds without it. The dock's tokens, which today live only in `style.css` (radius 18, the 6 px float margin, `acc_fg` for the running indicator), become Rust constants beside the palettes, and a test reads `style.css` and fails when the two disagree.
 - [ ] `athanor-dock`: `gtk4` and `gtk4-layer-shell` optional under a default `gtk` feature, so that `placement` and `autohide` build without them.
 - [ ] The toolkit stays free of GPL crates: the dock fills the toolkit's `Theme` from `athanor-style`, the toolkit never depends on it.
 - [ ] GLib's main context runs inside the toolkit's calloop loop (its file descriptors as a calloop source, dispatched without blocking), so that the async launch completes.
 - [ ] CI: `just check-rust` already tests the toolkit with its default features; a job adds the build of the crates above without their `gtk` feature.
+- [ ] The edges between these crates (`athanor-apps` to `athanor-compositor-client`, `athanor-compositor-client` to `athanor-style`, `athanor-dock` to all three) are declared with `default-features = false`, and each crate's `gtk` feature forwards to its dependencies' `gtk`.
 - [ ] Check: `cargo tree --no-default-features` of `athanor-apps`, `athanor-compositor-client`, `athanor-style` and `athanor-dock` names no `gtk4`, `gdk4` or `gtk4-layer-shell`; the existing tests of the GTK path pass unchanged; a test launches a desktop entry through the security context from a calloop loop.
 
 ### Task 3: layer surfaces and outputs
