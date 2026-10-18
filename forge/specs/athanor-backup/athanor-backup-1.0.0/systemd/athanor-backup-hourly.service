@@ -16,10 +16,12 @@ MemoryHigh=48M
 MemoryMax=64M
 
 # Snapshotting needs CAP_FOWNER on the source subvolume, deleting one CAP_SYS_ADMIN.
-# The live homes stay read-only: only the snapshot subvolume is writable.
+# The live homes stay read-only: only the snapshot subvolume is writable. "-" lets the
+# namespace skip it while it does not exist: the first ExecStartPre= above creates it, and
+# systemd builds the namespace for that command too.
 CapabilityBoundingSet=CAP_FOWNER CAP_SYS_ADMIN
 ProtectSystem=strict
-ReadWritePaths=/var/home/.snapshots
+ReadWritePaths=-/var/home/.snapshots
 PrivateTmp=true
 PrivateNetwork=true
 NoNewPrivileges=yes

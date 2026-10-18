@@ -207,6 +207,9 @@ def collect():
         [*nix, "build", "--no-link", "--impure", "--expr", NIX_EXPR % os.getpid()],
     )
     probe("nix:gc", [*nix, "store", "gc"])
+    # The hourly snapshot, started by hand: the first run creates the snapshot subvolume (#595).
+    probe("backup", ["systemctl", "start", "athanor-backup-hourly.service"], sudo=True)
+    facts["backup"] = probe("backup:list", ["athanor-backup", "list"], sudo=True).split()
     return facts
 
 
@@ -322,6 +325,9 @@ def evaluate(facts, expect, contacts):
             "trust",
             f"verified.reason is {facts['trust'].get('reason')}, expected {reason}",
         )
+
+    if not facts["backup"]:
+        fail("backup", "athanor-backup list shows no snapshot after the hourly unit ran")
     return bad
 
 

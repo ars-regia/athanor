@@ -28,6 +28,8 @@ def good():
         "sysctl",
         "nix:build",
         "nix:gc",
+        "backup",
+        "backup:list",
     )
     return {
         "rc": {
@@ -48,6 +50,7 @@ def good():
         },
         "sysctl": "",
         "trust": {"reason": "signature"},
+        "backup": ["20261018T100000Z"],
     }
 
 
@@ -151,6 +154,11 @@ class Expectations(unittest.TestCase):
         f["trust"] = {"reason": "media"}
         self.assertEqual(failed(f), {"trust"})
 
+    def test_no_snapshot_after_the_hourly_unit_fails(self):
+        f = good()
+        f["backup"] = []
+        self.assertEqual(failed(f), {"backup"})
+
     def test_a_listener_on_another_port_fails(self):
         f = good()
         f["listeners"][0]["port"] = 2222
@@ -177,6 +185,8 @@ class Expectations(unittest.TestCase):
             "sysctl": "sysctl",
             "nix:build": "nix",
             "nix:gc": "nix",
+            "backup": "backup",
+            "backup:list": "backup",
             "security:athanor-update.service": "security",
         }
         for name, check in checks.items():
