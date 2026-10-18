@@ -16,29 +16,50 @@ if [ ! -d "$XDG_RUNTIME_DIR" ]; then
     mkdir -m 0700 "$XDG_RUNTIME_DIR"
 fi
 
-# The greeter speaks the system's language. Its own strings find /etc/locale.conf by
-# themselves (athanor-i18n); GTK's strings and the date's weekday and month names come
-# from glibc, which needs the variables. systemd applies locale.conf to services, but
-# greetd hands a session only PAM's environment. The file is parsed, never sourced: only
-# the locale variables are taken, and only values made of the characters a locale name
-# uses, so nothing in it runs in the process that starts the compositor.
-if [ -r /etc/locale.conf ]; then
+# Exports variables of a systemd environment-style file: $1 is the file, $2 the characters
+# a value may hold, and each further argument is FILE_NAME=EXPORTED_NAME. The file is
+# parsed, never sourced: only the named variables are taken, and only values made of the
+# allowed characters, so nothing in it runs in the process that starts the compositor.
+export_from() {
+    file=$1
+    allowed=$2
+    shift 2
+    [ -r "$file" ] || return 0
     while IFS='=' read -r variable value || [ -n "$variable" ]; do
-        case $variable in
-        LANG | LANGUAGE | LC_MESSAGES | LC_TIME) ;;
-        *) continue ;;
-        esac
+        target=
+        for pair in "$@"; do
+            case $pair in
+            "$variable="*) target=${pair#*=} ;;
+            esac
+        done
+        [ -n "$target" ] || continue
         # systemd's format allows the value in quotes.
         value=${value#\"}
         value=${value%\"}
         value=${value#\'}
         value=${value%\'}
         case $value in
-        '' | *[!A-Za-z0-9_.@:-]*) continue ;;
+        '' | *[!$allowed]*) continue ;;
         esac
-        export "$variable=$value"
-    done < /etc/locale.conf
-fi
+        export "$target=$value"
+    done < "$file"
+}
+
+# The greeter speaks the system's language. Its own strings find /etc/locale.conf by
+# themselves (athanor-i18n); GTK's strings and the date's weekday and month names come
+# from glibc, which needs the variables. systemd applies locale.conf to services, but
+# greetd hands a session only PAM's environment.
+export_from /etc/locale.conf 'A-Za-z0-9_.@:-' \
+    LANG=LANG LANGUAGE=LANGUAGE LC_MESSAGES=LC_MESSAGES LC_TIME=LC_TIME
+
+# The greeter types on the system's keyboard layout (doc_languages.md LN10). cosmic-comp
+# does not ask localed, and the greetd user has no xkb_config, so libxkbcommon takes the
+# layout from XKB_DEFAULT_*; without them it is plain us, and a password typed with the
+# dead keys of us(intl) arrives with its accents split. localed keeps the XKB lines of
+# vconsole.conf in step with SetX11Keyboard. The lists are comma-separated.
+export_from /etc/vconsole.conf 'A-Za-z0-9_.@:,-' \
+    XKBLAYOUT=XKB_DEFAULT_LAYOUT XKBVARIANT=XKB_DEFAULT_VARIANT \
+    XKBMODEL=XKB_DEFAULT_MODEL XKBOPTIONS=XKB_DEFAULT_OPTIONS
 
 # GTK 4.20's wayland input-method module, which GTK 4 picks whenever the compositor
 # offers text-input-v3, composes nothing by itself: with no input method running,

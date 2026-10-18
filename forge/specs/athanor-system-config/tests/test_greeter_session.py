@@ -14,12 +14,19 @@ SCRIPT = Path(__file__).resolve().parents[1] / "SOURCES/usr/bin/athanor-greeter-
 
 
 class GreeterSession(unittest.TestCase):
-    def session_environment(self, locale_conf):
+    def session_environment(self, locale_conf, vconsole_conf=None):
         work = Path(tempfile.mkdtemp())
         conf = work / "locale.conf"
         conf.write_text(locale_conf)
+        vconsole = work / "vconsole.conf"
+        if vconsole_conf is not None:
+            vconsole.write_text(vconsole_conf)
         script = work / "athanor-greeter-session"
-        script.write_text(SCRIPT.read_text().replace("/etc/locale.conf", str(conf)))
+        script.write_text(
+            SCRIPT.read_text()
+            .replace("/etc/locale.conf", str(conf))
+            .replace("/etc/vconsole.conf", str(vconsole))
+        )
         stubs = work / "bin"
         stubs.mkdir()
         (stubs / "systemd-cat").write_text(f'#!/bin/sh\nenv > "{work}/env"\n')
@@ -59,6 +66,38 @@ class GreeterSession(unittest.TestCase):
         self.assertEqual(env["LANG"], "en_US.UTF-8")
         self.assertNotIn("LD_PRELOAD", env)
         self.assertNotEqual(env["PATH"], "/tmp")
+
+    def test_the_system_layout_reaches_libxkbcommon(self):
+        env = self.session_environment(
+            "LANG=it_IT.UTF-8",
+            'KEYMAP=us-intl\nXKBLAYOUT="us,it"\nXKBVARIANT=intl,\n'
+            "XKBMODEL=pc105\nXKBOPTIONS=grp:alt_shift_toggle,compose:ralt",
+        )
+        self.assertEqual(env["XKB_DEFAULT_LAYOUT"], "us,it")
+        self.assertEqual(env["XKB_DEFAULT_VARIANT"], "intl,")
+        self.assertEqual(env["XKB_DEFAULT_MODEL"], "pc105")
+        self.assertEqual(
+            env["XKB_DEFAULT_OPTIONS"], "grp:alt_shift_toggle,compose:ralt"
+        )
+        self.assertNotIn("KEYMAP", env)
+        self.assertNotIn("XKBLAYOUT", env)
+
+    def test_a_layout_is_never_run_nor_taken_with_other_characters(self):
+        marker = Path(tempfile.mkdtemp()) / "ran"
+        env = self.session_environment(
+            "LANG=it_IT.UTF-8",
+            f"XKBLAYOUT=us;touch {marker}\nXKBVARIANT=$(touch {marker})\n"
+            "XKBOPTIONS=a b\n",
+        )
+        self.assertFalse(marker.exists())
+        self.assertNotIn("XKB_DEFAULT_LAYOUT", env)
+        self.assertNotIn("XKB_DEFAULT_VARIANT", env)
+        self.assertNotIn("XKB_DEFAULT_OPTIONS", env)
+
+    def test_no_vconsole_conf_leaves_the_layout_to_libxkbcommon(self):
+        env = self.session_environment("LANG=it_IT.UTF-8")
+        self.assertEqual(env["LANG"], "it_IT.UTF-8")
+        self.assertFalse(any(name.startswith("XKB_DEFAULT_") for name in env))
 
 
 if __name__ == "__main__":
