@@ -190,3 +190,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | accepted | security, update, process |
 | ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122 | shell, security, process |
 | ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | accepted | shell, security, process |
+| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | proposed | process, docs, platform, security, update, shell |
