@@ -14,7 +14,7 @@
 
 use std::io;
 use std::marker::PhantomData;
-use std::os::fd::{AsFd, BorrowedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::raw::{c_int, c_uint};
 use std::time::Duration;
 
@@ -27,6 +27,7 @@ use glib::ffi::{
 };
 use glib::translate::ToGlibPtr;
 use nix::errno::Errno;
+use nix::libc;
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags};
 use nix::sys::time::TimeSpec;
 use nix::sys::timerfd::{ClockId, Expiration, TimerFd, TimerFlags, TimerSetTimeFlags};
@@ -140,8 +141,10 @@ impl GlibSource {
     /// last iteration's. Built afresh, the set holds exactly what GLib asked for: a descriptor
     /// closed since, or a number reused by another file, can neither linger nor be missed,
     /// and no descriptor is ever deleted by its number. True when a descriptor cannot be
-    /// watched: epoll refuses a regular file with EPERM, and poll calls one always ready, so
-    /// this iteration must not wait.
+    /// watched, so that this iteration does not wait and `g_poll` reports it to GLib as
+    /// poll would: epoll refuses a regular file with EPERM, which poll calls always ready,
+    /// and a closed descriptor with EBADF, which poll answers POLLNVAL. Any other error
+    /// (ENOMEM, ENOSPC) ends the loop.
     fn watch(&mut self) -> io::Result<bool> {
         let mut wanted: Vec<(RawFd, EpollFlags)> = Vec::with_capacity(self.fds.len());
         // poll ignores a negative descriptor; so does the set.
@@ -162,13 +165,20 @@ impl GlibSource {
         let set = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)?;
         let mut always_ready = false;
         for (fd, flags) in wanted {
-            // SAFETY: the query that named `fd` ran just now, on this thread, which owns the
-            // context, and no source has run since: the source that named it holds it open.
-            let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-            match set.add(borrowed, EpollEvent::new(flags, 0)) {
-                Ok(()) => {}
-                Err(Errno::EPERM) => always_ready = true,
-                Err(err) => return Err(err.into()),
+            let mut event = libc::epoll_event {
+                events: flags.bits().cast_unsigned(),
+                u64: 0,
+            };
+            // SAFETY: plain system call on a number, which may name a closed descriptor: the
+            // kernel answers EBADF then. `set` is open and `event` lives across the call.
+            let added = unsafe {
+                libc::epoll_ctl(set.0.as_raw_fd(), libc::EPOLL_CTL_ADD, fd, &mut event)
+            };
+            if added < 0 {
+                match Errno::last() {
+                    Errno::EPERM | Errno::EBADF => always_ready = true,
+                    errno => return Err(errno.into()),
+                }
             }
         }
         let outer = &self.epoll.get_ref().0;
@@ -279,7 +289,6 @@ mod tests {
     use std::cell::Cell;
     use std::fs::File;
     use std::io::Write;
-    use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -300,7 +309,7 @@ mod tests {
                 glib::ControlFlow::Break
             },
         );
-        // SAFETY: a live source, not yet attached, and a descriptor the caller keeps open.
+        // SAFETY: a live source, not yet attached; GLib only keeps the number to poll it.
         unsafe { glib::ffi::g_source_add_unix_fd(raw_source(&source), fd, G_IO_IN) };
         source.attach(None);
         source
@@ -384,7 +393,7 @@ mod tests {
         assert_eq!(duplicated, number, "dup2");
         drop((new, old_peer));
         let fired = Arc::new(AtomicBool::new(false));
-        let _second = on_readable(number, &fired);
+        let second = on_readable(number, &fired);
         // Attaching and destroying wake GLib's own descriptor, and a turn that wakes for it
         // polls every descriptor: drain it first, so that only the new file can wake the loop.
         for _ in 0..2 {
@@ -394,12 +403,25 @@ mod tests {
         }
         new_peer.write_all(b"x").expect("write");
         assert!(until(&mut event_loop, &fired), "the reused number woke the loop");
+        second.destroy();
         drop(old);
 
         // A regular file, which epoll refuses and poll calls always ready.
         let file = File::open(std::env::current_exe().expect("exe")).expect("open");
         let fired = Arc::new(AtomicBool::new(false));
-        let _file_source = on_readable(file.as_raw_fd(), &fired);
+        let file_source = on_readable(file.as_raw_fd(), &fired);
         assert!(until(&mut event_loop, &fired), "a regular file is ready at once");
+        file_source.destroy();
+
+        // A closed descriptor, which epoll refuses and poll answers POLLNVAL. A number far
+        // above any the tests open, so that no other test takes it meanwhile.
+        const CLOSED: RawFd = 900;
+        // SAFETY: only asks whether the number names a descriptor.
+        let open = unsafe { libc::fcntl(CLOSED, libc::F_GETFD) };
+        assert_eq!((open, Errno::last()), (-1, Errno::EBADF), "fd {CLOSED} is closed");
+        let fired = Arc::new(AtomicBool::new(false));
+        let closed_source = on_readable(CLOSED, &fired);
+        assert!(until(&mut event_loop, &fired), "a closed descriptor is reported at once");
+        closed_source.destroy();
     }
 }
