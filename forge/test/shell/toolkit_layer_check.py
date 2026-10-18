@@ -10,7 +10,6 @@ times the size its viewport maps it to.
 """
 
 import json
-import math
 import os
 import re
 import subprocess
@@ -44,8 +43,14 @@ def live_surfaces(lines):
     return live
 
 
+def physical(logical, scale):
+    """`logical` pixels at `scale`, as wp_fractional_scale_v1 rounds them: in integers from the
+    scale's 120ths, half away from zero."""
+    return (logical * round(scale * 120) + 60) // 120
+
+
 def drawn_at(lines, scale):
-    """Whether a buffer was drawn at `scale`: a create_buffer of ceil(w * scale) x ceil(h * scale)
+    """Whether a buffer was drawn at `scale`: a create_buffer of physical(w) x physical(h)
     followed by the set_destination(w, h) that maps it, as the driver sends them."""
     buffer = None
     for line in lines:
@@ -53,7 +58,7 @@ def drawn_at(lines, scale):
             buffer = (int(m[1]), int(m[2]))
         elif (m := DESTINATION.search(line)) and buffer is not None:
             w, h = int(m[1]), int(m[2])
-            if buffer == (math.ceil(w * scale), math.ceil(h * scale)):
+            if buffer == (physical(w, scale), physical(h, scale)):
                 return True
             buffer = None
     return False

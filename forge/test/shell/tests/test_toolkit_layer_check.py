@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from toolkit_layer_check import drawn_at, live_surfaces
+from toolkit_layer_check import drawn_at, live_surfaces, physical
 
 TRACE = """\
 [1.0]  -> zwlr_layer_shell_v1#10.get_layer_surface(new id zwlr_layer_surface_v1#30, wl_surface#29, wl_output#12, 2, "x")
@@ -26,6 +26,11 @@ class TestToolkitLayerCheck(unittest.TestCase):
         self.assertTrue(drawn_at(TRACE, 1.5))
         self.assertFalse(drawn_at(TRACE, 2.0))
         self.assertFalse(drawn_at(TRACE[:4], 1.5))
+
+    def test_the_physical_size_rounds_as_the_fractional_scale_protocol_does(self):
+        self.assertEqual(physical(101, 150 / 120), 126)
+        self.assertEqual(physical(100, 144 / 120), 120)
+        self.assertEqual(physical(101, 1.5), 152)
 
 
 if __name__ == "__main__":
