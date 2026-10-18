@@ -8,7 +8,7 @@ set -euo pipefail
 crates=(athanor-apps athanor-compositor-client athanor-style athanor-dock)
 status=0
 for crate in "${crates[@]}"; do
-    tree=$(cargo tree --locked --no-default-features -p "$crate" -e normal,build --prefix none --format '{p}')
+    tree=$(cargo tree --locked --no-default-features -p "$crate" -e normal,build,dev --prefix none --format '{p}')
     if gtk=$(grep -E '^(gtk4|gdk4)[-a-z0-9]* ' <<<"$tree" | sort -u); then
         echo "no_gtk.sh: $crate without gtk still depends on:" >&2
         echo "$gtk" >&2
