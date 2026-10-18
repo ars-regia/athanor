@@ -163,6 +163,10 @@ def collect():
         facts["security"] |= parse_security(
             probe(f"security:{u}", ["systemd-analyze", "security", "--no-pager", u])
         )
+    # The hourly snapshot, started by hand: the first run creates the snapshot subvolume (#595).
+    # Before the denials are read, so that the run's own denials count.
+    probe("backup", ["systemctl", "start", "athanor-backup-hourly.service"], sudo=True)
+    facts["backup"] = probe("backup:list", ["athanor-backup", "list"], sudo=True).split()
     facts["avc"] = parse_avc(
         probe(
             "avc",
@@ -207,9 +211,6 @@ def collect():
         [*nix, "build", "--no-link", "--impure", "--expr", NIX_EXPR % os.getpid()],
     )
     probe("nix:gc", [*nix, "store", "gc"])
-    # The hourly snapshot, started by hand: the first run creates the snapshot subvolume (#595).
-    probe("backup", ["systemctl", "start", "athanor-backup-hourly.service"], sudo=True)
-    facts["backup"] = probe("backup:list", ["athanor-backup", "list"], sudo=True).split()
     return facts
 
 
