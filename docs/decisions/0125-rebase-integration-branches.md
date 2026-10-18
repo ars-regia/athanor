@@ -26,9 +26,12 @@ The maintainer decided on 2026-10-19:
 1. A branch `rebase/<name>` is allowed only for a change of the Fedora base that cannot land in
    parts. Its parts merge into it by pull request; it then merges into the product branch as one
    squash-merged pull request.
-2. A ruleset `rebase-branches` protects `rebase/*`. It requires the check `gate` and code-owner
-   review, with the parameters of `product-review`, and refuses force push. It has no deletion
-   protection, and its only bypass actor is the repository admin role in pull-request mode.
+2. Two rulesets protect `rebase/*`, split as `product-branches` and `product-review` are.
+   `rebase-branches` requires the check `gate` and refuses force push, with no bypass actor; the
+   check is not enforced on the push that creates the branch, whose tip on `iso-v0` carries no
+   `gate` run. `rebase-review` holds code-owner review with the parameters of `product-review`,
+   and its only bypass actor is the repository admin role in pull-request mode, so an admin merge
+   skips the review but never a red `gate`. Neither has a deletion rule.
 3. The branch lives until its single pull request into the product branch merges, and is deleted
    then. The merge rule of `CLAUDE.md` applies to every pull request into it unchanged, because
    it reads the required checks of the base.
@@ -42,5 +45,5 @@ was taken.
 - BRN3 and BRN5 of `docs/operations/branching.md` gain this exception; ADR-0098 is amended.
 - `KERNEL_TRUSTED_REFS` (BRN6) does not list `rebase/*`, so a build on such a branch is never
   trusted or signed.
-- `.github/settings/rulesets.json` gains `rebase-branches`; it takes effect when the maintainer
+- `.github/settings/rulesets.json` gains `rebase-branches` and `rebase-review`; they take effect when the maintainer
   applies the settings (`docs/operations/github-settings.md`).
