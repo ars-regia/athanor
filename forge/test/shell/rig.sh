@@ -55,6 +55,7 @@ rig=$root/forge/test/shell
 out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
 # The dock the atspi and orca scenes run, as a path inside the rig.
 dock_bin=${ATHANOR_DOCK_BIN:-/out/bin/athanor-dock}
+dock_app=${dock_bin##*/}
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
@@ -866,9 +867,9 @@ atspi)
         seed_bar "$out/seed-atspi-dock" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-dock 4" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $dock_bin"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin")"
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -936,9 +937,9 @@ orca)
         # keyboard to the window (#614); orca_dock.py drops that line.
         seed_bar "$out/seed-orca-dock" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $dock_bin --window --pinnable --respawn"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable --respawn"
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
