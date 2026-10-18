@@ -39,7 +39,8 @@
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca chooser [it]   Orca's speech for a walk with Tab holds the GTK chooser's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#   rig.sh orca <chooser|dock> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#                           ATHANOR_DOCK_BIN runs another dock in `atspi dock` and `orca dock`
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
@@ -52,6 +53,8 @@ set -euo pipefail
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 rig=$root/forge/test/shell
 out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
+# The dock the atspi and orca scenes run, as a path inside the rig.
+dock_bin=${ATHANOR_DOCK_BIN:-/out/bin/athanor-dock}
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
@@ -856,13 +859,18 @@ atspi)
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
-        # Settings of the seed, applications.
+        # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-toolkit's
+        # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
+        # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
+        transcript=atspi-dock${3:+-$3}.json
         seed_bar "$out/seed-atspi-dock" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
-            ATSPI_REQUIRED_NAME="$required" \
+            ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-dock 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $dock_bin"
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     launcher)
         # 1 interactive widget by atspi_check.py's list of roles: the entry, named "Search".
@@ -883,19 +891,24 @@ atspi)
     esac
     ;;
 orca)
-    # doc_own_stack.md, OS8: Orca's speech transcript for a walk with Tab through the chooser, in
-    # English and in Italian, must hold every utterance of the GTK chooser's, recorded first in
-    # golden/orca/. ATHANOR_CHOOSER_BIN runs another chooser, athanor-toolkit's. The published
-    # rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build of the Containerfile's rig stage.
-    # To record it again, copy <out>/orca-chooser[-it].txt of a GTK run into golden/orca/.
-    [ "${2:-}" = chooser ] || { echo "rig.sh orca: the surface is 'chooser', not '${2:-}'" >&2; exit 2; }
+    # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
+    # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
+    # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
+    # athanor-toolkit's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
+    # of the Containerfile's rig stage.
+    # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
+    case "${2:-}" in
+    chooser) component=athanor-layout-chooser ;;
+    dock) component=athanor-dock ;;
+    *) echo "rig.sh orca: the surface is 'chooser' or 'dock', not '${2:-}'" >&2; exit 2 ;;
+    esac
     lang=(RIG_LOCALE=en_US.UTF-8)
     case "${3:-}" in
     '') ;;
     it)
-        in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it && msgfmt --check -o /out/locale/it/athanor-layout-chooser.mo \
-            /repo/forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/po/it.po"
-        lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG=/out/locale/it/athanor-layout-chooser.mo)
+        in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it && msgfmt --check -o /out/locale/it/$component.mo \
+            /repo/forge/specs/$component/$component-1.0.0/po/it.po"
+        lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG="/out/locale/it/$component.mo")
         ;;
     *) echo "rig.sh orca: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
     esac
@@ -903,13 +916,31 @@ orca)
         echo "rig.sh orca: $(rig_image) has no Orca; build the Containerfile's rig stage and name it in ATHANOR_RIG_IMAGE" >&2
         exit 1
     fi
-    bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
-    transcript=orca-chooser${3:+-$3}.txt
-    # Ten controls, Minimize, Close and the eight choices; the eleventh Tab comes back round.
-    in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-        RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript 11" \
-        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-chooser -- \
-        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true && exec $bin"
+    enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
+    transcript=orca-$2${3:+-$3}.txt
+    case "$2" in
+    chooser)
+        bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
+        # Ten controls, Minimize, Close and the eight choices; the eleventh Tab comes back round.
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*11" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-chooser -- \
+            bash -c "$enable && exec $bin"
+        ;;
+    dock)
+        # orca_dock.py runs the test window and a minimised second app, then starts the dock
+        # again so that it holds the focus, on Launcher. Six Tabs go round its six buttons
+        # (Launcher, Workspaces, the pinned COSMIC Settings, the test window, the minimised app,
+        # Applications); three more reach the test window, whose menu Shift+F10 opens, the
+        # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
+        # keyboard to the window (#614); orca_dock.py drops that line.
+        seed_bar "$out/seed-orca-dock" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $dock_bin --window --pinnable --respawn"
+        ;;
+    esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
         "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript"
     ;;
