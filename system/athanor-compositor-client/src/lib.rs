@@ -9,6 +9,8 @@ pub mod clock;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
+#[cfg(feature = "calloop")]
+pub mod glib_loop;
 mod keymap;
 mod launch;
 pub mod model;

@@ -11,11 +11,14 @@ default = ["gtk"]
 # The connection made from GDK's display, its monitors as the outputs, and the window
 # pictures as GDK textures. Without it the client connects from a plain Wayland connection.
 gtk = ["dep:gtk4", "dep:gdk4-wayland", "athanor-style/gtk"]
+# GLib's default main context as a calloop source, for an application whose loop is calloop's.
+calloop = ["dep:calloop", "dep:nix"]
 
 [dependencies]
 athanor-layout = { path = "../athanor-layout" }
 athanor-style = { path = "../athanor-style", default-features = false }
 bitflags = { workspace = true }
+calloop = { workspace = true, optional = true }
 futures-util = { workspace = true }
 gdk4-wayland = { workspace = true, optional = true }
 gio = { workspace = true }
@@ -23,6 +26,7 @@ gio-unix = { workspace = true }
 # `glib::Uri`; gtk4 turns it on too.
 glib = { workspace = true, features = ["v2_66"] }
 gtk4 = { workspace = true, optional = true }
+nix = { workspace = true, features = ["event", "time"], optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -33,3 +37,7 @@ wayland-scanner = { workspace = true }
 [[example]]
 name = "cc-probe"
 required-features = ["gtk"]
+
+[[example]]
+name = "cc-launch"
+required-features = ["calloop"]
