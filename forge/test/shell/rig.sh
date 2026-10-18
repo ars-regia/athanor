@@ -13,6 +13,7 @@
 #   rig.sh build-greeter    release build of athanor-greeter-ui into <out>/bin
 #   rig.sh build-layout     clippy, tests and release build of athanor-layout, the chooser and athanor-unit into <out>/bin
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe, and of cc-launch without gtk, into <out>/bin
+#   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
 #   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin,
@@ -471,6 +472,12 @@ build-compositor-client)
                  && install -m 0755 /out/target/release/examples/cc-probe /out/bin/ \
                  && cargo build --release --locked -p athanor-compositor-client --no-default-features --features calloop --example cc-launch \
                  && install -m 0755 /out/target/release/examples/cc-launch /out/bin/'
+    ;;
+no-gtk)
+    mkdir -p "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" bash forge/test/shell/no_gtk.sh
     ;;
 build-shelld)
     mkdir -p "$out/bin" "$out/target"
