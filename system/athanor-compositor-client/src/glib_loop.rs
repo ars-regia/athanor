@@ -4,10 +4,11 @@
 //!
 //! Each turn of the calloop loop is one iteration of GLib's, split as
 //! `g_main_context_iteration` splits it. Before calloop sleeps, `prepare` and `query` name
-//! the descriptors and the timeout GLib would wait on; an epoll set of our own holds those
-//! descriptors and a timer stands for the timeout, so calloop's one poll waits on both
-//! loops. When the set is ready, or GLib had something ready at once, `check` and
-//! `dispatch` run GLib's sources. Nothing but calloop's poll ever blocks.
+//! the descriptors and the timeout GLib would wait on. They go into an epoll set built afresh
+//! for that iteration, nested in the epoll set calloop polls, beside a timer that stands for
+//! the timeout, so calloop's one poll waits on both loops. When the set is ready, or GLib had
+//! something ready at once, `check` and `dispatch` run GLib's sources. Nothing but calloop's
+//! poll ever blocks.
 
 #![allow(unsafe_code)]
 
@@ -44,11 +45,12 @@ impl AsFd for EpollFd {
 /// runs after each turn that dispatched GLib's sources.
 pub struct GlibSource {
     context: glib::MainContext,
+    /// The set calloop polls: the timer, and this iteration's set of GLib's descriptors.
     epoll: Generic<EpollFd>,
     timer: TimerFd,
-    /// What the last `query` asked to poll, and the descriptors the epoll set holds for it.
+    /// What the last `query` asked to poll, and the set that holds those descriptors.
     fds: Vec<GPollFD>,
-    watched: Vec<(RawFd, EpollFlags)>,
+    iteration: Option<Epoll>,
     max_priority: c_int,
     /// True between a `prepare` and the `check` that ends its iteration.
     prepared: bool,
@@ -61,6 +63,13 @@ pub struct GlibSource {
 impl GlibSource {
     /// Fails when another thread owns GLib's default main context.
     pub fn new() -> io::Result<Self> {
+        let epoll = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)?;
+        let timer = TimerFd::new(
+            ClockId::CLOCK_MONOTONIC,
+            TimerFlags::TFD_CLOEXEC | TimerFlags::TFD_NONBLOCK,
+        )?;
+        epoll.add(&timer, EpollEvent::new(EpollFlags::EPOLLIN, 0))?;
+        // Acquired last, once nothing else can fail: `Drop` releases it.
         let context = glib::MainContext::default();
         // SAFETY: the pointer is the live context `context` holds a reference to.
         if unsafe { g_main_context_acquire(raw(&context)) } == 0 {
@@ -68,18 +77,12 @@ impl GlibSource {
                 "GLib's default main context belongs to another thread",
             ));
         }
-        let epoll = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)?;
-        let timer = TimerFd::new(
-            ClockId::CLOCK_MONOTONIC,
-            TimerFlags::TFD_CLOEXEC | TimerFlags::TFD_NONBLOCK,
-        )?;
-        epoll.add(&timer, EpollEvent::new(EpollFlags::EPOLLIN, 0))?;
         Ok(Self {
             context,
             epoll: Generic::new(EpollFd(epoll), Interest::READ, Mode::Level),
             timer,
             fds: Vec::new(),
-            watched: Vec::new(),
+            iteration: None,
             max_priority: 0,
             prepared: false,
             token: None,
@@ -122,7 +125,7 @@ impl GlibSource {
             );
         }
         self.prepared = true;
-        self.watch()?;
+        let always_ready = self.watch()?;
         match u64::try_from(timeout) {
             Ok(0) | Err(_) => self.timer.unset()?,
             Ok(ms) => self.timer.set(
@@ -130,13 +133,19 @@ impl GlibSource {
                 TimerSetTimeFlags::empty(),
             )?,
         }
-        Ok(ready || timeout == 0)
+        Ok(ready || timeout == 0 || always_ready)
     }
 
-    /// Makes the epoll set hold the descriptors of the last query, once each.
-    fn watch(&mut self) -> io::Result<()> {
+    /// Puts the descriptors of the last query, once each, in a new epoll set that replaces the
+    /// last iteration's. Built afresh, the set holds exactly what GLib asked for: a descriptor
+    /// closed since, or a number reused by another file, can neither linger nor be missed,
+    /// and no descriptor is ever deleted by its number. True when a descriptor cannot be
+    /// watched: epoll refuses a regular file with EPERM, and poll calls one always ready, so
+    /// this iteration must not wait.
+    fn watch(&mut self) -> io::Result<bool> {
         let mut wanted: Vec<(RawFd, EpollFlags)> = Vec::with_capacity(self.fds.len());
-        for fd in &self.fds {
+        // poll ignores a negative descriptor; so does the set.
+        for fd in self.fds.iter().filter(|fd| fd.fd >= 0) {
             let events = c_uint::from(fd.events);
             let mut flags = EpollFlags::empty();
             if events & (G_IO_IN | G_IO_PRI) != 0 {
@@ -150,27 +159,25 @@ impl GlibSource {
                 None => wanted.push((fd.fd, flags)),
             }
         }
-        wanted.sort_unstable_by_key(|&(fd, _)| fd);
-        if wanted == self.watched {
-            return Ok(());
-        }
-        let epoll = &self.epoll.get_ref().0;
-        for &(fd, _) in &self.watched {
-            // SAFETY: only names the descriptor to the kernel; one its owner closed since is
-            // gone from the set already and answers ENOENT or EBADF.
-            match epoll.delete(unsafe { BorrowedFd::borrow_raw(fd) }) {
-                Ok(()) | Err(Errno::ENOENT | Errno::EBADF) => {}
+        let set = Epoll::new(EpollCreateFlags::EPOLL_CLOEXEC)?;
+        let mut always_ready = false;
+        for (fd, flags) in wanted {
+            // SAFETY: the query that named `fd` ran just now, on this thread, which owns the
+            // context, and no source has run since: the source that named it holds it open.
+            let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+            match set.add(borrowed, EpollEvent::new(flags, 0)) {
+                Ok(()) => {}
+                Err(Errno::EPERM) => always_ready = true,
                 Err(err) => return Err(err.into()),
             }
         }
-        self.watched.clear();
-        for &(fd, flags) in &wanted {
-            // SAFETY: GLib's query names descriptors its sources hold open.
-            let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-            epoll.add(borrowed, EpollEvent::new(flags, 0))?;
-            self.watched.push((fd, flags));
+        let outer = &self.epoll.get_ref().0;
+        if let Some(last) = self.iteration.take() {
+            outer.delete(&last.0)?;
         }
-        Ok(())
+        outer.add(&set.0, EpollEvent::new(EpollFlags::EPOLLIN, 0))?;
+        self.iteration = Some(set);
+        Ok(always_ready)
     }
 
     /// The second half: reads which descriptors are ready without waiting, and dispatches
@@ -270,15 +277,54 @@ impl EventSource for GlibSource {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::fs::File;
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::UnixStream;
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::time::Instant;
 
     use calloop::EventLoop;
 
+    /// A source that GLib wakes only when `fd` is readable: its own timeout is an hour.
+    fn on_readable(fd: RawFd, fired: &Arc<AtomicBool>) -> glib::Source {
+        let fired = fired.clone();
+        let source = glib::timeout_source_new(
+            Duration::from_secs(3600),
+            None,
+            glib::Priority::DEFAULT,
+            move || {
+                fired.store(true, Ordering::SeqCst);
+                glib::ControlFlow::Break
+            },
+        );
+        // SAFETY: a live source, not yet attached, and a descriptor the caller keeps open.
+        unsafe { glib::ffi::g_source_add_unix_fd(raw_source(&source), fd, G_IO_IN) };
+        source.attach(None);
+        source
+    }
+
+    fn raw_source(source: &glib::Source) -> *mut glib::ffi::GSource {
+        source.to_glib_none().0
+    }
+
+    /// Runs the loop until `fired`, for at most two seconds, each turn willing to wait five.
+    fn until(event_loop: &mut EventLoop<'static, ()>, fired: &AtomicBool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !fired.load(Ordering::SeqCst) && Instant::now() < deadline {
+            event_loop
+                .dispatch(Duration::from_secs(5), &mut ())
+                .expect("dispatch");
+        }
+        fired.load(Ordering::SeqCst)
+    }
+
     /// One test: GLib's default context has one owner at a time, and the tests of a binary
     /// run on threads of their own.
     #[test]
-    fn glib_runs_its_idles_timeouts_and_futures_inside_calloop() {
+    fn glib_runs_its_sources_inside_calloop() {
         let mut event_loop: EventLoop<'static, ()> = EventLoop::try_new().expect("event loop");
         event_loop
             .handle()
@@ -321,5 +367,39 @@ mod tests {
             elapsed >= Duration::from_millis(150) && elapsed < Duration::from_secs(2),
             "{elapsed:?}"
         );
+
+        // A descriptor GLib watched is closed and its number taken by another file, with the
+        // same events asked: the new file must wake the loop.
+        let (old, old_peer) = UnixStream::pair().expect("pair");
+        let number = old.as_raw_fd();
+        let first = on_readable(number, &Arc::new(AtomicBool::new(false)));
+        event_loop
+            .dispatch(Duration::ZERO, &mut ())
+            .expect("dispatch");
+        first.destroy();
+        let (new, mut new_peer) = UnixStream::pair().expect("pair");
+        // SAFETY: both descriptors are open; dup2 closes the old file at `number`, which
+        // `old` keeps owning, now as the new file.
+        let duplicated = unsafe { nix::libc::dup2(new.as_raw_fd(), number) };
+        assert_eq!(duplicated, number, "dup2");
+        drop((new, old_peer));
+        let fired = Arc::new(AtomicBool::new(false));
+        let _second = on_readable(number, &fired);
+        // Attaching and destroying wake GLib's own descriptor, and a turn that wakes for it
+        // polls every descriptor: drain it first, so that only the new file can wake the loop.
+        for _ in 0..2 {
+            event_loop
+                .dispatch(Duration::ZERO, &mut ())
+                .expect("dispatch");
+        }
+        new_peer.write_all(b"x").expect("write");
+        assert!(until(&mut event_loop, &fired), "the reused number woke the loop");
+        drop(old);
+
+        // A regular file, which epoll refuses and poll calls always ready.
+        let file = File::open(std::env::current_exe().expect("exe")).expect("open");
+        let fired = Arc::new(AtomicBool::new(false));
+        let _file_source = on_readable(file.as_raw_fd(), &fired);
+        assert!(until(&mut event_loop, &fired), "a regular file is ready at once");
     }
 }
