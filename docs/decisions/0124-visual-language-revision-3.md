@@ -30,29 +30,28 @@ The maintainer took these decisions on 2026-10-19:
 
 1. **Material tiers.** The overlay surfaces (dock, launcher, application library, control center,
    notifications) get tiers chosen at run time from a measured frame time, never from the GPU's
-   vendor or name: M0 opaque; M1 translucent over a wallpaper snapshot
-   blurred once per wallpaper change; M2 live blur in the compositor. Software rendering means M0.
-   The bar stays opaque.
+   vendor or name: M0 opaque; M1 glass over the wallpaper blurred once; M2 live blur. The bar
+   stays opaque.
 2. **Reduce transparency.** A setting of its own, `reduce-transparency`, in
    `org.athanor.desktop.appearance`. High contrast and tier M0 force it on.
 3. **Accent.** An "on" tile is a `chip` tile with an `acc` icon disc and an `acc_ink` glyph. A
    selected row is `chip`. The `acc_fg` ring appears only on keyboard focus. This reverses the
    decision of 2026-10-17 in #570.
 4. **Motion.** Moves and resizes, interrupted ones included, use critically damped springs
-   (damping ratio 1.0, stiffness 800, no bounce). Shell surfaces enter on the curve (0.2, 0, 0, 1) and
-   exit in two thirds of the entry time; applications keep libadwaita's curve. With reduced motion
+   (damping ratio 1.0, no bounce). Shell surfaces enter on a firmer curve than libadwaita's;
+   applications keep libadwaita's curve. With reduced motion
    (`enable-animations` off) only opacity fades of about 100 ms remain: no translation, no scale,
    no spring. A fade is not motion under WCAG 2.3.3.
 5. **Bar.** The default is a full-width strip, 32 px tall; islands stay an option. Drawn elements
-   are 28 px and the input zone stays 32. Status icons sit at a 28 px pitch in one pill. The clock is `body` at weight 400 with tabular figures.
+   are 28 px. Status icons sit at a 28 px pitch in one pill. The clock is set at a regular weight.
 6. **Dock.** Icons are 48 px; on outputs up to 800 px tall (logical) they are 40 px. Intellihide:
    the dock hides only while a window overlaps it, never on a timer. Intellihide needs Athanor's
    own compositor; until then the dock does not hide.
 7. **Scope.** Revision 3 applies only to Athanor's toolkit (`athanor-toolkit`) and its generated
    theme. The GTK shell keeps today's tokens until it is removed. Revision 2's unapplied tokens
    (VL12 step 1, #574) are applied to the toolkit only.
-8. **Application library.** A Launchpad-style grid: pages of 7 × 5 with page dots, full screen over
-   the blurred wallpaper (or opaque in M0), with the groups of `doc_launcher.md` LA7 as folders.
+8. **Application library.** A Launchpad-style grid in pages with page dots, full screen over the
+   blurred wallpaper, with the groups of `doc_launcher.md` LA7 as folders.
 
 On the same day the maintainer confirmed three points of the draft as decisions:
 
@@ -69,8 +68,12 @@ table, the control center's modules, the use of the type scale, application icon
 inner 1 px highlight in M1 and M2, the composited contrast check with `ink3` retuned until it
 passes, and the `[material]` tokens. These details are recommended values too, item by item: the
 dock's 4 px dot, the 12 px between its icons and its island of the icon plus 6 + 6 px; the status
-pill opening the control center; and the bar growing taller as the text grows. Where and when the
-tier's frame time is measured, and its thresholds, stay open (spike VL-S5).
+pill opening the control center; the bar growing taller as the text grows, and its 32 px input
+zone; the clock as `body` with tabular figures; the springs' stiffness of 800 and unit mass; the
+entry curve (0.2, 0, 0, 1) and the exit in two thirds of the entry time; software rendering
+meaning M0; M1's blur redone at each change of wallpaper; M2's blur drawn by the compositor; and
+the library's 7 × 5 pages and its opaque form in M0. Where and when the tier's frame time is
+measured, and its thresholds, stay open (spike VL-S5).
 
 The alternatives weighed were opaque surfaces everywhere, transparency tied only to high contrast
 and to the hardware, every duration at zero under reduced motion, islands as the bar's default,
