@@ -1,0 +1,139 @@
+//! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
+//! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
+//! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
+
+use crate::state::State;
+use smithay::backend::input::InputTime;
+use smithay::input::pointer::MotionEvent;
+use smithay::output::Output;
+use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
+use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::SERIAL_COUNTER;
+use smithay::wayland::session_lock::{
+    LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
+};
+
+/// A locked session: the client's lock, its confirmation until the outputs have been drawn
+/// locked, and the lock surface of each output.
+pub struct Lock {
+    lock: ExtSessionLockV1,
+    locker: Option<SessionLocker>,
+    surfaces: Vec<(Output, LockSurface)>,
+}
+
+impl Lock {
+    /// The lock surface shown on `output`, if the locker has given it one.
+    pub fn surface_on(&self, output: &Output) -> Option<&WlSurface> {
+        self.surfaces
+            .iter()
+            .find(|(on, surface)| on == output && surface.alive())
+            .map(|(_, surface)| surface.wl_surface())
+    }
+}
+
+impl SessionLockHandler for State {
+    fn lock_state(&mut self) -> &mut SessionLockManagerState {
+        &mut self.lock_state
+    }
+
+    /// Locks the session, unless a live lock holds it: dropping the locker answers `finished`.
+    /// A lock whose client has gone leaves the session locked, and a new lock takes it over, as
+    /// the protocol allows.
+    fn lock(&mut self, locker: SessionLocker) {
+        if self.lock.as_ref().is_some_and(|lock| lock.lock.is_alive()) {
+            return;
+        }
+        // Capture stops here: the sessions are dropped, which stops them, and no new one starts
+        // while locked (`capture_constraints`).
+        self.capture_sessions.clear();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.unset_grab(self);
+        }
+        if let Some(pointer) = self.seat.get_pointer() {
+            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
+        }
+        self.lock = Some(Lock {
+            lock: locker.ext_session_lock().clone(),
+            locker: Some(locker),
+            surfaces: Vec::new(),
+        });
+        self.set_keyboard_focus(None);
+        self.refresh_pointer();
+    }
+
+    fn unlock(&mut self) {
+        self.lock = None;
+        self.focus_top();
+        self.refresh_pointer();
+    }
+
+    /// Sized to the output, before Smithay sends the first configure; the first lock surface
+    /// takes the keyboard.
+    fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
+        let Some(output) = Output::from_resource(&output) else {
+            return;
+        };
+        // Only the surfaces of the lock in force: a refused lock's are never shown.
+        let Some(lock) = self
+            .lock
+            .as_mut()
+            .filter(|lock| surface.ext_session_lock() == &lock.lock)
+        else {
+            return;
+        };
+        if let Some(area) = self.space.output_geometry(&output) {
+            let size = (area.size.w.max(1) as u32, area.size.h.max(1) as u32);
+            surface.with_pending_state(|state| state.size = Some(size.into()));
+        }
+        lock.surfaces.push((output, surface));
+        self.set_keyboard_focus(None);
+        self.refresh_pointer();
+    }
+}
+
+impl State {
+    /// Gives the keyboard to `surface`; while the session is locked, to the first lock surface
+    /// whatever `surface` is. Every change of the keyboard focus but a popup grab's goes
+    /// through here, and `grab` refuses grabs while locked.
+    pub fn set_keyboard_focus(&mut self, surface: Option<WlSurface>) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let surface = match &self.lock {
+            Some(lock) => lock
+                .surfaces
+                .iter()
+                .find(|(_, surface)| surface.alive())
+                .map(|(_, surface)| surface.wl_surface().clone()),
+            None => surface,
+        };
+        keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+    }
+
+    /// Gives the pointer to what is under it now. Locking and unlocking change that without a
+    /// motion, and a button goes to the pointer's focus: without this, a click on the lock would
+    /// reach the window under it.
+    fn refresh_pointer(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        let under = self.surface_under(location);
+        let motion = MotionEvent {
+            location,
+            serial: SERIAL_COUNTER.next_serial(),
+            time: InputTime::now(),
+        };
+        pointer.motion(self, under, &motion);
+        pointer.frame(self);
+    }
+
+    /// After a frame of every output: a lock waiting for its confirmation has been drawn, and
+    /// is confirmed.
+    pub fn locked_drawn(&mut self) {
+        if let Some(locker) = self.lock.as_mut().and_then(|lock| lock.locker.take()) {
+            locker.lock();
+        }
+    }
+}

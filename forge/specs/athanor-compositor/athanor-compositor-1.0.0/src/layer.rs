@@ -12,7 +12,6 @@ use smithay::desktop::{
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
-use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::shell::wlr_layer::{
     KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
     WlrLayerShellState,
@@ -120,7 +119,7 @@ impl State {
         if keyboard.is_grabbed() {
             keyboard.unset_grab(self);
         }
-        keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
+        self.set_keyboard_focus(Some(surface));
     }
 
     /// The surface that holds the keyboard exclusively: the top one of the mapped exclusive
@@ -157,10 +156,7 @@ impl State {
         if !layer.can_receive_keyboard_focus() || self.exclusive_layer().is_some() {
             return;
         }
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            let surface = layer.wl_surface().clone();
-            keyboard.set_focus(self, Some(surface), SERIAL_COUNTER.next_serial());
-        }
+        self.set_keyboard_focus(Some(layer.wl_surface().clone()));
     }
 }
 

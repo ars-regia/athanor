@@ -3,16 +3,26 @@
 
 use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
+use crate::lock::Lock;
 use crate::winit::Nested;
+use crate::workspace::Group;
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::renderer::element::{
-    default_primary_scanout_output_compare, RenderElementStates,
+use smithay::backend::renderer::damage::{
+    Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
-use smithay::backend::renderer::ImportDma;
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
+use smithay::backend::renderer::element::{
+    default_primary_scanout_output_compare, Kind, RenderElementStates,
+};
+use smithay::backend::renderer::{ImportAll, ImportDma, Renderer, Texture};
+use smithay::desktop::space::render_output;
 use smithay::desktop::utils::{
-    surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-    update_surface_primary_scanout_output, OutputPresentationFeedback,
+    send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
+    surface_primary_scanout_output, update_surface_primary_scanout_output,
+    with_surfaces_surface_tree, OutputPresentationFeedback,
 };
 use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
@@ -25,7 +35,7 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, P
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Display, DisplayHandle};
+use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
@@ -33,10 +43,16 @@ use smithay::wayland::compositor::{CompositorClientState, CompositorState, Surfa
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
+use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::idle_notify::IdleNotifierState;
+use smithay::wayland::image_capture_source::ToplevelCaptureSourceState;
+use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
+use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
+use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
@@ -92,6 +108,20 @@ pub struct State {
     pub next_held: u64,
     /// Given to each client's `ClientState`, which sends its id on disconnection.
     pub client_gone: channel::Sender<ClientId>,
+
+    pub foreign_toplevel_state: ForeignToplevelListState,
+    pub toplevel_capture_state: ToplevelCaptureSourceState,
+    pub image_copy_capture_state: ImageCopyCaptureState,
+    /// The capture sessions in progress; dropping one stops it.
+    pub capture_sessions: Vec<Session>,
+    /// The frames asked for, answered at the next frame of the outputs (`serve_captures`).
+    pub captures: Vec<(SessionRef, Frame)>,
+    pub lock_state: SessionLockManagerState,
+    /// The session's lock, while it is locked.
+    pub lock: Option<Lock>,
+    pub idle_notifier_state: IdleNotifierState<Self>,
+    /// The workspace groups sent to the clients of ext-workspace-v1.
+    pub workspace_groups: Vec<Group>,
 }
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
@@ -150,6 +180,20 @@ impl State {
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         // GDK will not open a display without wl_data_device_manager.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        // ponytail: every client outside a security context may bind these five; task 5 grants
+        // each by identity (OS4): the toplevel list and capture to the dock, the lock to the lock
+        // screen, the workspaces to the bar.
+        let foreign_toplevel_state =
+            ForeignToplevelListState::new_with_filter::<Self>(&dh, unconfined);
+        let toplevel_capture_state =
+            ToplevelCaptureSourceState::new_with_filter::<Self, _>(&dh, unconfined);
+        let image_copy_capture_state =
+            ImageCopyCaptureState::new_with_filter::<Self, _>(&dh, unconfined);
+        let lock_state = SessionLockManagerState::new::<Self, _>(&dh, unconfined);
+        crate::workspace::global(&dh);
+        // A client inside a security context cannot make another (spike Q4), as Smithay asks.
+        SecurityContextState::new::<Self, _>(&dh, unconfined);
+        let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
@@ -184,14 +228,36 @@ impl State {
             held: Vec::new(),
             next_held: 0,
             client_gone,
+            foreign_toplevel_state,
+            toplevel_capture_state,
+            image_copy_capture_state,
+            capture_sessions: Vec::new(),
+            captures: Vec::new(),
+            lock_state,
+            lock: None,
+            idle_notifier_state,
+            workspace_groups: Vec::new(),
         })
+    }
+
+    /// Input from the user: the idle timers start again.
+    pub fn activity(&mut self) {
+        let seat = self.seat.clone();
+        self.idle_notifier_state.notify_activity(&seat);
     }
 
     /// What the compositor keeps for a client that connects now.
     pub fn client_state(&self) -> Arc<ClientState> {
+        self.contained_client_state(None)
+    }
+
+    /// What the compositor keeps for a client that connects now through `context`'s listener,
+    /// or through the compositor's own socket without one.
+    pub fn contained_client_state(&self, context: Option<SecurityContext>) -> Arc<ClientState> {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
+            security_context: context,
         })
     }
 
@@ -275,6 +341,14 @@ impl State {
         for layer in &layers {
             layer.with_surfaces(scanout);
         }
+        let locked = self
+            .lock
+            .as_ref()
+            .and_then(|lock| lock.surface_on(output))
+            .cloned();
+        if let Some(surface) = &locked {
+            with_surfaces_surface_tree(surface, scanout);
+        }
         if damaged {
             let mut feedback = OutputPresentationFeedback::new(output);
             let flags = |surface: &WlSurface, _: &SurfaceData| {
@@ -319,11 +393,24 @@ impl State {
                 surface_primary_scanout_output,
             );
         }
+        if let Some(surface) = &locked {
+            send_frames_surface_tree(
+                surface,
+                output,
+                frame_target,
+                throttle,
+                surface_primary_scanout_output,
+            );
+        }
     }
 
     /// What is under `pos`, with its origin in the space, in the order the outputs are drawn
     /// from the top: the overlay and top layers, the windows, the bottom and background layers.
+    /// Nothing while the session is locked.
     pub fn under(&self, pos: Point<f64, Logical>) -> Option<(Under, Point<i32, Logical>)> {
+        if self.lock.is_some() {
+            return None;
+        }
         let output = self.space.output_under(pos).next()?;
         let origin = self.space.output_geometry(output)?.loc;
         let map = layer_map_for_output(output);
@@ -353,6 +440,14 @@ impl State {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        if let Some(lock) = &self.lock {
+            // While locked, only the lock surface of the output under `pos`, which fills it.
+            let output = self.space.output_under(pos).next()?;
+            let origin = self.space.output_geometry(output)?.loc.to_f64();
+            return lock
+                .surface_on(output)
+                .map(|surface| (surface.clone(), origin));
+        }
         let (under, origin) = self.under(pos)?;
         let local = pos - origin.to_f64();
         let found = match &under {
@@ -368,6 +463,66 @@ impl State {
             .elements()
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
+    }
+}
+
+/// What an output shows: the space, or while the session is locked only the lock surface the
+/// locker gave it, if any, on the background.
+pub enum View<'a> {
+    Space(&'a Space<Window>),
+    Locked(Option<&'a WlSurface>),
+}
+
+impl<'a> View<'a> {
+    pub fn of(space: &'a Space<Window>, lock: Option<&'a Lock>, output: &Output) -> Self {
+        match lock {
+            Some(lock) => View::Locked(lock.surface_on(output)),
+            None => View::Space(space),
+        }
+    }
+}
+
+/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents.
+pub fn draw_view<'d, R>(
+    renderer: &mut R,
+    framebuffer: &mut R::Framebuffer<'_>,
+    output: &Output,
+    age: usize,
+    view: View<'_>,
+    damage_tracker: &'d mut OutputDamageTracker,
+) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
+where
+    R: Renderer + ImportAll,
+    R::TextureId: Clone + Texture + 'static,
+{
+    match view {
+        View::Space(space) => render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
+            output,
+            renderer,
+            framebuffer,
+            1.0,
+            age,
+            [space],
+            &[],
+            damage_tracker,
+            BACKGROUND,
+        ),
+        View::Locked(surface) => {
+            let scale = output.current_scale().fractional_scale();
+            let elements: Vec<WaylandSurfaceRenderElement<R>> = surface
+                .map(|surface| {
+                    render_elements_from_surface_tree(
+                        renderer,
+                        surface,
+                        (0, 0),
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                })
+                .unwrap_or_default();
+            damage_tracker.render_output(renderer, framebuffer, age, &elements, BACKGROUND)
+        }
     }
 }
 
@@ -470,6 +625,16 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     gone: channel::Sender<ClientId>,
+    /// The security context the client connected through, if any (a sandboxed application).
+    pub security_context: Option<SecurityContext>,
+}
+
+/// Whether `client` connected outside a security context: only such a client sees the
+/// privileged globals.
+pub fn unconfined(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_some_and(|data| data.security_context.is_none())
 }
 
 impl ClientData for ClientState {

@@ -59,3 +59,13 @@ keyboard follows `keyboard_interactivity`: an exclusive surface on the top or ov
 holds it while mapped, an on-demand one takes it on a click, and one with none never gets it.
 A popup grab is honoured only for a client that already holds the pointer or the keyboard.
 Every client may bind the protocol until task 5 grants the top and overlay layers by identity.
+
+Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
+windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
+through the toplevel capture source, into a client's `wl_shm` buffer (`src/capture.rs`).
+`ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
+refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
+`ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
+output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox connects: they
+see none of these globals but the idle notifier, nor the security context manager, until task 5
+grants them by identity.
