@@ -2,16 +2,15 @@
 id: ADR-0123
 title: "Name the Fedora rebase release 0.10 and place rows 7 and 25 in it"
 date: 2026-10-18
-status: proposed
+status: accepted
 issues: [124, 125, 126, 543]
 areas: [process, docs, platform, security, update, shell]
 ---
 
 # 0123. Name the Fedora rebase release 0.10 and place rows 7 and 25 in it
 
-**Proposed.** The maintainer has not taken these decisions. Each item gives the options and the
-recommendation; approving this record approves the recommendations, unless the approval names
-another option.
+**Accepted** on 2026-10-19. The maintainer chose option A in every item. The options not taken
+stay below as the record of what was weighed.
 
 ## Context
 

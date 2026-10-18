@@ -172,7 +172,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
 | ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
-| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115, ADR-0121 | platform, build, signing, security, shell, docs, process |
+| ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115, ADR-0121, ADR-0123 | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | amended by ADR-0115 | update, build, signing, security, kernel |
 | ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |
 | ADR-0108 | 0108 | [A GitHub App for the bump and merge bots, with a review-only bypass](0108-bots-github-app.md) | accepted | process, security, build |
@@ -182,12 +182,12 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
 | ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | accepted | update, build, release, security |
-| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121 | process, docs, platform, security, shell |
+| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123 | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
 | ADR-0119 | 0119 | [An upgrade does not keep ssh in the installer's public zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
-| ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | accepted | security, update, process |
+| ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | amended by ADR-0123 | security, update, process |
 | ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122 | shell, security, process |
 | ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | accepted | shell, security, process |
-| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | proposed | process, docs, platform, security, update, shell |
+| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | accepted | process, docs, platform, security, update, shell |
