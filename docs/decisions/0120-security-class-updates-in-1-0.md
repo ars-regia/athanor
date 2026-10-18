@@ -2,7 +2,7 @@
 id: ADR-0120
 title: "Security-class updates ship in 1.0, not 0.9"
 date: 2026-10-16
-status: accepted
+status: amended by ADR-0123
 issues: [133, 543]
 areas: [security, update, process]
 ---
