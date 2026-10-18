@@ -26,37 +26,25 @@ the GTK shell gets nothing new until it is removed (decision of 2026-10-18).
 
 ## Decision
 
-The maintainer chose these options on 2026-10-19. Each item quotes the chosen option in the
-maintainer's words, then gives a word-for-word English translation; nothing is added or dropped.
+The maintainer chose these options on 2026-10-19. Each item gives the chosen option, translated
+word for word; nothing is added or dropped.
 
-1. **Material tiers.** "Vetro scelto a runtime: opaco, vetro sullo sfondo sfocato una volta,
-   sfocatura dal vivo. Il livello lo decide il tempo di frame misurato, non la marca della GPU.
-   Barra opaca." In English: "Glass chosen at run time: opaque, glass over the wallpaper blurred
-   once, live blur. The level is decided by the measured frame time, not by the GPU's brand. Opaque
-   bar."
-2. **Reduce transparency.** "Un interruttore 'Riduci trasparenza' nelle Impostazioni. L'alto
-   contrasto e il livello opaco lo forzano comunque, come in macOS." In English: "A 'Reduce
-   transparency' switch in Settings. High contrast and the opaque level force it anyway, as in
-   macOS."
-3. **Accent.** "Viola solo sul disco dell'icona di una tessera accesa e sull'anello del focus da
-   tastiera. Rovescia #570." In English: "Purple only on the icon disc of a tile that is on and on
-   the keyboard focus ring. Reverses #570."
-4. **Motion.** "Molle senza rimbalzo per spostamenti e ridimensionamenti, curva d'entrata più
-   decisa. Con il movimento ridotto: dissolvenze di circa 100 ms, come macOS." In English: "Springs
-   without bounce for moves and resizes, a firmer entry curve. With reduced motion: fades of about
-   100 ms, like macOS."
-5. **Bar.** "Striscia da 32 px a tutta larghezza, con le icone di stato in una pillola a passo 28 e
-   l'orologio di peso regolare. Le isole restano un'opzione." In English: "A 32 px full-width strip,
-   with the status icons in a pill at a pitch of 28 and the clock of regular weight. The islands
-   remain an option."
+1. **Material tiers.** "Glass chosen at run time: opaque, glass over the wallpaper blurred once,
+   live blur. The level is decided by the measured frame time, not by the GPU's brand. Opaque bar."
+2. **Reduce transparency.** "A 'Reduce transparency' switch in Settings. High contrast and the
+   opaque level force it anyway, as in macOS."
+3. **Accent.** "Purple only on the icon disc of a tile that is on and on the keyboard focus ring.
+   Reverses #570."
+4. **Motion.** "Springs without bounce for moves and resizes, a firmer entry curve. With reduced
+   motion: fades of about 100 ms, like macOS."
+5. **Bar.** "A 32 px full-width strip, with the status icons in a pill at a pitch of 28 and the
+   clock of regular weight. The islands remain an option."
 6. **Dock.** Asked the size of the dock's icons, the maintainer answered
-   "48, 40 su schermi piccoli + intellihide". In English: "48, 40 on small screens + intellihide".
-7. **Scope.** "Solo il toolkit nuovo; la shell GTK resta ai token di oggi fino a quando esce. #574
-   si riduce ai token del toolkit." In English: "Only the new toolkit; the GTK shell stays on
-   today's tokens until it leaves. #574 narrows to the toolkit's tokens."
-8. **Application library.** "Pagine 7×5: griglia a pagine con i puntini, a schermo pieno sopra lo
-   sfondo sfocato, con i gruppi LA7 come cartelle." In English: "7×5 pages: a grid in pages with the
-   dots, full screen over the blurred wallpaper, with the LA7 groups as folders."
+   "48, 40 on small screens + intellihide".
+7. **Scope.** "Only the new toolkit; the GTK shell stays on today's tokens until it leaves. #574
+   narrows to the toolkit's tokens."
+8. **Application library.** "7×5 pages: a grid in pages with the dots, full screen over the
+   blurred wallpaper, with the LA7 groups as folders."
 
 On the same day the maintainer confirmed three points of the draft as decisions:
 
