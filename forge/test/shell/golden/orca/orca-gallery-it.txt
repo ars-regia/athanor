@@ -1,0 +1,9 @@
+Lettore schermo attivo.
+Galleria
+Pulsanti pulsante di commutazione premuto.
+Un pulsante button.
+Uno pulsante di commutazione premuto.
+Due pulsante di commutazione non premuto.
+Tre pulsante di commutazione non premuto.
+Nome testo.
+Lettore schermo disattivato.

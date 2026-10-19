@@ -27,8 +27,15 @@ REWORDED = {
 }
 # Roles that a screen reader speaks alike. AccessKit 0.25 has no way to say "grouping": its
 # Role::Group reaches AT-SPI as a panel. The maintainer decided on 2026-10-17 that AccessKit's
-# "panel" equals GTK's "grouping".
-SAME_ROLE = [{"button", "push button"}, {"frame", "window"}, {"grouping", "panel"}]
+# "panel" equals GTK's "grouping". The same goes for a single-line field: AccessKit's
+# Role::TextInput reaches AT-SPI as an entry and has no way to say "text", the role of GTK's
+# GtkText, and Orca speaks both as a text field.
+SAME_ROLE = [
+    {"button", "push button"},
+    {"frame", "window"},
+    {"grouping", "panel"},
+    {"text", "entry"},
+]
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button; a label under any other parent is
 # its own element, as the title under the window.

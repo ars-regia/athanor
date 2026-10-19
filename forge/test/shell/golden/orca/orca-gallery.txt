@@ -1,0 +1,9 @@
+Screen reader on.
+Gallery
+Buttons toggle button pressed.
+A button button.
+One toggle button pressed.
+Two toggle button not pressed.
+Three toggle button not pressed.
+Name text.
+Screen reader off.

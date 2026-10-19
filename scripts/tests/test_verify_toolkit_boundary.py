@@ -72,6 +72,24 @@ class ToolkitBoundary(unittest.TestCase):
         (self.dir / "LICENSE-APACHE").unlink()
         self.assertEqual(self.problems(), [f"{verify.TOOLKIT}/LICENSE-APACHE: missing, license = 'MIT OR Apache-2.0'"])
 
+    def gallery(self, body):
+        (self.dir / "gallery").mkdir(exist_ok=True)
+        (self.dir / "gallery" / "Cargo.toml").write_text(
+            '[package]\nname = "athanor-toolkit-gallery"\n' + body)
+        return self.problems()
+
+    def test_the_gallery_may_depend_on_the_toolkit_by_its_path(self):
+        self.assertEqual(self.gallery('[dependencies]\nathanor-toolkit = { path = ".." }\n'), [])
+
+    def test_a_gallery_that_adds_the_i18n_crate_fails(self):
+        out = self.gallery('[dependencies]\nathanor-toolkit = { path = ".." }\n'
+                           'athanor-i18n = { path = "../../athanor-i18n" }\n')
+        self.assertEqual(len(out), 1)
+        self.assertIn("athanor-i18n", out[0])
+
+    def test_a_gallery_that_points_the_toolkit_elsewhere_fails(self):
+        self.assertTrue(self.gallery('[dependencies]\nathanor-toolkit = { path = "../other" }\n'))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,7 +16,7 @@
 #   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field, test input method and layer surfaces into <out>/bin,
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field, test input method, layer surfaces and gallery into <out>/bin,
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
 #   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
@@ -37,10 +37,12 @@
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock` and `orca dock`
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
@@ -48,7 +50,7 @@
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
-#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)>  capture every case of a surface and compare with the goldens
+#   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)|toolkit-gallery (the same)|gtk-gallery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 set -euo pipefail
 
@@ -262,6 +264,30 @@ capture_toolkit_chooser() {
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             /out/bin/athanor-toolkit-chooser
     done < <(python3 -B "$rig/cases.py" toolkit-chooser)
+}
+
+# The gallery's pages in English, left to right and right to left, at both scales: the toolkit's
+# under athanor-compositor, and its GTK twin (forge/test/shell/gallery_gtk.py) under cosmic-comp,
+# whose captures are the references to match. Each case passes its page and direction to the
+# binary as arguments.
+capture_gallery() { # capture_gallery <toolkit-gallery|gtk-gallery>
+    local surface=$1 compositor=() bin=/repo/forge/test/shell/gallery_gtk.py
+    if [ "$surface" = toolkit-gallery ]; then
+        require athanor-compositor build-compositor
+        require athanor-toolkit-gallery build-toolkit
+        compositor=(RIG_COMPOSITOR=athanor)
+        bin=/out/bin/athanor-toolkit-gallery
+    fi
+    while IFS=$'\t' read -r tag variant scale locale _ page direction; do
+        tags+=("$tag")
+        seed_scheme "$out/seed-$tag" "$variant"
+        args=(--page "$page")
+        if [ "$direction" = rtl ]; then args+=(--rtl); fi
+        in_rig "$(rig_image)" env "${compositor[@]}" RIG_LOCALE="$locale" RIG_CONFIG_SEED="/out/seed-$tag" \
+            RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
+            "$bin" "${args[@]}"
+    done < <(python3 -B "$rig/cases.py" "$surface")
 }
 
 require() { # require <binary> <recipe>: a scene that runs one of our binaries
@@ -514,7 +540,9 @@ build-toolkit)
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method \
-                 && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-toolkit-layer'
+                 && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-toolkit-layer \
+                 && cargo build --release --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml \
+                 && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
     # doc_own_stack.md, C1 tasks 1 and 4: what a client of athanor-compositor binds.
@@ -809,7 +837,11 @@ atspi)
     '' | it) ;;
     *) echo "atspi: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
     esac
-    if [ "${3:-}" = it ]; then
+    if [ "${3:-}" = it ] && [ "${2:-}" = gallery ]; then
+        # The gallery takes its language from --lang; "Pulsanti" is its Italian page.
+        required=Pulsanti
+        lang=(RIG_LOCALE=it_IT.UTF-8)
+    elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
             [dock]="athanor-dock Applicazioni")
@@ -843,6 +875,23 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec $bin"
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
+        ;;
+    gallery)
+        # The gallery's first page: the page toggle, a button, three toggles and a field, and the
+        # title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
+        # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
+        # hold all the reference holds, the GTK twin's, recorded (OS8).
+        # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
+        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-toolkit-gallery}
+        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-toolkit-gallery build-toolkit; fi
+        transcript=atspi-gallery${3:+-$3}.json
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 6" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
+            bash -c "$enable && exec $bin --lang ${3:-en}"
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -921,15 +970,20 @@ orca)
     case "${2:-}" in
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
-    *) echo "rig.sh orca: the surface is 'chooser' or 'dock', not '${2:-}'" >&2; exit 2 ;;
+    gallery) component= ;;
+    *) echo "rig.sh orca: the surface is 'chooser', 'dock' or 'gallery', not '${2:-}'" >&2; exit 2 ;;
     esac
     lang=(RIG_LOCALE=en_US.UTF-8)
     case "${3:-}" in
     '') ;;
     it)
-        in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it && msgfmt --check -o /out/locale/it/$component.mo \
-            /repo/forge/specs/$component/$component-1.0.0/po/it.po"
-        lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG="/out/locale/it/$component.mo")
+        if [ -z "$component" ]; then
+            lang=(RIG_LOCALE=it_IT.UTF-8)
+        else
+            in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it && msgfmt --check -o /out/locale/it/$component.mo \
+                /repo/forge/specs/$component/$component-1.0.0/po/it.po"
+            lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG="/out/locale/it/$component.mo")
+        fi
         ;;
     *) echo "rig.sh orca: the language is 'it' or none, not '$3'" >&2; exit 2 ;;
     esac
@@ -947,6 +1001,22 @@ orca)
             RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*11" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-chooser -- \
             bash -c "$enable && exec $bin"
+        ;;
+    gallery)
+        # One walk per page, started on that page (--page), whose toggle holds the focus in both
+        # galleries: Space selects the page, then one Tab for each page toggle after it and for
+        # each control of the page (cases.py gallery-pages). The walks follow one another in
+        # the transcript, in the order of the pages. ATHANOR_GALLERY_BIN runs the GTK twin.
+        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-toolkit-gallery}
+        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-toolkit-gallery build-toolkit; fi
+        rm -f "$out/$transcript"
+        while IFS=$'\t' read -r page tabs; do
+            in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+                RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/orca-gallery-$page.txt space Tab*$tabs" \
+                dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-gallery -- \
+                bash -c "$enable && exec $bin --page $page --lang ${3:-en}"
+            cat "$out/orca-gallery-$page.txt" >> "$out/$transcript"
+        done < <(python3 -B "$rig/cases.py" gallery-pages)
         ;;
     dock)
         # orca_dock.py runs the test window and a minimised second app, then starts the dock
@@ -1041,6 +1111,7 @@ surface | update-goldens)
     dock) capture_dock ;;
     launcher) capture_launcher ;;
     toolkit-chooser) capture_toolkit_chooser ;;
+    toolkit-gallery | gtk-gallery) capture_gallery "$surface" ;;
     *)
         echo "rig.sh $1: unknown surface '$surface'" >&2
         exit 2

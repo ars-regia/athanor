@@ -47,6 +47,14 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Style panel'", lines[0])
 
+    def test_a_text_is_heard_as_an_entry_in_english_and_italian(self):
+        lines, failures = compare.compare(
+            ["Name text.", "Nome testo."],
+            ["Name entry.", "Nome campo inserimento."],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Name entry.'", lines[0])
+
     def test_a_label_that_ends_in_panel_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Control panel"], ["Control panel"])[1], [])
         self.assertEqual(

@@ -18,4 +18,8 @@ cargo clippy -p athanor-preview-render --all-targets --all-features -- -D warnin
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
-cargo deny --manifest-path Cargo.toml --config deny.toml check advisories 2>&1 | tee "$out/deny.log"
+# The toolkit's gallery has a workspace and a lockfile of its own, so it is audited beside the root's.
+: > "$out/deny.log"
+for manifest in Cargo.toml system/athanor-toolkit/gallery/Cargo.toml; do
+    cargo deny --manifest-path "$manifest" --config deny.toml check advisories 2>&1 | tee -a "$out/deny.log"
+done

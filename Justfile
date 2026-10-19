@@ -152,6 +152,7 @@ check-rust:
     bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
     bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
     bash forge/test/shell/rig.sh cargo rustdoc --locked -p athanor-toolkit -- -D warnings
+    bash forge/test/shell/rig.sh cargo build --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml
 
 # The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
 # licences, bans and sources. Advisories are not here: they depend on a database that changes
@@ -166,7 +167,7 @@ check-deny:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-deny >/dev/null || { echo "check-deny: cargo-deny is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
-    for manifest in Cargo.toml; do
+    for manifest in Cargo.toml system/athanor-toolkit/gallery/Cargo.toml; do
         echo "check-deny: $manifest"
         cargo deny --locked --manifest-path "$manifest" --config deny.toml check licenses bans sources
     done

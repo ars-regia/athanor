@@ -16,16 +16,26 @@ from pathlib import Path
 # "grouping" (atspi_compare.py), so a grouping of the reference may be heard as a panel, in
 # English and in Italian. Only the reference's role is rewritten: a label that ends in
 # "panel", such as "Control panel", is matched as it is said.
-SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
+#
+# The same goes for a single-line field: AccessKit's Role::TextInput reaches AT-SPI as an entry
+# and has no way to say "text", the role of GTK's GtkText, so a text of the reference may be
+# heard as an entry. Orca ends the line of a field with a full stop, which is kept.
+SAME_ROLE = {
+    "grouping": "panel",
+    "raggruppamento": "pannello",
+    "text": "entry",
+    "testo": "campo inserimento",
+}
 
 
 def heard_as(utterance):
     """The ways the transcript may say a reference utterance: as it is, and, when it ends in
     a grouping's role, with a panel's."""
     yield utterance
+    body, stop = (utterance[:-1], ".") if utterance.endswith(".") else (utterance, "")
     for role, said in SAME_ROLE.items():
-        if utterance.endswith(f" {role}"):
-            yield f"{utterance[: -len(role)]}{said}"
+        if body.endswith(f" {role}"):
+            yield f"{body[: -len(role)]}{said}{stop}"
 
 
 def compare(reference, transcript):
