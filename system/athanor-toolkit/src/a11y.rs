@@ -77,7 +77,8 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.add_action(Action::Focus);
     }
     node.set_bounds(bounds(ui, id, scale));
-    let mut children: Vec<NodeId> = widget.children.iter().map(|&c| node_id(c)).collect();
+    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
     if matches!(widget.kind, Kind::Field(_)) {
         children.push(text_run_id(id));
     }
@@ -108,15 +109,16 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
-/// The whole tree, as the adapter's first update and after every change.
+/// The whole tree of the visible widgets, as the adapter's first update and after every change.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
     tree.toolkit_name = Some("athanor-toolkit".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
+    let shown = || (0..ui.len()).filter(|&id| ui.is_visible(id));
     TreeUpdate {
-        nodes: (0..ui.len())
+        nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
-            .chain((0..ui.len()).filter_map(|id| text_run(ui, id, scale)))
+            .chain(shown().filter_map(|id| text_run(ui, id, scale)))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -124,10 +126,11 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     }
 }
 
-/// The widgets that `update` leaves without a usable node: missing, of an unknown role, or
-/// focusable without a name.
+/// The visible widgets that `update` leaves without a usable node: missing, of an unknown role,
+/// or focusable without a name.
 pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
     (0..ui.len())
+        .filter(|&id| ui.is_visible(id))
         .filter(|&id| {
             let Some((_, node)) = update.nodes.iter().find(|(n, _)| *n == node_id(id)) else {
                 return true;
@@ -142,7 +145,7 @@ impl Ui {
     pub fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
         let id = usize::try_from(request.target_node.0)
             .ok()
-            .filter(|&id| id < self.len())?;
+            .filter(|&id| id < self.len() && self.is_visible(id))?;
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             (Action::Focus, _) => {
@@ -179,9 +182,14 @@ mod tests {
         ui.add_title_bar();
         ui.layout();
 
+        let hidden = ui.add(group, Kind::Button("Hidden".into()));
+        ui.set_visible(hidden, false);
+        ui.layout();
         let mut update = tree_update(&ui, 1.0);
-        // Every widget, and the field's text run.
-        assert_eq!(update.nodes.len(), ui.len() + 1);
+        // Every visible widget, and the field's text run.
+        let visible = (0..ui.len()).filter(|&id| ui.is_visible(id)).count();
+        assert_eq!(update.nodes.len(), visible + 1);
+        assert!(update.nodes.iter().all(|(n, _)| *n != node_id(hidden)));
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
 
         // The check notices a widget whose node is gone or nameless.

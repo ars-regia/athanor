@@ -195,6 +195,9 @@ pub fn paint<C: Canvas>(
 
     let focus = ui.focus;
     for id in 0..ui.widgets.len() {
+        if !ui.is_visible(id) {
+            continue;
+        }
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {

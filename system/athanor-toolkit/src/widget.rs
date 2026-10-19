@@ -100,6 +100,7 @@ pub struct Widget {
     pub children: Vec<WidgetId>,
     /// Where the last layout put the widget, in logical pixels.
     pub rect: Rect,
+    pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
 }
 
@@ -179,6 +180,7 @@ impl Ui {
                 parent: None,
                 children: Vec::new(),
                 rect: Rect::default(),
+                visible: true,
                 text: None,
             }],
             title: title.to_owned(),
@@ -205,6 +207,7 @@ impl Ui {
             parent: Some(parent),
             children: Vec::new(),
             rect: Rect::default(),
+            visible: true,
             text: None,
         });
         self.widgets[parent].children.push(id);
@@ -277,9 +280,42 @@ impl Ui {
     /// it where it is.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
         match id {
-            Some(id) if !self.widgets[id].is_focusable() => {}
+            Some(id) if !self.widgets[id].is_focusable() || !self.is_visible(id) => {}
             _ => self.focus = id,
         }
+    }
+
+    /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
+    /// drawn, takes no focus or input and has no node for assistive technologies; it keeps its
+    /// state. Hiding the widget that has the focus moves the focus to the next visible widget that
+    /// takes it, or the previous one. The root cannot be hidden. Call [`Ui::layout`] afterwards.
+    pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
+        if id == Self::ROOT || self.widgets[id].visible == visible {
+            return;
+        }
+        let before = focus::chain(self);
+        self.widgets[id].visible = visible;
+        let Some(at) = self.focus.and_then(|f| before.iter().position(|&w| w == f)) else {
+            return;
+        };
+        if !self.is_visible(before[at]) {
+            let after = focus::chain(self);
+            let next = before[at + 1..].iter().find(|w| after.contains(w));
+            let previous = before[..at].iter().rev().find(|w| after.contains(w));
+            self.focus = next.or(previous).copied();
+        }
+    }
+
+    /// Whether `id` and all its ancestors are visible: what the user can see and reach.
+    pub fn is_visible(&self, id: WidgetId) -> bool {
+        let mut at = Some(id);
+        while let Some(w) = at {
+            if !self.widgets[w].visible {
+                return false;
+            }
+            at = self.widgets[w].parent;
+        }
+        true
     }
 
     /// The window's size in logical pixels, after [`Ui::layout`].
@@ -295,13 +331,19 @@ impl Ui {
         self.size
     }
 
+    fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
+        let widgets = &self.widgets;
+        let shown = widgets[id].children.iter();
+        shown.copied().filter(|&c| widgets[c].visible).collect()
+    }
+
     fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap, min_width) = (t.margin, t.section_gap, self.min_width);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
-        let children = self.widgets[id].children.clone();
+        let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
         let between = match self.widgets[id].kind {
@@ -374,7 +416,7 @@ impl Ui {
             _ => self.theme.gap,
         };
         let outer = self.widgets[id].rect;
-        let children = self.widgets[id].children.clone();
+        let children = self.visible_children(id);
         match self.widgets[id].kind {
             Kind::Row => {
                 let n = children.len().max(1) as f32;
@@ -444,6 +486,9 @@ impl Ui {
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
     /// its group. Either takes the focus.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
+        if !self.is_visible(id) {
+            return None;
+        }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
             Kind::Button(_) => Some(Event::Clicked(id)),
@@ -467,7 +512,11 @@ impl Ui {
     /// The focusable widget under the point, in logical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
         (0..self.widgets.len())
-            .find(|&id| self.widgets[id].is_focusable() && self.widgets[id].rect.contains(x, y))
+            .find(|&id| {
+                self.widgets[id].is_focusable()
+                    && self.widgets[id].rect.contains(x, y)
+                    && self.is_visible(id)
+            })
     }
 
     /// Presses the pointer at the point, in logical pixels, and returns the event of the widget there, if any.
@@ -643,5 +692,73 @@ mod tests {
             assert_eq!(crate::focus::chain(&ui)[..2], [minimize, close]);
             assert_eq!(ui.activate(close), Some(Event::Window(WindowButton::Close)));
         }
+    }
+
+    /// A column with a button, a hidden row of two buttons and a field.
+    fn with_hidden_row() -> (Ui, [WidgetId; 5]) {
+        let mut ui = Ui::new("Hidden", Theme::default(), false);
+        let top = ui.add(Ui::ROOT, Kind::Button("Top".into()));
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let a = ui.add(row, Kind::Button("A".into()));
+        let b = ui.add(row, Kind::Button("B".into()));
+        let field = ui.field(Ui::ROOT, "Name", "");
+        (ui, [top, row, a, b, field])
+    }
+
+    #[test]
+    fn a_hidden_widget_is_gone_everywhere() {
+        use crate::a11y::{node_id, tree_update};
+        let (mut ui, [top, row, a, b, field]) = with_hidden_row();
+        let shown = ui.layout();
+        let old = ui.widget(a).rect;
+        ui.set_visible(row, false);
+        let hidden = ui.layout();
+        assert_eq!(
+            shown.1 - hidden.1,
+            ui.widget(row).rect.h + ui.theme.section_gap,
+            "the row's height and its gap leave the window"
+        );
+        assert_eq!(crate::focus::chain(&ui), [top, field]);
+        assert!(![Some(a), Some(b)].contains(&ui.hit(old.x + 1.0, old.y + 1.0)));
+        let has = |ui: &Ui, id| {
+            let update = tree_update(ui, 1.0);
+            update.nodes.iter().any(|(n, _)| *n == node_id(id))
+        };
+        assert!(![row, a, b].iter().any(|&id| has(&ui, id)));
+        assert!(!ui.is_visible(a) && ui.widget(a).visible);
+
+        ui.set_visible(row, true);
+        assert_eq!(ui.layout(), shown);
+        assert_eq!(crate::focus::chain(&ui), [top, a, b, field]);
+        assert_eq!(ui.hit(old.x + 1.0, old.y + 1.0), Some(a));
+        assert!([row, a, b].iter().all(|&id| has(&ui, id)));
+    }
+
+    #[test]
+    fn hiding_the_focus_moves_it() {
+        use crate::a11y::{node_id, tree_update};
+        use accesskit::{Action, ActionRequest, TreeId};
+        let (mut ui, [_, row, a, b, field]) = with_hidden_row();
+        ui.layout();
+        ui.set_focus(Some(a));
+        ui.set_visible(row, false);
+        assert_eq!(ui.focus(), Some(field));
+        let update = tree_update(&ui, 1.0);
+        assert!(update.nodes.iter().any(|(n, _)| *n == update.focus));
+        assert_eq!(update.focus, node_id(field));
+
+        ui.set_focus(Some(b));
+        assert_eq!(ui.focus(), Some(field), "a hidden button takes no focus");
+        assert_eq!(ui.activate(b), None);
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(b),
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), None);
+        assert_eq!(ui.focus(), Some(field));
+        ui.set_visible(row, true);
+        assert_eq!(ui.activate(b), Some(Event::Clicked(b)));
     }
 }
