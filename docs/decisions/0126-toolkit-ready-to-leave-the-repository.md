@@ -107,7 +107,6 @@ copy lacks.
 - A new dependency of the toolkit on another Athanor crate is refused by the check and needs this
   decision changed first.
 - The own-code exception of the toolkit in `scripts/verify.py` cites ADR-0121; it stays valid.
-- `doc_own_stack.md` revision 2 adds OS10, OS11 and decisions 12 to 15. The measurements of
-  milestones C1 and T1 and the compositor's acceptance move to its revision 3: where ADR-0121
-  (decision 5), ADR-0122, ADR-0123 and `docs/operations/release-1.0.md` name revision 2 for them,
-  revision 3 is meant.
+- `doc_own_stack.md` is amended: revision 1 gains OS10, OS11 and decisions 12 to 15. Its
+  revision 2 still brings the measurements of milestones C1 and T1 and the compositor's
+  acceptance, as ADR-0121, ADR-0122, ADR-0123 and `docs/operations/release-1.0.md` say.

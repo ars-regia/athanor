@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** the first version of `athanor-toolkit` draws the layout chooser so that Orca says no less than it says for the GTK version, and its costs against GTK4 go into revision 3 of `doc_own_stack.md`.
+**Goal:** the first version of `athanor-toolkit` draws the layout chooser so that Orca says no less than it says for the GTK version, and its costs against GTK4 go into revision 2 of `doc_own_stack.md`.
 
 **Architecture:** a windowing driver on smithay-client-toolkit (an xdg-toplevel, as the GTK chooser's `ApplicationWindow` is, and layer-shell surfaces for the shell surfaces that follow; `wl_shm` buffers from `vello_cpu`, then a wgpu surface for `vello_gpu`), a widget tree with flex layout and a focus chain, Parley for text and editing, AccessKit with `accesskit_unix` attached directly to the driver's event loop. The code is the real crate, `system/athanor-toolkit/`, a member of the workspace, merged task by task; the GTK chooser stays the shipped one until the gate of OS8 passes.
 
@@ -69,6 +69,6 @@
 - [ ] In the development VM (virgl or llvmpipe), on the laptop, and on the NVIDIA desktop (nested in the session, unattended).
 - [ ] The lines of the toolkit (`tokei`), split into driver, widgets, accessibility and text.
 
-### Task 8: measurements for revision 3
+### Task 8: measurements for revision 2
 
-- [ ] `docs/spikes/t1-own-toolkit.md`: the tables of tasks 4, 5 and 7, the renderer recommendation (the open decision of `doc_own_stack.md` section 7), every AccessKit gap met with its upstream issue, and what revision 3 must change.
+- [ ] `docs/spikes/t1-own-toolkit.md`: the tables of tasks 4, 5 and 7, the renderer recommendation (the open decision of `doc_own_stack.md` section 7), every AccessKit gap met with its upstream issue, and what revision 2 must change.

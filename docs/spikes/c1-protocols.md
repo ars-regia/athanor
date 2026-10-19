@@ -237,7 +237,7 @@ These are proposals and unknowns, kept apart from the findings above. None is de
    consumer in the shell. None is in tasks 3 to 7. Proposed: task 5's fixture asserts that the
    Smithay-available privileged globals (input method, virtual keyboard, virtual pointer, data control) are
    withheld from a non-matching client even before a consumer exists, and the missing ones are
-   listed as inputs to revision 3.
+   listed as inputs to revision 2.
 7. **Capture while locked.** OS4 forbids capture while the session is locked. The capture handler
    must refuse a frame when the lock is active; the fixture of task 4 should assert it. Not
    observable from the shell crates.

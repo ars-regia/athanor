@@ -1,11 +1,11 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 2 (2026-10-19) proposed, awaiting the maintainer's approval; revision 1 was
-approved by the maintainer on 2026-10-17.** It sets out the direction ADR-0121 records: a
+Status: **revision 1, approved by the maintainer on 2026-10-17; amended on 2026-10-19
+(ADR-0126), awaiting the maintainer's approval.** It sets out the direction ADR-0121 records: a
 compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in
-Rust. The code starts at once (ADR-0121 decision 1). Revision 2 adds OS10 and OS11, a toolkit
-developers outside Athanor can build on, with decisions 12 to 15; revision 3 adds the
-measurements of the first two milestones of section 5 and the compositor's acceptance. Section 7
+Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the measurements of the first
+two milestones of section 5 and the compositor's acceptance. The amendment adds OS10 and OS11, a
+toolkit developers outside Athanor can build on, with decisions 12 to 15. Section 7
 records the maintainer's decisions of 2026-10-17 and the one left open; decisions 10 and 11 were
 taken after the approval and are recorded in ADR-0122, decisions 12 to 15 on 2026-10-19 in
 ADR-0126. The milestones' plans are
@@ -251,7 +251,7 @@ Both start at once, beside release 0.9, as the first steps of the real crates: t
 `athanor-compositor` under `forge/specs/`, built on the desktop, where it comes before release
 0.9's rig work (decision 11), and the
 toolkit `athanor-toolkit` under `system/`, built on the reference laptop. Their measurements are
-recorded under `docs/spikes/` and go into revision 3. Their plans are named in the status line.
+recorded under `docs/spikes/` and go into revision 2. Their plans are named in the status line.
 
 **Milestone C1: the shell on the own compositor.** The compositor's first version runs the current
 GTK4 bar, dock, greeter and launcher unchanged: in the rig, headless and nested on the NVIDIA
@@ -273,11 +273,11 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 1. This document, ADR-0121 and the plans of the first two milestones.
 2. At once, beside release 0.9 and in parallel: milestone C1 on the desktop and milestone T1 on
-   the laptop, each with the harnesses of OS9 it needs; then revision 3 of this document with
+   the laptop, each with the harnesses of OS9 it needs; then revision 2 of this document with
    their measurements.
 3. The rest of the harnesses of OS9.
 4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
-   the GTK4 shell unchanged on top. Revision 3 writes that acceptance: every surface 1.0 carries
+   the GTK4 shell unchanged on top. Revision 2 writes that acceptance: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,

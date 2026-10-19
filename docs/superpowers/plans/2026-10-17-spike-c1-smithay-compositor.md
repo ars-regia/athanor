@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** the first version of `athanor-compositor`, on Smithay, hosts the current GTK4 shell (bar, dock, greeter, launcher) in the rig and on NVIDIA's driver, and its measurements go into revision 3 of `doc_own_stack.md`.
+**Goal:** the first version of `athanor-compositor`, on Smithay, hosts the current GTK4 shell (bar, dock, greeter, launcher) in the rig and on NVIDIA's driver, and its measurements go into revision 2 of `doc_own_stack.md`.
 
-**Architecture:** a compositor on Smithay at a pinned git revision, built from `anvil`'s structure: the winit backend nested in the rig's sway parent, as cosmic-comp is today; a headless backend on a GBM render node for the test fixture and for NVIDIA; the udev/DRM backend with libseat on hardware. Privileged globals are granted by executable and unit (OS4). The code is the real crate, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`, a member of the workspace, merged task by task; cosmic-comp stays the image's default compositor until the acceptance of revision 3, and the compositor is an optional session from task 9a (ADR-0122).
+**Architecture:** a compositor on Smithay at a pinned git revision, built from `anvil`'s structure: the winit backend nested in the rig's sway parent, as cosmic-comp is today; a headless backend on a GBM render node for the test fixture and for NVIDIA; the udev/DRM backend with libseat on hardware. Privileged globals are granted by executable and unit (OS4). The code is the real crate, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`, a member of the workspace, merged task by task; cosmic-comp stays the image's default compositor until the acceptance of revision 2, and the compositor is an optional session from task 9a (ADR-0122).
 
 **Tech Stack:** Rust, Smithay (git revision recorded in task 1), calloop, the GLES renderer, GBM, the rig (`forge/test/shell/rig.sh`, `scene.sh`, `session.sh`).
 
@@ -21,7 +21,7 @@
 
 ## Review Focus
 
-1. **The identity check of task 5** reads the peer once, at connect, through the pidfd; a client that `exec`s after connecting keeps what it connected as. The results say so, and what revision 3 must add.
+1. **The identity check of task 5** reads the peer once, at connect, through the pidfd; a client that `exec`s after connecting keeps what it connected as. The results say so, and what revision 2 must add.
 2. **A client inside a security context** gets no privileged global, whatever its executable or unit.
 3. **Golden differences of task 3** are explained one by one; "looks the same" is not an explanation.
 4. **NVIDIA explicit sync** is negotiated, not assumed: the log names the syncobj path or its absence.
@@ -69,7 +69,7 @@ The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout
 ### Task 7: Orca reads the bar
 
 - [ ] Check: `rig.sh atspi bar` and `rig.sh atspi bar it` pass with `RIG_COMPOSITOR=athanor`.
-- [ ] Record whether Orca's keys need `org.freedesktop.a11y.KeyboardMonitor` in the rig, and size it for revision 3 (AX4).
+- [ ] Record whether Orca's keys need `org.freedesktop.a11y.KeyboardMonitor` in the rig, and size it for revision 2 (AX4).
 
 ### Task 8: the DRM backend
 
@@ -92,6 +92,6 @@ Prerequisites: tasks 5 and 9 verified (ADR-0122 decision 1).
 - [ ] A session the greeter offers beside cosmic-comp's, starting the compositor with the bar and the dock; cosmic-comp stays the default.
 - [ ] Check: in the development VM the greeter lists both sessions, the default one is cosmic-comp's, and the compositor's session starts the bar and the dock; the maintainer then picks it on the desktop.
 
-### Task 10: measurements for revision 3
+### Task 10: measurements for revision 2
 
-- [ ] `docs/spikes/c1-own-compositor.md`: the Smithay revision, the lines written (`tokei`), the goldens table, the protocol table of task 4, the identity check's limits, frame times per machine, every NVIDIA defect, and what revision 3 must change or add, the acceptance among it.
+- [ ] `docs/spikes/c1-own-compositor.md`: the Smithay revision, the lines written (`tokei`), the goldens table, the protocol table of task 4, the identity check's limits, frame times per machine, every NVIDIA defect, and what revision 2 must change or add, the acceptance among it.
