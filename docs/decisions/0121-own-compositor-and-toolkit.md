@@ -2,7 +2,7 @@
 id: ADR-0121
 title: "Athanor writes its own compositor on Smithay and its own toolkit"
 date: 2026-10-17
-status: amended by ADR-0122
+status: amended by ADR-0122, ADR-0126
 issues: []
 areas: [shell, security, process]
 ---
