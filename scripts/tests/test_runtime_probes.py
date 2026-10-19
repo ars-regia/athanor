@@ -54,8 +54,11 @@ def good():
     }
 
 
-def failed(facts):
-    return {c for c, _ in probes.evaluate(facts, EXPECT, CONTACTS)}
+TUNNEL = 5000  # the default ACC_PORT of lib.sh
+
+
+def failed(facts, tunnel_port=TUNNEL):
+    return {c for c, _ in probes.evaluate(facts, EXPECT, CONTACTS, tunnel_port)}
 
 
 class Parsers(unittest.TestCase):
@@ -167,7 +170,7 @@ class Expectations(unittest.TestCase):
     def test_a_listener_contact_missing_from_the_expectations_fails(self):
         contacts = {"listener": [*CONTACTS["listener"], {"unit": "telnet.socket"}]}
         self.assertEqual(
-            {c for c, _ in probes.evaluate(good(), EXPECT, contacts)}, {"listeners"}
+            {c for c, _ in probes.evaluate(good(), EXPECT, contacts, TUNNEL)}, {"listeners"}
         )
 
     def test_a_ceiling_without_a_measurement_fails(self):
@@ -207,6 +210,19 @@ class Expectations(unittest.TestCase):
         self.assertEqual(failed(f), set())
         f["listeners"][-1] = tunnel | {"address": "0.0.0.0"}
         self.assertEqual(failed(f), {"listeners"})
+
+    def test_the_tunnel_follows_the_harness_port(self):
+        f = good()
+        f["listeners"].append(
+            {
+                "proto": "tcp",
+                "address": "127.0.0.1",
+                "port": 5001,
+                "process": "sshd-session",
+            }
+        )
+        self.assertEqual(failed(f, 5001), set())
+        self.assertEqual(failed(f, 5000), {"listeners"})
 
     def test_resolved_llmnr_and_sshd_5000_are_not_declared(self):
         for process, port in (("systemd-resolve", 5355), ("sshd", 5000)):
@@ -265,7 +281,7 @@ class Expectations(unittest.TestCase):
 
     def firewall_checks(self, facts):
         return [
-            d for c, d in probes.evaluate(facts, EXPECT, CONTACTS) if c == "firewall"
+            d for c, d in probes.evaluate(facts, EXPECT, CONTACTS, TUNNEL) if c == "firewall"
         ]
 
     def test_collect_keeps_one_probe_key_per_zone(self):
@@ -329,7 +345,7 @@ class Expectations(unittest.TestCase):
             {
                 c
                 for c, _ in probes.evaluate(
-                    facts | {"pam": good()["pam"]}, EXPECT, CONTACTS
+                    facts | {"pam": good()["pam"]}, EXPECT, CONTACTS, TUNNEL
                 )
             },
         )

@@ -486,7 +486,7 @@ stage_probes() { # the runtime audit probes (issue #312), against expectations.t
   local facts=$ACC_STATE/probes-facts.json
   guest_ssh python3 - collect < "$ACC_HERE/probes.py" > "$facts"
   # The verdict names each check; a failure stops the run, and the facts stay in $ACC_STATE.
-  python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" || die "FAIL  runtime probes (facts: $facts)"
+  python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" "$ACC_PORT" || die "FAIL  runtime probes (facts: $facts)"
 }
 
 stage_report() {
