@@ -1,7 +1,7 @@
 # Athanor's own compositor and toolkit
 
 Status: **revision 1, approved by the maintainer on 2026-10-17; amended on 2026-10-19
-(ADR-0126), awaiting the maintainer's approval.** It sets out the direction ADR-0121 records: a
+(ADR-0126), the amendment approved by the maintainer on 2026-10-19 (#629).** It sets out the direction ADR-0121 records: a
 compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in
 Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the measurements of the first
 two milestones of section 5 and the compositor's acceptance. The amendment adds OS10 and OS11, a
