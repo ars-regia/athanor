@@ -6,8 +6,11 @@ ROOT=$(cd "$ACC_HERE/../../.." && pwd)
 # shellcheck source-path=SCRIPTDIR
 source "$ACC_HERE/../devvm.env"
 
-ACC_REGISTRY=${ACC_REGISTRY:-localhost:5000/acc}
 ACC_PORT=${ACC_PORT:-5000}
+# The container and the systemd user unit of the registry, and the image prefix on its port: set
+# here, so a second registry on another port starts and reuses nothing of the one on 5000.
+ACC_REGISTRY_NAME=${ACC_REGISTRY_NAME:-athanor-acc-registry}
+ACC_REGISTRY=${ACC_REGISTRY:-localhost:${ACC_PORT}/acc}
 ACC_STATE=${ACC_STATE:-$STATE/acceptance}
 ACC_BASE=${ACC_BASE:-$SYSTEM_IMAGE:latest}
 ACC_RPM_DIR=${ACC_RPM_DIR:-$ROOT/RPMS_OUT}
