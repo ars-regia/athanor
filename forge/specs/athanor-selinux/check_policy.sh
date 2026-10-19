@@ -5,7 +5,7 @@
 # policy the image resolves is not the one named, so it never passes against another one.
 # Writes nothing into the checkout.
 # Usage: check_policy.sh BASE_IMAGE POLICY_VERSION
-#   e.g. check_policy.sh registry.fedoraproject.org/fedora:45@sha256:... 45.20
+#   e.g. check_policy.sh registry.fedoraproject.org/fedora:45@sha256:... 45.21
 # The number of modules is the count of install lines in athanor-selinux.spec's %install;
 # a module added later raises EXPECTED below.
 set -euo pipefail

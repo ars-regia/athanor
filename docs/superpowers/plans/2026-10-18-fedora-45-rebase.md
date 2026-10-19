@@ -86,7 +86,7 @@ The two columns at the right say which task moves each pin and how much of it do
 | `system/disk_config/iso.toml:254,258`, `system/athanor-install.ks:261,265`, `scripts/devvm/devvm.ks:86,90`, `forge/test/iso/collaudo.ks:289,293` | workarounds for "branch fedora-43" of Anaconda | 7 | Re-verified on Anaconda 45 |
 | `system/nvidia/lock.py:67,77` and `system/nvidia/locks/*.lock` | negativo17 `fedora-43`, RPM Fusion `updates/43` | 7 | Both Fedora 45 repositories answer HTTP 200 |
 | `flake.nix:38-44` | `libdisplay-info-target` 0.2.0 | 7 | `libdisplay-info-sys` 0.3 accepts versions below 0.4.0 |
-| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
+| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 (45.21 since 2026-10-19) makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
 | `scripts/devvm/acceptance/images.sh:71` | version label `43.${created}` | — | Cosmetic: machines order images by `created`, never by the version string (`system/build-image.sh:135-137`) |
 | `forge/test/shell/kvm/guest.sh:16`, `scripts/devvm/shelld-acceptance.sh:112`, `scripts/devvm/lock-acceptance.sh:30` | 43 in text and in the kernel choice | 11 / 7 | — |
 | `forge/test/shell/Containerfile:8` | `fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809` (Fedora 43) | 11 | The goldens depend on its GTK |
