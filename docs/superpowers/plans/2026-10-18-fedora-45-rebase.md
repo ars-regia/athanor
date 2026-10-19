@@ -49,7 +49,7 @@ Sources: the Koji `f45`, `f44` and `f43-updates` tags (`getLatestBuilds`), Bodhi
 | systemd | 258.11 | 262 | 259.9 | D25: 262 matters for the 1.1 chain only |
 | libdisplay-info | 0.2.0 (.so.2) | 0.3.0 (.so.3 only) | 0.3.0 | The `flake.nix` target moves to 0.3.0 with the base (task 7) |
 | openssl | 3.5.9 | 4.0.3; `openssl3-libs` 3.5.8 compat ships `libssl.so.3` | 3.5.9 | The Nix target moves to OpenSSL 4 inside the cut-over; no compat package (M3, decided). Fedora 43 has no OpenSSL 4 (`f43-updates`: `openssl-3.5.9-1.fc43`, no `openssl4`), so the move cannot land before the base |
-| polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork is rebased onto 127-5 and keeps the #447 patch and the agent-helper 0755 change (M2, decided; task 4b). With its current release, Fedora's 127-5.fc45 would replace it |
+| polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork is rebased onto upstream 128 and keeps the #447 patch and the agent-helper 0755 change (M2, decided; task 4b). With its current release, Fedora's 127-5.fc45 would replace it |
 | shim / grub2 | 15.8-3 / 2.12-43 | 16.1-7 / 2.12-81 | 16.1-7 / 2.12 | SBAT and MOK chain under shim 16.1 (spike item 6) |
 | selinux-policy | 43.10 | 45.20 (45.21 on 2026-10-19, task 5) | 44.11 | Eight modules to validate against the new policy (task 5) |
 | anaconda / pykickstart | 43.44 / 3.66 | 45.29 / 3.77 | 44.30 | `KICKSTART_SYNTAX`, the workaround comments |
@@ -343,7 +343,7 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 ## What the maintainer decides or does
 
 - **M1 — the Fedora key pin.** Approve the change of `FEDORA_KEY_FPR` to the Fedora 45 key in task 9. Approve the `signing-kernel` environment for tasks 9 and 12.
-- **M2 — the polkit fork.** *Decided 2026-10-19:* rebase the fork onto 127-5.fc45 and keep the #447 cancel-before-answer patch and the agent-helper 0755 change until upstream has them (task 4b, task 7 part 5).
+- **M2 — the polkit fork.** *Decided 2026-10-19:* rebase the fork onto 127-5.fc45 and keep the #447 cancel-before-answer patch and the agent-helper 0755 change until upstream has them (task 4b, task 7 part 5). *Changed the same day:* the fork follows upstream 128 instead (task 4b).
 - **M3 — OpenSSL.** *Decided 2026-10-19:* the Nix target moves to OpenSSL 4 in its own pull request, without `openssl3-libs`. Fedora 43 has no OpenSSL 4, so that pull request is merged into the cut-over branch and reaches `iso-v0` with task 7 (M10, ADR-0125).
 - **M4 — the release.** *Decided by ADR-0123 (accepted, PR #617):* the rebase ships as release 0.10 "base". Still needed: the approvals of `signing` (release) and `signing-images` for it, and of `release` when it is promoted to `:stable`.
 - **M5 — the decision point.** *Confirmed 2026-10-19:* 2026-11-16. Green is reached on the branch, before task 7 merges: the branch build, the laptop ISO test, the console check and the S1 items listed in task 8, item 5 (the signature policy and `containerPolicy` on Fedora 45) among them.
@@ -380,7 +380,7 @@ If M5 finds Fedora 45 not green, the tasks run unchanged with 44 in place of 45:
 - `KICKSTART_SYNTAX = "F44"`;
 - negativo17 `fedora-44`.
 
-Fedora 44 also ships `libdisplay-info` 0.3.0, so the `flake.nix` change stays. It ships OpenSSL 3.5.9 only, so the OpenSSL 4 part of task 7 is left out (M3 applies to Fedora 45). Polkit is 127-2.fc44.2, so the rebased fork takes the release `5.fc44.athanor1`. Its end of life is 2027-06-02 (ADR-0078), so a second rebase follows in the first half of 2027. Tasks 1 to 6 are release-neutral and are not lost.
+Fedora 44 also ships `libdisplay-info` 0.3.0, so the `flake.nix` change stays. It ships OpenSSL 3.5.9 only, so the OpenSSL 4 part of task 7 is left out (M3 applies to Fedora 45). Polkit is 127-2.fc44.2, so the rebased fork takes the release `1.fc44.athanor1`. Its end of life is 2027-06-02 (ADR-0078), so a second rebase follows in the first half of 2027. Tasks 1 to 6 are release-neutral and are not lost.
 
 When the fallback starts:
 
