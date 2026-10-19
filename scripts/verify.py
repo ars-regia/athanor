@@ -1014,6 +1014,64 @@ def check_os_release():
     return r
 
 
+# --------------------------------------------------------------------------- #
+# toolkit-boundary: the toolkit stays ready to leave the repository (ADR-0126)
+# --------------------------------------------------------------------------- #
+
+TOOLKIT = "system/athanor-toolkit"
+# SPDX identifier -> the licence file that carries its text.
+TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
+
+
+def toolkit_boundary_problems(root=None):
+    """The toolkit names no Athanor crate and no path in [dependencies] or [build-dependencies],
+    and its `license` is the set of licence files beside the manifest (ADR-0126)."""
+    root = Path(root or ROOT)
+    manifest = f"{TOOLKIT}/Cargo.toml"
+    try:
+        data = tomllib.loads(read(root / manifest))
+        workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        return [f"{manifest}: cannot read ({err})"]
+    tables = [("dependencies", data.get("dependencies", {})),
+              ("build-dependencies", data.get("build-dependencies", {}))]
+    for target, spec in data.get("target", {}).items():
+        tables += [(f"target.{target}.{kind}", spec.get(kind, {}))
+                   for kind in ("dependencies", "build-dependencies")]
+    out = []
+    for table, deps in tables:
+        for name, dep in deps.items():
+            dep = dep if isinstance(dep, dict) else {}
+            if dep.get("workspace"):
+                dep = workspace.get(name, {})
+                dep = dep if isinstance(dep, dict) else {}
+            package = dep.get("package", name)
+            if re.match(r"athanor[-_]", package):
+                out.append(f"{manifest}: [{table}] {name} is an Athanor crate: only dev-dependencies may be")
+            if "path" in dep:
+                out.append(f"{manifest}: [{table}] {name} is a path dependency: only dev-dependencies may be")
+    licence = data.get("package", {}).get("license")
+    ids = re.split(r"\s+(?:OR|AND)\s+", licence) if licence else []
+    wanted = {TOOLKIT_LICENCE_FILES.get(i) for i in ids}
+    if not ids or None in wanted:
+        out.append(f"{manifest}: license = {licence!r} names an identifier with no licence file "
+                   f"({', '.join(sorted(TOOLKIT_LICENCE_FILES))} are known)")
+    present = {f for f in TOOLKIT_LICENCE_FILES.values() if (root / TOOLKIT / f).is_file()}
+    for f in sorted(wanted - {None} - present):
+        out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
+    for f in sorted(present - wanted):
+        out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
+    return out
+
+
+@check("toolkit-boundary", "The toolkit names no Athanor crate outside dev-dependencies, and its licence files match its license")
+def check_toolkit_boundary():
+    r = Result()
+    for problem in toolkit_boundary_problems():
+        r.fail(problem)
+    return r
+
+
 CONTACTS = "forge/config/contacts.toml"
 CONTACT_FIELDS = ("id", "purpose", "destination", "where_off")
 
