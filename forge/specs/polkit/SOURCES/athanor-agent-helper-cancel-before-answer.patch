@@ -1,4 +1,4 @@
-From c320feb51c7520f231552c1579b949f8f8f46d5c Mon Sep 17 00:00:00 2001
+From dc0ac2ad624e7e5147de1e638e04eb6768322f62 Mon Sep 17 00:00:00 2001
 From: Athanor Forge <forge@athanor.os>
 Date: Wed, 14 Oct 2026 18:55:15 +0200
 Subject: [PATCH] agent helper: end without a verdict when the agent hangs up
@@ -19,7 +19,7 @@ conversation as before, so every tried password still reaches authfail.
  1 file changed, 21 insertions(+), 1 deletion(-)
 
 diff --git a/src/polkitagent/polkitagenthelper-pam.c b/src/polkitagent/polkitagenthelper-pam.c
-index 2dc4882..0e7928e 100644
+index 143340a..8a46a91 100644
 --- a/src/polkitagent/polkitagenthelper-pam.c
 +++ b/src/polkitagent/polkitagenthelper-pam.c
 @@ -45,6 +45,9 @@
@@ -32,7 +32,7 @@ index 2dc4882..0e7928e 100644
  static void
  send_to_helper (const gchar *str1,
                  const gchar *str2)
-@@ -339,7 +342,24 @@ conversation_function (int n, const struct pam_message **msg, struct pam_respons
+@@ -352,7 +355,24 @@ conversation_function (int n, const struct pam_message **msg, struct pam_respons
  
          conv1:
            if (fgets (buf, sizeof buf, stdin) == NULL)

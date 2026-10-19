@@ -1,6 +1,8 @@
-# Athanor's polkit: Fedora 44's polkit 127 (dist-git rpms/polkit, branch f44, commit
-# fccf087ae9d5a7d28474494689a8112225982cfc, 127-2.fc44.2) rebuilt for Fedora 43, which
-# still ships polkit 126.
+# Athanor's polkit: Fedora Rawhide's polkit 128 (dist-git rpms/polkit, branch rawhide, commit
+# 994c3d95f850051c454e0f81b78b6ef984c76c79, the source of Koji build polkit-128-1.fc46)
+# rebuilt for the image base. Fedora 43 still ships polkit 126 and Fedora 45 polkit 127-5;
+# 128 fixes CVE-2026-85498 in the agent helper's input, a use-after-free in the agent's
+# session handling, and revalidates the administrator behind auth_admin_keep.
 #
 # Why: polkit 127 brings polkit-agent-helper.socket, a socket-activated helper that runs
 # as a system service and needs no setuid bit. The session's polkit agent (cosmic-osd)
@@ -19,10 +21,14 @@
 #   - the ldconfig scriptlets are spelled out, as the builder has no %%ldconfig_scriptlets;
 #   - explicit meson commands instead of %%meson, which the builder does not define, as
 #     forge/specs/athanor-ananicy does for cmake;
-#   - Source0 is pinned in SOURCES/sources.sha256. The Release is Fedora's 127-2.fc44.2 with
-#     the dist tag of Fedora 43 and .athanorN appended: it sorts above Fedora 43's 126 and
-#     below every later Fedora 127 build (127-2.fc43.3, 127-2.fc44.N), so a Fedora rebuild
-#     replaces this backport instead of being hidden by it;
+#   - Source0 is pinned in SOURCES/sources.sha256. The Release is Fedora's 128-1 with the
+#     dist tag of the image base and .athanorN appended (1.fc43.athanorN on Fedora 43): it
+#     sorts above every Fedora build of that base today (126-6.fc43.N), Fedora 44's
+#     127-2.fc44.N and Fedora 45's 127-5.fc45, and below Fedora's 128-1 builds for Fedora 44
+#     and later (Rawhide's 128-1.fc46) and every later Fedora build, so a Fedora rebuild
+#     replaces this fork instead of being hidden by it. A later Fedora build that lacks the
+#     two changes of the exit condition is taken only after the fork is rebased onto it;
+#     system/Containerfile fails the image build when the installed polkit is not this fork;
 #   - drop-ins limit the agent helper socket to 8 connections per UID and end a helper
 #     that has run for 5 minutes, so one local user cannot hold every helper;
 #   - a drop-in lets the helper write /run/faillock, where system-auth's pam_faillock keeps
@@ -33,17 +39,22 @@
 #     conversation with agent-helper-hangup-check.c;
 #   - os_type=redhat is set, as meson cannot detect the distribution in the builder.
 #
-# Exit condition: drop this backport (spec directory and the "polkit" entries of
-# forge/config/packages.json) when the image base reaches Fedora 44 or later
-# (#125 moves to Fedora 45).
+# Exit condition: drop this fork (spec directory and the "polkit" entries of
+# forge/config/packages.json) when Fedora's polkit for the image base carries both changes:
+# polkit-agent-helper-1 installed without the setuid bit with polkit-agent-helper.socket
+# enabled, and the helper ending on a hang-up before any answer (polkit-org/polkit#713,
+# issue #447). The release of the image base does not decide it: Fedora 45's 127-5 and
+# Rawhide's 128-1 (dist-git commit 994c3d9) still install the helper 4755 and carry neither
+# change. The drop-ins and the preset are Athanor's and move to the image's configuration
+# when the fork goes.
 #
 # License and the upstream changelog below are Fedora's.
 %global debug_package %{nil}
 
 Summary: An authorization framework
 Name: polkit
-Version: 127
-Release: 2.fc43.2.athanor3
+Version: 128
+Release: 1.fc43.athanor1
 License: LGPL-2.0-or-later
 URL: https://github.com/polkit-org/polkit
 Source0: https://github.com/polkit-org/polkit/archive/refs/tags/%{version}.tar.gz#/polkit-%{version}.tar.gz
@@ -54,13 +65,7 @@ Source4: polkit-agent-helper-service-limits.conf
 Source5: polkit-agent-helper-service-faillock.conf
 Source6: agent-helper-hangup-check.c
 
-Patch1: 0001-polkit-agent-helper-service-simplify-sandbox-rules.patch
-Patch2: 0002-agent-helper-Send-standard-error-to-journal.patch
-Patch3: 0004-polkitsubject-Fix-GVariant-ref-leak-for-pidfd-withou.patch
-Patch4: 0005-Aisle-www.aisle.com-reported-an-issue-with-unsanitiz.patch
-Patch5: 0006-Add-Kazakh-translation.patch
-Patch6: CVE-2026-4897-getline-string-overflow.patch
-Patch7: athanor-agent-helper-cancel-before-answer.patch
+Patch1: athanor-agent-helper-cancel-before-answer.patch
 
 BuildRequires: gcc-c++
 BuildRequires: glib2-devel >= 2.32
@@ -175,7 +180,7 @@ done
 [ "$protected" = 1 ] || { echo "no stack protector (__stack_chk_fail) import in any binary"; fail=1; }
 [ "$fortified" = 1 ] || { echo "no _FORTIFY_SOURCE (*_chk) import in any binary"; fail=1; }
 # The agent helper's conversation, compiled from the patched source, ends the process on a
-# hang-up before any answer and fails the conversation on one after it (Patch7).
+# hang-up before any answer and fails the conversation on one after it (Patch1).
 gcc $CFLAGS $LDFLAGS -D_GNU_SOURCE -include build/config.h -D_POLKIT_COMPILATION \
     -Isrc/polkitagent -Isrc -Ibuild/src $(pkg-config --cflags glib-2.0) \
     -o build/agent-helper-hangup-check %{SOURCE6} $(pkg-config --libs glib-2.0) -lpam
@@ -243,6 +248,17 @@ exit $fail
 %{_libdir}/girepository-1.0/*.typelib
 
 %changelog
+* Mon Oct 19 2026 Athanor Forge <forge@athanor.os> - 128-1.fc43.athanor1
+- Rebase onto Rawhide's polkit 128-1: CVE-2026-85498, the agent session use-after-free and
+  the auth_admin_keep revalidation; upstream 128 carries Fedora's six 127 patches, so none
+  is applied here
+- Refresh the polkit-org/polkit#713 patch onto 128; its change is the same
+- Drop the fork when Fedora's polkit carries the unprivileged agent helper and the
+  polkit-org/polkit#713 change, not when the image base reaches a given Fedora release
+
+* Thu Oct 15 2026 Jan Rybar <jrybar@redhat.com> - 128-1
+- Rebase to polkit-128
+
 * Wed Oct 14 2026 Athanor Forge <forge@athanor.os> - 127-2.fc43.2.athanor3
 - End the agent helper when the agent hangs up before answering, so a cancelled polkit
   dialog no longer counts as a pam_faillock failure (polkit-org/polkit#713, #447)
@@ -259,10 +275,13 @@ exit $fail
 * Mon Oct 05 2026 Athanor Forge <forge@athanor.os> - 127-2.2.fc43.athanor1
 - Fedora 44's polkit 127-2.2 rebuilt for Fedora 43: polkit-agent-helper-1 is not setuid and
   polkit-agent-helper.socket is enabled by preset; no -devel, -docs or man pages.
-* Fri Mar 27 2026 Jan Rybar <jrybar@redhat.com> - 127-2.2
+* Thu Jul 16 2026 Fedora Release Engineering <releng@fedoraproject.org> - 127-5
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_45_Mass_Rebuild
+
+* Fri Mar 27 2026 Jan Rybar <jrybar@redhat.com> - 127-4
 - CVE-2026-4897 aisle.com fix of unsanitized getline
 
-* Wed Mar 04 2026 Jan Rybar <jrybar@redhat.com> - 127-2.1
+* Wed Mar 04 2026 Jan Rybar <jrybar@redhat.com> - 127-3
 - backport of significant upstream patches
 
 * Sat Jan 17 2026 Fedora Release Engineering <releng@fedoraproject.org> - 127-2

@@ -236,7 +236,12 @@ RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --k
     test "$(grep -c sigstoreSigned /etc/containers/policy.json)" -eq 3
 
 # Declarative Systemd presets & sysusers
-RUN systemctl enable tetragon.service systemd-sysext.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
+# polkit is Athanor's build, whose agent helper is not setuid; a newer Fedora one is 4755 (#144, #447).
+RUN case $(rpm -q --qf '%{RELEASE}' polkit) in *.athanor*) ;; \
+        *) echo "polkit is not Athanor's build: $(rpm -q polkit)" >&2; exit 1;; esac && \
+    test -x /usr/lib/polkit-1/polkit-agent-helper-1 && ! test -u /usr/lib/polkit-1/polkit-agent-helper-1 \
+        || { echo "polkit-agent-helper-1 is missing or setuid" >&2; exit 1; } && \
+    systemctl enable tetragon.service systemd-sysext.service && systemd-sysusers && systemctl preset-all && systemctl --global preset-all
 
 # Keylime is installed and stays disabled: no verifier exists for its agent to report to
 # (scripts/verify.py shipped forbids enabling it in the sources; this is the image check).

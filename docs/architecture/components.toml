@@ -396,7 +396,7 @@ area = "security"
 status = "specified"
 spec = "doc_lock_and_prompts.md"
 item = "D9"
-purpose = "polkit 127 rebuilt from Fedora 44 for Fedora 43: socket-activated, non-setuid agent helper"
+purpose = "polkit 128 rebuilt from Fedora Rawhide for the image base: socket-activated, non-setuid agent helper"
 
 [[component]]
 path = "forge/test"
