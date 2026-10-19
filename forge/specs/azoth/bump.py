@@ -24,20 +24,20 @@ Two groups, one pull request each, because they are verified differently
            republished at an unchanged version. System Image Check builds the three images
            against the published kernel and reports the package difference a person reviews.
 
-Kernel pair (spec, section 2): for the X.Y series that both Fedora (stable, F43 then F44)
+Kernel pair (spec, section 2): for the X.Y series that both Fedora (stable, F{N} then F{N+1})
 and CachyOS (GitHub releases of CachyOS/linux) ship, the highest patch level X.Y.Z present
 on both sides. KERNEL_CHANNEL=stable takes the newest common series, lts the longterm
 one. Without a pair the kernel stays where it is and a note says so. With the pair, the
 head commit of CachyOS/kernel-patches for the series and the commit of
 linux-cachyos/config in force at the date of the CachyOS release move as well.
-cosmic-comp (forge/specs/cosmic-comp): the newest stable F43 build on Bodhi against the spec's
+cosmic-comp (forge/specs/cosmic-comp): the newest stable F{N} build on Bodhi against the spec's
 Version and fedora_release; a difference rewrites the spec and the archive pin. It runs on its own
 (`cosmic-comp-bump.yml`, its own branch and PR, never auto-merged), apart from the kernel bump.
 Outside the kernel: the NVIDIA versions (open from the GitHub tags, legacy from RPM Fusion)
 within the pinned branch, and the digest of the base image of each group's Containerfiles.
 The system group verifies the NVIDIA locks in system/nvidia/locks against the repository
 metadata and regenerates a lock whose packages the repository republished; the kernel group
-regenerates the lock of a pin it moves. A ref pinned in both groups (fedora:43) may sit at
+regenerates the lock of a pin it moves. A ref pinned in both groups (fedora:<N>) may sit at
 two digests between the merges of the two pull requests: the groups build separately. The kernel hash manifests are not here: `build.sh --stage manifest` and `nvidia.sh manifest` write
 them. Standard library only: it runs on the GitHub runner without installing anything.
 """
@@ -68,8 +68,7 @@ LOCK_STALE = 4  # lock.py verify: the repository publishes the version with othe
 KERNEL_MD = HERE / "KERNEL.md"
 COSMIC_COMP_DIR = HERE.parents[0] / "cosmic-comp"
 COSMIC_COMP_SPEC = COSMIC_COMP_DIR / "cosmic-comp.spec"
-COSMIC_COMP_RE = re.compile(r"^cosmic-comp-(\d+\.\d+\.\d+)-(\d+)\.fc43$")
-FEDORA_RELEASES = ("F43", "F44")  # in order of preference for the same patch level
+SYSTEM_CONTAINERFILE = HERE.parents[2] / "system" / "Containerfile"
 LTS_SERIES = "6.18"  # KERNEL_CHANNEL=lts: the longterm Fedora and CachyOS maintain
 KERNEL_RELEASES = "https://www.kernel.org/releases.json"
 BODHI = "https://bodhi.fedoraproject.org/updates/"
@@ -84,6 +83,26 @@ MANIFEST_ACCEPT = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     ]
 )
+
+
+def fedora_version(containerfile=None):
+    """N of `ARG FEDORA_VERSION=N` in system/Containerfile, the line build-image.sh reads: the
+    release every Fedora-derived pin follows. A missing or malformed line is an error, never a default."""
+    path = containerfile or SYSTEM_CONTAINERFILE
+    m = re.search(r"^ARG FEDORA_VERSION=(\d+)$", path.read_text(), re.M)
+    if not m:
+        sys.exit(f"{path}: no `ARG FEDORA_VERSION=<major>` line")
+    return int(m.group(1))
+
+
+def fedora_releases():
+    """(F{N}, F{N+1}), in order of preference for the same patch level."""
+    n = fedora_version()
+    return (f"F{n}", f"F{n + 1}")
+
+
+def cosmic_comp_re():
+    return re.compile(rf"^cosmic-comp-(\d+\.\d+\.\d+)-(\d+)\.fc{fedora_version()}$")
 
 
 def vtuple(version):
@@ -130,9 +149,9 @@ def read_pins():
 
 
 def fedora_kernels():
-    """{patch level: NVR} of the stable kernel builds; F43 before F44 for the same version."""
+    """{patch level: NVR} of the stable kernel builds; F{N} before F{N+1} for the same version."""
     found = {}
-    for release in FEDORA_RELEASES:
+    for release in fedora_releases():
         page, pages = 1, 1
         while page <= pages:
             query = {
@@ -216,26 +235,26 @@ def head_commit(repo, path, until=None):
 
 
 def cosmic_comp_nvrs():
-    """The Bodhi answer for the stable F43 builds of cosmic-comp."""
-    query = {"packages": "cosmic-comp", "releases": "F43", "status": "stable", "rows_per_page": 100}
+    """The Bodhi answer for the stable F{N} builds of cosmic-comp."""
+    query = {"packages": "cosmic-comp", "releases": f"F{fedora_version()}", "status": "stable", "rows_per_page": 100}
     return json.loads(http(f"{BODHI}?{urllib.parse.urlencode(query)}")[1])
 
 
 def cosmic_comp_newest(data):
-    """The newest `version-release.fc43` among the builds of a Bodhi answer."""
-    found = []
+    """The newest `version-release.fc{N}` among the builds of a Bodhi answer."""
+    n, regex, found = fedora_version(), cosmic_comp_re(), []
     for update in data["updates"]:
         for build in update["builds"]:
-            m = COSMIC_COMP_RE.match(build["nvr"])
+            m = regex.match(build["nvr"])
             if m:
-                found.append((vtuple(m.group(1)), int(m.group(2)), f"{m.group(1)}-{m.group(2)}.fc43"))
+                found.append((vtuple(m.group(1)), int(m.group(2)), f"{m.group(1)}-{m.group(2)}.fc{n}"))
     if not found:
-        sys.exit("cosmic-comp: Bodhi lists no stable F43 build")
+        sys.exit(f"cosmic-comp: Bodhi lists no stable F{n} build")
     return max(found)[2]
 
 
 def cosmic_comp_pin(spec):
-    """`version-release.fc43` of the spec: Fedora's build it is made from."""
+    """`version-release.fc{N}` of the spec: Fedora's build it is made from."""
     version = re.search(r"^Version:\s*(\S+)$", spec, re.M)
     release = re.search(r"^%global fedora_release (\S+)$", spec, re.M)
     if not version or not release:
@@ -246,12 +265,12 @@ def cosmic_comp_pin(spec):
 def cosmic_comp_spec(spec, nvr, commit, day=None):
     """The spec rewritten for Fedora's build NVR: the Athanor suffix starts again at 1, and the
     changelog gains an entry for the new release."""
-    version, release = COSMIC_COMP_RE.match(f"cosmic-comp-{nvr}").groups()
+    version, release = cosmic_comp_re().match(f"cosmic-comp-{nvr}").groups()
     day = day or datetime.date.today()
     entry = f"* {day:%a %b %d %Y} Athanor Forge <forge@athanor.os> - {nvr}.athanor1\n- Fedora's cosmic-comp {nvr}.\n\n"
     for pattern, value in (
         (r"^(Version:\s*).*$", rf"\g<1>{version}"),
-        (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc43"),
+        (r"^(%global fedora_release ).*$", rf"\g<1>{release}.fc{fedora_version()}"),
         (r"^(Release:\s*%\{fedora_release\}\.athanor).*$", r"\g<1>1"),
         (r"^(%global commit ).*$", rf"\g<1>{commit}"),
         (r"^%changelog\n", lambda m: m.group(0) + entry),
@@ -263,7 +282,7 @@ def cosmic_comp_spec(spec, nvr, commit, day=None):
 
 
 def cosmic_comp_move():
-    """{"old", "new"} when Bodhi's newest stable F43 build differs from the spec's, else None."""
+    """{"old", "new"} when Bodhi's newest stable F{N} build differs from the spec's, else None."""
     old = cosmic_comp_pin(COSMIC_COMP_SPEC.read_text())
     new = cosmic_comp_newest(cosmic_comp_nvrs())
     return {"old": old, "new": new} if new != old else None
@@ -563,7 +582,7 @@ def cosmic_comp_body(move):
     return (
         "## Pins\n\n| package | before | after |\n| --- | --- | --- |\n"
         f"| `cosmic-comp` | `{move['old']}` | `{move['new']}` |\n\n"
-        "Fedora's stable F43 build moved. This PR rewrites `forge/specs/cosmic-comp/cosmic-comp.spec` "
+        f"Fedora's stable F{fedora_version()} build moved. This PR rewrites `forge/specs/cosmic-comp/cosmic-comp.spec` "
         "and `SOURCES/sources.sha256`; the patches are untouched. Please check whether upstream "
         "(pop-os/cosmic-comp) has merged the layer-surface focus fix (`Patch0`) or the `GIT_HASH` "
         "change to build.rs (`Patch1`): if so, drop that patch and its file. If a patch no longer "
