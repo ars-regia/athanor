@@ -1,6 +1,6 @@
 name: cosmic-comp Bump
 
-# Tracks Fedora's stable F43 build of cosmic-comp (forge/specs/cosmic-comp, bump.py cosmic-comp).
+# Tracks Fedora's stable build of cosmic-comp for the base's release (forge/specs/cosmic-comp, bump.py cosmic-comp).
 # Independent of the kernel bump: its own workflow, branch and PR, so a held cosmic-comp PR
 # never blocks a kernel bump (EOL ones included) and a lookup failure here never stops it.
 # The PR is never auto-merged and has no prep job: the DAG build is the gate (%autosetup -p1
