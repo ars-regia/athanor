@@ -174,6 +174,8 @@ FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd78
   - on the desktop after the 0.9 acceptance, `scripts/devvm/lock-acceptance.sh` with its expected polkit release updated.
 - Runs on: laptop for the build, desktop for the lock acceptance. Depends on: nothing.
 
+**Changed (2026-10-19, the maintainer's decision).** The fork follows upstream polkit 128, released on 2026-10-14, instead of 127-5: 128 fixes CVE-2026-85498 in the agent helper's input, a use-after-free in the agent's session handling, and revalidates the administrator behind `auth_admin_keep`. It takes Fedora Rawhide's dist-git commit 994c3d95 (Koji `polkit-128-1.fc46`); upstream 128 carries Fedora's six 127 patches, so only the #447 patch is applied. The release is `1.fc43.athanor1`, and task 7 moves it to `1.fc45.athanor1`. `system/Containerfile` now fails the image build when the installed polkit is not the fork or its agent helper is setuid, so a later Fedora build can no longer replace the fork unseen.
+
 ### Task 5: SELinux modules against policy 45.20
 
 The spec only compiles: `checkmodule -M -m -C` (`athanor-selinux.spec:40`) does not check a module against any policy. The modules meet the policy when the image build loads them with `semodule -i` (`system/Containerfile:220-222`). The check repeats both steps on a copy, against Fedora 45's policy store. It fails if no module is compiled, and it writes nothing into the checkout:

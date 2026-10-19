@@ -254,9 +254,6 @@ exit $fail
   is applied here
 - Refresh the polkit-org/polkit#713 patch onto 128; its change is the same
 
-* Mon Oct 19 2026 Athanor Forge <forge@athanor.os> - 127-5.fc43.athanor1
-- Rebase onto Fedora 45's polkit 127-5: same source and Fedora patches as 127-2.fc44.2;
-  the CVE-2026-4897 patch takes Fedora's file name
 - Drop the fork when Fedora's polkit carries the unprivileged agent helper and the
   polkit-org/polkit#713 change, not when the image base reaches a given Fedora release
 
