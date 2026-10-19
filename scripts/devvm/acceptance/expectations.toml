@@ -13,7 +13,7 @@ unit = "sshd.service"
 
 [[listener]]
 process = "sshd-session" # OpenSSH 9.8 and later: the session process owns a forwarded port
-ports = [5000] # acceptance only: the registry tunnel `ssh -R 5000:...` of lib.sh, on loopback
+tunnel = true # acceptance only: the registry tunnel `ssh -R $ACC_PORT:...` of lib.sh, on loopback; run.sh passes the port
 address = ["127.0.0.1", "::1"]
 
 [[listener]]

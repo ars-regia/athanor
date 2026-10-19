@@ -5,9 +5,9 @@
 #   1. builds the RPMs of the given forge/specs directories in the builder image, as
 #      call-dag-compile.yml does, into .scratch/local-image/rpms;
 #   2. serves them to system/build-image.sh through a tier3 overlay on the acceptance
-#      registry (localhost:5000): the published tier3 minus the rebuilt packages and minus
+#      registry (localhost:$ACC_PORT, 5000 by default): the published tier3 minus the rebuilt packages and minus
 #      the packages the switch removes, plus the new RPMs;
-#   3. builds localhost:5000/acc/athanor-system:switch-<short hash> with the tier3
+#   3. builds $ACC_REGISTRY/athanor-system:switch-<short hash> with the tier3
 #      reference remapped to the overlay, and pushes it to the acceptance registry; the
 #      image never leaves this host;
 #   4. with --push-to-vm, signs it with a throwaway key the guest trusts for that one
@@ -21,10 +21,12 @@ set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
+# shellcheck source-path=SCRIPTDIR
+source "$HERE/acceptance/lib.sh"
 OWNER=${OWNER:-${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}}
 BUILDER=${BUILDER:-$OWNER/athanor-builder:latest}
 TIER3=${TIER3:-$OWNER/athanor-forge-tier3-repo}
-OVERLAY=localhost:5000/${TIER3#*/}
+OVERLAY=${ACC_REGISTRY%%/*}/${TIER3#*/}
 # Packages the switch retires: their published RPMs must not reach the image.
 REMOVED=(athanor-layout-translator)
 
@@ -59,13 +61,13 @@ for spec in "$@"; do
 done
 
 work=$ROOT/.scratch/local-image
-image=localhost:5000/acc/athanor-system
+image=$REPO
 tag=switch-$(git -C "$ROOT" rev-parse --short HEAD)
 
 # The acceptance registry, as acceptance/images.sh runs it.
-podman container exists athanor-acc-registry ||
-    podman run -d --name athanor-acc-registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2
-podman start athanor-acc-registry > /dev/null
+podman container exists "$ACC_REGISTRY_NAME" ||
+    podman run -d --name "$ACC_REGISTRY_NAME" -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+podman start "$ACC_REGISTRY_NAME" > /dev/null
 
 # A clean checkout whose image the registry already holds from the last run, for the same
 # specs, is not built again: the tag names the commit, and the RPMs stay for the notifier.
@@ -131,7 +133,7 @@ else
     printf '\n[[registry]]\nprefix = "%s"\nlocation = "%s"\ninsecure = true\n' "$TIER3" "$OVERLAY" >> "$work/registries.conf"
     bash "$ROOT/system/kernel-artifacts.sh" require-ready
     CONTAINERS_REGISTRIES_CONF=$work/registries.conf \
-        bash "$ROOT/system/build-image.sh" --gpu none --registry localhost:5000/acc --tag "$tag"
+        bash "$ROOT/system/build-image.sh" --gpu none --registry "$ACC_REGISTRY" --tag "$tag"
     podman push --tls-verify=false "$image:$tag"
     echo "$tag" > "$work/tag"
     echo "$tag $*" > "$work/built"
@@ -143,8 +145,6 @@ echo "${0##*/}: $image:$tag"
 # has signed, signs the pushed digest, and the guest trusts that key for this tag during the
 # switch only (acceptance/lib.sh, trust_tag). The signature stays required.
 if $push; then
-    # shellcheck source-path=SCRIPTDIR
-    source "$HERE/acceptance/lib.sh"
     guard_no_ci
     keys=$work/keys
     mkdir -p "$keys" "$work/registries.d"
@@ -167,7 +167,7 @@ if $push; then
     trap restore_policy EXIT
     # The drop-in stays after the switch, unlike the trust: the guest now follows this
     # plain-HTTP registry, and each later upgrade reads from it. The signature stays required.
-    guest_ssh "printf '[[registry]]\nlocation = \"localhost:5000\"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-acceptance.conf > /dev/null"
+    guest_ssh "printf '[[registry]]\nlocation = \"${ACC_REGISTRY%%/*}\"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/50-acceptance.conf > /dev/null"
     trust_tag "$tag" "$keys/switch.pub"
     guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:$tag"
     # Before the reboot: ostree merges /etc into the staged deployment on the way down.

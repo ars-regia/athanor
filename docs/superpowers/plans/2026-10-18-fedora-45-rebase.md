@@ -51,7 +51,7 @@ Sources: the Koji `f45`, `f44` and `f43-updates` tags (`getLatestBuilds`), Bodhi
 | openssl | 3.5.9 | 4.0.3; `openssl3-libs` 3.5.8 compat ships `libssl.so.3` | 3.5.9 | The Nix target moves to OpenSSL 4 inside the cut-over; no compat package (M3, decided). Fedora 43 has no OpenSSL 4 (`f43-updates`: `openssl-3.5.9-1.fc43`, no `openssl4`), so the move cannot land before the base |
 | polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork is rebased onto 127-5 and keeps the #447 patch and the agent-helper 0755 change (M2, decided; task 4b). With its current release, Fedora's 127-5.fc45 would replace it |
 | shim / grub2 | 15.8-3 / 2.12-43 | 16.1-7 / 2.12-81 | 16.1-7 / 2.12 | SBAT and MOK chain under shim 16.1 (spike item 6) |
-| selinux-policy | 43.10 | 45.20 | 44.11 | Eight modules to validate against the new policy (task 5) |
+| selinux-policy | 43.10 | 45.20 (45.21 on 2026-10-19, task 5) | 44.11 | Eight modules to validate against the new policy (task 5) |
 | anaconda / pykickstart | 43.44 / 3.66 | 45.29 / 3.77 | 44.30 | `KICKSTART_SYNTAX`, the workaround comments |
 | llvm / clang | 21.1.8 | 23.1.2 | 22.1.8 | Only if the kernel builder moves (task 12) |
 | gtk4 / libadwaita | 4.20.4 / 1.8.8 | 4.24.1 / 1.10.0 | 4.22.5 | Shell rendering, dead keys (task 7 console check), rig goldens (task 11) |
@@ -86,7 +86,7 @@ The two columns at the right say which task moves each pin and how much of it do
 | `system/disk_config/iso.toml:254,258`, `system/athanor-install.ks:261,265`, `scripts/devvm/devvm.ks:86,90`, `forge/test/iso/collaudo.ks:289,293` | workarounds for "branch fedora-43" of Anaconda | 7 | Re-verified on Anaconda 45 |
 | `system/nvidia/lock.py:67,77` and `system/nvidia/locks/*.lock` | negativo17 `fedora-43`, RPM Fusion `updates/43` | 7 | Both Fedora 45 repositories answer HTTP 200 |
 | `flake.nix:38-44` | `libdisplay-info-target` 0.2.0 | 7 | `libdisplay-info-sys` 0.3 accepts versions below 0.4.0 |
-| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
+| `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 (45.21 since 2026-10-19) makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
 | `scripts/devvm/acceptance/images.sh:71` | version label `43.${created}` | — | Cosmetic: machines order images by `created`, never by the version string (`system/build-image.sh:135-137`) |
 | `forge/test/shell/kvm/guest.sh:16`, `scripts/devvm/shelld-acceptance.sh:112`, `scripts/devvm/lock-acceptance.sh:30` | 43 in text and in the kernel choice | 11 / 7 | — |
 | `forge/test/shell/Containerfile:8` | `fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809` (Fedora 43) | 11 | The goldens depend on its GTK |
@@ -176,13 +176,13 @@ FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd78
 
 **Changed (2026-10-19, the maintainer's decision).** The fork follows upstream polkit 128, released on 2026-10-14, instead of 127-5: 128 fixes CVE-2026-85498 in the agent helper's input, a use-after-free in the agent's session handling, and revalidates the administrator behind `auth_admin_keep`. It takes Fedora Rawhide's dist-git commit 994c3d95 (Koji `polkit-128-1.fc46`); upstream 128 carries Fedora's six 127 patches, so only the #447 patch is applied. The release is `1.fc43.athanor1`, and task 7 moves it to `1.fc45.athanor1`. `system/Containerfile` now fails the image build when the installed polkit is not the fork or its agent helper is setuid, so a later Fedora build can no longer replace the fork unseen.
 
-### Task 5: SELinux modules against policy 45.20
+### Task 5: SELinux modules against Fedora 45's policy
 
 The spec only compiles: `checkmodule -M -m -C` (`athanor-selinux.spec:40`) does not check a module against any policy. The modules meet the policy when the image build loads them with `semodule -i` (`system/Containerfile:220-222`). The check repeats both steps on a copy, against Fedora 45's policy store. It fails if no module is compiled, and it writes nothing into the checkout:
 
 ```
 base=registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42
-policy=45.20
+policy=45.21
 podman run --rm --security-opt label=disable -e POLICY="$policy" \
   -v "$PWD/forge/specs/athanor-selinux/SOURCES:/src:ro" \
   "$base" \
@@ -196,10 +196,18 @@ podman run --rm --security-opt label=disable -e POLICY="$policy" \
     test "$(semodule -l | grep -cE "^(athanor_|bootupd_lsblk)")" -eq 8'
 ```
 
-- [ ] As a control, the same command with `base` set to Fedora 43's image (`registry.fedoraproject.org/fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8`) and `policy=43.10` passes first. The version test fails if the image's repositories resolve another policy, so the check never passes against a policy it did not name. The 8 is the number of modules in the spec's `%install`; a module added later raises it.
-- [ ] For `athanor_powerprofiles_passwd`, `athanor_pcscd_cgroup` and `athanor_systemd_pstore`, run `sesearch -A` (`setools-console`) against 45.20 and record whether the policy now grants the rule. What is now upstream is removed in task 7, where the base changes.
-- [ ] Check: the command above exits 0 with `policy=45.20` on Fedora 45 and with `policy=43.10` on Fedora 43.
+- [x] As a control, the same command with `base` set to Fedora 43's image (`registry.fedoraproject.org/fedora:43@sha256:4566e9af5e4f52d5a63e025cf4ad69e21ddc6a2acd2aefafa1ab613df6669df8`) and `policy=43.10` passes first. The version test fails if the image's repositories resolve another policy, so the check never passes against a policy it did not name. The 8 is the number of modules in the spec's `%install`; a module added later raises it.
+- [x] For `athanor_powerprofiles_passwd`, `athanor_pcscd_cgroup` and `athanor_systemd_pstore`, run `sesearch -A` (`setools-console`) against Fedora 45's policy and record whether the policy now grants the rule. What is now upstream is removed in task 7, where the base changes.
+- [x] Check: the command above (or `forge/specs/athanor-selinux/check_policy.sh BASE POLICY`) exits 0 with the policy Fedora 45 resolves (`policy=45.21` on 2026-10-19; 45.20 when the plan was written) on Fedora 45, and with `policy=43.10` on Fedora 43.
 - Runs on: laptop. Depends on: nothing.
+
+**Result (2026-10-19).** The command is `forge/specs/athanor-selinux/check_policy.sh BASE POLICY`.
+- **Control:** Fedora 43 with 43.10 exits 0.
+- **Target:** Fedora 45's repositories now resolve `selinux-policy-targeted` 45.21-1.fc45, so the run with 45.20 fails on the version test, as designed. With 45.21 it exits 0: all 8 modules compile and load, and `semodule -l` lists 8. Task 7 runs the check again against the policy the cut-over image resolves.
+- **The three rules,** checked with `sesearch -A` against 45.21 without the Athanor modules:
+  - `athanor_pcscd_cgroup`: granted (`allow pcscd_t cgroup_t:dir { getattr open search };`). Task 7 removes it.
+  - `athanor_powerprofiles_passwd`: not granted (`powerprofiles_t passwd_file_t:file`). It stays.
+  - `athanor_systemd_pstore`: not granted (`systemd_pstore_t systemd_pstore_var_lib_t:dir create`). It stays.
 
 ### Task 6: the prerequisites of the S1 spike
 
@@ -354,7 +362,7 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 - **Soname breaks beyond `libdisplay-info`.** `check_rpm_sonames.sh` in the branch run is the guard. If a builder library cannot follow the base, the builder needs a per-release target *(estimated: not needed)*.
 - **The Fedora 43 kernel on a Fedora 45 base.** The Azoth `7.2.9-100.fc43` RPM is installed on a Fedora 45 userspace until task 9 lands *(estimated: compatible, same series; the task 7 ISO test confirms)*.
 - **shim 16.1 and the ESP.** bootc does not roll back the ESP. A Fedora 45 shim and GRUB may stay in place while a Fedora 43 deployment boots, or the ESP may keep shim 15.8 if nothing runs `bootupctl update` (Q1). SBAT revocations and NX requirements in shim 16 are unverified for the Azoth kernel. Spike item 6 (S1-a to S1-e) settles this.
-- **The SELinux policy store across rollback.** 45.20 to 43.10, with local customisations (spike item 1). The power-profiles domain becomes enforcing.
+- **The SELinux policy store across rollback.** 45.21 to 43.10, with local customisations (spike item 1). The power-profiles domain becomes enforcing.
 - **Container storage.** podman 6 against 5 across a rollback (the `podman` stage of spike item 4).
 - **Anaconda 45 with `ostreecontainer`.** The workarounds may have changed or become unnecessary (task 7's ISO test).
 - **Expiring base digests.** Tags carry `quay.expires-after=4w`, so a pinned digest that no tag keeps may be collected. The digest bump bot keeps it current *(estimated)*.

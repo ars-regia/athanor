@@ -1,7 +1,8 @@
 """Runtime audit probes of the VM acceptance (issue #312).
 
-    probes.py collect                      on the guest, as the login user: print the facts as JSON
-    probes.py check FACTS EXPECT CONTACTS  on the host: compare them with the committed expectations
+    probes.py collect                           on the guest, as the login user: print the facts as JSON
+    probes.py check FACTS EXPECT CONTACTS PORT  on the host: compare them with the committed expectations;
+                                                PORT is the registry tunnel's ($ACC_PORT of lib.sh)
 
 `collect` only observes (plus one Nix build and one `nix store gc`, as the login user). `check`
 is pure, so every comparison is unit-tested (scripts/tests/test_runtime_probes.py). A change of
@@ -217,18 +218,20 @@ def collect():
 # --- evaluation (pure) --------------------------------------------------------------------------
 
 
-def declares(entry, socket):
-    """Whether a declared listener covers a socket: process and port, and the address when declared."""
+def declares(entry, socket, tunnel_port):
+    """Whether a declared listener covers a socket: process and port, and the address when declared.
+    An entry with `tunnel = true` takes the port of the harness's registry tunnel."""
     addresses = entry.get("address", [])
     addresses = [addresses] if isinstance(addresses, str) else addresses
+    ports = [tunnel_port] if entry.get("tunnel") else entry["ports"]
     return (
         entry["process"] == socket["process"]
-        and socket["port"] in entry["ports"]
+        and socket["port"] in ports
         and (not addresses or socket["address"] in addresses)
     )
 
 
-def evaluate(facts, expect, contacts):
+def evaluate(facts, expect, contacts, tunnel_port):
     """Every violated expectation as (check, detail); empty when the guest conforms."""
     bad = []
 
@@ -257,7 +260,7 @@ def evaluate(facts, expect, contacts):
             f"{unit} is a [[listener]] of contacts.toml but not declared in expectations.toml",
         )
     for s in facts["listeners"]:
-        if not any(declares(e, s) for e in listeners):
+        if not any(declares(e, s, tunnel_port) for e in listeners):
             fail(
                 "listeners",
                 f"undeclared {s['proto']} listener {s['address']}:{s['port']} ({s['process'] or 'unknown process'})",
@@ -341,10 +344,10 @@ def main(argv):
     if argv[:1] == ["collect"]:
         print(json.dumps(collect()))
         return 0
-    if len(argv) == 4 and argv[0] == "check":
+    if len(argv) == 5 and argv[0] == "check" and argv[4].isdigit():
         with open(argv[1]) as f:
             facts = json.load(f)
-        bad = evaluate(facts, load(argv[2]), load(argv[3]))
+        bad = evaluate(facts, load(argv[2]), load(argv[3]), int(argv[4]))
         for check, detail in bad:
             print(f"FAIL  probe {check}: {detail}")
         for check in sorted(
