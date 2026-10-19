@@ -160,13 +160,13 @@ FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd78
 - [ ] Check: `python3 -B -m unittest discover -s scripts/tests`.
 - Runs on: laptop. Depends on: nothing.
 
-### Task 4b: polkit rebased onto Fedora's 127-5 (M2)
+### Task 4b: polkit rebased onto upstream 128 (M2)
 
-- [ ] `forge/specs/polkit/polkit.spec`: move to the source and the Fedora patches of 127-5. Keep:
+- [x] `forge/specs/polkit/polkit.spec`: move to the source of 128, as Fedora Rawhide's 128-1 builds it (127-5 when the plan was written; see the note below). Keep:
   - `athanor-agent-helper-cancel-before-answer.patch` (#447, polkit-org/polkit#713) and the `%check` that drives it;
   - the agent-helper 0755 change;
   - the drop-ins and the preset.
-- [ ] The release becomes `5.fc43.athanor1`. This is Fedora's 127-5 with the dist tag of the current base, following the rule of `polkit.spec:20-26`: it sorts above every Fedora 43 build today. Task 7 moves it to `5.fc45.athanor1`, which sorts above Fedora's 127-5.fc45 and below any later Fedora build.
+- [x] The release becomes `1.fc43.athanor1` (`5.fc43.athanor1` for 127-5 when the plan was written). This is Fedora's 128-1 with the dist tag of the current base, following the rule of `polkit.spec:20-26`: it sorts above every Fedora 43 build today. Task 7 moves it to `1.fc45.athanor1`, which sorts above Fedora's 127-5.fc45 and 128-1.fc45 and below any later Fedora build.
 - [ ] Rewrite the exit condition (:35-38): drop the fork when Fedora's polkit carries both changes, not when the base reaches a given Fedora release.
 - [ ] Check:
   - `bash forge/scripts/run_spec_build.sh ghcr.io/ars-regia/athanor-builder:latest specs/polkit` (the `%check` and `check_rpm_sonames.sh` both pass);
@@ -242,7 +242,7 @@ The branch is `rebase/fedora-45`, from `origin/iso-v0`, with one pull request to
 5. **Fork releases.**
    - `python3 forge/specs/azoth/bump.py cosmic-comp apply <dir>` writes Fedora 45's stable build (needs task 2).
    - `greenboot-rs.spec:11` → `0.fc45`.
-   - `polkit.spec` → `5.fc45.athanor1`.
+   - `polkit.spec` → `1.fc45.athanor1`.
    - `athanor-system-config.spec` → a release in fc45 that sorts above `71.fc43`, and `Requires: cosmic-comp >=` the fork's fc45 release.
    - Task 4a's test is green again.
 6. **Installer.**
