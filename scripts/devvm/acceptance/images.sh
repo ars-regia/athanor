@@ -34,27 +34,27 @@ printf '[[registry]]\nlocation = "%s"\ninsecure = true\n' "${ACC_REGISTRY%%/*}" 
 mkdir -p "$ACC_STATE/registries.d"
 printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ACC_REGISTRY" > "$ACC_STATE/registries.d/acceptance.yaml"
 
-# The registry runs in a user unit of its own, athanor-acc-registry: started from a run that is
+# The registry runs in a user unit of its own, named by ACC_REGISTRY_NAME: started from a run that is
 # itself a transient unit, its processes landed in that unit's cgroup and died with it (#556).
 # The container keeps the images across runs; the unit only runs it.
-podman container exists athanor-acc-registry ||
-  podman create --name athanor-acc-registry -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
-if ! systemctl --user -q is-active athanor-acc-registry; then
+podman container exists "$ACC_REGISTRY_NAME" ||
+  podman create --name "$ACC_REGISTRY_NAME" -p "127.0.0.1:$ACC_PORT:5000" docker.io/library/registry:2
+if ! systemctl --user -q is-active "$ACC_REGISTRY_NAME"; then
   # A unit still stopping would make systemd-run refuse the name: wait until it is gone.
   for _ in $(seq 30); do
-    [[ $(systemctl --user show -P ActiveState athanor-acc-registry) == deactivating ]] || break
+    [[ $(systemctl --user show -P ActiveState "$ACC_REGISTRY_NAME") == deactivating ]] || break
     sleep 1
   done
   # One started outside the unit by an earlier images.sh: the unit takes it over.
-  podman stop athanor-acc-registry > /dev/null
-  systemd-run --user --quiet --collect --unit=athanor-acc-registry podman start --attach athanor-acc-registry
+  podman stop "$ACC_REGISTRY_NAME" > /dev/null
+  systemd-run --user --quiet --collect --unit="$ACC_REGISTRY_NAME" podman start --attach "$ACC_REGISTRY_NAME"
 fi
 # The unit does not wait for the registry to listen: the first push would race it.
 for _ in $(seq 30); do
   curl -fs -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" && break
   sleep 1
 done
-curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT: journalctl --user -u athanor-acc-registry"
+curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT: journalctl --user -u $ACC_REGISTRY_NAME"
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
