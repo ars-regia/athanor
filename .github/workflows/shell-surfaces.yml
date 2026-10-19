@@ -135,6 +135,18 @@ jobs:
             .scratch/shell-rig/*.log
             .scratch/shell-rig/compositor-e2e.png
 
+  no-gtk:
+    name: The shared crates of the shell without GTK
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: No GTK crate in their tree; clippy and tests without the gtk feature
+        run: bash forge/test/shell/rig.sh no-gtk
+
   shelld:
     name: Shell daemon, notifications and the tray watcher
     needs: lint

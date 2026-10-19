@@ -40,6 +40,20 @@ title = 16
 body = 13
 small = 11.5
 
+# The dock's measures (doc_bar.md, BR7), whole pixels. The GTK dock reads them through the
+# stylesheet, a dock drawn without GTK through generated/dock.rs.
+[dock]
+# The island's padding, and the minimum width and height of its buttons.
+padding = 4
+button = 32
+# The island's margins on its transparent surface, room for its shadow (0 6px 18px): toward
+# the screen edge, away from it, and along it, 18 on the bottom edge and 24 on a side edge,
+# which the shadow's 6px offset pushes down.
+margin_edge = 6
+margin_inner = 14
+margin_along_bottom = 18
+margin_along_side = 24
+
 [hearth]
 # Concentric discs rising from the bottom right corner. Centre in fractions of the
 # image; radii in fractions of the distance from the centre to the farthest corner,

@@ -6,13 +6,33 @@ edition = "2021"
 description = "Centralized Glassmorphism, Accent Color Engine, and Appearance Layout System for Athanor OS"
 authors = ["Athanor Architect <architect@athanor.os>"]
 
+[features]
+default = ["gtk"]
+# The GTK stylesheets and the pre-Calmo glass theme with its engines. Without it, the
+# appearance and the variants build with GIO alone, for a surface that does not use GTK.
+gtk = [
+    "dep:gtk4",
+    "dep:gtk4-layer-shell",
+    "dep:glib",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:toml",
+    "dep:zbus",
+    "dep:tokio",
+]
+
 [dependencies]
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
-glib = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-toml = "0.8"
-zbus = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+gio = { workspace = true }
+gtk4 = { workspace = true, optional = true }
+gtk4-layer-shell = { workspace = true, optional = true }
+glib = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+toml = { version = "0.8", optional = true }
+zbus = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["full"], optional = true }
 tracing = { workspace = true }
+
+[[test]]
+name = "apply"
+required-features = ["gtk"]

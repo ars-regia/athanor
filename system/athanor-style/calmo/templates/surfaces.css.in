@@ -227,7 +227,7 @@ window.athanor-dock {
 }
 
 window.athanor-dock .dock-island {
-    padding: 4px;
+    padding: ${dock_padding}px;
     border-radius: ${radius_chip}px;
     background-color: @ath_bar;
     box-shadow: 0 1px 2px @ath_shadow_near, 0 6px 18px @ath_shadow_panel;
@@ -238,20 +238,20 @@ window.athanor-dock .dock-island {
  * zone, which is the surface's depth: 18px to each side, 24px along a vertical dock, which
  * the 6px offset pushes down. Across the edge the depth stays 6px + island + 14px. */
 window.athanor-dock.edge-bottom .dock-island {
-    margin: 14px 18px 6px;
+    margin: ${dock_margin_inner}px ${dock_margin_along_bottom}px ${dock_margin_edge}px;
 }
 
 window.athanor-dock.edge-left .dock-island {
-    margin: 24px 14px 24px 6px;
+    margin: ${dock_margin_along_side}px ${dock_margin_inner}px ${dock_margin_along_side}px ${dock_margin_edge}px;
 }
 
 window.athanor-dock.edge-right .dock-island {
-    margin: 24px 6px 24px 14px;
+    margin: ${dock_margin_along_side}px ${dock_margin_edge}px ${dock_margin_along_side}px ${dock_margin_inner}px;
 }
 
 button.bar-button {
-    min-height: 32px;
-    min-width: 32px;
+    min-height: ${dock_button}px;
+    min-width: ${dock_button}px;
     padding: 0 8px;
     border: none;
     border-radius: ${radius_control}px;

@@ -98,6 +98,7 @@ subtle = "2.6.1"
 
 # System Utilities & CLI
 nix = "0.29.0"
+calloop = "0.14.5"
 clap = { version = "4.6.4", features = ["derive"] }
 greetd_ipc = "0.10.3"
 landlock = "0.4"
