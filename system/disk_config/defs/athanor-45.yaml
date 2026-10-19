@@ -1,0 +1,127 @@
+# Packages of the Anaconda installer that carries the Athanor system image.
+#
+# bootc-image-builder cannot read this list from the image: it looks for
+# <ID>-<VERSION_ID>.yaml, where ID comes from the os-release of the image being
+# installed. Athanor declares ID=athanor (athanor-base-config), so none of the
+# definitions shipped inside the builder matches, and neither does its fuzzy
+# match, which only compares versions of the same ID. Every downstream of Fedora
+# in that directory (bazzite, bluefin, aurora) carries the same copy under its own
+# name; this file is ours, and the ISO step mounts it into the builder.
+#
+# Contents: athanor-43.yaml with the names Fedora 45 renamed or dropped replaced:
+# dnf -> dnf5, google-noto-sans-cjk-ttc-fonts -> google-noto-sans-cjk-vf-fonts,
+# khmeros-base-fonts -> khmer-os-system-fonts, tigervnc-server-minimal ->
+# tigervnc-x11-server, tigervnc-server-module -> tigervnc-x11-server-module,
+# wget -> wget2-wget. Every name resolves in Fedora 45 (dnf repoquery).
+anaconda-iso:
+  packages:
+    - aajohan-comfortaa-fonts
+    - abattis-cantarell-fonts
+    - alsa-firmware
+    - alsa-tools-firmware
+    - anaconda
+    - anaconda-dracut
+    - anaconda-install-img-deps
+    - anaconda-widgets
+    - atheros-firmware
+    - audit
+    - bind-utils
+    - bitmap-fangsongti-fonts
+    - brcmfmac-firmware
+    - bzip2
+    - cryptsetup
+    - curl
+    - dbus-x11
+    - dejavu-sans-fonts
+    - dejavu-sans-mono-fonts
+    - device-mapper-persistent-data
+    - dmidecode
+    - dnf5
+    - dracut-config-generic
+    - dracut-network
+    - efibootmgr
+    - ethtool
+    - fcoe-utils
+    - ftp
+    - gdb-gdbserver
+    - gdisk
+    - glibc-all-langpacks
+    - gnome-kiosk
+    - google-noto-sans-cjk-vf-fonts
+    - grub2-tools
+    - grub2-tools-extra
+    - grub2-tools-minimal
+    - grubby
+    - gsettings-desktop-schemas
+    - hdparm
+    - hexedit
+    - hostname
+    - initscripts
+    - ipmitool
+    - iwlwifi-dvm-firmware
+    - iwlwifi-mvm-firmware
+    - jomolhari-fonts
+    - kbd
+    - kbd-misc
+    - kdump-anaconda-addon
+    - kernel
+    - khmer-os-system-fonts
+    - less
+    - libblockdev-lvm-dbus
+    - libibverbs
+    - libreport-plugin-bugzilla
+    - libreport-plugin-reportuploader
+    - librsvg2
+    - linux-firmware
+    - lldpad
+    - lsof
+    - madan-fonts
+    - mt-st
+    - mtr
+    - net-tools
+    - nfs-utils
+    - nm-connection-editor
+    - nmap-ncat
+    - nss-tools
+    - openssh-clients
+    - openssh-server
+    - ostree
+    - pciutils
+    - perl-interpreter
+    - pigz
+    - plymouth
+    - prefixdevname
+    - python3-pyatspi
+    - rdma-core
+    - realtek-firmware
+    - rit-meera-new-fonts
+    - rng-tools
+    - rpcbind
+    - rpm-ostree
+    - rsync
+    - rsyslog
+    - selinux-policy-targeted
+    - sg3_utils
+    - sil-abyssinica-fonts
+    - sil-padauk-fonts
+    - smartmontools
+    - spice-vdagent
+    - strace
+    - systemd
+    - tar
+    - tigervnc-x11-server
+    - tigervnc-x11-server-module
+    - udisks2
+    - udisks2-iscsi
+    - usbutils
+    - vim-minimal
+    - volume_key
+    - wget2-wget
+    - xfsdump
+    - xfsprogs
+    - xorg-x11-drivers
+    - xorg-x11-fonts-misc
+    - xorg-x11-server-Xorg
+    - xorg-x11-xauth
+    - xrdb
+    - xz
