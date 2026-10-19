@@ -35,8 +35,9 @@ class PublishTiers(unittest.TestCase):
         bin_dir.mkdir()
         stubs = {
             "skopeo": f"""\
+                printf '%s\\n' "$2" >> {self.dir}/skopeo.log
                 name=${{2#docker://{REGISTRY}/}}
-                name=${{name%:latest}}
+                name=${{name%:*}}
                 [[ $1 == inspect && -f {self.published}/$name.json ]] || exit 1
                 cat {self.published}/$name.json
                 """,
@@ -49,7 +50,7 @@ class PublishTiers(unittest.TestCase):
                   push)
                     [[ $4 != "${{FAIL_PUSH:-}}" ]] || exit 1
                     name=${{4#{REGISTRY}/}}
-                    printf 'sha256:%s' "$(printf '%s' "${{name%:latest}}:new" | sha256sum | cut -d' ' -f1)" > "$3" ;;
+                    printf 'sha256:%s' "$(printf '%s' "${{name%:*}}:new" | sha256sum | cut -d' ' -f1)" > "$3" ;;
                 esac
                 """,
             "createrepo_c": "mkdir -p repodata\n",
@@ -66,10 +67,12 @@ class PublishTiers(unittest.TestCase):
         self.env = {
             k: v
             for k, v in os.environ.items()
-            if k not in ("REGISTRY_HOST", "GITHUB_REPOSITORY_OWNER", "FAIL_PUSH")
+            if k
+            not in ("REGISTRY_HOST", "GITHUB_REPOSITORY_OWNER", "FAIL_PUSH", "GITHUB_REF")
         }
         self.env["PATH"] = f"{bin_dir}:{os.environ['PATH']}"
         self.env["GITHUB_REPOSITORY_OWNER"] = "owner"
+        self.env["GITHUB_REF"] = "refs/heads/iso-v0"
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -190,6 +193,41 @@ class PublishTiers(unittest.TestCase):
             env=self.env,
         )
         self.assertEqual(r.returncode, 2)
+
+    def assert_tag(self, ref, tag):
+        """A run on REF reads and pushes :TAG only, for all five images."""
+        self.env["GITHUB_REF"] = ref
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.pushed()), 5)
+        reads = (self.dir / "skopeo.log").read_text().split()
+        self.assertEqual(len(reads), 5)
+        for reference in reads + self.pushed():
+            self.assertTrue(reference.endswith(f":{tag}"), reference)
+        for log in ("skopeo.log", "buildah.log"):
+            (self.dir / log).unlink()
+
+    def test_the_default_branches_push_latest(self):
+        for ref in ("refs/heads/iso-v0", "refs/heads/main"):
+            with self.subTest(ref=ref):
+                self.assert_tag(ref, "latest")
+
+    def test_another_branch_pushes_a_branch_tag(self):
+        self.assert_tag("refs/heads/rebase/fedora-45", "branch-rebase-fedora-45")
+
+    def test_a_pull_request_ref_pushes_a_branch_tag(self):
+        self.assert_tag("refs/pull/618/merge", "branch-pull-618-merge")
+
+    def test_an_unset_or_empty_ref_fails_closed(self):
+        for ref in (None, ""):
+            with self.subTest(ref=ref):
+                self.env.pop("GITHUB_REF", None)
+                if ref is not None:
+                    self.env["GITHUB_REF"] = ref
+                r = self.run_script()
+                self.assertEqual(r.returncode, 2)
+                self.assertEqual(self.pushed(), [])
+                self.assertFalse(self.out.exists())
 
 
 if __name__ == "__main__":

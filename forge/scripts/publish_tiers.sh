@@ -7,6 +7,11 @@
 # never by tag, so a tier that another run publishes meanwhile cannot reach this run's images.
 # The rolling aggregate (repo-cache/repo) is published as well; no build consumes it.
 #
+# The tag comes from $GITHUB_REF: `latest` on refs/heads/iso-v0 and refs/heads/main, and
+# `branch-<name>` on any other ref, <name> being the ref without refs/heads/ (or refs/),
+# lower-cased, with every character outside [a-z0-9._-] replaced by `-`. A branch run so
+# never moves a tier `latest`. An unset or empty GITHUB_REF exits 2: it never means `latest`.
+#
 # Usage: publish_tiers.sh OUT   (from forge/, after fetch_repo_rpms.sh)
 # The registry is $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER (default ghcr.io and ars-regia), in
 # lower case, as system/tier-digests.sh resolves it. Needs buildah, skopeo, createrepo_c and jq.
@@ -17,17 +22,30 @@ set -euo pipefail
     exit 2
 }
 OUT=$1
+[[ -n ${GITHUB_REF:-} ]] || {
+    echo "${0##*/}: GITHUB_REF is unset or empty; refusing to choose a tag" >&2
+    exit 2
+}
+case $GITHUB_REF in
+    refs/heads/iso-v0 | refs/heads/main) TAG=latest ;;
+    *)
+        ref=${GITHUB_REF#refs/heads/}
+        ref=${ref#refs/}
+        ref=${ref,,}
+        TAG=branch-${ref//[^a-z0-9._-]/-}
+        ;;
+esac
 REGISTRY=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${REGISTRY,,}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# publish NAME DIR: pushes DIR as $REGISTRY/NAME:latest unless the published image already
+# publish NAME DIR: pushes DIR as $REGISTRY/NAME:$TAG unless the published image already
 # carries the same RPM content hash, and writes the digest of the image in use to $work/NAME.
 publish() {
-    local name=$1 dir=$2 image=$REGISTRY/$1:latest new_hash inspect ctr
+    local name=$1 dir=$2 image=$REGISTRY/$1:$TAG new_hash inspect ctr
     new_hash=$(find "$dir" -name '*.rpm' -type f | sort | xargs -r sha256sum | sha256sum | awk '{print $1}')
-    # One manifest read gives both the content label and the digest it belongs to. An image
+    # One manifest read of the tag about to be pushed gives both the content label and the digest it belongs to. An image
     # that cannot be read (never published yet) counts as changed, with skopeo's error left in
     # the log: the push that follows fails on its own if the registry is the problem.
     if inspect=$(skopeo inspect "docker://$image") &&
