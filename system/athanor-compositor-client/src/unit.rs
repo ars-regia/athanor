@@ -5,8 +5,8 @@
 use std::os::fd::OwnedFd;
 
 use futures_util::StreamExt;
-use gtk4::gio::{self, prelude::*};
-use gtk4::glib::{self, variant::Handle, variant::ObjectPath, Variant};
+use gio::prelude::*;
+use glib::{variant::Handle, variant::ObjectPath, Variant};
 
 use crate::launch::LaunchError;
 

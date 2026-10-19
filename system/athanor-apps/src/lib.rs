@@ -2,20 +2,30 @@
 //! favourites and the running windows grouped by application, minimised windows included,
 //! pinning and unpinning, launching behind a security context (BR2), and the opener
 //! buttons. Generic over `Host`, which each program implements for its own state.
+//!
+//! Without the default `gtk` feature only the model, the favourites and the translations
+//! build, for a surface drawn without GTK.
 
 pub mod favorites;
 pub mod i18n;
+#[cfg(feature = "gtk")]
 pub mod menu;
 pub mod model;
+#[cfg(feature = "gtk")]
 pub mod openers;
+#[cfg(feature = "gtk")]
 pub mod row;
+#[cfg(feature = "gtk")]
 pub mod timing;
 
+#[cfg(feature = "gtk")]
 use std::rc::Rc;
 
+#[cfg(feature = "gtk")]
 use athanor_compositor_client::Client;
 
 /// What the row needs from the program that shows it.
+#[cfg(feature = "gtk")]
 pub trait Host: 'static {
     /// The program's name: the application name of its notifications.
     const APP: &'static str;

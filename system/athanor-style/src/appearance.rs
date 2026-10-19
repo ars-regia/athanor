@@ -9,13 +9,19 @@
 //! service here, so every schema and key is looked up before it is touched. One that is
 //! missing reads as its default and refuses writes.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+#[cfg(feature = "gtk")]
+use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
-use gtk4::{gdk, gio, prelude::*};
+use gio::prelude::*;
+#[cfg(feature = "gtk")]
+use gtk4::gdk;
 
-use crate::calmo::{self, Variant};
+#[cfg(feature = "gtk")]
+use crate::calmo;
+use crate::variant::Variant;
 
 const INTERFACE: &str = "org.gnome.desktop.interface";
 const A11Y: &str = "org.gnome.desktop.a11y.interface";
@@ -463,12 +469,14 @@ pub fn on_accent(accent: Rgb) -> Rgb {
     }
 }
 
+#[cfg(feature = "gtk")]
 thread_local! {
     static ACCENT_PROVIDER: RefCell<Option<gtk4::CssProvider>> = const { RefCell::new(None) };
 }
 
 /// Installs the Calmo variant of `appearance` and its accent on `display`. Called again
 /// after a change, it replaces what it installed.
+#[cfg(feature = "gtk")]
 pub fn load(display: &gdk::Display, appearance: &Appearance) {
     calmo::load(display, appearance.variant());
     let provider = appearance.accent_css().map(|css| {

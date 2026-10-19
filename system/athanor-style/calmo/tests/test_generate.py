@@ -53,6 +53,24 @@ class CssTest(unittest.TestCase):
         for selector in selectors:
             self.assertIn(":focus:focus-visible", selector)
 
+    def test_the_dock_rules_read_the_dock_tokens(self):
+        text = generate.css(self.tokens, "light")
+        self.assertIn(".dock-island {\n    padding: 4px;", text)
+        self.assertIn(".edge-bottom .dock-island {\n    margin: 14px 18px 6px;", text)
+        self.assertIn(".edge-left .dock-island {\n    margin: 24px 14px 24px 6px;", text)
+        self.assertIn(".edge-right .dock-island {\n    margin: 24px 6px 24px 14px;", text)
+        self.assertIn("button.bar-button {\n    min-height: 32px;\n    min-width: 32px;", text)
+
+    def test_the_dock_tokens_become_rust_constants(self):
+        rust = generate.dock_rs(self.tokens)
+        self.assertIn("pub const PADDING: i32 = 4;", rust)
+        self.assertIn("pub const BUTTON: i32 = 32;", rust)
+        self.assertIn("pub const MARGIN_ALONG_SIDE: i32 = 24;", rust)
+        self.assertIn("pub const RADIUS: i32 = 10;", rust)
+        broken = dict(self.tokens, dock={"padding": 4.5})
+        with self.assertRaises(ValueError):
+            generate.dock_rs(broken)
+
     def test_translucent_colours_keep_their_alpha(self):
         self.assertRegex(generate.css(self.tokens, "light"), r"@define-color ath_d1 rgba\(\d+, \d+, \d+, 0\.5\);")
 

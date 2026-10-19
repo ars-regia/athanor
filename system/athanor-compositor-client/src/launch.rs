@@ -11,8 +11,8 @@ use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use gtk4::gio::{self, prelude::*};
-use gtk4::glib::{self, Variant};
+use gio::prelude::*;
+use glib::Variant;
 
 use crate::connection::{Client, Error};
 use crate::unit::{self, Unit};

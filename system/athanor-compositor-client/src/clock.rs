@@ -3,8 +3,7 @@
 
 use std::path::PathBuf;
 
-use gtk4::gio;
-use gtk4::prelude::*;
+use gio::prelude::*;
 
 use crate::cosmic_config;
 
