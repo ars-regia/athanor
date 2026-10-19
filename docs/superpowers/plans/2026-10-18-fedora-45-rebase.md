@@ -51,7 +51,7 @@ Sources: the Koji `f45`, `f44` and `f43-updates` tags (`getLatestBuilds`), Bodhi
 | openssl | 3.5.9 | 4.0.3; `openssl3-libs` 3.5.8 compat ships `libssl.so.3` | 3.5.9 | The Nix target moves to OpenSSL 4 inside the cut-over; no compat package (M3, decided). Fedora 43 has no OpenSSL 4 (`f43-updates`: `openssl-3.5.9-1.fc43`, no `openssl4`), so the move cannot land before the base |
 | polkit | 126 (fork 127-2.fc43.2.athanor3) | 127-5 | 127-2.fc44.2 | The fork is rebased onto 127-5 and keeps the #447 patch and the agent-helper 0755 change (M2, decided; task 4b). With its current release, Fedora's 127-5.fc45 would replace it |
 | shim / grub2 | 15.8-3 / 2.12-43 | 16.1-7 / 2.12-81 | 16.1-7 / 2.12 | SBAT and MOK chain under shim 16.1 (spike item 6) |
-| selinux-policy | 43.10 | 45.20 | 44.11 | Eight modules to validate against the new policy (task 5) |
+| selinux-policy | 43.10 | 45.20 (45.21 on 2026-10-19, task 5) | 44.11 | Eight modules to validate against the new policy (task 5) |
 | anaconda / pykickstart | 43.44 / 3.66 | 45.29 / 3.77 | 44.30 | `KICKSTART_SYNTAX`, the workaround comments |
 | llvm / clang | 21.1.8 | 23.1.2 | 22.1.8 | Only if the kernel builder moves (task 12) |
 | gtk4 / libadwaita | 4.20.4 / 1.8.8 | 4.24.1 / 1.10.0 | 4.22.5 | Shell rendering, dead keys (task 7 console check), rig goldens (task 11) |
@@ -198,6 +198,14 @@ podman run --rm --security-opt label=disable -e POLICY="$policy" \
 - [ ] For `athanor_powerprofiles_passwd`, `athanor_pcscd_cgroup` and `athanor_systemd_pstore`, run `sesearch -A` (`setools-console`) against 45.20 and record whether the policy now grants the rule. What is now upstream is removed in task 7, where the base changes.
 - [ ] Check: the command above exits 0 with `policy=45.20` on Fedora 45 and with `policy=43.10` on Fedora 43.
 - Runs on: laptop. Depends on: nothing.
+
+**Result (2026-10-19).** The command is `forge/specs/athanor-selinux/check_policy.sh BASE POLICY`.
+- **Control:** Fedora 43 with 43.10 exits 0.
+- **Target:** Fedora 45's repositories now resolve `selinux-policy-targeted` 45.21-1.fc45, so the run with 45.20 fails on the version test, as designed. With 45.21 it exits 0: all 8 modules compile and load, and `semodule -l` lists 8. Task 7 runs the check again against the policy the cut-over image resolves.
+- **The three rules,** checked with `sesearch -A` against 45.21 without the Athanor modules:
+  - `athanor_pcscd_cgroup`: granted (`allow pcscd_t cgroup_t:dir { getattr open search };`). Task 7 removes it.
+  - `athanor_powerprofiles_passwd`: not granted (`powerprofiles_t passwd_file_t:file`). It stays.
+  - `athanor_systemd_pstore`: not granted (`systemd_pstore_t systemd_pstore_var_lib_t:dir create`). It stays.
 
 ### Task 6: the prerequisites of the S1 spike
 
