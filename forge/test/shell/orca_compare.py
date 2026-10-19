@@ -18,24 +18,23 @@ from pathlib import Path
 # "panel", such as "Control panel", is matched as it is said.
 #
 # The same goes for a single-line field: AccessKit's Role::TextInput reaches AT-SPI as an entry
-# and has no way to say "text", the role of GTK's GtkText, so a text of the reference may be
-# heard as an entry. Orca ends the line of a field with a full stop, which is kept.
-SAME_ROLE = {
-    "grouping": "panel",
-    "raggruppamento": "pannello",
-    "text": "entry",
-    "testo": "campo inserimento",
-}
+# and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
+# as an entry's. Only that line is rewritten: Orca ends a field's line with a full stop and a
+# label's without, so a label such as "Sample text" is matched as it is said.
+SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
+SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
 
 
 def heard_as(utterance):
     """The ways the transcript may say a reference utterance: as it is, and, when it ends in
-    a grouping's role, with a panel's."""
+    a grouping's role, with a panel's, or a field's line, with an entry's."""
     yield utterance
-    body, stop = (utterance[:-1], ".") if utterance.endswith(".") else (utterance, "")
     for role, said in SAME_ROLE.items():
-        if body.endswith(f" {role}"):
-            yield f"{body[: -len(role)]}{said}{stop}"
+        if utterance.endswith(f" {role}"):
+            yield f"{utterance[: -len(role)]}{said}"
+    for role, said in SAME_FIELD_ROLE.items():
+        if utterance.endswith(f" {role}."):
+            yield f"{utterance[: -len(role) - 1]}{said}."
 
 
 def compare(reference, transcript):

@@ -541,6 +541,7 @@ build-toolkit)
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method \
                  && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-toolkit-layer \
+                 && cargo clippy --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml --all-targets -- -D warnings \
                  && cargo build --release --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml \
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;

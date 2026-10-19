@@ -87,6 +87,14 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("athanor-i18n", out[0])
 
+    def test_a_gallery_with_dev_dependencies_patch_or_replace_fails(self):
+        base = '[dependencies]\nathanor-toolkit = { path = ".." }\n'
+        for extra in ('[dev-dependencies]\nserde = "1"\n',
+                      '[target.\'cfg(unix)\'.dev-dependencies]\nserde = "1"\n',
+                      '[patch.crates-io]\nserde = { path = "x" }\n',
+                      '[replace]\n"serde:1.0.0" = { path = "x" }\n'):
+            self.assertTrue(self.gallery(base + extra), extra)
+
     def test_a_gallery_that_points_the_toolkit_elsewhere_fails(self):
         self.assertTrue(self.gallery('[dependencies]\nathanor-toolkit = { path = "../other" }\n'))
 

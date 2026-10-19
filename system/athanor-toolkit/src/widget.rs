@@ -288,9 +288,10 @@ impl Ui {
     /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
     /// drawn, takes no focus or input and has no node for assistive technologies; it keeps its
     /// state. Hiding the widget that has the focus moves the focus to the next visible widget that
-    /// takes it, or the previous one. The root cannot be hidden. Call [`Ui::layout`] afterwards.
+    /// takes it, or the previous one. The root and the title bar cannot be hidden: asking for it
+    /// changes nothing. Call [`Ui::layout`] afterwards.
     pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
-        if id == Self::ROOT || self.widgets[id].visible == visible {
+        if id == Self::ROOT || Some(id) == self.title_bar || self.widgets[id].visible == visible {
             return;
         }
         let before = focus::chain(self);
@@ -671,8 +672,10 @@ mod tests {
             let plain = ui.layout();
             ui.add_title_bar();
             ui.add_title_bar();
-            let (w, h) = ui.layout();
             let bar = ui.widget(Ui::ROOT).children[0];
+            ui.set_visible(bar, false);
+            assert!(ui.is_visible(bar), "rtl {rtl}: the title bar cannot be hidden");
+            let (w, h) = ui.layout();
             let r = ui.widget(bar).rect;
             assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");
             assert_eq!(h, plain.1 + r.h, "rtl {rtl}: the bar adds its height once");

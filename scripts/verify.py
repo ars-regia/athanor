@@ -1035,12 +1035,12 @@ def gallery_problems(root):
         data = tomllib.loads(read(root / GALLERY_MANIFEST))
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
-    tables = [("dependencies", data.get("dependencies", {})),
-              ("build-dependencies", data.get("build-dependencies", {}))]
+    kinds = ("dependencies", "build-dependencies", "dev-dependencies")
+    tables = [(kind, data.get(kind, {})) for kind in kinds]
     for target, spec in data.get("target", {}).items():
-        tables += [(f"target.{target}.{kind}", spec.get(kind, {}))
-                   for kind in ("dependencies", "build-dependencies")]
-    out = []
+        tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
+    out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
+           for kind in ("patch", "replace") if kind in data]
     for table, deps in tables:
         for name, dep in deps.items():
             if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:

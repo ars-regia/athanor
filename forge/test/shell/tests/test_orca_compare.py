@@ -55,6 +55,15 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Name entry.'", lines[0])
 
+    def test_a_label_that_ends_in_text_is_matched_as_it_is_said(self):
+        self.assertEqual(compare.compare(["Sample text"], ["Sample text"])[1], [])
+        self.assertEqual(compare.compare(["Sample text"], ["Sample entry"])[1], ["'Sample text': missing"])
+        self.assertEqual(compare.compare(["Sample text"], ["Sample entry."])[1], ["'Sample text': missing"])
+        self.assertEqual(
+            compare.compare(["Etichetta di testo"], ["Etichetta di campo inserimento"])[1],
+            ["'Etichetta di testo': missing"],
+        )
+
     def test_a_label_that_ends_in_panel_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Control panel"], ["Control panel"])[1], [])
         self.assertEqual(
