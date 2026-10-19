@@ -151,6 +151,7 @@ check-rust:
     export ATHANOR_REQUIRE_QALC=1
     bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
     bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
+    bash forge/test/shell/rig.sh cargo rustdoc --locked -p athanor-toolkit -- -D warnings
 
 # The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
 # licences, bans and sources. Advisories are not here: they depend on a database that changes

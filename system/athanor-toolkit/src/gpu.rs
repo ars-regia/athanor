@@ -18,6 +18,7 @@ use wayland_client::{protocol::wl_surface::WlSurface, Connection, Proxy};
 use wgpu::rwh::{HasDisplayHandle, RawWindowHandle, WaylandWindowHandle};
 use wgpu::{CurrentSurfaceTexture, PresentMode, TextureFormat};
 
+/// The GPU renderer of one Wayland surface, drawing with vello_gpu through wgpu.
 pub struct Gpu {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,

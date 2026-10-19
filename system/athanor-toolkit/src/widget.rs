@@ -12,26 +12,35 @@ pub type WidgetId = usize;
 /// A rectangle in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
+    /// The distance from the left edge.
     pub x: f32,
+    /// The distance from the top edge.
     pub y: f32,
+    /// The width.
     pub w: f32,
+    /// The height.
     pub h: f32,
 }
 
 impl Rect {
+    /// Whether the point is inside the rectangle; the right and bottom edges are outside.
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
     }
 
+    /// The horizontal middle.
     pub fn center_x(&self) -> f32 {
         self.x + self.w / 2.0
     }
 
+    /// The vertical position of the bottom edge.
     pub fn bottom(&self) -> f32 {
         self.y + self.h
     }
 }
 
+/// What a widget is and what it shows. New kinds are added over time: match with a `_` arm.
+#[non_exhaustive]
 pub enum Kind {
     /// Children stacked top to bottom, aligned to the start edge.
     Column,
@@ -40,25 +49,34 @@ pub enum Kind {
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
+    /// A line of text that takes no input.
     Label(String),
+    /// A button with a label; activating it raises [`Event::Clicked`].
     Button(String),
     /// A toggle button. The toggles that share a parent form a radio group: activating one
     /// releases the others.
     Toggle {
+        /// The text of the toggle.
         label: String,
+        /// Whether this toggle is the active one of its group.
         active: bool,
     },
+    /// A single-line text field.
     Field(Box<TextField>),
     /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
     /// does: the title centred and the window's buttons at the end edge. See [`Ui::add_title_bar`].
     TitleBar,
+    /// One of the title bar's buttons.
     WindowButton(WindowButton),
 }
 
 /// A button of the title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum WindowButton {
+    /// Minimizes the window.
     Minimize,
+    /// Closes the window.
     Close,
 }
 
@@ -72,15 +90,21 @@ impl WindowButton {
     }
 }
 
+/// One node of the tree: what it is, where it sits and where it was laid out.
 pub struct Widget {
+    /// What the widget is and shows.
     pub kind: Kind,
+    /// The widget it is a child of; `None` for the root.
     pub parent: Option<WidgetId>,
+    /// The children, in reading order.
     pub children: Vec<WidgetId>,
+    /// Where the last layout put the widget, in logical pixels.
     pub rect: Rect,
     pub(crate) text: Option<Layout<Brush>>,
 }
 
 impl Widget {
+    /// Whether the keyboard can focus the widget.
     pub fn is_focusable(&self) -> bool {
         matches!(
             self.kind,
@@ -91,7 +115,9 @@ impl Widget {
 
 /// What the user did, for the application to act on.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Event {
+    /// A button was activated by the pointer, the keyboard or an assistive technology.
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
@@ -103,24 +129,38 @@ pub enum Event {
 
 /// A key, already translated from the keyboard layout by the driver.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Key {
+    /// Moves the focus to the next widget in reading order.
     Tab,
+    /// Moves the focus to the previous widget in reading order.
     BackTab,
+    /// The left arrow.
     Left,
+    /// The right arrow.
     Right,
+    /// The up arrow.
     Up,
+    /// The down arrow.
     Down,
+    /// Activates the focused widget.
     Enter,
+    /// Deletes before the caret.
     Backspace,
+    /// Deletes after the caret.
     Delete,
+    /// Text to type, which may be several characters (a composed or pasted character).
     Text(String),
 }
 
 /// One window's widgets, theme, reading direction and keyboard focus.
 pub struct Ui {
     pub(crate) widgets: Vec<Widget>,
+    /// The title of the window, which the title bar shows and assistive technologies read.
     pub title: String,
+    /// The colours and sizes the widgets draw with.
     pub theme: Theme,
+    /// Whether the interface is mirrored, for a right-to-left language.
     pub rtl: bool,
     /// The window's width in logical pixels when its widgets need less, as GTK's default width.
     pub min_width: f32,
@@ -131,6 +171,7 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
     pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
         Self {
             widgets: vec![Widget {
@@ -151,6 +192,7 @@ impl Ui {
         }
     }
 
+    /// The root column every widget descends from.
     pub const ROOT: WidgetId = 0;
     /// The longest text a field takes from outside the keyboard, in characters.
     pub const FIELD_MAX_CHARS: usize = 1024;
@@ -198,22 +240,27 @@ impl Ui {
             .is_some_and(|bar| self.widgets[bar].rect.contains(x, y))
     }
 
+    /// The widget `id`. Panics if `id` is not from this tree.
     pub fn widget(&self, id: WidgetId) -> &Widget {
         &self.widgets[id]
     }
 
+    /// The number of widgets in the tree, the root included.
     pub fn len(&self) -> usize {
         self.widgets.len()
     }
 
+    /// Whether the tree has no widgets; always `false`, as the root exists from the start.
     pub fn is_empty(&self) -> bool {
         self.widgets.is_empty()
     }
 
+    /// Whether `id` is a toggle that is the active one of its group.
     pub fn is_active(&self, id: WidgetId) -> bool {
         matches!(self.widgets[id].kind, Kind::Toggle { active: true, .. })
     }
 
+    /// The text of the field `id`, or `None` if it is not a field.
     pub fn field_text(&self, id: WidgetId) -> Option<String> {
         match &self.widgets[id].kind {
             Kind::Field(field) => Some(field.text()),
@@ -221,6 +268,7 @@ impl Ui {
         }
     }
 
+    /// The widget that has the keyboard focus, if any.
     pub fn focus(&self) -> Option<WidgetId> {
         self.focus
     }
@@ -422,6 +470,7 @@ impl Ui {
             .find(|&id| self.widgets[id].is_focusable() && self.widgets[id].rect.contains(x, y))
     }
 
+    /// Presses the pointer at the point, in logical pixels, and returns the event of the widget there, if any.
     pub fn click(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hit(x, y).and_then(|id| self.activate(id))
     }

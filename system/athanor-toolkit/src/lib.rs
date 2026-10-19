@@ -2,6 +2,8 @@
 //! smithay-client-toolkit, widgets laid out in logical pixels and mirrored in right-to-left, text
 //! on Parley, drawing on vello_cpu (or vello_gpu, with the `gpu` feature) and accessibility on AccessKit.
 
+#![warn(missing_docs)]
+
 // The chooser's tree is shared by the example and the tests, which name the crate.
 extern crate self as athanor_toolkit;
 

@@ -9,19 +9,29 @@ use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, 
 use vello_cpu::peniko::{Color, FontData};
 use vello_cpu::{Glyph, Pixmap, RenderContext};
 
+/// The error of drawing and of the GPU renderer: any error that can cross threads.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// The calls the window's scene makes, which vello_cpu's `RenderContext` and vello_gpu's
 /// `Scene` both offer under the same names, on the types of their shared vello_common.
 pub trait Canvas {
+    /// What the canvas draws glyphs with and keeps between calls: a glyph cache or a font store.
     type Resources;
+    /// Sets the transform applied to what is drawn next.
     fn set_transform(&mut self, transform: Affine);
+    /// Sets the colour of the next fills.
     fn set_paint(&mut self, color: Color);
+    /// Sets the stroke of the next strokes.
     fn set_stroke(&mut self, stroke: Stroke);
+    /// Fills a rectangle with the current paint.
     fn fill_rect(&mut self, rect: &Rect);
+    /// Fills a path with the current paint.
     fn fill_path(&mut self, path: &BezPath);
+    /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
+    /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
+    /// Ends the innermost clip.
     fn pop_clip(&mut self);
     /// Fills a run of glyphs of one font and size, hinted.
     fn glyphs(

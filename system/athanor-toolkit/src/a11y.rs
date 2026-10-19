@@ -7,6 +7,7 @@ use accesskit::{
     TreeInfo, TreeUpdate,
 };
 
+/// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id as u64)
 }

@@ -507,6 +507,7 @@ build-toolkit)
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-toolkit --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-toolkit --all-targets --features gpu -- -D warnings \
+                 && cargo rustdoc --locked -p athanor-toolkit -- -D warnings \
                  && cargo test --locked -p athanor-toolkit \
                  && cargo test --locked -p athanor-toolkit --features gpu \
                  && cargo build --release --locked -p athanor-toolkit --features gpu --example chooser --example field --example input_method --example layer \

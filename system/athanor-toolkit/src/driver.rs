@@ -90,19 +90,28 @@ pub struct SurfaceId(u64);
 /// How a surface is shown: the same widgets, in a window or on a layer of the shell.
 pub enum Role {
     /// An xdg-toplevel, which draws its own title bar.
-    Window { app_id: String },
+    Window {
+        /// The application id the compositor groups the window under, as the name of its
+        /// `.desktop` file.
+        app_id: String,
+    },
     /// A wlr-layer-shell surface on the output the compositor picks.
     Layer(LayerOptions),
 }
 
 /// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets.
 pub struct LayerOptions {
+    /// The layer of the shell the surface sits on.
     pub layer: Layer,
+    /// What the surface is for, as the compositor's configuration names it.
     pub namespace: String,
+    /// The edges of the output the surface is attached to.
     pub anchor: Anchor,
     /// Top, right, bottom, left, in logical pixels.
     pub margin: [i32; 4],
+    /// How far the surface pushes other surfaces away from its edge; `-1` ignores their zones.
     pub exclusive_zone: i32,
+    /// Whether and when the surface takes the keyboard.
     pub keyboard: KeyboardInteractivity,
     /// The part of the surface that takes the pointer, in logical pixels; `None` is all of it.
     pub input_region: Option<Vec<Rect>>,
@@ -316,6 +325,7 @@ impl Shell {
         self.surfaces.iter().map(|s| s.id)
     }
 
+    /// The widgets of an open surface, or `None` once it is closed.
     pub fn ui(&self, id: SurfaceId) -> Option<&Ui> {
         self.surfaces.iter().find(|s| s.id == id).map(|s| &s.ui)
     }
