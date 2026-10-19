@@ -253,7 +253,6 @@ exit $fail
   the auth_admin_keep revalidation; upstream 128 carries Fedora's six 127 patches, so none
   is applied here
 - Refresh the polkit-org/polkit#713 patch onto 128; its change is the same
-
 - Drop the fork when Fedora's polkit carries the unprivileged agent helper and the
   polkit-org/polkit#713 change, not when the image base reaches a given Fedora release
 
