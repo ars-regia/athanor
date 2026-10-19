@@ -19,7 +19,7 @@
 - Right to left: every widget mirrors its start edge and its order, as GTK does.
 - No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`). No change to any package or to the image: the toolkit ships nothing in stage 1.
 - The gallery takes the toolkit as `path = ".."`; an outside application takes it as `{ git = "https://github.com/ars-regia/athanor", rev = "..." }` until the split (decision 15). Nothing is published on crates.io.
-- Tasks 4, 5, 8 and 9 need task 4 of the dock plan merged (pointer motion, press and release, the Escape key, `xdg_popup`, the menu widget); task 7 needs its task 5 (the image widget, the icon theme). Tasks 1 to 3 and 6 can start before. Where both plans touch `driver.rs`, the one that lands second merges the other's branch first.
+- Tasks 4, 5, 8 and 9 need task 4 of the dock plan merged (pointer motion, press and release, the Escape key, `xdg_popup`, the menu widget); task 7 needs its task 5 (the image widget, the icon theme). Tasks 1 to 3 can start before; task 6 follows task 5. Where both plans touch `driver.rs`, the one that lands second merges the other's branch first.
 
 ## Review Focus
 
@@ -27,7 +27,7 @@
 2. **Values at their bounds:** a slider set past its range, to a value between steps, or to NaN, from the keyboard, the pointer or an assistive technology's SetValue, ends inside `[min, max]` on a step, and NaN changes nothing. Pinned in task 4.
 3. **Right-to-left keys follow what is seen:** in a mirrored window a switch's knob starts at the right, and the slider's Right arrow moves the knob right, which lowers the value, as GTK's `Scale` does. Pinned in tasks 3 and 4.
 4. **A long list keeps the focus in view:** End on a list of 1000 rows, or Tab into it after a scroll, leaves the focused row fully inside the viewport. Pinned in task 5.
-5. **A multi-line field keeps its newlines and nothing else invisible:** text committed by the input method or set by SetValue keeps `\n` and drops the other controls and the bidirectional formats `set_field_text` drops today. Pinned in task 6.
+5. **A multi-line field keeps its newlines and nothing else invisible:** text committed by the input method or set by SetValue keeps `\n` and drops the other controls; SetValue alone also drops the bidirectional formats, as `set_field_text` does today, so that an input method's RLM stays as a typed one does. Pinned in task 6.
 
 ---
 
@@ -61,8 +61,8 @@
 - Produces: `Ui::set_visible(&mut self, id: WidgetId, visible: bool)` and `Ui::is_visible(&self, id: WidgetId) -> bool`, true only when the widget and all its ancestors are visible. The gallery's command line: `athanor-toolkit-gallery [--lang en|it] [--rtl] [--page <name>]`, and the same for `gallery_gtk.py`. Pages: `buttons` in this task; later tasks add `choices`, `values`, `lists`, `text`, `images`, `menus`, `dialogs`. `strings.tsv`: one line per string, `key<TAB>en<TAB>it`, read by both galleries (the Rust one through `include_str!`, no new dependency). The rig's `ATHANOR_GALLERY_BIN` selects the gallery a scene runs, by default the toolkit's.
 
 - [ ] Write the failing test `a_hidden_widget_is_gone_everywhere` in `widget.rs`: a column with a button, a hidden row holding two buttons, and a field. After `layout()`, the hidden row's height is not part of the window's; `focus::chain` skips its buttons; `hit` at their old rectangle is not one of them; `a11y::tree_update` has no node for the row or its buttons; `set_visible(row, true)` brings all three back.
-- [ ] Write the failing test `hiding_the_focus_moves_it`: with the focus on the row's first button, `set_visible(row, false)` moves it to the field, and `tree_update`'s focus names a node of the update; `set_focus(Some(button))` on a hidden button changes nothing; `a11y::do_action` on a hidden widget's id returns no event.
-- [ ] Implement visibility: a `visible: bool` on `Widget`, true by default. `measure` gives a hidden widget and its subtree no size and no gap; `place`, `focus::chain`, `hit`, `set_focus`, `render::paint`, `a11y::node`'s children, `a11y::tree_update`'s node list, `a11y::missing` and `a11y::do_action` skip them. The test `every_widget_has_a_node` counts visible widgets. Run the tests: they pass.
+- [ ] Write the failing test `hiding_the_focus_moves_it`: with the focus on the row's first button, `set_visible(row, false)` moves it to the field, and `tree_update`'s focus names a node of the update; `set_focus(Some(button))` on a hidden button changes nothing; `Ui::activate` and `a11y::do_action` on a hidden widget's id return no event.
+- [ ] Implement visibility: a `visible: bool` on `Widget`, true by default. `measure` gives a hidden widget and its subtree no size and no gap; `place`, `focus::chain`, `hit`, `set_focus`, `activate`, `render::paint`, `a11y::node`'s children, `a11y::tree_update`'s node list, `a11y::missing` and `a11y::do_action` skip them. The test `every_widget_has_a_node` counts visible widgets. Run the tests: they pass.
 - [ ] Commit: `feat(toolkit): hide and show widgets`.
 - [ ] The gallery: a title bar, a row of toggles naming the pages, and one group per page, hidden except the selected one. The `buttons` page holds a label, a button, a row of three toggles and a single-line field. `--page` selects the page at start; `--rtl` mirrors; `--lang it` takes the `it` column of `strings.tsv`.
 - [ ] `gallery/Cargo.toml`: `athanor-toolkit-gallery`, `license = "MIT OR Apache-2.0"`, `publish = false`, `athanor-toolkit = { path = ".." }` and no other dependency, an empty `[workspace]`, and the root's `[profile.dev]` and `[profile.release]` copied (`panic = "abort"`, LTO, one codegen unit), since a workspace root of its own inherits none. `Cargo.lock` generated on the host by `cargo generate-lockfile --manifest-path` (the rig mounts the repository read-only), never edited by hand. `verify.py`'s `OWN_LICENCE_EXCEPTIONS` names it: `("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None)`.
@@ -95,7 +95,7 @@ From here on, every widget task ends the same way: the widget on its page in bot
 **Files:** `src/widget.rs`, `src/a11y.rs`, `src/render.rs`, `src/driver.rs` (keys); the galleries (page `values`); the references.
 
 **Interfaces:**
-- Produces: `Kind::Slider(Slider)`, with `pub struct Slider` whose fields are private (`name`, `value`, `min`, `max`, `step`) so that its invariants hold; `Ui::slider(&mut self, parent: WidgetId, name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<WidgetId>`, `None` unless every number is finite, `min < max` and `step > 0`; `Ui::value(&self, id: WidgetId) -> Option<f64>`; `Ui::set_value(&mut self, id: WidgetId, value: f64) -> Option<Event>`; `Event::Changed(WidgetId)`. `Key` gains `Home`, `End`, `PageUp`, `PageDown`, which the driver maps from their keysyms.
+- Produces: `Kind::Slider(Slider)`, with `pub struct Slider` whose fields are `pub(crate)` (`name`, `value`, `min`, `max`, `step`), read by `a11y.rs` and `render.rs` and closed to applications so that its invariants hold; `Ui::slider(&mut self, parent: WidgetId, name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<WidgetId>`, `None` unless every number is finite, `min < max` and `step > 0`; the steps count from `min`, and `max` is always a value even when the step does not divide the range, as in GTK's `Adjustment` (0 to 10 by 3: 0, 3, 6, 9, 10); `Ui::value(&self, id: WidgetId) -> Option<f64>`; `Ui::set_value(&mut self, id: WidgetId, value: f64) -> Option<Event>`; `Event::Changed(WidgetId)`. `Key` gains `Home`, `End`, `PageUp`, `PageDown`, which the driver maps from their keysyms.
 
 - [ ] Failing test `a_slider_refuses_a_broken_range`: `slider` with step 0, step NaN, max below min or an infinite bound returns `None` and adds nothing.
 - [ ] Failing test `a_slider_stays_on_its_steps_within_its_range`: with min 0, max 10, step 2, `set_value(id, 11.0)` gives 10, `set_value(id, 3.1)` gives 4 (the nearest step), `set_value(id, f64::NAN)` returns `None` and keeps the value; Right and Up add a step, Left and Down remove one, PageUp and PageDown move ten steps, Home and End go to min and max, each returning `Changed(id)` only when the value moved.
@@ -130,10 +130,10 @@ From here on, every widget task ends the same way: the widget on its page in bot
 - Consumes: the clip and the offset of task 5.
 - Produces: `Kind::TextArea(Box<TextField>)`; `Ui::text_area(&mut self, parent: WidgetId, name: &str, text: &str, lines: usize) -> WidgetId`, `lines` tall, as wide as `theme.field_width`, wrapping at that width; `Ui::field_text` and `Ui::set_field_text` answer for it.
 
-- [ ] Failing test `a_text_area_keeps_its_newlines_only`: `set_field_text(area, "a\nb\u{202E}c\u{7}")` leaves `"a\nbc"`; the same on a single-line field still leaves `"abc"`; a commit of `"x\ny"` from the input method keeps the newline.
+- [ ] Failing test `a_text_area_keeps_its_newlines_only`: `set_field_text(area, "a\nb\u{202E}c\u{7}")` leaves `"a\nbc"`; the same on a single-line field still leaves `"abc"`; a commit of `"x\ny"` from the input method keeps the newline, and a commit of `"\u{200F}x"` keeps the RLM.
 - [ ] Failing test `a_text_area_scrolls_to_its_caret`: with 3 lines shown, Enter five times moves the offset so that the caret's line is inside the field; Up and Down move by a line; Tab leaves the field, as a GTK `TextView` with `accepts_tab` false.
 - [ ] Failing test in `a11y.rs`: `Role::MultilineTextInput` with its name and value, one text run per visual line, run `n` of widget `id` with the node id `id | (n + 1) << 32` (a single-line field keeps its one run at `id | 1 << 32`).
-- [ ] Implement on Parley's `PlainEditor` with a wrap width; one filter, with a `multiline` flag, serves `set_field_text`, `Ui::commit` and the driver's `printable`.
+- [ ] Implement on Parley's `PlainEditor` with a wrap width; the control filter, with a `multiline` flag that keeps `\n`, serves `set_field_text`, `Ui::commit` and the driver's `printable`; the bidirectional formats stay dropped by `set_field_text` alone.
 - [ ] Gallery: a text area of 4 lines, with a `TextView` in a `ScrolledWindow` in the twin.
 - [ ] Check: the tests pass; the check of task 2 passes.
 - [ ] Commit: `feat(toolkit): multi-line text fields`.
@@ -171,12 +171,12 @@ From here on, every widget task ends the same way: the widget on its page in bot
 **Files:** `src/driver.rs`, `src/a11y.rs`; the galleries (page `dialogs`); the references.
 
 **Interfaces:**
-- Produces: `Ui::set_dialog(&mut self)`, which makes the root node `Role::Dialog` with `modal` and makes Escape return `Event::Window(WindowButton::Close)`; `Shell::open_dialog(&mut self, parent: SurfaceId, ui: Ui) -> Result<SurfaceId, Error>`, an `xdg_toplevel` with `set_parent`, told modal through `xdg_wm_dialog_v1` when the compositor offers it; the toolkit itself drops input to the parent while the dialog is open, so it is modal with or without the protocol. `Shell::close(&mut self, id: SurfaceId)` made public, ending the surface's text input as `App::close` does. In `App::update`, `Window(Close)` from a dialog surface goes to the application's `event`, which closes it; from any other surface it exits as today.
+- Produces: `Ui::set_dialog(&mut self)`, which makes the root node `Role::Dialog` with `modal` and makes Escape return `Event::Window(WindowButton::Close)`; `Shell::open_dialog(&mut self, parent: SurfaceId, ui: Ui) -> Result<SurfaceId, Error>`, an `xdg_toplevel` with `set_parent`, told modal through `xdg_wm_dialog_v1` when the compositor offers it; the toolkit itself drops input to the parent while the dialog is open, so it is modal with or without the protocol. `Shell::close(&mut self, id: SurfaceId)` made public: it queues the surface, and the driver closes it after the application's `event` returns through `App::close`, which also ends its text input. In `App::update`, `Window(Close)` from a dialog surface goes to the application's `event`, which closes it; from any other surface it exits as today.
 
-- [ ] Failing test: after `set_dialog`, the root node is `Role::Dialog` with `modal` and the dialog's title, and Escape returns `Window(Close)`; without it Escape returns nothing.
+- [ ] Failing test: after `set_dialog`, the root node is `Role::Dialog` with `modal` and the dialog's title, and Escape returns `Window(Close)`, also with the focus on a field or on a slider (`Ui::key` handles Escape before the focused widget's keys); without it Escape returns nothing.
 - [ ] Implement; on close the parent's focus returns to the widget that held it.
 - [ ] Gallery: a button opening a dialog with a label and a Close button, with a `Gtk.Window` set `transient_for` and `modal` in the twin.
-- [ ] Check: the test passes; the check of task 2 passes, its walk opening the dialog and closing it with Escape.
+- [ ] Check: the test passes; the check of task 2 passes, its walk opening the dialog, finding that a click on the parent activates nothing while it is open, and closing it with Escape.
 - [ ] Commit: `feat(toolkit): modal dialogs`.
 
 ### Task 10: the guide
@@ -190,7 +190,7 @@ From here on, every widget task ends the same way: the widget on its page in bot
 
 - [ ] The guide, short: what the toolkit is and its licence; the dependency pinned to a commit; a first window with `driver::run_window`; widgets, layout and events, with the gallery as the catalogue; several surfaces and dialogs with `driver::Application`; the theme an application fills; what accessibility asks of an application (a name for every field, slider, list and image); right to left; fractional scale; the renderer variable; what stage 1 does not have (OS11).
 - [ ] Every code block compiles: `no_run` where it opens a window, so that `cargo test --doc` builds it without a compositor.
-- [ ] Check: `rig.sh build-toolkit` (clippy, tests with the doctests, `cargo doc -D warnings`) passes.
+- [ ] Check: `rig.sh build-toolkit` (clippy, tests with the doctests, `cargo rustdoc -- -D warnings`) passes.
 - [ ] Commit: `docs(toolkit): a guide for applications`.
 
 ### Task 11: the acceptance of stage 1
