@@ -16,7 +16,7 @@
 #   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field and test input method into <out>/bin,
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field, test input method and layer surfaces into <out>/bin,
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it (run build-compositor first)
 #   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
@@ -44,6 +44,7 @@
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock` and `orca dock`
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
+#   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
@@ -246,7 +247,7 @@ capture_chooser() {
 
 # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
 # athanor-compositor, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
-# the toolkit draws at 2 and the compositor scales it down.
+# the toolkit draws at 1.5 itself, through wp_fractional_scale_v1 and wp_viewporter.
 capture_toolkit_chooser() {
     require athanor-compositor build-compositor
     require athanor-toolkit-chooser build-toolkit
@@ -508,10 +509,11 @@ build-toolkit)
                  && cargo clippy --locked -p athanor-toolkit --all-targets --features gpu -- -D warnings \
                  && cargo test --locked -p athanor-toolkit \
                  && cargo test --locked -p athanor-toolkit --features gpu \
-                 && cargo build --release --locked -p athanor-toolkit --features gpu --example chooser --example field --example input_method \
+                 && cargo build --release --locked -p athanor-toolkit --features gpu --example chooser --example field --example input_method --example layer \
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
-                 && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method'
+                 && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method \
+                 && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-toolkit-layer'
     ;;
 compositor-globals)
     # doc_own_stack.md, C1 tasks 1 and 4: what a client of athanor-compositor binds.
@@ -996,6 +998,12 @@ input-method)
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                  && exec /out/bin/athanor-toolkit-field"
     echo "look at $out/input-method-preedit.png (the preedit underlined) and $out/input-method-commit.png"
+    ;;
+toolkit-layer)
+    # The dock plan, task 3: the driver keeps one layer surface per output. sway's headless
+    # backend adds and removes outputs, which athanor-compositor's fixture cannot yet (C1 task 8).
+    require athanor-toolkit-layer build-toolkit
+    in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_layer_check.py
     ;;
 chooser-e2e)
     # The bar and the dock as in a session, the chooser beside them; the check presses a

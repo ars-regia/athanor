@@ -13,7 +13,7 @@ fn main() -> ExitCode {
             println!("{}", ui.field_text(id).unwrap_or_default());
         }
     };
-    match driver::run(ui, "athanor-toolkit-field", Box::new(on_event)) {
+    match driver::run_window(ui, "athanor-toolkit-field", Box::new(on_event)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("athanor-toolkit-field: {error}");
