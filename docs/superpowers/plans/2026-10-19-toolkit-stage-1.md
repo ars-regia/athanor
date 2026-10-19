@@ -95,9 +95,10 @@ From here on, every widget task ends the same way: the widget on its page in bot
 **Files:** `src/widget.rs`, `src/a11y.rs`, `src/render.rs`, `src/driver.rs` (keys); the galleries (page `values`); the references.
 
 **Interfaces:**
-- Produces: `Kind::Slider(Slider)`, with `pub struct Slider` whose fields are `pub(crate)` (`name`, `value`, `min`, `max`, `step`), read by `a11y.rs` and `render.rs` and closed to applications so that its invariants hold; `Ui::slider(&mut self, parent: WidgetId, name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<WidgetId>`, `None` unless every number is finite, `min < max` and `step > 0`; the steps count from `min`, and `max` is always a value even when the step does not divide the range, as in GTK's `Adjustment` (0 to 10 by 3: 0, 3, 6, 9, 10); `Ui::value(&self, id: WidgetId) -> Option<f64>`; `Ui::set_value(&mut self, id: WidgetId, value: f64) -> Option<Event>`; `Event::Changed(WidgetId)`. `Key` gains `Home`, `End`, `PageUp`, `PageDown`, which the driver maps from their keysyms.
+- Produces: `Kind::Slider(Slider)`, with `pub struct Slider` whose fields are `pub(crate)` (`name`, `value`, `min`, `max`, `step`), read by `a11y.rs` and `render.rs` and closed to applications so that its invariants hold; `Ui::slider(&mut self, parent: WidgetId, name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<WidgetId>`, `None` unless every number is finite, `min < max` and `step > 0`; the steps count from `min`, and `max` is always a value even when the step does not divide the range (0 to 10 by 3: 0, 3, 6, 9, 10); `Ui::value(&self, id: WidgetId) -> Option<f64>`; `Ui::set_value(&mut self, id: WidgetId, value: f64) -> Option<Event>`; `Event::Changed(WidgetId)`. `Key` gains `Home`, `End`, `PageUp`, `PageDown`, which the driver maps from their keysyms.
 
 - [ ] Failing test `a_slider_refuses_a_broken_range`: `slider` with step 0, step NaN, max below min or an infinite bound returns `None` and adds nothing.
+- [ ] Failing test `a_slider_ends_on_max`: with min 0, max 10, step 3, End gives 10, Left from 10 gives 9, and `set_value(id, 9.6)` gives 10, the nearest value.
 - [ ] Failing test `a_slider_stays_on_its_steps_within_its_range`: with min 0, max 10, step 2, `set_value(id, 11.0)` gives 10, `set_value(id, 3.1)` gives 4 (the nearest step), `set_value(id, f64::NAN)` returns `None` and keeps the value; Right and Up add a step, Left and Down remove one, PageUp and PageDown move ten steps, Home and End go to min and max, each returning `Changed(id)` only when the value moved.
 - [ ] Failing test `a_mirrored_slider_follows_what_is_seen`: in RTL, min is at the right edge of the track, and Right lowers the value.
 - [ ] Failing test in `a11y.rs`: `Role::Slider` with the name, the numeric value, min, max and step, and `Action::Increment`, `Decrement` and `SetValue`, each going through `set_value`.
@@ -130,10 +131,10 @@ From here on, every widget task ends the same way: the widget on its page in bot
 - Consumes: the clip and the offset of task 5.
 - Produces: `Kind::TextArea(Box<TextField>)`; `Ui::text_area(&mut self, parent: WidgetId, name: &str, text: &str, lines: usize) -> WidgetId`, `lines` tall, as wide as `theme.field_width`, wrapping at that width; `Ui::field_text` and `Ui::set_field_text` answer for it.
 
-- [ ] Failing test `a_text_area_keeps_its_newlines_only`: `set_field_text(area, "a\nb\u{202E}c\u{7}")` leaves `"a\nbc"`; the same on a single-line field still leaves `"abc"`; a commit of `"x\ny"` from the input method keeps the newline, and a commit of `"\u{200F}x"` keeps the RLM.
+- [ ] Failing test `a_text_area_keeps_its_newlines_only`: `set_field_text(area, "a\nb\u{202E}c\u{7}")` leaves `"a\nbc"`; the same on a single-line field still leaves `"abc"`; a commit of `"x\ny"` from the input method keeps the newline, a commit of `"\u{200F}x"` keeps the RLM, and a commit of `"a\u{2028}b"` leaves `"ab"`.
 - [ ] Failing test `a_text_area_scrolls_to_its_caret`: with 3 lines shown, Enter five times moves the offset so that the caret's line is inside the field; Up and Down move by a line; Tab leaves the field, as a GTK `TextView` with `accepts_tab` false.
 - [ ] Failing test in `a11y.rs`: `Role::MultilineTextInput` with its name and value, one text run per visual line, run `n` of widget `id` with the node id `id | (n + 1) << 32` (a single-line field keeps its one run at `id | 1 << 32`).
-- [ ] Implement on Parley's `PlainEditor` with a wrap width; the control filter, with a `multiline` flag that keeps `\n`, serves `set_field_text`, `Ui::commit` and the driver's `printable`; the bidirectional formats stay dropped by `set_field_text` alone.
+- [ ] Implement on Parley's `PlainEditor` with a wrap width; the control filter, which also drops U+2028 and U+2029 (Parley breaks lines on them, and `\n` is the only newline of a text area), with a `multiline` flag that keeps `\n`, serves `set_field_text`, `Ui::commit` and the driver's `printable`; the bidirectional formats stay dropped by `set_field_text` alone.
 - [ ] Gallery: a text area of 4 lines, with a `TextView` in a `ScrolledWindow` in the twin.
 - [ ] Check: the tests pass; the check of task 2 passes.
 - [ ] Commit: `feat(toolkit): multi-line text fields`.
@@ -168,15 +169,16 @@ From here on, every widget task ends the same way: the widget on its page in bot
 
 ### Task 9: dialogs
 
-**Files:** `src/driver.rs`, `src/a11y.rs`; the galleries (page `dialogs`); the references.
+**Files:** `src/driver.rs`, `src/widget.rs` (`set_dialog`, Escape in `Ui::key`), `src/a11y.rs`; the galleries (page `dialogs`); the references.
 
 **Interfaces:**
-- Produces: `Ui::set_dialog(&mut self)`, which makes the root node `Role::Dialog` with `modal` and makes Escape return `Event::Window(WindowButton::Close)`; `Shell::open_dialog(&mut self, parent: SurfaceId, ui: Ui) -> Result<SurfaceId, Error>`, an `xdg_toplevel` with `set_parent`, told modal through `xdg_wm_dialog_v1` when the compositor offers it; the toolkit itself drops input to the parent while the dialog is open, so it is modal with or without the protocol. `Shell::close(&mut self, id: SurfaceId)` made public: it queues the surface, and the driver closes it after the application's `event` returns through `App::close`, which also ends its text input. In `App::update`, `Window(Close)` from a dialog surface goes to the application's `event`, which closes it; from any other surface it exits as today.
+- Produces: `Ui::set_dialog(&mut self)`, which makes the root node `Role::Dialog` with `modal` and makes Escape return `Event::Window(WindowButton::Close)`; `Shell::open_dialog(&mut self, parent: SurfaceId, ui: Ui) -> Result<SurfaceId, Error>`, an `xdg_toplevel` with `set_parent`, told modal through `xdg_wm_dialog_v1` when the compositor offers it; the toolkit itself drops input to the parent while the dialog is open, so it is modal with or without the protocol: a free function `fn blocked(id: SurfaceId, dialogs: &[(SurfaceId, SurfaceId)]) -> bool` over the open (dialog, parent) pairs decides it. `Shell::close(&mut self, id: SurfaceId)` made public: it queues the surface, and the driver drains the queue through `App::close`, which also ends its text input, after every call into the application (`event`, `output`, `output_changed`). In `App::update`, `Window(Close)` from a dialog surface goes to the application's `event`, which closes it; from any other surface it exits as today.
 
+- [ ] Failing test `a_dialog_blocks_its_parent` in `driver.rs`: `blocked(parent, &dialogs)` is true while `dialogs` holds a dialog of `parent` and false for the dialog itself and after it closes. The pointer, keyboard, input-method and AccessKit action handlers of `App` ask it first and drop the input of a blocked surface.
 - [ ] Failing test: after `set_dialog`, the root node is `Role::Dialog` with `modal` and the dialog's title, and Escape returns `Window(Close)`, also with the focus on a field or on a slider (`Ui::key` handles Escape before the focused widget's keys); without it Escape returns nothing.
 - [ ] Implement; on close the parent's focus returns to the widget that held it.
 - [ ] Gallery: a button opening a dialog with a label and a Close button, with a `Gtk.Window` set `transient_for` and `modal` in the twin.
-- [ ] Check: the test passes; the check of task 2 passes, its walk opening the dialog, finding that a click on the parent activates nothing while it is open, and closing it with Escape.
+- [ ] Check: the tests pass; the check of task 2 passes, its walk opening the dialog and closing it with Escape.
 - [ ] Commit: `feat(toolkit): modal dialogs`.
 
 ### Task 10: the guide
