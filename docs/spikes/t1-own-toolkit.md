@@ -2,8 +2,8 @@
 
 Results of milestone T1 of `doc_own_stack.md` (section 5), plan
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`: the chooser against the GTK goldens
-(task 4), the AT-SPI and Orca comparison (task 5), the measurements (task 7), and, for revision 2
-(task 8), the renderer recommendation, the AccessKit gaps met and what revision 2 must change.
+(task 4), the AT-SPI and Orca comparison (task 5), the measurements (task 7), and, for revision 3
+(task 8), the renderer recommendation, the AccessKit gaps met and what revision 3 must change.
 
 ## Summary
 
@@ -166,7 +166,7 @@ first frame.
 Not measured. The rig (Mesa's llvmpipe, no GPU) on the laptop and on the desktop already gives the
 case without a GPU, and the VM's virgl adds a host GPU behind a paravirtual driver, which no
 Athanor user meets on hardware. Booting the VM on the desktop costs memory and cores the 0.9
-hardware matrix needs; the column is measured if revision 2 asks for virgl figures. The commands,
+hardware matrix needs; the column is measured if revision 3 asks for virgl figures. The commands,
 run inside the guest's session (or any live session):
 
 ```sh
@@ -199,7 +199,7 @@ drawing is counted apart from it, `render.rs` (`vello_cpu`, and the scene both r
 | test clients (examples: text field, input method) | 111 | 0 | 12 | 11 |
 | total | 2532 | 510 | 258 | 223 |
 
-## Task 8: for revision 2
+## Task 8: for revision 3
 
 ### The renderer
 
@@ -239,7 +239,7 @@ each with a test.
 `localized_role_name` returns the node's role description or an empty string; Orca speaks its own
 translated role names, as the Italian run shows, so this was not a loss here.
 
-### What revision 2 must change
+### What revision 3 must change
 
 1. Section 7: the toolkit's renderer is decided, `vello_cpu`, with `vello_gpu` behind a feature
    and the conditions above for turning it on.
@@ -252,4 +252,4 @@ translated role names, as the Italian run shows, so this was not a loss here.
    toolkit's title bar, which it draws itself (maintainer decision of 2026-10-17), takes its strings from
    `athanor-i18n` before the first surface moves.
 5. The styling differences of task 4, and the right-to-left line height, are work for the first
-   surface, not decisions; revision 2 lists them as its acceptance.
+   surface, not decisions; revision 3 lists them as its acceptance.

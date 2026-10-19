@@ -1,11 +1,14 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 1, approved by the maintainer on 2026-10-17.** It sets out the direction
-ADR-0121 records: a compositor of Athanor's own on Smithay, for which release 1.0 waits, and a
-toolkit of its own in Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the
+Status: **revision 2 (2026-10-19) proposed, awaiting the maintainer's approval; revision 1 was
+approved by the maintainer on 2026-10-17.** It sets out the direction ADR-0121 records: a
+compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in
+Rust. The code starts at once (ADR-0121 decision 1). Revision 2 adds OS10 and OS11, a toolkit
+developers outside Athanor can build on, with decisions 12 to 15; revision 3 adds the
 measurements of the first two milestones of section 5 and the compositor's acceptance. Section 7
 records the maintainer's decisions of 2026-10-17 and the one left open; decisions 10 and 11 were
-taken after the approval and are recorded in ADR-0122. The milestones' plans are
+taken after the approval and are recorded in ADR-0122, decisions 12 to 15 on 2026-10-19 in
+ADR-0126. The milestones' plans are
 `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`.
 
@@ -215,13 +218,40 @@ first surface moves:
    through Parley;
 5. deterministic goldens drawn with `vello_cpu`.
 
+**OS10. A toolkit others can build on** (ADR-0126). The toolkit is made usable by developers
+outside Athanor in two stages. Stage 1 is a front of its own, parallel to the compositor and to the
+rebase to Fedora 45, built on the laptop; it is done when a developer outside Athanor can build a
+simple application with it:
+
+- **The widgets:** windows; layout by column, row and group; label, button, toggle, check, switch
+  and slider; single- and multi-line text field; a list with scrolling; image and icon; menu and
+  popup; dialog. Most are those the dock, the launcher and the bar need, so the work serves the
+  move of the surfaces (section 6 step 5).
+- **A gallery,** an application outside the Cargo workspace that shows every widget of stage 1 and
+  uses only the toolkit's public API.
+- **A short developer guide,** and rustdoc on every public item, published on docs.rs at the split.
+- **A surface's gates for every widget.** Each widget of stage 1 passes OS8, Orca saying no less
+  for it than for the equivalent GTK widget, and OS9, its goldens drawn with `vello_cpu`. The
+  gallery is where those transcripts and goldens are taken.
+
+The toolkit leaves the repository when the gallery, outside the workspace, builds and runs with
+only the public API, and either a first user outside Athanor appears or the 1.0 tag comes
+(ADR-0098), whichever is first. It is published on crates.io only then, under the definitive name
+the maintainer chooses at the split, because a name there is permanent. Until then an application
+takes it as a git dependency pinned to a commit:
+`athanor-toolkit = { git = "https://github.com/ars-regia/athanor", rev = "..." }`.
+
+**OS11. Stage 2: a toolkit of GTK's class** (direction, no date). Later, the toolkit grows toward
+what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
+revision records the direction only; a later revision specifies stage 2 before its code starts.
+
 ## 5. The first two milestones
 
 Both start at once, beside release 0.9, as the first steps of the real crates: the compositor
 `athanor-compositor` under `forge/specs/`, built on the desktop, where it comes before release
 0.9's rig work (decision 11), and the
 toolkit `athanor-toolkit` under `system/`, built on the reference laptop. Their measurements are
-recorded under `docs/spikes/` and go into revision 2. Their plans are named in the status line.
+recorded under `docs/spikes/` and go into revision 3. Their plans are named in the status line.
 
 **Milestone C1: the shell on the own compositor.** The compositor's first version runs the current
 GTK4 bar, dock, greeter and launcher unchanged: in the rig, headless and nested on the NVIDIA
@@ -243,11 +273,11 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 1. This document, ADR-0121 and the plans of the first two milestones.
 2. At once, beside release 0.9 and in parallel: milestone C1 on the desktop and milestone T1 on
-   the laptop, each with the harnesses of OS9 it needs; then revision 2 of this document with
+   the laptop, each with the harnesses of OS9 it needs; then revision 3 of this document with
    their measurements.
 3. The rest of the harnesses of OS9.
 4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
-   the GTK4 shell unchanged on top. Revision 2 writes that acceptance: every surface 1.0 carries
+   the GTK4 shell unchanged on top. Revision 3 writes that acceptance: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
@@ -257,6 +287,10 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 5. The toolkit, in parallel with the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
    launcher, the bar and the control centre; the greeter last, because it handles the password
    (AGENTS.md, "Stop and ask before editing").
+6. In parallel with steps 4 and 5 and with the rebase to Fedora 45, on the laptop: stage 1 of
+   OS10, a toolkit developers outside Athanor can build on. Its widgets, most of which step 5
+   needs, pass the gates of OS8 and OS9 in the gallery; the guide and the rustdoc complete it, and
+   the toolkit leaves the repository at the split of decision 14. Stage 2 (OS11) has no date.
 
 ## 7. Decisions
 
@@ -296,6 +330,19 @@ reaches the maintainer's machines in the least time, and recorded in ADR-0122:
     toolkit's runs; release 0.9 may land some days after 2026-10-21. The alternative weighed, the
     compositor on the desktop only while 0.9's rig is idle, was not taken.
 
+Taken by the maintainer on 2026-10-19 and recorded in ADR-0126, as its rules 5 to 8:
+
+12. **A toolkit others can build on, in two stages** (OS10, OS11). Stage 1 now, as a front
+    parallel to the compositor and to the rebase to Fedora 45, on the laptop; stage 2, a toolkit
+    of GTK's class, as a direction with no date.
+13. **Every widget of stage 1 passes a surface's gates**, OS8 and OS9, taken in the gallery.
+14. **The split** comes when the gallery, outside the workspace, builds and runs with only the
+    public API, and either a first user outside Athanor appears or the 1.0 tag comes (ADR-0098),
+    whichever is first. It makes precise when the toolkit leaves this repository (decision 4).
+15. **crates.io only at the split,** under the definitive name the maintainer chooses then, since
+    a name there is permanent; until then a git dependency pinned to a commit. The alternative
+    weighed, publication now as `athanor-toolkit`, was not taken.
+
 Open, settled by milestone T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
 default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
 
@@ -309,6 +356,9 @@ default and `vello_gpu` where T1 measures it faster, because no figure for NVIDI
   today; the gate of OS8 may hold a surface back until upstream or we close them.
 - **The widget layer is ours** (decision 7): widgets, layout, focus, menus and the test harness
   are written before the first surface moves, where Masonry would have given some of them.
+- **Stage 1 of the toolkit runs beside the compositor** (decision 12): the widgets the surfaces
+  need are written anyway, but the gallery, the guide, the rustdoc and the other widgets take the
+  maintainer's time from the compositor, for which release 1.0 waits (decision 5).
 - **Release 1.0 waits for the compositor** (decision 5): its date follows the compositor's
   acceptance, a defect of the hardware matrix found late moves it, and until then each Fedora
   rebase ships as a release 0.x.

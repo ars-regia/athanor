@@ -2,7 +2,7 @@
 
 A survey, made on 2026-10-18, of how other desktops draw the surfaces Athanor's shell draws, and
 what their sources and behaviour suggest for the own compositor and toolkit (`doc_own_stack.md`).
-It feeds revision 2 of that document and the toolkit's surfaces after the layout chooser, the dock
+It feeds revision 3 of that document and the toolkit's surfaces after the layout chooser, the dock
 first (`doc_own_stack.md` section 6, step 5). Nothing here is decided: sections 1 to 4 are
 findings, section 5 holds proposals.
 
@@ -119,7 +119,7 @@ Each finding says whether it was read in the sources of section 1 (source) or se
 
 ## 5. Proposals
 
-For revision 2 of `doc_own_stack.md` and the C1 plan:
+For revision 3 of `doc_own_stack.md` and the C1 plan:
 
 - The compositor documents which layers it draws in the overview and over the lock (finding 6).
 - Global shortcuts reach the shell through a protocol, without a process per key press (finding 5);
