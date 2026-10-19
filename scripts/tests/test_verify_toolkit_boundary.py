@@ -47,6 +47,27 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("path dependency", out[0])
 
+    def test_an_athanor_build_dependency_fails(self):
+        out = self.problems('[build-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n')
+        self.assertTrue(out)
+
+    def test_a_target_dependency_fails(self):
+        out = self.problems('[target.\'cfg(unix)\'.dependencies]\nathanor-i18n = "0.1"\n')
+        self.assertTrue(out)
+
+    def test_a_renamed_athanor_dependency_fails(self):
+        out = self.problems('[dependencies]\ni18n = { package = "athanor-i18n", version = "0.1" }\n')
+        self.assertTrue(out)
+
+    def test_an_unreadable_manifest_fails(self):
+        (self.dir / "Cargo.toml").write_text("[package\n")
+        self.assertTrue(verify.toolkit_boundary_problems(self.root))
+
+    def test_a_licence_file_the_license_does_not_name_fails(self):
+        (self.dir / "Cargo.toml").write_text('[package]\nname = "athanor-toolkit"\nlicense = "MIT"\n')
+        out = verify.toolkit_boundary_problems(self.root)
+        self.assertEqual(out, [f"{verify.TOOLKIT}/LICENSE-APACHE: present, but license = 'MIT' does not name it"])
+
     def test_a_missing_licence_file_fails(self):
         (self.dir / "LICENSE-APACHE").unlink()
         self.assertEqual(self.problems(), [f"{verify.TOOLKIT}/LICENSE-APACHE: missing, license = 'MIT OR Apache-2.0'"])

@@ -66,8 +66,8 @@ The maintainer decided on 2026-10-19:
    Until then a user takes it as a git dependency pinned to a commit:
    `athanor-toolkit = { git = "https://github.com/ars-regia/athanor", rev = "..." }`.
 
-Rules 5 to 8 are decisions 12 to 15 of `doc_own_stack.md`, whose revision 2 specifies them as OS10
-and OS11.
+Rules 5 to 8 are decisions 12 to 15 of `doc_own_stack.md`, whose revision 1, as amended on
+2026-10-19, specifies them as OS10 and OS11.
 
 The check `verify.py toolkit-boundary` holds rules 2 and 3. The existing `licence` check already
 holds the manifest's value as an own-code exception. The gates of OS8 and OS9 hold rule 6.
@@ -106,6 +106,8 @@ copy lacks.
 - `scripts/verify.py` gains `toolkit-boundary`, run by `just check`.
 - A new dependency of the toolkit on another Athanor crate is refused by the check and needs this
   decision changed first.
+- It amends decision 4 of ADR-0121 for the toolkit only: the toolkit moves to a repository of its
+  own under rule 7, not when outside contributors need it. The compositor keeps decision 4.
 - The own-code exception of the toolkit in `scripts/verify.py` cites ADR-0121; it stays valid.
 - `doc_own_stack.md` is amended: revision 1 gains OS10, OS11 and decisions 12 to 15. Its
   revision 2 still brings the measurements of milestones C1 and T1 and the compositor's
