@@ -676,9 +676,16 @@ impl Ui {
         Some(Event::DragStarted(press.widget))
     }
 
-    /// The pointer left the surface: nothing is hovered.
-    pub fn pointer_leave(&mut self) {
+    /// The pointer left the surface: nothing is hovered, and the press waiting for its release
+    /// ends, since the release goes elsewhere, as when a grab starts with the button down. A
+    /// drag it started ends over no widget.
+    pub fn pointer_leave(&mut self) -> Option<Event> {
         self.hover = None;
+        let press = self.press.take()?;
+        press.dragging.then_some(Event::DragEnded {
+            from: press.widget,
+            to: None,
+        })
     }
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
@@ -1131,6 +1138,43 @@ mod tests {
         ui.pointer_press(0.5, 0.5, PointerButton::Primary);
         assert_eq!(ui.pointer_motion(40.0, 40.0), None);
         assert_eq!(ui.pointer_release(40.0, 40.0, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn a_leave_with_the_button_down_ends_the_press() {
+        let (mut ui, app, _) = with_popup();
+        let a = ui.widget(app).rect;
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        // A grab starts with the button down: the release goes elsewhere.
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(ui.pointer_leave(), None, "no drag had started");
+        assert_eq!(
+            ui.pointer_motion(x + 30.0, y),
+            None,
+            "no button is down: nothing drags"
+        );
+        assert_eq!(ui.pointer_release(x, y, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn a_leave_during_a_drag_ends_it_over_no_widget() {
+        let (mut ui, app, _) = with_popup();
+        let a = ui.widget(app).rect;
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_motion(x + 30.0, y),
+            Some(Event::DragStarted(app))
+        );
+        assert_eq!(
+            ui.pointer_leave(),
+            Some(Event::DragEnded {
+                from: app,
+                to: None
+            })
+        );
+        assert_eq!(ui.pointer_motion(x, y), None, "it ends once");
+        assert_eq!(ui.pointer_release(x, y, PointerButton::Primary), None);
     }
 
     #[test]

@@ -1781,8 +1781,8 @@ impl PointerHandler for App {
                         self.pointer_moved(id, at.0, at.1);
                     }
                     PointerEventKind::Leave { .. } => {
-                        surface.ui.pointer_leave();
-                        self.changed(id, None);
+                        let event = surface.ui.pointer_leave();
+                        self.changed(id, event);
                     }
                     PointerEventKind::Press { button, serial, .. } => {
                         self.pointer_pressed(id, at, button, serial);
