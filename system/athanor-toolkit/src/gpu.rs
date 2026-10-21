@@ -52,6 +52,8 @@ pub struct Resources {
     /// Each uploaded pixmap with its id. The `Arc` is held, so that the address it is matched
     /// by is not reused while it is listed.
     images: Vec<(Arc<Pixmap>, ImageId)>,
+    /// The pixmaps left out at the last frame for want of room, so that each is logged once.
+    skipped: Vec<Arc<Pixmap>>,
 }
 
 impl Resources {
@@ -167,6 +169,7 @@ impl Gpu {
             resources: Resources {
                 vello: resources,
                 images: Vec::new(),
+                skipped: Vec::new(),
             },
             scene: vello_gpu::Scene::new(1, 1),
             errors,
@@ -185,7 +188,7 @@ impl Gpu {
         }
         self.scene.reset_and_resize(width, height);
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.upload_images(ui, &mut encoder)?;
+        self.upload_images(ui, &mut encoder);
         paint(ui, scale, &mut self.scene, &mut self.resources)?;
         let frame = match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) | CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -217,9 +220,8 @@ impl Gpu {
     }
 
     /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
-    /// holds any more. Fails, uploading nothing more, when the images would pass
-    /// [`ATLAS_BUDGET`].
-    fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) -> Result<(), Error> {
+    /// holds any more. An image that would pass [`ATLAS_BUDGET`] is left out, and logged.
+    fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
         let wanted: Vec<&Arc<Pixmap>> = (0..ui.len())
             .filter_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. } => Some(image.pixmap()),
@@ -230,24 +232,40 @@ impl Gpu {
         let (kept, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut resources.images)
             .into_iter()
             .partition(|(uploaded, _)| wanted.iter().any(|w| Arc::ptr_eq(w, uploaded)));
-        for (_, id) in gone {
-            self.renderer
-                .destroy_image(&mut resources.vello, encoder, id);
-        }
         resources.images = kept;
+        if !gone.is_empty() {
+            // destroy_image clears the freed rectangles with a pass in an encoder, while an
+            // upload writes through the queue, which runs before the next submission's passes:
+            // in the frame's encoder the clear would wipe an image uploaded to a freed
+            // rectangle. The clears go in a submission of their own, before the uploads.
+            let mut clears = self.device.create_command_encoder(&Default::default());
+            for (_, id) in gone {
+                self.renderer
+                    .destroy_image(&mut resources.vello, &mut clears, id);
+            }
+            self.queue.submit([clears.finish()]);
+        }
         let area = |pixmap: &Pixmap| u64::from(pixmap.width()) * u64::from(pixmap.height());
         let mut used: u64 = resources.images.iter().map(|(p, _)| area(p)).sum();
+        let mut skipped = Vec::new();
         for pixmap in wanted {
             if resources.image(pixmap).is_some() {
                 continue;
             }
-            used += area(pixmap);
-            if used > ATLAS_BUDGET {
-                return Err(format!(
-                    "the window's images pass the GPU atlas budget of {ATLAS_BUDGET} pixels"
-                )
-                .into());
+            if used + area(pixmap) > ATLAS_BUDGET {
+                // Left out, so not drawn; the rest of the window is.
+                if !resources.skipped.iter().any(|s| Arc::ptr_eq(s, pixmap)) {
+                    eprintln!(
+                        "athanor-toolkit: an image of {}x{} pixels is not drawn: the window's \
+                         images pass the GPU atlas budget of {ATLAS_BUDGET} pixels",
+                        pixmap.width(),
+                        pixmap.height()
+                    );
+                }
+                skipped.push(Arc::clone(pixmap));
+                continue;
             }
+            used += area(pixmap);
             let id = self.renderer.upload_image(
                 &mut resources.vello,
                 &self.device,
@@ -257,7 +275,7 @@ impl Gpu {
             );
             resources.images.push((Arc::clone(pixmap), id));
         }
-        Ok(())
+        resources.skipped = skipped;
     }
 
     /// Fails with the first error wgpu reported since the last check.

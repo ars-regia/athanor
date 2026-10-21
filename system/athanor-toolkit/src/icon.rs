@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{Cursor, Read};
 use std::ops::RangeInclusive;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use vello_cpu::peniko::ImageAlphaType;
@@ -34,14 +35,30 @@ const SIZES: RangeInclusive<i64> = 1..=4096;
 const SCALES: RangeInclusive<i64> = 1..=16;
 const THRESHOLDS: RangeInclusive<i64> = 0..=4096;
 
+/// The most directories read from an `index.theme`, which bounds the parse and the files each
+/// lookup stats. hicolor lists about a hundred.
+const MAX_DIRECTORIES: usize = 256;
+
 /// The bytes of the regular file `path`, refused when it is larger than `cap` bytes.
+/// `O_NONBLOCK` of Linux on x86_64 and aarch64; libc is not a dependency of the toolkit.
+const O_NONBLOCK: i32 = 0o4000;
+
 fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, Error> {
     // A FIFO or a device would block the open or never end: only a regular file is opened.
     if !fs::metadata(path)?.is_file() {
         return Err(format!("{}: not a regular file", path.display()).into());
     }
-    let file = File::open(path)?;
-    let len = file.metadata()?.len();
+    // Opened without blocking, should a FIFO take the file's place after the check, and checked
+    // again on what was opened.
+    let file = File::options()
+        .read(true)
+        .custom_flags(O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(format!("{}: not a regular file", path.display()).into());
+    }
+    let len = metadata.len();
     if len > cap {
         return Err(format!("{}: {len} bytes, more than {cap}", path.display()).into());
     }
@@ -251,16 +268,20 @@ impl Index {
             .into_iter()
             .chain(list(theme, "ScaledDirectories"))
             .filter(|path| is_subdirectory(path))
+            .take(MAX_DIRECTORIES)
             .filter_map(|path| {
                 let keys = &groups.iter().find(|(name, _)| *name == path)?.1;
                 // A value out of its bounds, or not a number, skips the directory; one that is
-                // absent takes its default.
+                // absent takes its default, but Size, which the specification requires.
                 let number =
                     |name: &str, default: i64, bounds: RangeInclusive<i64>| match get(keys, name) {
                         None => Some(default),
                         Some(value) => value.parse().ok().filter(|n| bounds.contains(n)),
                     };
-                let size = number("Size", 0, SIZES)?;
+                let size = get(keys, "Size")?
+                    .parse()
+                    .ok()
+                    .filter(|n| SIZES.contains(n))?;
                 Some(Directory {
                     size,
                     scale: number("Scale", 1, SCALES)?,
@@ -336,11 +357,14 @@ impl IconTheme {
     /// broken icon.
     pub fn image(&self, icon: &str, size: u16, scale: u16) -> Result<Image, Error> {
         let px = size.saturating_mul(scale);
-        if let Some(image) = self
-            .resolve(icon, size, scale)
-            .and_then(|path| Image::from_file(&path, px).ok())
-        {
-            return Ok(image);
+        if let Some(path) = self.resolve(icon, size, scale) {
+            match Image::from_file(&path, px) {
+                Ok(image) => return Ok(image),
+                Err(error) => eprintln!(
+                    "athanor-toolkit: icon {icon:?}: {}: {error}; drawing {FALLBACK_ICON}",
+                    path.display()
+                ),
+            }
         }
         let path = self
             .lookup(FALLBACK_ICON, size, scale)
@@ -766,6 +790,40 @@ mod tests {
             16
         );
         assert_eq!(tail(theme.resolve("named.png", 16, 1)), "t/apps/named.png");
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_without_a_size_is_skipped() -> Result<(), Error> {
+        let theme = theme_of(
+            "no-size",
+            "[Icon Theme]\nDirectories=nosize,apps\n\
+             [nosize]\nType=Scalable\nMinSize=1\nMaxSize=512\n\
+             [apps]\nSize=16\nType=Fixed\n",
+            &["nosize", "apps"],
+        )?;
+        assert_eq!(tail(theme.resolve("icon", 48, 1)), "t/apps/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn at_most_256_directories_are_read() -> Result<(), Error> {
+        let names: Vec<String> = (0..300).map(|n| format!("d{n}")).collect();
+        let mut index = format!("[Icon Theme]\nDirectories={}\n", names.join(","));
+        for name in &names {
+            index.push_str(&format!("[{name}]\nSize=16\nType=Fixed\n"));
+        }
+        let dir = scratch(
+            "many",
+            &[
+                ("t/index.theme", index.as_bytes()),
+                ("t/d255/last.png", PNG),
+                ("t/d256/beyond.png", PNG),
+            ],
+        )?;
+        let theme = IconTheme::new(vec![dir], "t");
+        assert_eq!(tail(theme.resolve("last", 16, 1)), "t/d255/last.png");
+        assert_eq!(theme.resolve("beyond", 16, 1), None);
         Ok(())
     }
 }
