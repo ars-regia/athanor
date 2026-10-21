@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -961,11 +962,31 @@ class SignImages(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("connection refused", r.stderr)
 
+    def test_a_hanging_prior_ends_with_retry_sh_inside_the_candidate_timeout(self):
+        """Attempts x images x keys x the timeout of one call, plus the backoff of retry.sh
+        (15 s doubling), stays under half of candidate's timeout-minutes, so a cosign that hangs
+        ends with retry.sh's error and leaves the earlier steps their time."""
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        candidate = workflow.split("\n  candidate:\n", 1)[1].split("\n  sign-images:\n", 1)[0]
+        job_minutes = int(re.search(r"^    timeout-minutes: (\d+)$", candidate, re.M)[1])
+        step = candidate.split("release_attestation.py prior", 1)[0].rsplit("      - name:", 1)[1]
+        attempts = int(re.search(r'RETRY_ATTEMPTS: "(\d+)"', step)[1])
+        per_call = int(re.search(r"prior --timeout (\d+) ", candidate)[1])
+        keys = len(list((ROOT / "system" / "keys").glob("*.pub")))
+        backoff = sum(15 * 2**n for n in range(attempts - 1))
+        worst = attempts * len(NAMES) * keys * per_call + backoff
+        self.assertLess(worst, job_minutes * 60 / 2, (attempts, per_call, keys, backoff))
+        r = subprocess.run(
+            [sys.executable, "-B", str(ATTESTATION), "prior", "--timeout", "x", "--dir", "d", "--keys-dir", "k"],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        self.assertEqual(r.returncode, 2, "prior takes a whole number of seconds")
+
     def test_candidate_runs_prior_through_retry_and_outlasts_a_transient_error(self):
         """release.yml runs the prior check through retry.sh, as verify-images reads the
         registry: a dropped connection is read again, not fatal."""
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
-        self.assertIn("run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior ", workflow)
+        self.assertIn("run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior --timeout ", workflow)
         self.digests()
         statements = self.statements()
         r = subprocess.run(

@@ -12,7 +12,7 @@ public keys of the checkout.
   release_attestation.py verify --statement FILE --keys-dir DIR REPOSITORY@DIGEST
       For system/verify-images.sh: at least one attestation verifies with a key of DIR, and
       every one that verifies says what the statement says.
-  release_attestation.py prior --dir DIR --keys-dir DIR
+  release_attestation.py prior [--timeout SECONDS] --dir DIR --keys-dir DIR
       For candidate: no image of a statement in DIR already carries an attestation that
       verifies with a key of --keys-dir and says something else.
 
@@ -150,7 +150,7 @@ def predicates(digests, statements, out):
         )
 
 
-def attestations(ref, keys_dir):
+def attestations(ref, keys_dir, timeout=TIMEOUT):
     """The envelopes of PREDICATE_TYPE on ref that verify with a key of keys_dir. A key that
     attested nothing here fails with cosign's "no matching attestations"; any other failure,
     such as an unreachable registry, is refused rather than read as no attestation."""
@@ -163,11 +163,11 @@ def attestations(ref, keys_dir):
             r = subprocess.run(
                 ["cosign", "verify-attestation", "--key", str(key), "--type", PREDICATE_TYPE,
                  "--insecure-ignore-tlog=true", "--new-bundle-format=false", ref],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=TIMEOUT,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout,
             )  # fmt: skip
         except subprocess.TimeoutExpired:
             raise Refused(
-                f"{ref}: cosign verify-attestation with {key} ran past {TIMEOUT} s"
+                f"{ref}: cosign verify-attestation with {key} ran past {timeout} s"
             ) from None
         if r.returncode == 0:
             envelopes += [
@@ -204,7 +204,7 @@ def verify(ref, statement_path, keys_dir):
         )
 
 
-def prior(statements, keys_dir):
+def prior(statements, keys_dir, timeout=TIMEOUT):
     """For candidate, before sign-images: refuses an image that already carries an attestation
     which verifies and differs from its statement. A re-run would add a second one, and an image
     with two that disagree never verifies (ADR-0127); one that matches is attested again."""
@@ -221,7 +221,7 @@ def prior(statements, keys_dir):
             raise Refused(f"{path}: not the release statement of {repository}@{digest}")
         expected = load_statement(path, repository, digest)
         ref = f"{repository}@{digest}"
-        envelopes = attestations(ref, keys_dir)
+        envelopes = attestations(ref, keys_dir, timeout)
         if any(differs(e, expected) for e in envelopes):
             raise Refused(
                 f"{ref} already carries an attestation that differs from {path}: "
@@ -247,6 +247,7 @@ def main(argv):
     r = sub.add_parser("prior")
     r.add_argument("--dir", required=True, type=pathlib.Path)
     r.add_argument("--keys-dir", required=True, type=pathlib.Path)
+    r.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds for one cosign call")
     a = p.parse_args(argv)
     try:
         if a.cmd == "write":
@@ -255,7 +256,7 @@ def main(argv):
         elif a.cmd == "predicates":
             predicates(a.digests, a.dir, a.out)
         elif a.cmd == "prior":
-            prior(a.dir, a.keys_dir)
+            prior(a.dir, a.keys_dir, a.timeout)
         else:
             verify(a.ref, a.statement, a.keys_dir)
             print(f"attestation verified: {a.ref}")
