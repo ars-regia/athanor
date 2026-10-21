@@ -867,9 +867,9 @@ def check_installer():
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
 
-# La sintassi che l'Anaconda spedito sull'ISO sa leggere. L'ISO è Fedora 45: alzalo
-# insieme alla base, non oltre, perché una direttiva introdotta dopo passerebbe qui
-# e fallirebbe sul supporto reale.
+# The syntax the Anaconda shipped on the ISO reads. The ISO is Fedora 45: raise it
+# with the base and no further, because a directive introduced later would pass here
+# and fail on the real media.
 KICKSTART_SYNTAX = "F45"
 
 
