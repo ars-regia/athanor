@@ -144,12 +144,14 @@ artifact and never pushed; any other change runs in the published `athanor-build
   brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
   `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
   verified kernel artifacts). `forge/scripts/publish_tiers.sh` then runs `createrepo_c` for
-  each tier whose content hash changed and publishes `athanor-forge-tier<N>-repo:latest`; an
-  unchanged tier is not pushed. It writes `tier-digests.json`, the digest of each tier this run
-  published or found unchanged, which the image job downloads: the image build takes the tiers
-  by these digests, never by tag (doc_update_delivery.md, UD28), and records them as the
-  `io.athanor.forge-tier<N>.digest` labels of each image. The tier images are not signed yet
-  (UD44), and a tier image carries only `latest` until UD44 adds its `hash-` and run tags,
+  each tier whose content hash changed and publishes `athanor-forge-tier<N>-repo:latest` from
+  `iso-v0` and `main`, and `:branch-<name>` from any other branch, so a branch run never moves a
+  tier's `latest` (`publish_tiers.sh`, #624); an unchanged tier is not pushed. It writes
+  `tier-digests.json`, the digest of each tier this run published or found unchanged, which
+  the image job downloads: the image build takes the tiers by these digests, never by tag
+  (doc_update_delivery.md, UD28), and records them as the `io.athanor.forge-tier<N>.digest`
+  labels of each image. The tier images are not signed yet (UD44), and a tier image carries
+  only `latest`, or `branch-<name>` from a branch run, until UD44 adds its `hash-` and run tags,
   so the digest a system image installed lives on as an untagged manifest once `latest`
   moves. The retention of the janitor (PLAT-N01) must keep every tier digest that the
   `io.athanor.forge-tier<N>.digest` labels of a kept system image name. The RPMs are not
