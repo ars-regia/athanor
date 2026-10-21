@@ -286,11 +286,11 @@ mv /etc/fstab.athanor /etc/fstab
 # installer against any sysroot whose boot/ holds no loader entries. Anaconda's own
 # ConfigureBootloader issues the identical call, chrooted into this same system root and
 # without --sysroot (pyanaconda/modules/payloads/payload/rpm_ostree/installation.py,
-# branch fedora-43).
+# branch fedora-45).
 #
 # %post scripts run after that task: the boss queues RunScriptsWithTask(KS_SCRIPT_POST)
 # in the configuration queue, which follows the installation queue carrying the payload's
-# post-install tasks (pyanaconda/modules/boss/installation.py, branch fedora-43). So the
+# post-install tasks (pyanaconda/modules/boss/installation.py, branch fedora-45). So the
 # arguments ConfigureBootloader wrote -- root=, rootflags=subvol=, rw -- are already on
 # the deployment, --merge keeps them and appends this one, and the initrd's
 # systemd-fstab-generator joins every rootflags=. Nothing rewrites the entries after the

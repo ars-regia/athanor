@@ -867,10 +867,10 @@ def check_installer():
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
 
-# La sintassi che l'Anaconda spedito sull'ISO sa leggere. L'ISO è Fedora 43: alzalo
+# La sintassi che l'Anaconda spedito sull'ISO sa leggere. L'ISO è Fedora 45: alzalo
 # insieme alla base, non oltre, perché una direttiva introdotta dopo passerebbe qui
 # e fallirebbe sul supporto reale.
-KICKSTART_SYNTAX = "F43"
+KICKSTART_SYNTAX = "F45"
 
 
 # The kickstarts that live inside another file: bootc-image-builder's TOML carries the ISO's.
