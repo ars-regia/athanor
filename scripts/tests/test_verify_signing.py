@@ -738,11 +738,12 @@ class SigningTest(unittest.TestCase):
             'exec "cosign" sign "$ref"',
             'c=cosign; "$c" sign "$ref"',
             "/usr/bin/cosign attest x",
+            'eval "$attest"',
         ):
             with self.subTest(line=line):
                 problems = self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script + line + "\n"})
                 self.assertEqual(len(problems), 1, problems)
-                self.assertRegex(problems[0], r"^system/sign-images\.sh:2 runs cosign other than cosign attest")
+                self.assertRegex(problems[0], r"^system/sign-images\.sh:2 (runs cosign other than cosign attest|runs eval)")
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

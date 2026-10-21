@@ -227,7 +227,9 @@ SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KE
 # `cosign attest` (ADR-0127 point 5).
 IMAGE_SIGN_SCRIPT = "system/sign-images.sh"
 # Every word cosign on a line of it, quoted, in a substitution or an assignment alike, and
-# the bare command cosign followed by attest, which alone it may be.
+# the bare command cosign followed by attest, which alone it may be; and eval, which runs a
+# command no line names.
+EVAL = re.compile(r"(?:^|(?<=[\s;&|(]))eval\b")
 COSIGN_WORD = re.compile(r"\bcosign\b")
 COSIGN_ATTEST = re.compile(r"(?:^|(?<=[\s;&|(]))cosign\s+attest\b")
 # A container engine as a command, not the docker:// transport of an image reference.
@@ -631,7 +633,9 @@ def image_sign_script_problems(root):
     """The image sign script starts no container and runs no cosign subcommand but attest: a
     line outside a comment that names a container engine as a command, or names cosign anywhere
     but as the bare command `cosign attest` (quoted, through a variable, a substitution or a path
-    alike), is a problem (D43, ADR-0127). The scripts it runs are not read here: of those,
+    alike), or runs eval, is a problem (D43, ADR-0127). The lint catches mistakes, not a
+    deliberate evasion: a name built from pieces passes it, and the review of sign-images.sh,
+    a code-owned path, is the boundary. The scripts it runs are not read here: of those,
     scripts/ci/release_attestation.py runs cosign only in verify, which verify-images.sh calls in
     a job without the key, where the pinned installer puts cosign beside no secret."""
     path = Path(root) / IMAGE_SIGN_SCRIPT
@@ -648,6 +652,8 @@ def image_sign_script_problems(root):
         if len(COSIGN_WORD.findall(code)) != len(COSIGN_ATTEST.findall(code)):
             problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs cosign other than cosign attest beside the "
                             "key (D43, ADR-0127)")
+        if EVAL.search(code):
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs eval beside the key (D43, ADR-0127)")
     return problems
 
 
