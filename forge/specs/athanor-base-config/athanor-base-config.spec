@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
-Version:        43.0.0
-Release:        19%{?dist}
+Version:        45.0.0
+Release:        1%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -9,34 +9,34 @@ URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 
 Requires:       glibc-langpack-it glibc-langpack-en
-Provides:       fedora-logos = 43
+Provides:       fedora-logos = 45
 Provides:       fedora-logos = %{version}-%{release}
-Obsoletes:      fedora-logos < 43
-Provides:       fedora-logos-httpd = 43
+Obsoletes:      fedora-logos < 45
+Provides:       fedora-logos-httpd = 45
 Provides:       fedora-logos-httpd = %{version}-%{release}
-Obsoletes:      fedora-logos-httpd < 43
-Provides:       system-logos = 43
+Obsoletes:      fedora-logos-httpd < 45
+Provides:       system-logos = 45
 Provides:       system-logos = %{version}-%{release}
-Obsoletes:      system-logos < 43
-Provides:       system-logos-httpd = 43
+Obsoletes:      system-logos < 45
+Provides:       system-logos-httpd = 45
 Provides:       system-logos-httpd = %{version}-%{release}
-Obsoletes:      system-logos-httpd < 43
-Provides:       fedora-release = 43
+Obsoletes:      system-logos-httpd < 45
+Provides:       fedora-release = 45
 Provides:       fedora-release = %{version}-%{release}
-Obsoletes:      fedora-release < 43
-Provides:       fedora-release-systemd = 43
+Obsoletes:      fedora-release < 45
+Provides:       fedora-release-systemd = 45
 Provides:       fedora-release-systemd = %{version}-%{release}
-Obsoletes:      fedora-release-systemd < 43
-Provides:       fedora-release-identity = 43
+Obsoletes:      fedora-release-systemd < 45
+Provides:       fedora-release-identity = 45
 Provides:       fedora-release-identity = %{version}-%{release}
-Obsoletes:      fedora-release-identity < 43
-Provides:       fedora-release-common = 43
+Obsoletes:      fedora-release-identity < 45
+Provides:       fedora-release-common = 45
 Provides:       fedora-release-common = %{version}-%{release}
-Obsoletes:      fedora-release-common < 43
-Provides:       system-release = 43
+Obsoletes:      fedora-release-common < 45
+Provides:       system-release = 45
 Provides:       system-release = %{version}-%{release}
-Provides:       system-release(43)
-Obsoletes:      system-release < 43
+Provides:       system-release(45)
+Obsoletes:      system-release < 45
 %description
 This package provides the foundational configuration for Athanor Base: os-release
 and the fedora-release identity, Dracut configuration, systemd presets, units and
@@ -78,6 +78,10 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/plymouth/themes/spinner/watermark.png
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 45.0.0-1
+- Fedora 45 base: os-release names release 45 (VERSION, VERSION_ID, PRETTY_NAME, CPE_NAME,
+  PLATFORM_ID), and the fedora-release, system-release and logos provides follow it
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 43.0.0-19
 - Ship athanor-firewall-zone-migrate.service, a oneshot that runs once before firewalld and
   gives back the public zone to the image where Anaconda's firewall-offline-cmd wrote it with

@@ -77,9 +77,9 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:f8ad36b5070e498f6684f686b7e6fa7d18e9c89bb7b499cd701f816c6d4f06fc AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:f5db6745b7bec9792301b16d729ca73102ea72b9dc7a58390f97ef08bc8ce7d3 AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG FEDORA_VERSION=43
+ARG FEDORA_VERSION=45
 ENV FEDORA_VERSION=$FEDORA_VERSION
 ARG TETRAGON_VERSION=v1.3.0
 ARG ATHANOR_OWNED_EXCLUDES
