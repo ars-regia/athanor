@@ -11,6 +11,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "system/tests"))
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+import schema  # noqa: E402
 from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
@@ -83,6 +85,11 @@ def jobs(*extra, image="success"):
 
 
 class Candidate(Tool):
+    def setUp(self):
+        super().setUp()
+        for tool in ("podman", "rpm", "curl", "git"):
+            (self.dir / "bin" / tool).symlink_to(pathlib.Path(__file__).with_name("fake_release_tools.py"))
+
     def github(
         self,
         req=None,
@@ -218,6 +225,21 @@ class Candidate(Tool):
             ("kernel-digests.txt", KERNEL),
         ):
             self.assertEqual((self.dir / "out" / name).read_text(), text)
+
+    def test_check_writes_one_class_record_per_repository(self):
+        self.github()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        got = self.candidate()
+        self.assertEqual(got["schema_version"], 2)
+        schema.validate(got, schema.load("release-candidate"))
+        self.assertEqual(
+            [(c["repository"], c["baseline_digest"], c["candidate_digest"], c["class"]) for c in got["classes"]],
+            [(f"{REG}/{n}", digest(i + 8), digest(i + 1), "feature") for i, n in enumerate(NAMES)],
+        )
+        calls = (self.dir / "calls.log").read_text().splitlines()
+        self.assertTrue([c for c in calls if c.startswith("podman create")])
+        self.assertFalse([c for c in calls if c.split()[:2] in (["podman", "start"], ["podman", "run"])])
 
     def test_a_completed_build_is_a_candidate_too(self):
         self.github(run=run_object(status="completed", conclusion="success"))

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 
+import release_class
 import schema
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -188,6 +189,27 @@ def superseded(repo, run, verdicts):
     )
 
 
+def classes(verdicts, commit, sources):
+    """PL55: one class record per repository, the :latest of each as its baseline."""
+    records = []
+    for v in verdicts:
+        repository = v["repository"]
+        baseline = None
+        if v["latest_digest"]:
+            ref = f"{repository}@{v['latest_digest']}"
+            baseline = release_class.Baseline(
+                ref, v["latest_digest"], labels(ref).get(REVISION) or None
+            )
+        candidate = release_class.Image(
+            f"{repository}@{v['candidate_digest']}", v["candidate_digest"]
+        )
+        try:
+            records.append(release_class.derive(repository, baseline, candidate, commit, sources))
+        except release_class.ClassError as error:
+            raise Refused(str(error)) from None
+    return records
+
+
 def check(out):
     run_id = os.environ.get("BUILD_RUN_ID", "")
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
@@ -260,10 +282,15 @@ def check(out):
         for name in FILES:
             shutil.copy(tmp / name, out / name)
     verdicts = order(repo, out / "image-digests.txt", request["commit"])
+    records = classes(verdicts, request["commit"], release_class.PodmanSources(ROOT))
+    for r in records:
+        if r["class_reason"]:
+            print(f"{r['repository']}: class_reason {r['class_reason']}", file=sys.stderr)
     candidate = {
-        "schema_version": 1,
+        "schema_version": 2,
         "request": request,
         "order": verdicts,
+        "classes": records,
         "superseded": superseded(repo, run, verdicts),
     }
     try:

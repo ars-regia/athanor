@@ -38,8 +38,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: 🌿 Release only from iso-v0
         run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 📦 rpm, to read the RPM databases of the images (PL55)
+        run: sudo apt-get install --yes --no-install-recommends rpm
       - name: 👤 Who dispatched this release
         run: echo "Dispatched by ${GITHUB_TRIGGERING_ACTOR}." >> "${GITHUB_STEP_SUMMARY}"
       - name: 🧾 Check the request against the build run (scripts/ci/release_candidate.py)
