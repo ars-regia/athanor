@@ -10,6 +10,7 @@ use smithay::backend::renderer::ImportDma;
 use smithay::backend::winit::{WinitEvent, WinitGraphicsBackend};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::{Mode, Output};
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Transform;
@@ -130,8 +131,8 @@ impl State {
             // so a lock is confirmed only once it is on screen.
             nested.damage_tracker = OutputDamageTracker::from_output(&output);
         }
-        if let Ok((damage, states)) = rendered {
-            let presented = shown && damage.is_some();
+        let presented = shown && matches!(rendered, Ok((Some(_), _)));
+        if let Ok((_, states)) = rendered {
             self.frame_done(&output, &states, presented, frame_target, frame_period);
         }
         self.serve_captures();
@@ -144,8 +145,26 @@ impl State {
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");
         }
-        if let Backend::Nested(nested) = &self.backend {
-            nested.backend.window().request_redraw();
+        // A presented frame is paced by the parent; one with nothing to draw is not, and asking
+        // for the next at once spins a core. It waits a frame period instead.
+        // ponytail: an idle output still wakes at 60 Hz; redraw on damage only if that shows.
+        if presented {
+            request_redraw(self);
+        } else if let Err(error) =
+            self.loop_handle
+                .insert_source(Timer::from_duration(frame_period), |_, _, state| {
+                    request_redraw(state);
+                    TimeoutAction::Drop
+                })
+        {
+            tracing::warn!(error = %error.error, "the next frame could not be scheduled");
+            request_redraw(self);
         }
+    }
+}
+
+fn request_redraw(state: &State) {
+    if let Backend::Nested(nested) = &state.backend {
+        nested.backend.window().request_redraw();
     }
 }
