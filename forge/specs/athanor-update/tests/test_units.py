@@ -95,6 +95,9 @@ class Presets(unittest.TestCase):
         lines = [l for l in (SOURCES / "usr/lib/tmpfiles.d/athanor-update.conf").read_text().splitlines() if l and not l.startswith("#")]
         self.assertIn("d /run/athanor-update 0755 root root -", lines)
         self.assertIn("d /var/lib/athanor-update 0755 root root -", lines)
+        # skopeo copies into dir:<path> only when the parent of <path> exists.
+        for objects in ("signatures", "attestations"):
+            self.assertIn(f"d /var/lib/athanor-update/{objects} 0755 root root -", lines)
         self.assertFalse(any(re.search(r"\s/run/athanor(\s|/\s|$)", line) for line in lines))
 
 
