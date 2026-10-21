@@ -62,8 +62,8 @@ fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
     Some(chain[i])
 }
 
-/// Where the arrows find `id`: a list's stop, wherever its row is scrolled, at the part of its
-/// list in view.
+/// Where the arrows find `id`, and start from it: a list's stop, wherever its row is scrolled, at
+/// the part of its list in view.
 fn place(ui: &Ui, id: WidgetId) -> crate::widget::Rect {
     match ui.widget(id).parent {
         Some(list) if matches!(ui.widget(list).kind, Kind::List { .. }) => {
@@ -80,7 +80,7 @@ pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
     let Some(from) = ui.focus() else {
         return chain.first().copied();
     };
-    let r = ui.widget(from).rect;
+    let r = place(ui, from);
     let candidates = chain
         .into_iter()
         .filter(|&id| id != from)

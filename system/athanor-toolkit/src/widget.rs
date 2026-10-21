@@ -2163,6 +2163,23 @@ mod tests {
     }
 
     #[test]
+    fn the_arrows_leave_a_list_whose_focused_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        let view = ui.widget(scroll).rect;
+        ui.set_focus(Some(rows[0]));
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[49])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[49]));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+
+        ui.set_focus(Some(rows[49]));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+    }
+
+    #[test]
     fn a_scroll_clips_its_content_and_follows_the_wheel() {
         for rtl in [false, true] {
             let (mut ui, [_, scroll, list, after], rows) = long_list(50, 200.0, rtl);
