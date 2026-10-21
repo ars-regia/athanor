@@ -1062,6 +1062,18 @@ pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) ->
     }
 }
 
+/// The x of the label of a check button or a switch of width `width`, given its `mark`: a check's
+/// label follows its box by `gap`, wherever the widget's rectangle `r` ends; a switch's label
+/// takes the far edge, opposite its track.
+pub(crate) fn label_x(r: Rect, mark: Rect, rtl: bool, is_switch: bool, gap: f32, width: f32) -> f32 {
+    match (is_switch, rtl) {
+        (false, false) => mark.x + mark.w + gap,
+        (false, true) => mark.x - gap - width,
+        (true, false) => r.x,
+        (true, true) => r.x + r.w - width,
+    }
+}
+
 /// The knob inside the `track` of a switch: at the start edge when off, at the end edge when on,
 /// so that it mirrors in right-to-left.
 pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
@@ -1215,6 +1227,38 @@ mod tests {
             );
             assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
             assert!(ui.is_active(off));
+        }
+    }
+
+    #[test]
+    fn a_check_label_follows_its_box_in_a_row_cell() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Checks", Theme::default(), rtl);
+            ui.min_width = 600.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let check = |label: &str| Kind::Check {
+                label: label.into(),
+                active: false,
+            };
+            let bold = ui.add(row, check("Bold"));
+            ui.add(row, check("A much longer label"));
+            ui.layout();
+            let widget = ui.widget(bold);
+            let width = widget.text.as_ref().expect("a laid-out label").width();
+            assert!(width > 0.0);
+            let (r, gap) = (widget.rect, ui.theme.gap);
+            let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
+            assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
+            let x = label_x(r, mark, rtl, false, gap, width);
+            if rtl {
+                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
+            } else {
+                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
+            }
+            // A switch keeps the far edge.
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            let x = label_x(r, track, rtl, true, gap, width);
+            assert_eq!(if rtl { x + width } else { x }, if rtl { r.x + r.w } else { r.x });
         }
     }
 
