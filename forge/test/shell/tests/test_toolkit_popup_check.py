@@ -3,7 +3,15 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from toolkit_popup_check import BOTTOM, FLIP_Y, SLIDE_X, popups, rects, whole
+from toolkit_popup_check import (
+    BOTTOM,
+    FLIP_Y,
+    SLIDE_X,
+    popups,
+    popups_before_layer,
+    rects,
+    whole,
+)
 
 TRACE = """\
 [1.0]  -> xdg_wm_base#9.create_positioner(new id xdg_positioner#30)
@@ -58,6 +66,15 @@ class TestToolkitPopupCheck(unittest.TestCase):
     def test_an_anchor_covers_the_widget_in_whole_pixels(self):
         self.assertEqual(whole(10, 10, 51.17, 30, 4), (6, 6, 60, 38))
         self.assertEqual(whole(10, 10, 51.17, 30), (10, 10, 52, 30))
+
+    def test_every_popup_goes_before_its_layer_surface(self):
+        layer = "[3.0]  -> zwlr_layer_surface_v1#20.destroy()"
+        self.assertTrue(popups_before_layer([*TRACE, layer]))
+        self.assertFalse(popups_before_layer(TRACE), "the layer surface lives")
+        self.assertFalse(
+            popups_before_layer([*TRACE[:-1], layer, TRACE[-1]]),
+            "the menu outlived its parent",
+        )
 
 
 if __name__ == "__main__":

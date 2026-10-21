@@ -13,7 +13,10 @@ device, so `athanor-toolkit-pointer` adds a virtual one. From the client's own t
 - a click on the layer surface outside the menu closes it, without the compositor's popup_done;
 - a click outside the client closes it through the compositor's popup_done;
 - the secondary button opens it, the down arrow moves past the separator and Return activates
-  the second item; Escape closes the next one; a click activates an item.
+  the second item; Escape closes the next one; a click activates an item;
+- Shift+F10 on an item asks for a popup of the menu, which the driver refuses, and the menu
+  stays open;
+- the output goes with the menu open: the client destroys the popup before its layer surface.
 """
 
 import math
@@ -47,6 +50,7 @@ LAYER_PARENT = re.compile(r"-> zwlr_layer_surface_v1#\d+\.get_popup\(xdg_popup#(
 GRAB = re.compile(r"-> xdg_popup#(\d+)\.grab\(")
 DONE = re.compile(r"(?<!-> )xdg_popup#(\d+)\.popup_done\(\)")
 DESTROY = re.compile(r"-> xdg_popup#(\d+)\.destroy\(\)")
+LAYER_DESTROY = re.compile(r"-> zwlr_layer_surface_v1#\d+\.destroy\(\)")
 CONFIGURE = re.compile(
     r"(?<!-> )xdg_popup#(\d+)\.configure\((-?\d+), (-?\d+), (\d+), (\d+)\)"
 )
@@ -89,6 +93,19 @@ def popups(lines):
         elif (m := DESTROY.search(line)) and m[1] in live:
             live.pop(m[1])["destroyed"] = True
     return made
+
+
+def popups_before_layer(lines):
+    """Whether the client destroyed its layer surface, and every xdg_popup it made before it: a
+    popup never outlives its parent."""
+    layer = next(
+        (i for i, line in enumerate(lines) if LAYER_DESTROY.search(line)), None
+    )
+    if layer is None:
+        return False
+    destroyed = [i for i, line in enumerate(lines) if DESTROY.search(line)]
+    made = sum(1 for line in lines if GET_POPUP.search(line))
+    return len(destroyed) == made and all(i < layer for i in destroyed)
 
 
 def rects(text):
@@ -278,6 +295,36 @@ def main():
         step(
             "a click activates the first item",
             lambda: "activated New Window" in printed(),
+        )
+
+        send(f"move {button[0]} {button[1]}")
+        send("click 272")
+        step(
+            "the menu opens a sixth time",
+            lambda: len(made()) == 7 and made()[6]["position"] is not None,
+        )
+        count = len(made())
+        subprocess.run(
+            [*TYPE, "-M", "shift", "-k", "F10", "-m", "shift"], env=wayland, check=True
+        )
+        step(
+            "Shift+F10 on an item asks for a popup of the menu, which is refused",
+            lambda: "refused" in printed(),
+        )
+        if len(made()) != count or made()[-1]["destroyed"]:
+            raise SystemExit(
+                f"toolkit_popup_check: the refusal closed the menu: {made()[-1]}"
+            )
+        print("the menu stays open")
+
+        socket = next(runtime.glob("sway-ipc.*.sock"))
+        subprocess.run(
+            ["swaymsg", "-s", str(socket), "output", "HEADLESS-1", "disable"],
+            check=True,
+        )
+        step(
+            "the output goes with the menu open: the popup goes before the layer surface",
+            lambda: popups_before_layer(TRACE.read_text().splitlines()),
         )
         if client.poll() is not None:
             raise SystemExit(
