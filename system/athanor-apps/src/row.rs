@@ -7,50 +7,20 @@
 //! the installed applications are cached until GIO reports a change.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use athanor_compositor_client::WindowId;
 use athanor_layout::favorites;
-use athanor_unit::text;
 use gio_unix::DesktopAppInfo;
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
 
+use crate::entries::{self, app_name, entry_label, Apps, State};
 use crate::i18n::{tr, tr_with};
 use crate::menu;
-use crate::model::{self, AppIndex, Entry, Open, Primary};
+use crate::model::{self, Entry, Open, Primary};
 use crate::Host;
-
-const NOTIFY_TIMEOUT_MS: i32 = 5000;
-
-/// The installed applications: the index windows are matched through, and the desktop
-/// entries by id.
-struct Apps {
-    index: AppIndex,
-    infos: HashMap<String, DesktopAppInfo>,
-}
-
-impl Apps {
-    fn installed() -> Apps {
-        let infos: HashMap<String, DesktopAppInfo> = gio::AppInfo::all()
-            .into_iter()
-            .filter_map(|info| info.downcast::<DesktopAppInfo>().ok())
-            .filter_map(|info| Some((info.id()?.to_string(), info)))
-            .collect();
-        let index = AppIndex::new(infos.iter().map(|(id, info)| {
-            (
-                id.clone(),
-                info.startup_wm_class().map(|class| class.to_string()),
-                info.should_show(),
-            )
-        }));
-        Apps { index, infos }
-    }
-}
-
-type State = (Entry<WindowId>, Option<DesktopAppInfo>);
 
 /// One button of the row. Its handlers read `state` when they fire, so an update in place
 /// reaches them.
@@ -123,29 +93,9 @@ impl Row {
             return;
         }
         let Some(client) = host.client() else { return };
-        let windows: Vec<Open<WindowId>> = client
-            .windows()
-            .into_iter()
-            .map(|window| Open {
-                id: window.id,
-                app_id: window.app_id,
-                title: text::line(&window.title, text::TITLE_CHARS),
-                activated: window.state.activated,
-                minimized: window.state.minimized,
-            })
-            .collect();
+        let windows = entries::windows(client);
         let favorites = host.favorites().ids().unwrap_or_default();
-        let apps = self.apps();
-        let states: Vec<State> = model::entries(&favorites, &windows, &apps.index)
-            .into_iter()
-            .map(|entry| {
-                let info = entry
-                    .desktop_id
-                    .as_deref()
-                    .and_then(|id| apps.infos.get(id).cloned());
-                (entry, info)
-            })
-            .collect();
+        let states = self.apps().states(&favorites, &windows);
         let shown_entries: Vec<Entry<WindowId>> = self
             .shown
             .borrow()
@@ -189,45 +139,6 @@ impl Drop for Row {
     }
 }
 
-/// The window's app id is set by the client (`xdg_toplevel.set_app_id`): arbitrary UTF-8,
-/// control and bidi characters included (SH12). With no desktop entry to name it, it is
-/// shown only sanitised, never raw; an id that sanitises to nothing falls back like an
-/// empty one.
-fn app_name(entry: &Entry<WindowId>, info: Option<&DesktopAppInfo>) -> String {
-    match info {
-        Some(info) => info.name().to_string(),
-        None => {
-            let sanitized = text::line(&entry.app_id, text::NAME_CHARS);
-            if sanitized.is_empty() {
-                tr("Unknown application")
-            } else {
-                sanitized
-            }
-        }
-    }
-}
-
-/// The tooltip and accessible label of an entry's button: the app name alone with no
-/// window or an empty title, `app: title` with exactly one titled window (the app is
-/// substituted first, so a title containing the literal text "{app}" is not mistaken for
-/// the placeholder), and a count with two or more.
-fn entry_label<K>(name: &str, windows: &[Open<K>]) -> String {
-    match windows {
-        [] => name.to_owned(),
-        [window] if !window.title.is_empty() => tr_with(
-            &tr_with("{app}: {title}", "app", name),
-            "title",
-            &window.title,
-        ),
-        [_] => name.to_owned(),
-        _ => tr_with(
-            &tr_with("{app} ({count} windows)", "app", name),
-            "count",
-            &windows.len().to_string(),
-        ),
-    }
-}
-
 /// Shows `shown`'s state on its button: the label, the icon, and whether the app runs and
 /// has the focus. A new button and an update in place both come here.
 fn present(shown: &Shown) {
@@ -239,9 +150,7 @@ fn present(shown: &Shown) {
     button.update_property(&[Property::Label(&label)]);
     match info.as_ref().and_then(|info| info.icon()) {
         Some(icon) => shown.image.set_from_gicon(&icon),
-        None => shown
-            .image
-            .set_icon_name(Some("application-x-executable-symbolic")),
+        None => shown.image.set_icon_name(Some(entries::FALLBACK_ICON)),
     }
     if entry.windows.is_empty() {
         button.remove_css_class("running");
@@ -250,11 +159,7 @@ fn present(shown: &Shown) {
         button.add_css_class("running");
         button.update_property(&[Property::Description(&tr("Running"))]);
     }
-    if entry
-        .windows
-        .iter()
-        .any(|window| window.activated && !window.minimized)
-    {
+    if entries::active(entry) {
         button.add_css_class("active");
     } else {
         button.remove_css_class("active");
@@ -333,8 +238,8 @@ fn entry_button<H: Host>(
                 }
             }
             Primary::Minimize(id) => {
-                if let Some(Err(err)) = host.client().map(|client| client.minimize(id)) {
-                    tracing::error!(error = %err, "cannot minimise the window");
+                if let Some(client) = host.client() {
+                    entries::minimize(client, id);
                 }
             }
             Primary::Choose => choose(),
@@ -475,11 +380,7 @@ fn menu_content<H: Host>(
 ) -> gtk4::Box {
     let list = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     for window in &entry.windows {
-        let title = if window.title.is_empty() {
-            tr("Untitled window")
-        } else {
-            window.title.clone()
-        };
+        let title = entries::window_title(window);
         let line = gtk4::Box::new(gtk4::Orientation::Horizontal, 2);
         let row = menu_row(&title);
         let minimise = icon_button(
@@ -496,13 +397,13 @@ fn menu_content<H: Host>(
         });
         let id = window.id;
         on_press(&minimise, host, menu, move |host: &Rc<H>| {
-            if let Some(Err(err)) = host.client().map(|client| client.minimize(id)) {
-                tracing::error!(error = %err, "cannot minimise the window");
+            if let Some(client) = host.client() {
+                entries::minimize(client, id);
             }
         });
         on_press(&close, host, menu, move |host: &Rc<H>| {
-            if let Some(Err(err)) = host.client().map(|client| client.close(id)) {
-                tracing::error!(error = %err, "cannot close the window");
+            if let Some(client) = host.client() {
+                entries::close(client, id);
             }
         });
         line.append(&row);
@@ -551,19 +452,13 @@ fn menu_content<H: Host>(
 }
 
 fn activate<H: Host>(host: &H, window: &Open<WindowId>) {
-    let Some(client) = host.client() else { return };
-    let restored = if window.minimized {
-        client.unminimize(window.id)
-    } else {
-        Ok(())
-    };
-    if let Err(err) = restored.and_then(|()| client.activate(window.id)) {
-        tracing::error!(error = %err, "cannot activate the window");
+    if let Some(client) = host.client() {
+        entries::activate(client, window);
     }
 }
 
-/// BR2: every start goes through the compositor client, behind a security context. A
-/// start that fails closed is logged at err and told to the user (BR2.6).
+/// BR2: every start goes through the compositor client, behind a security context
+/// (`entries::launch`).
 fn launch<H: Host>(host: &Rc<H>, info: &DesktopAppInfo) {
     let (weak_host, info) = (Rc::downgrade(host), info.clone());
     glib::spawn_future_local(async move {
@@ -571,125 +466,6 @@ fn launch<H: Host>(host: &Rc<H>, info: &DesktopAppInfo) {
             return;
         };
         let Some(client) = host.client() else { return };
-        if let Err(err) = client.launch(&info).await {
-            let name = info.name().to_string();
-            tracing::error!(error = %err, app = %name, "the application was not started");
-            notify_failure(H::APP, &name).await;
-        }
+        entries::launch(client, &info, H::APP).await;
     });
-}
-
-async fn notify_failure(app: &str, name: &str) {
-    let args = (
-        app,
-        0u32,
-        "dialog-error-symbolic",
-        tr_with("{name} could not start", "name", name),
-        tr("The reason is in the system journal."),
-        Vec::<String>::new(),
-        HashMap::<String, glib::Variant>::new(),
-        -1i32,
-    )
-        .to_variant();
-    let sent = async {
-        let bus = gio::bus_get_future(gio::BusType::Session).await?;
-        bus.call_future(
-            Some("org.freedesktop.Notifications"),
-            "/org/freedesktop/Notifications",
-            "org.freedesktop.Notifications",
-            "Notify",
-            Some(&args),
-            None,
-            gio::DBusCallFlags::NONE,
-            NOTIFY_TIMEOUT_MS,
-        )
-        .await
-    };
-    if let Err(err) = sent.await {
-        tracing::error!(error = %err, "cannot send the notification of the failed start");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn open(title: &str) -> Open<u32> {
-        Open {
-            id: 1,
-            app_id: "a".to_owned(),
-            title: title.to_owned(),
-            activated: false,
-            minimized: false,
-        }
-    }
-
-    fn entry(app_id: &str) -> Entry<WindowId> {
-        Entry {
-            desktop_id: None,
-            app_id: app_id.to_owned(),
-            pinned: false,
-            windows: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn an_app_id_of_hidden_characters_only_falls_back_to_unknown_application() {
-        assert_eq!(
-            app_name(&entry("\u{202e}\u{7}"), None),
-            tr("Unknown application")
-        );
-        assert_eq!(app_name(&entry(""), None), tr("Unknown application"));
-    }
-
-    #[test]
-    fn an_app_id_with_no_desktop_entry_is_shown_sanitised_not_raw() {
-        assert_eq!(
-            app_name(&entry("org.athanor.CcWindow3\u{202e}evil"), None),
-            "org.athanor.CcWindow3evil"
-        );
-    }
-
-    #[test]
-    fn no_window_shows_the_app_name_alone() {
-        assert_eq!(entry_label("Firefox", &[] as &[Open<u32>]), "Firefox");
-    }
-
-    #[test]
-    fn one_window_with_an_empty_title_shows_the_app_name_alone() {
-        assert_eq!(entry_label("Firefox", &[open("")]), "Firefox");
-    }
-
-    #[test]
-    fn one_titled_window_pairs_the_app_and_the_title() {
-        assert_eq!(entry_label("Firefox", &[open("Inbox")]), "Firefox: Inbox");
-    }
-
-    #[test]
-    fn a_title_holding_the_placeholder_text_stays_literal() {
-        assert_eq!(
-            entry_label("Firefox", &[open("about {app}")]),
-            "Firefox: about {app}"
-        );
-    }
-
-    #[test]
-    fn two_or_more_windows_are_counted() {
-        assert_eq!(
-            entry_label("Firefox", &[open("a"), open("b")]),
-            "Firefox (2 windows)"
-        );
-    }
-
-    #[test]
-    fn a_title_of_hidden_characters_only_falls_back_to_the_app_name() {
-        let window = Open {
-            id: 1u32,
-            app_id: "a".into(),
-            title: athanor_unit::text::line("\u{202e}\u{7}", athanor_unit::text::TITLE_CHARS),
-            activated: false,
-            minimized: false,
-        };
-        assert_eq!(entry_label("App", &[window]), "App");
-    }
 }

@@ -387,6 +387,7 @@ dependencies = [
  "athanor-i18n",
  "athanor-layout",
  "athanor-unit",
+ "gio",
  "gio-unix",
  "gtk4",
  "gtk4-layer-shell",
