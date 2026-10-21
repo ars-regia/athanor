@@ -100,7 +100,14 @@ fn booted_claim<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, booted: &Deplo
 /// (UT5) and its release attestations (UT13); `None` when the policy has no scope for it.
 fn policy_keys(policy: &InForce, repository: &str) -> Option<Vec<VerifyingKey>> {
     let key_paths = policy.scopes.get(repository)?;
-    Some(key_paths.iter().filter_map(|path| std::fs::read_to_string(path).ok()).filter_map(|pem| sigobj::load_key(&pem)).collect())
+    let key = |path: &PathBuf| {
+        let key = std::fs::read_to_string(path).ok().and_then(|pem| sigobj::load_key(&pem));
+        if key.is_none() {
+            tracing::warn!(path = %path.display(), "a key of the policy in force cannot be read; nothing it signed verifies");
+        }
+        key
+    };
+    Some(key_paths.iter().filter_map(key).collect())
 }
 
 /// The class of `digest` by the release attestation stored for it, verified again with the
@@ -114,31 +121,43 @@ fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &s
 
 /// The class of the candidate: its release attestation is fetched, then verified. A failed
 /// fetch is the feature class, logged and not a failure of the check: the digest then waits
-/// for `Apply()`, and the next check fetches again.
-fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &str, digest: &str) -> Class {
+/// for `Apply()`, and the next check fetches again. Only the attestations of the booted, the
+/// staged and the candidate digest are kept.
+fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status, digest: &str) -> Class {
+    let repository = sigobj::repository_of(&status.booted.image);
+    let keep: Vec<&str> = [Some(status.booted.digest.as_str()), status.staged.as_ref().map(|staged| staged.digest.as_str()), Some(digest)].into_iter().flatten().collect();
+    if let Err(err) = ctx.store.retain_attestations(&keep) {
+        tracing::error!(%err, "cannot remove the release attestations of earlier digests");
+    }
     let Some(dir) = ctx.store.attestation_dir(digest) else {
         return Class::Feature;
     };
+    // The copy is bounded neither in size nor in time: #658.
     if let Err(failure) = ctx.tools.fetch_attestation(repository, digest, &dir) {
         tracing::warn!(code = ?failure.code, %digest, "the release attestation could not be fetched; the candidate is of the feature class");
         return Class::Feature;
     }
-    stored_class(ctx, policy, repository, digest)
+    let class = stored_class(ctx, policy, repository, digest);
+    if class == Class::Feature {
+        // A feature release, or an attestation no key of the policy verifies: the log cannot
+        // tell them apart, and either way nothing applies by itself.
+        tracing::warn!(%digest, "the release attestation does not verify as the security class; the candidate is of the feature class");
+    }
+    class
 }
 
 /// A security-class digest is staged and locked: the check unlocks it for the next shutdown
 /// with no request and no reboot (UT13), unless the opt-out is on or the lineage's postpone,
-/// unexpired, holds it. The first unlock of a lineage opens it; a newer digest inherits it.
+/// unexpired, holds it. `run` then opens the lineage, unless one is open.
 ///
 /// # Errors
 /// The unlock fails: the digest stays downloaded and locked, and the next check tries again.
-fn settle_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, lineage: &mut Lineage, automatic: bool) -> Result<UpdateState, Failure> {
+fn settle_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, lineage: &Lineage, automatic: bool) -> Result<UpdateState, Failure> {
     let postponed = lineage.open.as_ref().is_some_and(|open| open.postponed) && !lineage.expired(ctx.now);
     if !automatic || postponed {
         return Ok(UpdateState::Downloaded);
     }
     ctx.tools.apply_downloaded()?;
-    lineage.notice(ctx.now, ctx.boot_id.as_deref().unwrap_or_default());
     tracing::info!(digest = ?status.staged.as_ref().map(|staged| &staged.digest), "security update unlocked for the next shutdown");
     Ok(UpdateState::WillApplyAtNextShutdown)
 }
@@ -251,7 +270,7 @@ fn downloaded(ctx: &Context<'_, impl Tools>, status: &Status, staged: &str) -> O
 
 /// The check with the network. `automatic` is the opt-out of UT13 as read from the store, and
 /// `lineage` the lineage the run persists.
-fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut Status, automatic: bool, lineage: &mut Lineage) -> (UpdateState, Option<Failure>) {
+fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut Status, automatic: bool, lineage: &Lineage) -> (UpdateState, Option<Failure>) {
     let local = match local_update(ctx, status) {
         Ok(local) => local,
         Err(failure) => return (UpdateState::None, Some(failure)),
@@ -283,7 +302,7 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     }
     // Classified at every check while it waits, so an attestation that failed to fetch once
     // does not leave a security digest waiting for Apply().
-    let security = matches!(candidate_class(ctx, policy, sigobj::repository_of(&status.booted.image), &candidate.digest), Class::Security { .. });
+    let security = matches!(candidate_class(ctx, policy, status, &candidate.digest), Class::Security { .. });
     if status.staged.as_ref().is_some_and(|staged| staged.download_only && staged.digest == candidate.digest) {
         return if security { settled_security(settle_security(ctx, status, lineage, automatic), None) } else { (UpdateState::Downloaded, None) };
     }
@@ -310,8 +329,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
             }
             let staged = status.staged.as_ref().map(|staged| staged.digest.clone()).unwrap_or_default();
             let failure = downloaded(ctx, status, &staged);
-            // The class is the candidate's: a tag that moved during the download staged another digest.
-            if security && staged == candidate.digest {
+            // The class is the candidate's: a tag that moved during the download staged another
+            // digest. A failure left by the download step unlocks nothing: the next check settles it.
+            if security && staged == candidate.digest && failure.is_none() {
                 return settled_security(settle_security(ctx, status, lineage, automatic), failure);
             }
             (UpdateState::Downloaded, failure)
@@ -423,11 +443,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         if let Some(boot_id) = &ctx.boot_id {
             lineage.boot(boot_id);
         }
-        // Applied (ADR-0127 point 10): the booted digest verifies as the security class, is
-        // not the anchor, and greenboot is not returning from it.
+        // Applied (ADR-0127 point 10, as amended on 2026-10-22): the booted digest verifies as
+        // the security class, was built after the anchor, and greenboot is not returning from
+        // it. Only the check service counts it: it is ordered after greenboot's verdict
+        // (`After=boot-complete.target`), where the state service at boot runs before it.
         let booted = &status.booted;
-        if !status.rollback_queued && lineage.anchor.as_deref() != Some(booted.digest.as_str()) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) {
-            lineage.applied(&booted.digest);
+        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) {
+            lineage.applied(&booted.digest, booted.build_time);
         }
     }
     let (update, failure) = if unreadable_newest.is_some() {
@@ -435,11 +457,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     } else if status.rollback_queued {
         settle(local_update(ctx, &status), held)
     } else {
-        match (&automatic, lineage.as_mut()) {
+        match (&automatic, lineage.as_ref()) {
             (Ok(automatic), Ok(lineage)) if offline => match local_update(ctx, &status) {
-                // An expired postpone needs no network: the staged security digest is unlocked
-                // at boot, from the attestation the check stored (UT13).
-                Ok(UpdateState::Downloaded) if lineage.expired(ctx.now) && status.staged.as_ref().is_some_and(|staged| matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })) => {
+                // A staged security digest that no unexpired postpone holds is unlocked at boot
+                // and after a request, with no network, from the attestation the check stored
+                // (UT13): a postpone that expired, the opt-out turned back on, an earlier
+                // unlock that failed.
+                Ok(UpdateState::Downloaded) if status.staged.as_ref().is_some_and(|staged| matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })) => {
                     settled_security(settle_security(ctx, &status, lineage, *automatic), None)
                 }
                 local => settle(local, None),
@@ -449,6 +473,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
             _ => settle(local_update(ctx, &status), None),
         }
     };
+    // A security digest unlocked for the next shutdown opens the lineage, unless one is open,
+    // whoever unlocked it and whether or not the run that unlocked it recorded the lineage.
+    if let (Ok(lineage), UpdateState::WillApplyAtNextShutdown, Some(staged)) = (lineage.as_mut(), update, status.staged.as_ref()) {
+        if matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. }) {
+            lineage.notice(ctx.now, ctx.boot_id.as_deref().unwrap_or_default());
+        }
+    }
     // Persisted once per run, under the store lock the caller holds, and only when it changed.
     let unwritten_lineage = match &lineage {
         Ok(lineage) if Some(lineage) != stored_lineage.as_ref() => ctx.store.set_lineage(lineage).err().map(|err| {
@@ -833,7 +864,7 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, 5000), true).expect("check");
         assert_eq!((state.schema, state.automatic_security_updates, state.postpone), (2, true, None), "a fresh machine: on, no lineage");
         let mut lineage = crate::lineage::Lineage::default();
-        lineage.applied(&digest(1));
+        lineage.applied(&digest(1), 1000);
         lineage.notice(4000, "boot-0");
         machine.store.set_lineage(&lineage).expect("write");
         machine.store.set_automatic_security_updates(false).expect("write");
@@ -1205,7 +1236,12 @@ pub(crate) mod tests {
     }
 
     fn open_lineage(first_notice_at: i64, postponed: bool) -> Lineage {
-        Lineage { anchor: None, open: Some(Open { first_notice_at, boots_remaining: 7, postponed, last_boot_id: "boot-0".into() }) }
+        Lineage { anchor: None, anchor_build_time: 0, open: Some(Open { first_notice_at, boots_remaining: 7, postponed, last_boot_id: "boot-0".into() }) }
+    }
+
+    /// The release attestation of `attested()` is stored, as the check that offered it left it.
+    fn store_attestation(machine: &Machine, tools: &Fake) {
+        tools.fetch_attestation(ATT_REPO, &attested(), &machine.store.attestation_dir(&attested()).expect("dir")).expect("stored");
     }
 
     fn position(tools: &Fake, what: &str) -> Option<usize> {
@@ -1342,22 +1378,114 @@ pub(crate) mod tests {
     #[test]
     fn a_greenboot_return_does_not_count_as_applied() {
         let machine = Machine::new("greenboot-return", &["real/k1.pub"]);
-        let lineage = Lineage { anchor: Some(digest(1)), ..open_lineage(NOW - 86_400, false) };
+        let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, false) };
         machine.store.set_lineage(&lineage).expect("write");
-        let tools = booted_attested(&machine, true);
-        let state = run(&machine.ctx(&tools, NOW), true).expect("offline");
-        assert_eq!(state.postpone, lineage.published());
+        // The state service's check at boot runs before greenboot's verdict: it never counts.
+        let state = run(&machine.ctx(&booted_attested(&machine, false), NOW), true).expect("offline");
+        assert_eq!(machine.store.lineage().expect("stored"), lineage, "not counted before the health checks");
+        // Greenboot marked the boot bad: the check after the health checks sees the queued rollback.
+        let state_after = run(&machine.ctx(&booted_attested(&machine, true), NOW), false).expect("check");
+        assert_eq!((state.postpone.clone(), state_after.postpone), (lineage.published(), lineage.published()));
         assert_eq!(machine.store.lineage().expect("stored"), lineage, "the lineage stays open and the anchor does not move");
     }
 
     #[test]
     fn booting_a_security_digest_resets_the_lineage() {
         let machine = Machine::new("security-booted", &["real/k1.pub"]);
-        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), ..open_lineage(NOW - 86_400, true) }).expect("write");
+        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, true) }).expect("write");
         let tools = booted_attested(&machine, false);
-        let state = run(&machine.ctx(&tools, NOW), true).expect("offline");
+        let state = run(&machine.ctx(&tools, NOW), false).expect("check");
         assert_eq!(state.postpone, None);
-        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), open: None });
+        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: 2000, open: None });
+    }
+
+    #[test]
+    fn going_back_onto_an_earlier_security_digest_keeps_the_lineage() {
+        // The anchor is the security digest applied last, built at 3000. GoBack() returns to the
+        // security digest applied before it, then to one older still: neither is applied again.
+        for (name, build_time) in [("previous", 2000), ("older", 1000)] {
+            let machine = Machine::new(&format!("go-back-{name}"), &["real/k1.pub"]);
+            let lineage = Lineage { anchor: Some(digest(3)), anchor_build_time: 3000, ..open_lineage(NOW - 86_400, true) };
+            machine.store.set_lineage(&lineage).expect("write");
+            let tools = booted_attested(&machine, false);
+            tools.status.borrow_mut().booted.build_time = build_time;
+            let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+            assert_eq!(state.postpone, lineage.published(), "{name}");
+            assert_eq!(machine.store.lineage().expect("stored"), lineage, "{name}: the budget is not reset");
+        }
+    }
+
+    #[test]
+    fn a_security_digest_counts_by_the_anchor_s_build_time_alone() {
+        // A feature digest built at 3000 booted since the anchor (1000). A security digest built
+        // between them is still newer than the last one applied, and counts.
+        let machine = Machine::new("between", &["real/k1.pub"]);
+        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, false) }).expect("write");
+        machine.store.record_booted(3000).expect("a newer feature boot");
+        let state = run(&machine.ctx(&booted_attested(&machine, false), NOW), false).expect("check");
+        assert_eq!((state.newest_booted_build_time, state.postpone), (3000, None));
+        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: 2000, open: None });
+        // A digest without a build time label says nothing about its age: it never counts.
+        let machine = Machine::new("no-label", &["real/k1.pub"]);
+        let tools = booted_attested(&machine, false);
+        tools.status.borrow_mut().booted.build_time = 0;
+        run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert_eq!(machine.store.lineage().expect("stored"), Lineage::default());
+    }
+
+    #[test]
+    fn a_check_keeps_only_the_attestations_of_the_booted_staged_and_candidate_digests() {
+        let (machine, tools) = offered_attested("prune", Some(Class::Feature));
+        let (staged, stale) = (digest(4), digest(5));
+        for digest in [digest(1), staged.clone(), stale] {
+            std::fs::create_dir_all(machine.store.attestation_dir(&digest).expect("dir").join("leftover")).expect("mkdir");
+        }
+        tools.status.borrow_mut().staged = Some(in_att_repo(Deployed { download_only: true, ..deployed(&staged, 1500) }));
+        run(&machine.ctx(&tools, NOW), false).expect("check");
+        let mut kept: Vec<_> = std::fs::read_dir(machine.store.var.join("attestations")).expect("list").map(|entry| entry.expect("entry").file_name().into_string().expect("utf-8")).collect();
+        kept.sort();
+        let mut expected: Vec<_> = [digest(1), staged, attested()].iter().map(|digest| digest["sha256:".len()..].to_owned()).collect();
+        expected.sort();
+        assert_eq!(kept, expected);
+    }
+
+    #[test]
+    fn a_download_that_left_a_failure_unlocks_nothing() {
+        // No signature object is stored for the candidate, and the registry serves none.
+        let machine = Machine::new("downloaded-fails", &["real/k1.pub"]);
+        let mut tools = Fake::booted(in_att_repo(deployed(&digest(1), 1000))).offering(&attested(), 2000).attestation(&attested(), security());
+        tools.download = tools.download.map(in_att_repo);
+        let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert_eq!((state.update, state.last_error, state.postpone), (UpdateState::Downloaded, ErrorCode::Registry, None));
+        assert!(tools.called("download") && !tools.called("apply_downloaded"), "{:?}", tools.calls.borrow());
+    }
+
+    #[test]
+    fn an_unlocked_security_digest_without_a_lineage_opens_one() {
+        // The lineage was not recorded after the unlock, or Apply() unlocked the digest.
+        for offline in [false, true] {
+            let (machine, tools) = offered_attested(&format!("unlocked-no-lineage-{offline}"), Some(security()));
+            store_attestation(&machine, &tools);
+            stage(&tools);
+            tools.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
+            let state = run(&machine.ctx(&tools, NOW), offline).expect("check");
+            assert_eq!(state.update, UpdateState::WillApplyAtNextShutdown);
+            assert_eq!(state.postpone.as_ref().map(|postpone| (postpone.first_notice_at, postpone.boots_remaining, postpone.postponed)), Some((NOW, 7, false)), "{offline}");
+            assert_eq!(machine.store.lineage().expect("stored").published(), state.postpone);
+            assert!(!tools.called("download") && !tools.called("apply_downloaded"));
+        }
+    }
+
+    #[test]
+    fn a_waiting_security_digest_unlocks_at_boot_unless_postponed() {
+        // The opt-out turned back on, or an earlier unlock that failed: nothing holds it.
+        let (machine, tools) = offered_attested("waiting-offline", Some(security()));
+        store_attestation(&machine, &tools);
+        stage(&tools);
+        let state = run(&machine.ctx(&tools, NOW), true).expect("offline");
+        assert_eq!(state.update, UpdateState::WillApplyAtNextShutdown);
+        assert!(!tools.called("candidate") && tools.called("apply_downloaded"));
+        assert_eq!(state.postpone.map(|postpone| postpone.first_notice_at), Some(NOW));
     }
 
     #[test]

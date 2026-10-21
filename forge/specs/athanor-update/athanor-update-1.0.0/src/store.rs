@@ -245,6 +245,27 @@ impl Store {
         self.object_dir("attestations", digest)
     }
 
+    /// Removes the release attestation of every digest but `keep`, so that a registry that
+    /// names a new digest at each check cannot fill `/var`.
+    ///
+    /// # Errors
+    /// The directory cannot be listed, or an entry cannot be removed.
+    pub fn retain_attestations(&self, keep: &[&str]) -> std::io::Result<()> {
+        let keep: Vec<PathBuf> = keep.iter().filter_map(|digest| self.attestation_dir(digest)).collect();
+        for entry in std::fs::read_dir(self.var.join("attestations"))? {
+            let entry = entry?;
+            if keep.contains(&entry.path()) {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
+    }
+
     fn object_dir(&self, kind: &str, digest: &str) -> Option<PathBuf> {
         let hex = digest.strip_prefix("sha256:")?;
         (hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| self.var.join(kind).join(hex))
@@ -276,6 +297,9 @@ impl Store {
         // the service, and a long one would push the published state past its size cap.
         if lineage.anchor.as_deref().is_some_and(|anchor| !sha256_digest(anchor)) {
             return Err(invalid("the anchor is not a sha256 digest".into()));
+        }
+        if lineage.anchor_build_time < 0 {
+            return Err(invalid("the anchor's build time is negative".into()));
         }
         match lineage.published() {
             Some(postpone) if !postpone.consistent() => Err(invalid("boots or first notice out of range".into())),
@@ -384,7 +408,7 @@ mod tests {
         let store = scratch("lineage");
         assert_eq!(store.lineage().expect("absent"), Lineage::default());
         let mut lineage = Lineage::default();
-        lineage.applied(&format!("sha256:{}", "a".repeat(64)));
+        lineage.applied(&format!("sha256:{}", "a".repeat(64)), 1_789_000_000);
         lineage.notice(1_790_000_000, "boot-0");
         store.set_lineage(&lineage).expect("write");
         assert_eq!(store.lineage().expect("read"), lineage);
@@ -395,10 +419,10 @@ mod tests {
     #[test]
     fn a_malformed_lineage_file_is_a_storage_error() {
         let store = scratch("lineage-malformed");
-        let good = r#"{"anchor":null,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
+        let good = r#"{"anchor":null,"anchor_build_time":0,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
         std::fs::write(store.var.join("lineage.json"), good).expect("write");
         assert!(store.lineage().is_ok());
-        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#)] {
+        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#), &good.replace(r#""anchor_build_time":0,"#, ""), &good.replace(r#""anchor_build_time":0"#, r#""anchor_build_time":-1"#)] {
             std::fs::write(store.var.join("lineage.json"), bad).expect("write");
             assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
             assert_eq!(std::fs::read_to_string(store.var.join("lineage.json")).expect("read"), bad, "the file is left as it is");
@@ -412,7 +436,7 @@ mod tests {
     fn a_lineage_anchor_that_is_no_digest_is_a_storage_error() {
         let store = scratch("lineage-anchor");
         let digest = format!("sha256:{}", "a".repeat(64));
-        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"open":null}}"#);
+        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"anchor_build_time":0,"open":null}}"#);
         for good in ["null".to_owned(), format!("\"{digest}\"")] {
             std::fs::write(store.var.join("lineage.json"), with(&good)).expect("write");
             assert!(store.lineage().is_ok(), "{good}");

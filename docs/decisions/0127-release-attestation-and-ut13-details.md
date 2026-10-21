@@ -80,9 +80,22 @@ predicate type of point 1 as written below:
 9. **When `postpone` is `null`.** While no lineage is open, that is while no security digest
    has reached `will-apply-at-next-shutdown` since the anchor. The anchor is persisted under
    `/var/lib` either way, and `first_notice_at` is never `null` inside the object.
+   *Note of 2026-10-22:* a lineage file or an opt-out file that cannot be read is reported
+   as `storage` and left as it is, never read as the default: until an administrator removes
+   it, the check downloads and unlocks nothing, as with an unreadable held digest (UT6). A
+   reset would grant a new budget, and a default would turn a switched-off opt-out back on.
 10. **What counts as applied.** The booted digest verifies as the security class, differs from
     the anchor, and `rollbackQueued` is false. A boot that greenboot returns from is not
     applied.
+    *Amended on 2026-10-22 by the maintainer:* the booted digest must also have been built
+    after the anchor. `lineage.json` keeps the anchor's build time beside it (0 before the
+    first), and a digest without a build time label never counts, so a return by `GoBack()`
+    to an earlier security digest does not reset the budget. The rule compares with the
+    anchor, not with the newest build ever booted: a security digest built after the anchor
+    counts even when a newer feature digest booted in between. Only `athanor-update check`
+    counts a boot as applied, and its unit is ordered `After=boot-complete.target`, after
+    greenboot's verdict: the check at boot of `athanor-update-state.service` runs before that
+    verdict, when `rollbackQueued` cannot yet say that greenboot rejected the boot.
 11. **What counts as a boot.** A new `/proc/sys/kernel/random/boot_id` seen by
     `athanor-update check --offline`. A soft reboot keeps the boot id and is not counted.
 12. **Item 19's three checks.** UT6's hold stands: the digest stays held until a newer one is
