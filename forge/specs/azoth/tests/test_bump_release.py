@@ -31,22 +31,23 @@ class ReleaseTest(unittest.TestCase):
     def test_the_repository_is_at_45(self):
         self.assertEqual(bump.fedora_version(), 45)
 
-    def test_every_derived_value_follows_45(self):
-        self.containerfile("FROM scratch\nARG FEDORA_VERSION=45\nENV FEDORA_VERSION=$FEDORA_VERSION\n")
-        self.assertEqual(bump.fedora_version(), 45)
-        self.assertEqual(bump.fedora_releases(), ("F45", "F46"))
-        self.assertTrue(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc45"))
-        self.assertIsNone(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc43"))
+    def test_every_derived_value_follows_the_containerfile(self):
+        # 99, not the repository's own release: the values must come from the patched file.
+        self.containerfile("FROM scratch\nARG FEDORA_VERSION=99\nENV FEDORA_VERSION=$FEDORA_VERSION\n")
+        self.assertEqual(bump.fedora_version(), 99)
+        self.assertEqual(bump.fedora_releases(), ("F99", "F100"))
+        self.assertTrue(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc99"))
+        self.assertIsNone(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc45"))
         with mock.patch.object(bump, "http", return_value=(200, b'{"updates": []}')) as http:
             bump.cosmic_comp_nvrs()
-        self.assertIn("releases=F45", http.call_args.args[0])
-        self.assertEqual(bump.cosmic_comp_newest(updates("cosmic-comp-1.8.0-1.fc45", "cosmic-comp-1.9.0-1.fc43")), "1.8.0-1.fc45")
-        with self.assertRaisesRegex(SystemExit, "F45"):
-            bump.cosmic_comp_newest(updates("cosmic-comp-1.9.0-1.fc43"))
-        spec = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc45", "b" * 40, datetime.date(2026, 10, 8))
-        self.assertIn("%global fedora_release 2.fc45\n", spec)
-        self.assertEqual(bump.cosmic_comp_pin(spec), "1.9.0-2.fc45")
-        self.assertIn("stable F45 build moved", bump.cosmic_comp_body({"old": "1.8.0-1.fc45", "new": "1.9.0-2.fc45"}))
+        self.assertIn("releases=F99", http.call_args.args[0])
+        self.assertEqual(bump.cosmic_comp_newest(updates("cosmic-comp-1.8.0-1.fc99", "cosmic-comp-1.9.0-1.fc45")), "1.8.0-1.fc99")
+        with self.assertRaisesRegex(SystemExit, "F99"):
+            bump.cosmic_comp_newest(updates("cosmic-comp-1.9.0-1.fc45"))
+        spec = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc99", "b" * 40, datetime.date(2026, 10, 8))
+        self.assertIn("%global fedora_release 2.fc99\n", spec)
+        self.assertEqual(bump.cosmic_comp_pin(spec), "1.9.0-2.fc99")
+        self.assertIn("stable F99 build moved", bump.cosmic_comp_body({"old": "1.8.0-1.fc45", "new": "1.9.0-2.fc99"}))
 
     def test_a_missing_or_malformed_line_is_an_error(self):
         for text in ("FROM scratch\n", "ARG FEDORA_VERSION=\n", "ARG FEDORA_VERSION=rawhide\n"):
