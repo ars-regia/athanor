@@ -3,8 +3,8 @@
 
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, Node, NodeId, Orientation, Rect, Role, Toggled, TreeId,
-    TreeInfo, TreeUpdate,
+    Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role, Toggled,
+    TreeId, TreeInfo, TreeUpdate,
 };
 
 /// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
@@ -52,6 +52,20 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        Kind::Menu => Node::new(Role::Menu),
+        Kind::MenuItem(label) => {
+            let mut node = Node::new(Role::MenuItem);
+            node.set_label(label.as_str());
+            node.add_action(Action::Click);
+            node
+        }
+        // AccessKit's splitter is AT-SPI's separator.
+        Kind::Separator => Node::new(Role::Splitter),
+        Kind::Tooltip(text) => {
+            let mut node = Node::new(Role::Tooltip);
+            node.set_label(text.as_str());
+            node
+        }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
         // active, as GTK's ToggleButton.
         Kind::Toggle { label, active } => {
@@ -92,6 +106,13 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     };
     if widget.is_focusable() {
         node.add_action(Action::Focus);
+    }
+    if let Some(expanded) = widget.expanded {
+        node.set_has_popup(HasPopup::Menu);
+        node.set_expanded(expanded);
+    }
+    if let Some(description) = ui.description(id) {
+        node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
@@ -404,6 +425,49 @@ mod tests {
             .find(|(n, _)| *n == text_run_id(field))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
+    }
+
+    #[test]
+    fn a_menu_its_button_and_a_tooltip_read_as_gtks() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Dock", Theme::default(), false);
+        let app = ui.add(Ui::ROOT, Kind::Button("Files".into()));
+        ui.set_has_popup(app, true);
+        ui.set_tooltip(app, Some("Files"));
+        ui.set_description(app, Some("Running"));
+        ui.layout();
+        let read = |ui: &Ui, id: WidgetId| node(ui, id, 1.0);
+        let button = read(&ui, app);
+        assert_eq!(button.has_popup(), Some(HasPopup::Menu));
+        assert_eq!(button.is_expanded(), Some(false));
+        assert_eq!(button.description(), Some("Running"));
+        ui.set_expanded(app, true);
+        assert_eq!(read(&ui, app).is_expanded(), Some(true));
+
+        let mut menu = Ui::new("Files", Theme::default(), false);
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        let item = menu.add(list, Kind::MenuItem("New Window".into()));
+        let line = menu.add(list, Kind::Separator);
+        menu.layout();
+        assert_eq!(read(&menu, list).role(), Role::Menu);
+        let item = read(&menu, item);
+        assert_eq!(
+            (item.role(), item.label()),
+            (Role::MenuItem, Some("New Window"))
+        );
+        assert!(item.supports_action(Action::Click) && item.supports_action(Action::Focus));
+        // AccessKit's splitter is AT-SPI's separator.
+        assert_eq!(read(&menu, line).role(), Role::Splitter);
+        assert_eq!(
+            missing(&menu, &tree_update(&menu, 1.0)),
+            Vec::<WidgetId>::new()
+        );
+
+        let mut tip = Ui::new("Files", Theme::default(), false);
+        let text = tip.add(Ui::ROOT, Kind::Tooltip("Files".into()));
+        tip.layout();
+        let text = read(&tip, text);
+        assert_eq!((text.role(), text.label()), (Role::Tooltip, Some("Files")));
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {
