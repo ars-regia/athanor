@@ -136,7 +136,7 @@ class BuildImage(unittest.TestCase):
                            capture_output=True, text=True, env=self.env)
         self.assertEqual(r.returncode, 0, r.stderr)
         args = self.calls()[-1]
-        self.assertIn("org.opencontainers.image.version=43.20260915.412", args)
+        self.assertIn("org.opencontainers.image.version=45.20260915.412", args)
         self.assertIn("org.opencontainers.image.created=2026-09-15T10:00:00Z", args)
         self.assertIn("IMAGE_REGISTRY=localhost", args)
 
@@ -175,7 +175,7 @@ class BuildImage(unittest.TestCase):
         self.env["SOURCE_DATE_EPOCH"] = "1789466400"
         r, args = self.build("none")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("org.opencontainers.image.version=43.20260915.0", args)
+        self.assertIn("org.opencontainers.image.version=45.20260915.0", args)
         r = subprocess.run(["bash", str(BUILD), "--gpu", "none", "--registry", "localhost", "--tag", "check", "--serial", "v2"],
                            capture_output=True, text=True, env=self.env)
         self.assertEqual(r.returncode, 2)

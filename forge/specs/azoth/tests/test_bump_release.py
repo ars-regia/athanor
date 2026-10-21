@@ -28,8 +28,8 @@ class ReleaseTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_the_repository_is_at_43(self):
-        self.assertEqual(bump.fedora_version(), 43)
+    def test_the_repository_is_at_45(self):
+        self.assertEqual(bump.fedora_version(), 45)
 
     def test_every_derived_value_follows_45(self):
         self.containerfile("FROM scratch\nARG FEDORA_VERSION=45\nENV FEDORA_VERSION=$FEDORA_VERSION\n")

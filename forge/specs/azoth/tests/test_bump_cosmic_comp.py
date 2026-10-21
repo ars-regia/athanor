@@ -11,7 +11,7 @@ AZOTH = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AZOTH))
 import bump  # noqa: E402
 
-SPEC = """%global fedora_release 1.fc43
+SPEC = """%global fedora_release 1.fc45
 %global commit a55785993e8ef6aad38862cb1a9e1ccaad3c340d
 
 Name:           cosmic-comp
@@ -19,7 +19,7 @@ Version:        1.8.0
 Release:        %{fedora_release}.athanor3
 
 %changelog
-* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.8.0-1.fc43.athanor3
+* Fri Oct 02 2026 Athanor Forge <forge@athanor.os> - 1.8.0-1.fc45.athanor3
 - Earlier entry.
 """
 
@@ -30,36 +30,36 @@ def updates(*nvrs):
 
 class CosmicCompTracking(unittest.TestCase):
     def test_the_newest_stable_build_wins(self):
-        data = updates("cosmic-comp-1.8.0-1.fc43", "cosmic-comp-1.9.0-1.fc43", "cosmic-comp-1.8.0-2.fc43", "cosmic-panel-2.0.0-1.fc43")
-        self.assertEqual(bump.cosmic_comp_newest(data), "1.9.0-1.fc43")
+        data = updates("cosmic-comp-1.8.0-1.fc45", "cosmic-comp-1.9.0-1.fc45", "cosmic-comp-1.8.0-2.fc45", "cosmic-panel-2.0.0-1.fc45")
+        self.assertEqual(bump.cosmic_comp_newest(data), "1.9.0-1.fc45")
 
     def test_a_new_release_of_the_same_version_wins(self):
-        data = updates("cosmic-comp-1.8.0-1.fc43", "cosmic-comp-1.8.0-2.fc43")
-        self.assertEqual(bump.cosmic_comp_newest(data), "1.8.0-2.fc43")
+        data = updates("cosmic-comp-1.8.0-1.fc45", "cosmic-comp-1.8.0-2.fc45")
+        self.assertEqual(bump.cosmic_comp_newest(data), "1.8.0-2.fc45")
 
     def test_no_build_aborts(self):
         with self.assertRaises(SystemExit):
-            bump.cosmic_comp_newest(updates("cosmic-panel-2.0.0-1.fc43"))
+            bump.cosmic_comp_newest(updates("cosmic-panel-2.0.0-1.fc45"))
 
     def test_the_pin_is_the_version_and_release_of_the_spec(self):
-        self.assertEqual(bump.cosmic_comp_pin(SPEC), "1.8.0-1.fc43")
+        self.assertEqual(bump.cosmic_comp_pin(SPEC), "1.8.0-1.fc45")
 
     def test_a_bump_rewrites_the_spec_and_resets_the_suffix(self):
-        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc43", "b" * 40)
-        self.assertEqual(bump.cosmic_comp_pin(got), "1.9.0-2.fc43")
+        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc45", "b" * 40)
+        self.assertEqual(bump.cosmic_comp_pin(got), "1.9.0-2.fc45")
         self.assertIn("Release:        %{fedora_release}.athanor1\n", got)
         self.assertIn("%global commit " + "b" * 40, got)
 
     def test_a_bump_adds_a_changelog_entry_for_the_new_release(self):
-        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc43", "b" * 40, datetime.date(2026, 10, 8))
+        got = bump.cosmic_comp_spec(SPEC, "1.9.0-2.fc45", "b" * 40, datetime.date(2026, 10, 8))
         self.assertIn(
-            "%changelog\n* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.9.0-2.fc43.athanor1\n"
-            "- Fedora's cosmic-comp 1.9.0-2.fc43.\n\n* Fri Oct 02 2026",
+            "%changelog\n* Thu Oct 08 2026 Athanor Forge <forge@athanor.os> - 1.9.0-2.fc45.athanor1\n"
+            "- Fedora's cosmic-comp 1.9.0-2.fc45.\n\n* Fri Oct 02 2026",
             got,
         )
 
     def test_nothing_to_do_when_the_spec_already_has_the_newest(self):
-        with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-1.fc43")):
+        with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-1.fc45")):
             with tempfile.TemporaryDirectory() as d:
                 spec = pathlib.Path(d) / "cosmic-comp.spec"
                 spec.write_text(SPEC)
@@ -67,12 +67,12 @@ class CosmicCompTracking(unittest.TestCase):
                     self.assertIsNone(bump.cosmic_comp_move())
 
     def test_a_newer_build_is_a_move(self):
-        with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-2.fc43")):
+        with mock.patch.object(bump, "cosmic_comp_nvrs", return_value=updates("cosmic-comp-1.8.0-2.fc45")):
             with tempfile.TemporaryDirectory() as d:
                 spec = pathlib.Path(d) / "cosmic-comp.spec"
                 spec.write_text(SPEC)
                 with mock.patch.object(bump, "COSMIC_COMP_SPEC", spec):
-                    self.assertEqual(bump.cosmic_comp_move(), {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"})
+                    self.assertEqual(bump.cosmic_comp_move(), {"old": "1.8.0-1.fc45", "new": "1.8.0-2.fc45"})
 
 
 def never(*_):
@@ -96,20 +96,20 @@ class Independence(unittest.TestCase):
                 self.run_main("cosmic-comp", "check")
 
     def test_the_cosmic_comp_path_never_runs_the_kernel_tracking(self):
-        move = {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"}
+        move = {"old": "1.8.0-1.fc45", "new": "1.8.0-2.fc45"}
         with mock.patch.object(bump, "cosmic_comp_move", return_value=move), mock.patch.object(bump, "compute", never), mock.patch.object(bump, "fedora_kernels", never):
             with mock.patch.object(sys, "stdout"):
                 self.run_main("cosmic-comp", "check")
 
     def test_the_body_names_the_change_and_the_review(self):
-        body = bump.cosmic_comp_body({"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"})
-        self.assertIn("1.8.0-2.fc43", body)
+        body = bump.cosmic_comp_body({"old": "1.8.0-1.fc45", "new": "1.8.0-2.fc45"})
+        self.assertIn("1.8.0-2.fc45", body)
         self.assertIn("merged", body)
         self.assertIn("diff Fedora's", body)
         self.assertIn("`License:` and `Requires:`", body)
 
     def test_apply_writes_the_title_and_the_body_only_when_something_moved(self):
-        move = {"old": "1.8.0-1.fc43", "new": "1.8.0-2.fc43"}
+        move = {"old": "1.8.0-1.fc45", "new": "1.8.0-2.fc45"}
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp) / "out"
             with mock.patch.object(bump, "cosmic_comp_move", return_value=None), mock.patch.object(bump, "apply_cosmic_comp", never):
@@ -118,7 +118,7 @@ class Independence(unittest.TestCase):
             with mock.patch.object(bump, "cosmic_comp_move", return_value=move), mock.patch.object(bump, "apply_cosmic_comp") as applied:
                 self.run_main("cosmic-comp", "apply", str(out))
             applied.assert_called_once_with(move)
-            self.assertEqual((out / "title").read_text(), "chore(cosmic-comp): bump to 1.8.0-2.fc43\n")
+            self.assertEqual((out / "title").read_text(), "chore(cosmic-comp): bump to 1.8.0-2.fc45\n")
             self.assertEqual((out / "body.md").read_text(), bump.cosmic_comp_body(move))
 
     def test_apply_without_an_output_directory_is_refused(self):
