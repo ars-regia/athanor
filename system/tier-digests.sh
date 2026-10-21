@@ -57,6 +57,9 @@ ISSUER=https://token.actions.githubusercontent.com
 #   "no matching signatures:" ending the line.
 # Each "no matching signatures" form is anchored to the end of the line: cosign appends a
 # transient cause (a Rekor lookup that failed) to the same prefix, and that is an error.
+# A match on any line counts: with a foreign signature beside a trusted one whose check failed
+# for a transient cause, the reference reads as unsigned. Publishing then only signs it again;
+# a verifier must not use this to tell "unsigned" from an error without checking that too.
 UNVERIFIED='no signatures found|no matching CertificateIdentity|none of the expected identities matched|no matching signatures: *$|no matching signatures: error verifying bundle: empty key *$'
 
 # trust: sets IDENTITY, the certificate identity regex of a trusted run. resolve never calls it.
