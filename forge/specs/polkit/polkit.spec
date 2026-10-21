@@ -22,12 +22,13 @@
 #   - explicit meson commands instead of %%meson, which the builder does not define, as
 #     forge/specs/athanor-ananicy does for cmake;
 #   - Source0 is pinned in SOURCES/sources.sha256. The Release is Fedora's 128-1 with the
-#     dist tag of the image base and .athanorN appended (1.fc43.athanorN on Fedora 43): it
-#     sorts above every Fedora build of that base today (126-6.fc43.N), Fedora 44's
-#     127-2.fc44.N and Fedora 45's 127-5.fc45, and below Fedora's 128-1 builds for Fedora 44
-#     and later (Rawhide's 128-1.fc46) and every later Fedora build, so a Fedora rebuild
-#     replaces this fork instead of being hidden by it. A later Fedora build that lacks the
-#     two changes of the exit condition is taken only after the fork is rebased onto it;
+#     dist tag of the image base and .athanorN appended (1.fc45.athanorN on Fedora 45): it
+#     sorts above every Fedora build of that base today (127-5.fc45), Fedora 44's
+#     127-2.fc44.N and Fedora 43's 126-6.fc43.N, and below Rawhide's 128-1.fc46, any
+#     128-2.fc45 and every later Fedora build, so a Fedora rebuild replaces this fork instead
+#     of being hidden by it; a Fedora 128-1.fc45, which does not exist today, would sort
+#     below it. A later Fedora build that lacks the two changes of the exit condition is
+#     taken only after the fork is rebased onto it;
 #     system/Containerfile fails the image build when the installed polkit is not this fork;
 #   - drop-ins limit the agent helper socket to 8 connections per UID and end a helper
 #     that has run for 5 minutes, so one local user cannot hold every helper;
@@ -54,7 +55,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 128
-Release: 1.fc43.athanor1
+Release: 1.fc45.athanor1
 License: LGPL-2.0-or-later
 URL: https://github.com/polkit-org/polkit
 Source0: https://github.com/polkit-org/polkit/archive/refs/tags/%{version}.tar.gz#/polkit-%{version}.tar.gz
@@ -248,6 +249,10 @@ exit $fail
 %{_libdir}/girepository-1.0/*.typelib
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 128-1.fc45.athanor1
+- Rebuild for the Fedora 45 base: the release takes the fc45 dist tag; the sources and patches
+  are unchanged
+
 * Mon Oct 19 2026 Athanor Forge <forge@athanor.os> - 128-1.fc43.athanor1
 - Rebase onto Rawhide's polkit 128-1: CVE-2026-85498, the agent session use-after-free and
   the auth_admin_keep revalidation; upstream 128 carries Fedora's six 127 patches, so none
