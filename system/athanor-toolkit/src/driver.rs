@@ -155,8 +155,8 @@ pub trait Application {
         None
     }
 
-    /// An output that has the application's `surface` changed: its scale, mode or position.
-    /// The surface follows the scale by itself.
+    /// The output of the application's `surface`, right after the surface opened on it and each
+    /// time it changes: its scale, mode or position. The surface follows the scale by itself.
     fn output_changed(&mut self, _shell: &mut Shell, _surface: SurfaceId, _output: &OutputInfo) {}
 
     /// An event of the widgets of `surface`. The application may change the widgets of any
@@ -334,8 +334,8 @@ impl<O, S> Default for PerOutput<O, S> {
 }
 
 impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
-    /// An output announced or changed. When it has a surface, returns it, and opens none; when it
-    /// has none, `open` may give it one.
+    /// An output announced or changed: its surface, the one it had or the one `open` gave it,
+    /// if any. `open` is asked only when it has none.
     fn seen(
         &mut self,
         output: O,
@@ -344,10 +344,11 @@ impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
         if let Some((_, surface)) = self.0.iter().find(|(o, _)| *o == output) {
             return Ok(Some(*surface));
         }
-        if let Some(surface) = open(&output)? {
+        let opened = open(&output)?;
+        if let Some(surface) = opened {
             self.0.push((output, surface));
         }
-        Ok(None)
+        Ok(opened)
     }
 
     /// An output left: its surface, for the driver to close.
@@ -1224,7 +1225,8 @@ impl App {
         }
     }
 
-    /// An output announced or changed: the application's surface on it follows, or one opens.
+    /// An output announced or changed: one opens for the application if it has none, and the
+    /// application learns of the output of its surface.
     fn output_seen(&mut self, output: wl_output::WlOutput) {
         let Some(info) = self.output.info(&output) else {
             return;
@@ -2086,7 +2088,8 @@ mod tests {
     fn an_output_the_application_leaves_bare_is_asked_again_at_its_change() {
         let mut outputs = PerOutput::<u32, u32>::default();
         assert_eq!(outputs.seen(1, |_| Ok(None)).ok(), Some(None));
-        assert_eq!(outputs.seen(1, |_| Ok(Some(7))).ok(), Some(None));
+        // The surface opened is returned, so the application learns which one it is.
+        assert_eq!(outputs.seen(1, |_| Ok(Some(7))).ok(), Some(Some(7)));
         assert_eq!(outputs.seen(1, |_| Ok(Some(8))).ok(), Some(Some(7)));
         // A surface that fails to open leaves the output bare.
         assert!(outputs.seen(2, |_| Err("refused".into())).is_err());
