@@ -39,6 +39,7 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
@@ -105,7 +106,9 @@ fi
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
-# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp.
+# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp,
+# and runs the container in systemd mode, whose cgroup tree is writable: bar_session.py --unit
+# puts the bar in its unit's cgroup there, for the compositor's allow-list (OS4).
 # ATHANOR_TOOLKIT_RENDERER reaches athanor-toolkit's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
@@ -116,6 +119,9 @@ in_rig() { # in_rig <image> <command...>
     fi
     if [ -n "${RIG_COMPOSITOR:-}" ]; then
         opts+=(-e RIG_COMPOSITOR)
+    fi
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        opts+=(--systemd=always)
     fi
     if [ -n "${ATHANOR_TOOLKIT_RENDERER:-}" ]; then
         opts+=(-e ATHANOR_TOOLKIT_RENDERER)
@@ -916,14 +922,30 @@ atspi)
         ;;
     bar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
-        # accessibility, tiling, power, the shield.
+        # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
+        # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
+        # 6: input source and tiling need zcosmic_keyboard_layout_manager_v1 and
+        # zcosmic_workspace_manager_v2, whose private replacements are still to be specified
+        # (docs/spikes/c1-protocols.md, section 3).
+        unit='' widgets=8
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            require athanor-compositor build-compositor
+            unit=--unit widgets=6
+        fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 8" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+        # GTK keeps exporting the tree of a surface the compositor closed, so the walk alone
+        # passes a bar that is not on screen; the compositor's log says when it closed one
+        # (src/layer.rs).
+        if [ -n "$unit" ] && grep -q "not granted them was closed" "$out/atspi-bar-compositor.log"; then
+            echo "atspi bar: athanor-compositor closed the bar's surface; see $out/atspi-bar-compositor.log" >&2
+            exit 1
+        fi
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
