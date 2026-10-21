@@ -13,7 +13,7 @@ use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowB
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
+use smithay_client_toolkit::reexports::calloop::{EventLoop, EventSource, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
     Shape, WpCursorShapeDeviceV1,
@@ -162,6 +162,13 @@ pub trait Application {
     /// An event of the widgets of `surface`. The application may change the widgets of any
     /// surface through `shell`.
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event);
+
+    /// The pointer entered (`inside`) or left `surface`, a popup included.
+    fn pointer(&mut self, _shell: &mut Shell, _surface: SurfaceId, _inside: bool) {}
+
+    /// Runs after each turn of the event loop, once its events are handled: where the
+    /// application applies what its own source (see [`run_with`]) changed since.
+    fn turn(&mut self, _shell: &mut Shell) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -191,6 +198,27 @@ pub fn run_window(ui: Ui, app_id: &str, on_event: Handler) -> Result<(), Error> 
 
 /// Runs `application` until its window closes, or until an error.
 pub fn run(application: impl Application + 'static) -> Result<(), Error> {
+    run_on(application, |_| Ok(()))
+}
+
+/// Runs `application` as [`run`] does, with `source` in the same event loop: GLib's main
+/// context, say, for an application that awaits GIO. [`Application::turn`] follows each turn.
+pub fn run_with<S>(application: impl Application + 'static, source: S) -> Result<(), Error>
+where
+    S: EventSource<Event = (), Metadata = (), Ret = ()> + 'static,
+{
+    run_on(application, |handle| {
+        handle
+            .insert_source(source, |_, _, _| {})
+            .map(drop)
+            .map_err(|e| e.error.to_string().into())
+    })
+}
+
+fn run_on(
+    application: impl Application + 'static,
+    insert: impl FnOnce(&LoopHandle<'static, App>) -> Result<(), Error>,
+) -> Result<(), Error> {
     let gpu = wants_gpu(std::env::var_os(RENDERER))?;
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
@@ -199,6 +227,7 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
     WaylandSource::new(conn.clone(), queue)
         .insert(event_loop.handle())
         .map_err(|e| e.error.to_string())?;
+    insert(&event_loop.handle())?;
     #[cfg(not(feature = "gpu"))]
     debug_assert!(!gpu, "wants_gpu refuses gpu without the feature");
 
@@ -270,6 +299,10 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
     }
     while !app.shell.exit {
         event_loop.dispatch(None, &mut app)?;
+        app.application.turn(&mut app.shell);
+        if let Err(error) = app.shell.draw_dirty() {
+            app.fail(error);
+        }
         app.sync_window_focus();
         if let Some(error) = app.error.take() {
             return Err(error);
@@ -400,6 +433,40 @@ impl Shell {
         Ok(())
     }
 
+    /// Changes a layer surface's anchor, margin, exclusive zone, keyboard and input region to
+    /// `options`'; its layer and namespace stay those it was opened with. Takes effect with the
+    /// next frame.
+    pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
+        let surface = self
+            .get_mut(id)
+            .ok_or_else(|| format!("no open surface {id:?}"))?;
+        let Shown::Layer(layer) = &surface.shown else {
+            return Err(format!("{id:?} is not a layer surface").into());
+        };
+        layer.set_anchor(options.anchor);
+        let [top, right, bottom, left] = options.margin;
+        layer.set_margin(top, right, bottom, left);
+        layer.set_exclusive_zone(options.exclusive_zone);
+        layer.set_keyboard_interactivity(options.keyboard);
+        let stretch = stretched(options.anchor);
+        // An axis no longer stretched takes its widgets' size again.
+        if surface.stretch.0 && !stretch.0 {
+            surface.ui.min_width = 0.0;
+        }
+        if surface.stretch.1 && !stretch.1 {
+            surface.ui.min_height = 0.0;
+        }
+        surface.stretch = stretch;
+        // The size is asked again with the next frame.
+        surface.size = (0, 0);
+        self.set_input_region(id, options.input_region.as_deref())
+    }
+
+    /// The surface the open menu was opened from, if a menu is open.
+    pub fn popup_parent(&self) -> Option<SurfaceId> {
+        self.popup.filter(|p| p.menu).map(|p| p.parent)
+    }
+
     fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
         self.surfaces.iter_mut().find(|s| s.id == id)
     }
@@ -514,7 +581,7 @@ impl Shell {
         from.dirty = true;
         // A tooltip takes no pointer: it never stands between the pointer and its widget.
         let input = (!menu).then(Vec::new);
-        match self.adopt(ui, Shown::Popup(popup), fractional, input) {
+        match self.adopt(ui, Shown::Popup(popup), fractional, input, (false, false)) {
             Ok(id) => {
                 self.popup = Some(open);
                 Ok(id)
@@ -558,6 +625,7 @@ impl Shell {
         let (wl, fractional) = self.new_surface();
         let qh = &self.qh;
         let mut input_region = None;
+        let mut stretch = (false, false);
         let shown = match role {
             Role::Window { app_id } => {
                 let xdg_shell = self
@@ -587,10 +655,11 @@ impl Shell {
                 surface.set_exclusive_zone(options.exclusive_zone);
                 surface.set_keyboard_interactivity(options.keyboard);
                 input_region = options.input_region;
+                stretch = stretched(options.anchor);
                 Shown::Layer(surface)
             }
         };
-        self.adopt(ui, shown, fractional, input_region)
+        self.adopt(ui, shown, fractional, input_region, stretch)
     }
 
     /// Takes a surface just given its role: its renderer, its accessibility adapter, its size and
@@ -601,6 +670,7 @@ impl Shell {
         shown: Shown,
         fractional: Option<(WpFractionalScaleV1, WpViewport)>,
         input_region: Option<Vec<Rect>>,
+        stretch: (bool, bool),
     ) -> Result<SurfaceId, Error> {
         let id = SurfaceId(self.next);
         // ponytail: a popup draws on vello_cpu: a wgpu device of its own would cost every tooltip
@@ -629,7 +699,7 @@ impl Shell {
         let size = match &shown {
             Shown::Layer(surface) => {
                 layout(&mut ui, 1.0)?;
-                let size = logical_size(&ui);
+                let size = requested(logical_size(&ui), stretch);
                 surface.set_size(size.0, size.1);
                 size
             }
@@ -648,6 +718,7 @@ impl Shell {
             initial,
             scale: 1.0,
             size,
+            stretch,
             configured: false,
             frame_pending: false,
             redraw: false,
@@ -685,6 +756,23 @@ impl Shell {
         }
         Ok(())
     }
+}
+
+/// Whether a layer surface anchored at `anchor` spans its output's width, and its height.
+fn stretched(anchor: Anchor) -> (bool, bool) {
+    (
+        anchor.contains(Anchor::LEFT | Anchor::RIGHT),
+        anchor.contains(Anchor::TOP | Anchor::BOTTOM),
+    )
+}
+
+/// The size a layer surface asks for: its widgets' `size`, and 0 along a `stretch`ed axis,
+/// which the compositor then sizes.
+fn requested(size: (u32, u32), stretch: (bool, bool)) -> (u32, u32) {
+    (
+        if stretch.0 { 0 } else { size.0 },
+        if stretch.1 { 0 } else { size.1 },
+    )
 }
 
 /// The widgets' size in whole logical pixels, never empty.
@@ -741,6 +829,9 @@ struct Surface {
     scale: f32,
     /// The logical size last asked of a layer surface.
     size: (u32, u32),
+    /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
+    /// asks 0 along that axis and takes the size the compositor configures.
+    stretch: (bool, bool),
     configured: bool,
     /// A frame is committed and its callback has not come: the next one waits for it, so that
     /// drawing never runs ahead of the compositor, which throttles a covered surface.
@@ -824,9 +915,10 @@ impl Surface {
     fn place(&mut self) {
         let size = logical_size(&self.ui);
         if let Shown::Layer(surface) = &self.shown {
-            if size != self.size {
-                surface.set_size(size.0, size.1);
-                self.size = size;
+            let asked = requested(size, self.stretch);
+            if asked != self.size {
+                surface.set_size(asked.0, asked.1);
+                self.size = asked;
             }
         }
         match &self.fractional {
@@ -1529,14 +1621,21 @@ impl LayerShellHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         layer: &LayerSurface,
-        _: LayerSurfaceConfigure,
+        configure: LayerSurfaceConfigure,
         _: u32,
     ) {
         let Some(surface) = self.shell.find(layer.wl_surface()) else {
             return;
         };
-        // ponytail: the surface keeps its widgets' size whatever the compositor suggests;
-        // stretching to a size configured along both anchors of an edge comes with the dock.
+        // Along a stretched axis the surface takes the size configured; along any other it
+        // keeps its widgets' size whatever the compositor suggests.
+        let (width, height) = configure.new_size;
+        if surface.stretch.0 && width > 0 {
+            surface.ui.min_width = width as f32;
+        }
+        if surface.stretch.1 && height > 0 {
+            surface.ui.min_height = height as f32;
+        }
         surface.configured = true;
         let id = surface.id;
         self.changed(id, None);
@@ -1799,6 +1898,15 @@ impl PointerHandler for App {
                     _ => {}
                 }
             }
+            if let PointerEventKind::Enter { .. } | PointerEventKind::Leave { .. } = event.kind {
+                if let Some(id) = self.shell.find(&event.surface).map(|s| s.id) {
+                    let inside = matches!(event.kind, PointerEventKind::Enter { .. });
+                    self.application.pointer(&mut self.shell, id, inside);
+                    if let Err(error) = self.shell.draw_dirty() {
+                        self.fail(error);
+                    }
+                }
+            }
             // The press grabs no more once its button is up or the pointer has left, on any
             // surface, one closed since included.
             if matches!(
@@ -1847,6 +1955,19 @@ mod tests {
         let invalid = std::ffi::OsString::from_vec(vec![0x67, 0xff]);
         let error = wants_gpu(Some(invalid)).unwrap_err().to_string();
         assert!(error.contains("is not valid UTF-8"), "{error}");
+    }
+
+    #[test]
+    fn a_layer_surface_on_both_ends_of_an_axis_asks_the_compositor_for_its_length() {
+        let bottom = Anchor::BOTTOM;
+        let spanning = Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT;
+        let side = Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM;
+        assert_eq!(stretched(bottom), (false, false));
+        assert_eq!(stretched(spanning), (true, false));
+        assert_eq!(stretched(side), (false, true));
+        assert_eq!(requested((300, 60), stretched(bottom)), (300, 60));
+        assert_eq!(requested((300, 60), stretched(spanning)), (0, 60));
+        assert_eq!(requested((60, 300), stretched(side)), (60, 0));
     }
 
     #[test]

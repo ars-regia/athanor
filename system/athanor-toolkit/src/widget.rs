@@ -106,6 +106,31 @@ pub enum Kind {
         /// that only decorates.
         description: String,
     },
+    /// A dock's island along an edge of its window: its children stacked top to bottom when
+    /// `vertical`, side by side in reading order otherwise, each stretched across the line and
+    /// all centred along it. As the root's child it fills the window, so a surface stretched
+    /// along the edge keeps the island in its middle. Only the children and the theme's
+    /// `island_padding` around them are filled, with `island` and rounded by `island_radius`.
+    Island {
+        /// Whether the children are stacked top to bottom.
+        vertical: bool,
+        /// The room kept free around the fill, top, right, bottom and left, as CSS's margin.
+        margin: [f32; 4],
+    },
+    /// A flat button that shows an image, named by its label for assistive technologies;
+    /// activating it raises [`Event::Clicked`]. It is at least the theme's `button_min` on
+    /// each side, with the theme's padding on both sides of the image.
+    IconButton {
+        /// The name assistive technologies read.
+        label: String,
+        /// The image, drawn in a square of `size` logical pixels in the middle.
+        image: crate::icon::Image,
+        /// The side of the image's square, in logical pixels.
+        size: f32,
+        /// A line in the accent colour along this side, for an application that holds the
+        /// focus, as the GTK dock's inset shadow.
+        indicator: Option<crate::driver::Side>,
+    },
 }
 
 /// A button of the title bar.
@@ -172,6 +197,7 @@ impl Widget {
                 | Kind::Field(_)
                 | Kind::WindowButton(_)
                 | Kind::MenuItem(_)
+                | Kind::IconButton { .. }
         )
     }
 }
@@ -265,6 +291,8 @@ pub struct Ui {
     pub rtl: bool,
     /// The window's width in logical pixels when its widgets need less, as GTK's default width.
     pub min_width: f32,
+    /// The window's height in logical pixels when its widgets need less.
+    pub min_height: f32,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
@@ -282,6 +310,7 @@ impl Ui {
             theme,
             rtl,
             min_width: 0.0,
+            min_height: 0.0,
             focus: None,
             text: TextContext::default(),
             title_bar: None,
@@ -474,6 +503,39 @@ impl Ui {
         true
     }
 
+    /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
+    /// the buttons a menu holds, which then read as its rows.
+    pub fn is_flat(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        match widget.kind {
+            Kind::MenuItem(_) | Kind::IconButton { .. } => true,
+            Kind::Button(_) => widget
+                .parent
+                .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
+            _ => false,
+        }
+    }
+
+    /// What island `id` fills after [`Ui::layout`]: its visible children and the theme's
+    /// `island_padding` around them; `None` for an island with no child shown, or another kind.
+    pub fn island_fill(&self, id: WidgetId) -> Option<Rect> {
+        if !matches!(self.widgets[id].kind, Kind::Island { .. }) {
+            return None;
+        }
+        let pad = self.theme.island_padding;
+        let rects = self.visible_children(id).into_iter().map(|c| self.widgets[c].rect);
+        let (x0, y0, x1, y1) = rects.fold(None, |acc: Option<(f32, f32, f32, f32)>, r| {
+            let (x0, y0, x1, y1) = acc.unwrap_or((r.x, r.y, r.x + r.w, r.bottom()));
+            Some((x0.min(r.x), y0.min(r.y), x1.max(r.x + r.w), y1.max(r.bottom())))
+        })?;
+        Some(Rect {
+            x: x0 - pad,
+            y: y0 - pad,
+            w: x1 - x0 + 2.0 * pad,
+            h: y1 - y0 + 2.0 * pad,
+        })
+    }
+
     /// The window's size in logical pixels, after [`Ui::layout`].
     pub fn size(&self) -> (f32, f32) {
         self.size
@@ -496,7 +558,9 @@ impl Ui {
     fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
-        let (margin, section_gap, min_width) = (t.margin, t.section_gap, self.min_width);
+        let (margin, section_gap) = (t.margin, t.section_gap);
+        let (min_width, min_height) = (self.min_width, self.min_height);
+        let (island_pad, button_min) = (t.island_padding, t.button_min);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
@@ -516,6 +580,19 @@ impl Ui {
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
             Kind::Image { size, .. } => (*size, *size),
+            Kind::IconButton { size, .. } => ((*size + 2.0 * pad).max(button_min), size.max(button_min)),
+            Kind::Island { vertical, margin } => {
+                let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
+                let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
+                let mut content = [0.0; 2];
+                content[along] = side(along).sum::<f32>() + spacing;
+                content[across] = side(across).fold(0.0, f32::max);
+                let [top, right, bottom, left] = *margin;
+                (
+                    content[0] + 2.0 * island_pad + left + right,
+                    content[1] + 2.0 * island_pad + top + bottom,
+                )
+            }
             Kind::Column | Kind::Group(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
@@ -527,7 +604,8 @@ impl Ui {
                 let h = content.iter().map(|s| s.1).sum::<f32>() + spacing;
                 if id == Self::ROOT {
                     let edge = 2.0 * margin;
-                    ((w + edge).max(bar.0).max(min_width), h + edge + bar.1)
+                    let w = (w + edge).max(bar.0).max(min_width);
+                    (w, (h + edge + bar.1).max(min_height))
                 } else {
                     (w, h)
                 }
@@ -650,9 +728,15 @@ impl Ui {
                 for &c in children {
                     if matches!(
                         self.widgets[c].kind,
-                        Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Switch { .. }
+                        Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Switch { .. } | Kind::Island { .. }
                     ) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
+                    }
+                    // An island takes the rest of its column's height too.
+                    if matches!(self.widgets[c].kind, Kind::Island { .. }) {
+                        let rest = outer.bottom() - edge - cy;
+                        let r = &mut self.widgets[c].rect;
+                        r.h = r.h.max(rest);
                     }
                     let r = self.widgets[c].rect;
                     let cx = if self.rtl {
@@ -662,6 +746,49 @@ impl Ui {
                     };
                     self.place(c, cx, cy);
                     cy += r.h + gap;
+                }
+            }
+            Kind::Island { vertical, margin } => {
+                let [top, right, bottom, left] = margin;
+                let pad = self.theme.island_padding;
+                let inside = Rect {
+                    x: x + left + pad,
+                    y: y + top + pad,
+                    w: (outer.w - left - right - 2.0 * pad).max(0.0),
+                    h: (outer.h - top - bottom - 2.0 * pad).max(0.0),
+                };
+                let lengths: Vec<f32> = children
+                    .iter()
+                    .map(|&c| {
+                        let r = self.widgets[c].rect;
+                        if vertical { r.h } else { r.w }
+                    })
+                    .collect();
+                let content = lengths.iter().sum::<f32>() + gap * lengths.len().saturating_sub(1) as f32;
+                let free = |line: f32| ((line - content) / 2.0).max(0.0);
+                // In reading order: right to left mirrors a horizontal island.
+                let mut ordered = children.clone();
+                if !vertical && self.rtl {
+                    ordered.reverse();
+                }
+                let mut at = if vertical {
+                    inside.y + free(inside.h)
+                } else {
+                    inside.x + free(inside.w)
+                };
+                for c in ordered {
+                    let r = &mut self.widgets[c].rect;
+                    if vertical {
+                        r.w = inside.w;
+                        let h = r.h;
+                        self.place(c, inside.x, at);
+                        at += h + gap;
+                    } else {
+                        r.h = inside.h;
+                        let w = r.w;
+                        self.place(c, at, inside.y);
+                        at += w + gap;
+                    }
                 }
             }
             _ => {}
@@ -676,7 +803,7 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) | Kind::MenuItem(_) => Some(Event::Clicked(id)),
+            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
                 *active = !*active;
@@ -900,7 +1027,14 @@ pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) ->
 /// The x of the label of a check button or a switch of width `width`, given its `mark`: a check's
 /// label follows its box by `gap`, wherever the widget's rectangle `r` ends; a switch's label
 /// takes the far edge, opposite its track.
-pub(crate) fn label_x(r: Rect, mark: Rect, rtl: bool, is_switch: bool, gap: f32, width: f32) -> f32 {
+pub(crate) fn label_x(
+    r: Rect,
+    mark: Rect,
+    rtl: bool,
+    is_switch: bool,
+    gap: f32,
+    width: f32,
+) -> f32 {
     match (is_switch, rtl) {
         (false, false) => mark.x + mark.w + gap,
         (false, true) => mark.x - gap - width,
@@ -1055,17 +1189,29 @@ mod tests {
             assert!(width > 0.0);
             let (r, gap) = (widget.rect, ui.theme.gap);
             let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
-            assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
+            assert!(
+                r.w > mark.w + gap + width,
+                "the cell is wider than its content"
+            );
             let x = label_x(r, mark, rtl, false, gap, width);
             if rtl {
-                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
+                assert!(
+                    (x + width + gap - mark.x).abs() < 1e-3,
+                    "the label ends a gap before the box"
+                );
             } else {
-                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
+                assert!(
+                    (x - (mark.x + mark.w + gap)).abs() < 1e-3,
+                    "the label starts a gap after the box"
+                );
             }
             // A switch keeps the far edge.
             let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
             let x = label_x(r, track, rtl, true, gap, width);
-            assert_eq!(if rtl { x + width } else { x }, if rtl { r.x + r.w } else { r.x });
+            assert_eq!(
+                if rtl { x + width } else { x },
+                if rtl { r.x + r.w } else { r.x }
+            );
         }
     }
 
@@ -1424,5 +1570,151 @@ mod tests {
         ui.set_description(app, None);
         ui.set_tooltip(app, None);
         assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+    }
+
+    /// A theme as a dock's: no margin around the window, 2 between the island's children.
+    fn dock_theme() -> Theme {
+        Theme {
+            margin: 0.0,
+            gap: 2.0,
+            padding: 12.0,
+            ..Theme::default()
+        }
+    }
+
+    fn icon(label: &str, size: f32) -> Kind {
+        Kind::IconButton {
+            label: label.into(),
+            image: crate::icon::Image {
+                pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(1, 1)),
+            },
+            size,
+            indicator: None,
+        }
+    }
+
+    #[test]
+    fn an_island_fills_its_window_and_centres_its_children_along_its_line() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: true,
+                margin: [24.0, 14.0, 24.0, 6.0],
+            },
+        );
+        // 16 + 2 * 12 wide and the 32 of `button_min` tall; then 24 + 2 * 12 by 32.
+        let a = ui.add(island, icon("A", 16.0));
+        let b = ui.add(island, icon("B", 24.0));
+        // 48 + 2 * 4 + 6 + 14 wide; 32 + 2 + 32 + 2 * 4 + 24 + 24 tall.
+        assert_eq!(ui.layout(), (76.0, 122.0));
+        ui.min_height = 800.0;
+        assert_eq!(ui.layout(), (76.0, 800.0));
+        // Stretched across the line, centred along it: the inside is 28 to 772, the content 66.
+        let at = |id| ui.widget(id).rect;
+        assert_eq!(
+            at(a),
+            Rect {
+                x: 10.0,
+                y: 367.0,
+                w: 48.0,
+                h: 32.0
+            }
+        );
+        assert_eq!(
+            at(b),
+            Rect {
+                x: 10.0,
+                y: 401.0,
+                w: 48.0,
+                h: 32.0
+            }
+        );
+        assert_eq!(
+            at(island),
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 76.0,
+                h: 800.0
+            }
+        );
+        // The fill hugs the children: the padding around them, not the margin.
+        assert_eq!(
+            ui.island_fill(island),
+            Some(Rect {
+                x: 6.0,
+                y: 363.0,
+                w: 56.0,
+                h: 74.0
+            })
+        );
+    }
+
+    #[test]
+    fn a_horizontal_island_follows_the_reading_order() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Dock", dock_theme(), rtl);
+            let island = ui.add(
+                Ui::ROOT,
+                Kind::Island {
+                    vertical: false,
+                    margin: [14.0, 18.0, 6.0, 18.0],
+                },
+            );
+            let a = ui.add(island, icon("A", 16.0));
+            let b = ui.add(island, icon("B", 24.0));
+            assert_eq!(ui.layout(), (134.0, 60.0));
+            let (first, second) = if rtl { (b, a) } else { (a, b) };
+            let (first, second) = (ui.widget(first).rect, ui.widget(second).rect);
+            assert_eq!((first.x, first.y, first.h), (22.0, 18.0, 32.0));
+            assert_eq!((second.x, second.y), (22.0 + first.w + 2.0, 18.0));
+        }
+    }
+
+    #[test]
+    fn an_icon_button_takes_the_focus_and_clicks() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: false,
+                margin: [0.0; 4],
+            },
+        );
+        let a = ui.add(island, icon("A", 16.0));
+        let b = ui.add(island, icon("B", 16.0));
+        ui.layout();
+        assert_eq!(crate::focus::chain(&ui), [a, b]);
+        let r = ui.widget(b).rect;
+        assert_eq!(ui.click(r.center_x(), r.y + 1.0), Some(Event::Clicked(b)));
+        assert_eq!(ui.focus(), Some(b));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Clicked(b)));
+    }
+
+    #[test]
+    fn an_empty_island_keeps_its_margin_and_padding_and_has_no_fill() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: true,
+                margin: [1.0, 2.0, 3.0, 4.0],
+            },
+        );
+        assert_eq!(ui.layout(), (14.0, 12.0));
+        assert_eq!(ui.island_fill(island), None);
+    }
+
+    #[test]
+    fn a_menu_of_buttons_keeps_the_buttons_its_width() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let short = ui.add(menu, Kind::Button("Pin".into()));
+        let long = ui.add(menu, Kind::MenuItem("A much longer row".into()));
+        ui.layout();
+        assert_eq!(ui.widget(short).rect.w, ui.widget(long).rect.w);
+        assert!(ui.is_flat(short));
+        assert!(!ui.is_flat(Ui::ROOT));
     }
 }

@@ -27,7 +27,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(ui.title.as_str());
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar => Node::new(Role::GenericContainer),
+        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+            Node::new(Role::GenericContainer)
+        }
         Kind::Group(name) => {
             // A group stacks its children as a column, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Group);
@@ -46,7 +48,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        Kind::Button(label) => {
+        Kind::Button(label) | Kind::IconButton { label, .. } => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
