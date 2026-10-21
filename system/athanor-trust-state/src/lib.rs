@@ -482,7 +482,7 @@ mod tests {
         assert!(good.contains(r#""boots_remaining":5"#));
         assert!(parse(&good.replace(r#""boots_remaining":5"#, r#""boots_remaining":7"#)).is_ok());
         assert!(parse(&good.replace(r#""boots_remaining":5"#, r#""boots_remaining":0"#)).is_ok());
-        for bad in [r#""boots_remaining":8"#, r#""boots_remaining":-1"#, r#""boots_remaining":null"#] {
+        for bad in [r#""boots_remaining":8"#, r#""boots_remaining":-1"#, r#""boots_remaining":null"#, r#""boots_remaining":4294967296"#] {
             assert_eq!(parse(&good.replace(r#""boots_remaining":5"#, bad)), Err(ReadError::Malformed), "{bad}");
         }
     }
@@ -493,8 +493,23 @@ mod tests {
         let at = format!(r#""first_notice_at":{NOW}"#);
         assert!(good.contains(&at));
         assert!(parse(&good.replace(&at, r#""first_notice_at":0"#)).is_ok(), "a clock reset to 1970 is a real reading");
-        for bad in [r#""first_notice_at":-1"#.to_owned(), format!(r#""first_notice_at":{}"#, i64::MAX), r#""first_notice_at":null"#.to_owned()] {
+        for bad in [r#""first_notice_at":-1"#.to_owned(), format!(r#""first_notice_at":{}"#, i64::MAX), r#""first_notice_at":null"#.to_owned(), r#""first_notice_at":1e30"#.to_owned()] {
             assert_eq!(parse(&good.replace(&at, &bad)), Err(ReadError::Malformed), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_duplicate_key_is_malformed() {
+        let state = postponed_state();
+        let good = serde_json::to_string(&state).expect("serialize");
+        let automatic = format!(r#""automatic_security_updates":{}"#, state.automatic_security_updates);
+        for (from, to) in [
+            (r#""postponed":true"#.to_owned(), r#""postponed":true,"postponed":false"#.to_owned()),
+            (automatic.clone(), format!("{automatic},{automatic}")),
+            (r#""schema":2"#.to_owned(), r#""schema":2,"schema":2"#.to_owned()),
+        ] {
+            assert!(good.contains(&from), "{from}");
+            assert_eq!(parse(&good.replace(&from, &to)), Err(ReadError::Malformed), "{to}");
         }
     }
 
