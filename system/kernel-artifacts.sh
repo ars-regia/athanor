@@ -119,6 +119,12 @@ KERNEL_BUILD_PATHS=('forge/specs/azoth/*' '.github/workflows/kernel-build.yml' '
 # system/Containerfile: a base bump is reviewed with its package delta (O8).
 NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/specs/azoth/nvidia/sources.sha256 system/nvidia/locks/open.lock system/nvidia/locks/legacy.lock)
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
+# Kept by hand, not by kernel-bump.yml, but inputs of the kernel build like the pins
+# (build-inputs.py): a builder move changes them with the pins (clang 23 drops kernel-local's
+# kmalloc partition pin; Fedora 45 moves the release key build.sh reads), and the kernel job of a
+# pull request (call-kernel.yml) builds and boots them with the pins. Changed without a kernel pin,
+# they leave the published kernel built from other inputs, which no pull request can check.
+KERNEL_CONFIG_FILES=(forge/specs/azoth/kernel-local forge/specs/azoth/build.sh)
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -539,7 +545,7 @@ check_plan() {
   files=$(changed_files "$base" "$head")
   while IFS= read -r file; do
     [[ -n $file ]] || continue
-    matches_any "$file" "${KERNEL_PIN_FILES[@]}" || only_kernel_pins=false
+    matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" || only_kernel_pins=false
     matches_any "$file" "${NVIDIA_PIN_FILES[@]}" || only_nvidia_pins=false
   done <<< "$files"
   keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
