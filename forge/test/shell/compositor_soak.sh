@@ -26,6 +26,10 @@ done
     exit 2
 }
 shift
+[ $# -gt 0 ] && [ "$1" != --idle ] || {
+    echo "no client before --idle: the soak needs one that draws" >&2
+    exit 2
+}
 mkdir -p "$out"
 
 RUST_LOG=${RUST_LOG:-info} "${compositor[@]}" &> "$out/compositor.log" &
@@ -109,6 +113,7 @@ grep 'explicit sync' "$out/compositor.log" || [ $? -eq 1 ]
 echo "--- warnings and errors"
 grep -n -E 'WARN|ERROR|panicked' "$out/compositor.log" || [ $? -eq 1 ]
 for i in $(seq "$n"); do
-    grep -n -i -E 'warn|error|critical|fail' "$out/client-$i.log" | sed "s/^/client $i: /" || [ $? -eq 1 ]
+    # A journal priority prefix of warning or worse (<0> to <4>) counts as well.
+    grep -n -i -E '^<[0-4]>|warn|error|critical|fail' "$out/client-$i.log" | sed "s/^/client $i: /" || [ $? -eq 1 ]
 done
 exit "$status"
