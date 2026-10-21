@@ -241,7 +241,6 @@ impl Store {
 
     /// The directory of the release attestation of `digest`; `None` for anything but `sha256:<64 hex>`.
     #[must_use]
-    #[cfg_attr(not(test), allow(dead_code))] // read by the check from UT13's classification on
     pub fn attestation_dir(&self, digest: &str) -> Option<PathBuf> {
         self.object_dir("attestations", digest)
     }
@@ -286,7 +285,6 @@ impl Store {
 
     /// # Errors
     /// The file cannot be written.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
     pub fn set_lineage(&self, lineage: &Lineage) -> std::io::Result<()> {
         let json = serde_json::to_vec(lineage).map_err(std::io::Error::other)?;
         Self::replace(&self.var, "lineage.json", 0o644, &json)

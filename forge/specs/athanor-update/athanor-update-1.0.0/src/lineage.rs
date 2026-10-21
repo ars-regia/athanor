@@ -34,7 +34,7 @@ pub struct Open {
 }
 
 /// Why `Postpone()` has no budget to spend.
-#[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+#[cfg_attr(not(test), expect(dead_code, reason = "Postpone() of UT13 calls it; until then only the tests do"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Budget {
     /// The lineage's one postpone is spent.
@@ -45,7 +45,6 @@ pub enum Budget {
     NotOpen,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
 impl Lineage {
     /// A security digest reached `will-apply-at-next-shutdown` at `now`, during `boot_id`:
     /// opens the lineage, unless one is open, which the digest then inherits unchanged.
@@ -81,6 +80,7 @@ impl Lineage {
     ///
     /// # Errors
     /// See [`Budget`]; the lineage is unchanged then.
+    #[cfg_attr(not(test), expect(dead_code, reason = "Postpone() of UT13 calls it; until then only the tests do"))]
     pub fn postpone(&mut self, now: i64) -> Result<i64, Budget> {
         let expired = self.expired(now);
         let open = self.open.as_mut().ok_or(Budget::NotOpen)?;

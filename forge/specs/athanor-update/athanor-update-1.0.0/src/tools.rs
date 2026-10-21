@@ -63,6 +63,9 @@ pub trait Tools {
     fn switch(&self, image: &str) -> Result<(), Failure>;
     /// Copies `<repository>:sha256-<hex>.sig` into `dest` under the attachments policy.
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
+    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
+    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
     /// NetworkManager's `Metered` is 1 (yes) or 3 (guessed yes). No NetworkManager: false.
     fn metered(&self) -> bool;
 }
@@ -269,15 +272,6 @@ fn fetch_attachment(repository: &str, digest: &str, suffix: &str, dest: &Path) -
     run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
 }
 
-impl System {
-    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
-    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
-    #[cfg_attr(not(test), allow(dead_code))] // called by the check from UT13's classification on
-    pub fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        fetch_attachment(repository, digest, "att", dest)
-    }
-}
-
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
     run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
 }
@@ -353,6 +347,10 @@ impl Tools for System {
 
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
         fetch_attachment(repository, digest, "sig", dest)
+    }
+
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
+        fetch_attachment(repository, digest, "att", dest)
     }
 
     fn metered(&self) -> bool {
