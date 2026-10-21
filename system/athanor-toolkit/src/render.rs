@@ -3,7 +3,9 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
+use crate::widget::{
+    knob_rect, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui, WindowButton,
+};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::{Color, FontData};
@@ -343,6 +345,37 @@ pub fn paint<C: Canvas>(
                     let y = r.y + (r.h - layout.height()) / 2.0;
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
+            }
+            // A track, filled with the accent from min to the knob, and a round knob on it.
+            Kind::Slider(slider) => {
+                let d = slider_knob(t.font_size);
+                let fraction = (slider.value - slider.min) / (slider.max - slider.min);
+                let x_min = slider_knob_x(r, ui.rtl, t.font_size, 0.0);
+                let x_knob = slider_knob_x(r, ui.rtl, t.font_size, fraction);
+                let x_max = slider_knob_x(r, ui.rtl, t.font_size, 1.0);
+                let (cy, thick) = (r.y + r.h / 2.0, 4.0);
+                let bar = |from: f32, to: f32| crate::widget::Rect {
+                    x: from.min(to),
+                    y: cy - thick / 2.0,
+                    w: (to - from).abs(),
+                    h: thick,
+                };
+                ctx.set_paint(color(t.border));
+                ctx.fill_path(&rounded(bar(x_min, x_max), 0.0, thick / 2.0));
+                ctx.set_paint(color(t.accent));
+                ctx.fill_path(&rounded(bar(x_min, x_knob), 0.0, thick / 2.0));
+                let knob = Circle::new((f64::from(x_knob), f64::from(cy)), f64::from(d / 2.0));
+                let fill = if hover == Some(id) {
+                    mix(t.on_accent, t.text, HOVER)
+                } else {
+                    t.on_accent
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&knob.to_path(0.1));
+                ctx.set_paint(color(t.border));
+                ctx.set_stroke(Stroke::new(1.0));
+                let edge = Circle::new(knob.center, knob.radius - 0.5);
+                ctx.stroke_path(&edge.to_path(0.1));
             }
             Kind::Field(field) => {
                 ctx.set_paint(color(t.on_accent));
