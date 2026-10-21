@@ -61,9 +61,13 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
         // AccessKit's splitter is AT-SPI's separator.
         Kind::Separator => Node::new(Role::Splitter),
+        // An image without a description only decorates: its node is hidden, so assistive
+        // technologies skip it.
         Kind::Image { description, .. } => {
             let mut node = Node::new(Role::Image);
-            if !description.is_empty() {
+            if description.is_empty() {
+                node.set_hidden();
+            } else {
                 node.set_label(description.as_str());
             }
             node

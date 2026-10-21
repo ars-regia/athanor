@@ -95,8 +95,8 @@ pub enum Kind {
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
-    /// An image drawn as a square of `size` logical pixels, scaled from its own pixels. It takes
-    /// no input.
+    /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
+    /// with its aspect ratio kept, centred. It takes no input.
     Image {
         /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
         image: crate::icon::Image,

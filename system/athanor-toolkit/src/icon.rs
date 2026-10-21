@@ -101,7 +101,7 @@ impl Image {
     /// own size, and is scaled when drawn). Neither may be larger than [`MAX_IMAGE_SIDE`] on a
     /// side, and `px` is held to it.
     pub fn from_file(path: &Path, px: u16) -> Result<Self, Error> {
-        let pixmap = match path.extension().and_then(|e| e.to_str()) {
+        let pixmap = match icon_extension(path) {
             Some("png") => decode_png(&read_capped(path, MAX_IMAGE_FILE)?)?,
             Some("svg") => rasterise(&read_capped(path, MAX_IMAGE_FILE)?, px)?,
             _ => return Err(format!("{}: not a PNG or an SVG", path.display()).into()),
@@ -214,9 +214,10 @@ struct Index {
 }
 
 impl Index {
-    /// Parses the `Icon Theme` group and the groups of the directories it lists; what the
-    /// lookup does not use is ignored.
+    /// Parses the `Icon Theme` group and the groups of the directories it lists in
+    /// `Directories` and `ScaledDirectories`; what the lookup does not use is ignored.
     fn parse(text: &str) -> Self {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let mut groups: Vec<(&str, Vec<(&str, &str)>)> = Vec::new();
         for line in text.lines().map(str::trim) {
             if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
@@ -234,6 +235,7 @@ impl Index {
             get(keys, name)
                 .unwrap_or_default()
                 .split(',')
+                .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
                 .collect()
@@ -243,8 +245,11 @@ impl Index {
             .find(|(name, _)| *name == "Icon Theme")
             .map(|(_, keys)| keys.as_slice())
             .unwrap_or_default();
+        // ScaledDirectories lists the directories of a scale above 1 (hicolor's @2 ones), kept
+        // apart for implementations that predate them.
         let directories = list(theme, "Directories")
             .into_iter()
+            .chain(list(theme, "ScaledDirectories"))
             .filter(|path| is_subdirectory(path))
             .filter_map(|path| {
                 let keys = &groups.iter().find(|(name, _)| *name == path)?.1;
@@ -326,12 +331,21 @@ impl IconTheme {
             .or_else(|| self.lookup(FALLBACK_ICON, size, scale))
     }
 
-    /// [`IconTheme::resolve`], read as an image of `size` times `scale` pixels.
+    /// [`IconTheme::resolve`], read as an image of `size` times `scale` pixels. A file that
+    /// cannot be read as an image gets [`FALLBACK_ICON`] instead, as GTK draws a fallback for a
+    /// broken icon.
     pub fn image(&self, icon: &str, size: u16, scale: u16) -> Result<Image, Error> {
-        let path = self
+        let px = size.saturating_mul(scale);
+        if let Some(image) = self
             .resolve(icon, size, scale)
+            .and_then(|path| Image::from_file(&path, px).ok())
+        {
+            return Ok(image);
+        }
+        let path = self
+            .lookup(FALLBACK_ICON, size, scale)
             .ok_or_else(|| format!("no icon {icon:?}, nor {FALLBACK_ICON:?}, in the theme"))?;
-        Image::from_file(&path, size.saturating_mul(scale))
+        Image::from_file(&path, px)
     }
 
     /// The file of `name` by the specification's lookup: the theme, then what it inherits and
@@ -402,8 +416,21 @@ impl IconTheme {
     }
 }
 
-/// `name` with one of the icon extensions in `dir`, if it is there.
+/// The icon extension of `path`, in lower case, whatever its case in the name.
+fn icon_extension(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?;
+    EXTENSIONS
+        .into_iter()
+        .find(|known| known.eq_ignore_ascii_case(extension))
+}
+
+/// `name` with one of the icon extensions in `dir`, if it is there; `name` itself when it
+/// already carries one, as an `Icon=foo.png` written against the specification does.
 fn file_in(dir: &Path, name: &str) -> Option<PathBuf> {
+    if icon_extension(Path::new(name)).is_some() {
+        let path = dir.join(name);
+        return path.is_file().then_some(path);
+    }
     EXTENSIONS
         .iter()
         .map(|extension| dir.join(format!("{name}.{extension}")))
@@ -618,6 +645,129 @@ mod tests {
         );
         Ok(())
     }
+
+    /// A theme `t` of `index`, with an empty icon `icon` in each of `dirs`.
+    fn theme_of(test: &str, index: &str, dirs: &[&str]) -> Result<IconTheme, Error> {
+        let mut files = vec![("t/index.theme".to_owned(), index.as_bytes())];
+        files.extend(dirs.iter().map(|d| (format!("t/{d}/icon.png"), PNG)));
+        let files: Vec<(&str, &[u8])> = files.iter().map(|(p, b)| (p.as_str(), *b)).collect();
+        Ok(IconTheme::new(vec![scratch(test, &files)?], "t"))
+    }
+
+    #[test]
+    fn a_threshold_directory_serves_sizes_near_its_own() -> Result<(), Error> {
+        let theme = theme_of(
+            "threshold",
+            "[Icon Theme]\nDirectories=38,32\n\
+             [38]\nSize=38\nType=Fixed\n\
+             [32]\nSize=32\nType=Threshold\nThreshold=4\n",
+            &["38", "32"],
+        )?;
+        // 36 is within 32 plus 4, though 38 is closer.
+        assert_eq!(tail(theme.resolve("icon", 36, 1)), "t/32/icon.png");
+        assert_eq!(tail(theme.resolve("icon", 37, 1)), "t/38/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn a_scale_of_2_takes_a_scaled_directory() -> Result<(), Error> {
+        let theme = theme_of(
+            "scaled",
+            "[Icon Theme]\nDirectories=48\nScaledDirectories=48@2\n\
+             [48]\nSize=48\nType=Fixed\n\
+             [48@2]\nSize=48\nScale=2\nType=Fixed\n",
+            &["48", "48@2"],
+        )?;
+        assert_eq!(tail(theme.resolve("icon", 48, 2)), "t/48@2/icon.png");
+        assert_eq!(tail(theme.resolve("icon", 48, 1)), "t/48/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn without_a_match_the_closest_directory_wins() -> Result<(), Error> {
+        let theme = theme_of(
+            "closest",
+            "[Icon Theme]\nDirectories=48,16,24\n\
+             [48]\nSize=48\nType=Fixed\n\
+             [16]\nSize=16\nType=Fixed\n\
+             [24]\nSize=24\nType=Fixed\n",
+            &["48", "16", "24"],
+        )?;
+        assert_eq!(tail(theme.resolve("icon", 30, 1)), "t/24/icon.png");
+        assert_eq!(tail(theme.resolve("icon", 40, 1)), "t/48/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn an_inherits_cycle_ends() -> Result<(), Error> {
+        let index = |parent: &str| {
+            format!(
+                "[Icon Theme]\nInherits={parent}\nDirectories=apps\n[apps]\nSize=16\nType=Fixed\n"
+            )
+        };
+        let (a, b) = (index("b"), index("a"));
+        let dir = scratch(
+            "cycle",
+            &[
+                ("a/index.theme", a.as_bytes()),
+                ("b/index.theme", b.as_bytes()),
+                ("b/apps/icon.png", PNG),
+            ],
+        )?;
+        let theme = IconTheme::new(vec![dir], "a");
+        assert_eq!(theme.chain(), ["a", "b", "hicolor"]);
+        assert_eq!(tail(theme.resolve("icon", 16, 1)), "b/apps/icon.png");
+        assert_eq!(theme.resolve("missing", 16, 1), None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_malformed_index_keeps_what_it_can() -> Result<(), Error> {
+        let theme = theme_of(
+            "malformed",
+            "\u{feff}[Icon Theme]\nDirectories= apps , ,nogroup,bad\nno equals sign\n=\n\
+             [apps]\nSize=16\nType=Fixed\n\
+             [bad]\nSize=sixteen\n\
+             [unterminated\nSize=1\n",
+            &["apps", "nogroup", "bad"],
+        )?;
+        assert_eq!(tail(theme.resolve("icon", 16, 1)), "t/apps/icon.png");
+        assert_eq!(tail(theme.resolve("icon", 300, 1)), "t/apps/icon.png");
+        let garbage = theme_of("garbage", "\0\u{1}[[]]=\n[", &["apps"])?;
+        assert_eq!(garbage.resolve("icon", 16, 1), None);
+        Ok(())
+    }
+
+    #[test]
+    fn an_icon_that_cannot_be_decoded_gets_the_fallback() -> Result<(), Error> {
+        let index = "[Icon Theme]\nDirectories=apps\n[apps]\nSize=16\nType=Fixed\n";
+        let fallback = format!("t/apps/{FALLBACK_ICON}.png");
+        let dir = scratch(
+            "undecodable",
+            &[
+                ("t/index.theme", index.as_bytes()),
+                ("t/apps/broken.png", b"not a png"),
+                ("t/apps/upper.PNG", PNG),
+                ("t/apps/named.png", PNG),
+                (&fallback, PNG),
+                ("other.xpm", b"/* XPM */"),
+            ],
+        )?;
+        let theme = IconTheme::new(vec![dir.clone()], "t");
+        assert_eq!(tail(theme.resolve("broken", 16, 1)), "t/apps/broken.png");
+        assert_eq!(theme.image("broken", 16, 1)?.width(), 16);
+        let xpm = dir.join("other.xpm");
+        assert!(Image::from_file(&xpm, 16).is_err());
+        assert_eq!(theme.image(&xpm.to_string_lossy(), 16, 1)?.width(), 16);
+        // An extension in any case, and an Icon= that carries one, name the file itself.
+        assert_eq!(tail(theme.resolve("upper.PNG", 16, 1)), "t/apps/upper.PNG");
+        assert_eq!(
+            Image::from_file(&dir.join("t/apps/upper.PNG"), 16)?.width(),
+            16
+        );
+        assert_eq!(tail(theme.resolve("named.png", 16, 1)), "t/apps/named.png");
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -644,6 +794,68 @@ mod widget_tests {
         let r = ui.widget(id).rect;
         let pixel = pixmap.sample((r.x + r.w / 2.0) as u16, (r.y + r.h / 2.0) as u16);
         assert_eq!((pixel.r, pixel.g, pixel.b, pixel.a), (0xcc, 0, 0, 0xff));
+        Ok(())
+    }
+
+    #[test]
+    fn an_image_node_is_named_or_hidden() {
+        let image = Image {
+            pixmap: Arc::new(Pixmap::new(4, 4)),
+        };
+        let mut ui = Ui::new("Image", Theme::default(), false);
+        let named = ui.add(
+            Ui::ROOT,
+            Kind::Image {
+                image: image.clone(),
+                size: 16.0,
+                description: "Files".into(),
+            },
+        );
+        let decorative = ui.add(
+            Ui::ROOT,
+            Kind::Image {
+                image,
+                size: 16.0,
+                description: String::new(),
+            },
+        );
+        ui.layout();
+        let node = crate::a11y::node(&ui, named, 1.0);
+        assert_eq!(node.role(), accesskit::Role::Image);
+        assert_eq!(node.label(), Some("Files"));
+        assert!(!node.is_hidden());
+        let node = crate::a11y::node(&ui, decorative, 1.0);
+        assert!(node.is_hidden());
+        assert_eq!(node.label(), None);
+    }
+
+    #[test]
+    fn a_wide_image_keeps_its_aspect_ratio() -> Result<(), Error> {
+        let red = [0xcc, 0, 0, 0xff].repeat(32 * 16);
+        let metadata = PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false);
+        let image = Image {
+            pixmap: Arc::new(Pixmap::from_parts(red, 32, 16, metadata)),
+        };
+        let mut ui = Ui::new("Image", Theme::default(), false);
+        let id = ui.add(
+            Ui::ROOT,
+            Kind::Image {
+                image,
+                size: 32.0,
+                description: String::new(),
+            },
+        );
+        let pixmap = render::render(&mut ui, 1.0)?;
+        let r = ui.widget(id).rect;
+        let x = (r.x + r.w / 2.0) as u16;
+        let at = |y: f32| {
+            let p = pixmap.sample(x, (r.y + y) as u16);
+            (p.r, p.g, p.b)
+        };
+        // 32 by 16, centred in 32 by 32: rows 8 to 24 are the image, the rest the background.
+        assert_eq!(at(16.0), (0xcc, 0, 0));
+        assert_ne!(at(2.0), (0xcc, 0, 0));
+        assert_ne!(at(30.0), (0xcc, 0, 0));
         Ok(())
     }
 }

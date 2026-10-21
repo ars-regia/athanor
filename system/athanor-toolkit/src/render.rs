@@ -322,13 +322,13 @@ pub fn paint<C: Canvas>(
                 }
             }
             Kind::Image { image, .. } => {
-                let rect = Rect::new(
-                    f64::from(r.x),
-                    f64::from(r.y),
-                    f64::from(r.x + r.w),
-                    f64::from(r.y + r.h),
-                );
-                ctx.fill_image(resources, &rect, image.pixmap());
+                // The image keeps its aspect ratio, centred in its square.
+                let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                let fit = (f64::from(r.w) / w).min(f64::from(r.h) / h);
+                let (w, h) = (w * fit, h * fit);
+                let x = f64::from(r.x) + (f64::from(r.w) - w) / 2.0;
+                let y = f64::from(r.y) + (f64::from(r.h) - h) / 2.0;
+                ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
