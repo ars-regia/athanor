@@ -61,6 +61,17 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
         // AccessKit's splitter is AT-SPI's separator.
         Kind::Separator => Node::new(Role::Splitter),
+        // An image without a description only decorates: its node is hidden, so assistive
+        // technologies skip it.
+        Kind::Image { description, .. } => {
+            let mut node = Node::new(Role::Image);
+            if description.is_empty() {
+                node.set_hidden();
+            } else {
+                node.set_label(description.as_str());
+            }
+            node
+        }
         Kind::Tooltip(text) => {
             let mut node = Node::new(Role::Tooltip);
             node.set_label(text.as_str());
@@ -94,6 +105,19 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
                 Toggled::False
             });
             node.add_action(Action::Click);
+            node
+        }
+        Kind::Slider(slider) => {
+            let mut node = Node::new(Role::Slider);
+            node.set_label(slider.name.as_str());
+            node.set_numeric_value(slider.value);
+            node.set_min_numeric_value(slider.min);
+            node.set_max_numeric_value(slider.max);
+            node.set_numeric_value_step(slider.step);
+            node.set_orientation(Orientation::Horizontal);
+            for action in [Action::Increment, Action::Decrement, Action::SetValue] {
+                node.add_action(action);
+            }
             node
         }
         Kind::Field(field) => {
@@ -190,6 +214,9 @@ impl Ui {
                 self.set_focus(Some(id));
                 None
             }
+            (Action::Increment, _) => self.step_value(id, 1),
+            (Action::Decrement, _) => self.step_value(id, -1),
+            (Action::SetValue, Some(ActionData::NumericValue(value))) => self.set_value(id, *value),
             (Action::SetValue, Some(ActionData::Value(value))) => self.set_field_text(id, value),
             _ => None,
         }
@@ -468,6 +495,61 @@ mod tests {
         tip.layout();
         let text = read(&tip, text);
         assert_eq!((text.role(), text.label()), (Role::Tooltip, Some("Files")));
+    }
+
+    #[test]
+    fn a_slider_reads_as_gtks_and_obeys_assistive_technologies() {
+        let mut ui = Ui::new("Values", Theme::default(), false);
+        let id = ui
+            .slider(Ui::ROOT, "Level", 0.0, 10.0, 3.0, 9.0)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let n = &update.nodes[id].1;
+        assert_eq!((n.role(), n.label()), (Role::Slider, Some("Level")));
+        assert_eq!(n.orientation(), Some(Orientation::Horizontal));
+        assert_eq!(
+            (
+                n.numeric_value(),
+                n.min_numeric_value(),
+                n.max_numeric_value(),
+                n.numeric_value_step()
+            ),
+            (Some(9.0), Some(0.0), Some(10.0), Some(3.0))
+        );
+        for action in [
+            Action::Increment,
+            Action::Decrement,
+            Action::SetValue,
+            Action::Focus,
+        ] {
+            assert!(n.supports_action(action), "{action:?}");
+        }
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+
+        let request = |action, data| ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(id),
+            data,
+        };
+        let changed = Some(Event::Changed(id));
+        assert_eq!(ui.do_action(&request(Action::Increment, None)), changed);
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.do_action(&request(Action::Increment, None)), None);
+        assert_eq!(ui.do_action(&request(Action::Decrement, None)), changed);
+        assert_eq!(ui.value(id), Some(9.0));
+        let set = |v| request(Action::SetValue, Some(ActionData::NumericValue(v)));
+        assert_eq!(ui.do_action(&set(1.4)), changed);
+        assert_eq!(ui.value(id), Some(0.0));
+        assert_eq!(ui.do_action(&set(99.0)), changed);
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.do_action(&set(f64::NAN)), None);
+        assert_eq!(ui.value(id), Some(10.0));
+        // The text form of SetValue is for a field.
+        let text = request(Action::SetValue, Some(ActionData::Value("3".into())));
+        assert_eq!(ui.do_action(&text), None);
+        assert_eq!(ui.value(id), Some(10.0));
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {

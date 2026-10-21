@@ -1,0 +1,16 @@
+[Icon Theme]
+Name=Base
+Comment=The parent of the fixture theme
+Directories=48x48/apps,scalable/apps
+
+[48x48/apps]
+Size=48
+Context=Applications
+Type=Fixed
+
+[scalable/apps]
+Size=64
+MinSize=16
+MaxSize=512
+Context=Applications
+Type=Scalable

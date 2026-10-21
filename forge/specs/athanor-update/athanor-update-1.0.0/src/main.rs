@@ -6,6 +6,7 @@
 mod attestation;
 mod check;
 mod goback;
+mod lineage;
 mod migrate;
 mod policy;
 mod recover;

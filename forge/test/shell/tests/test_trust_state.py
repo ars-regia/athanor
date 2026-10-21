@@ -23,11 +23,13 @@ KEYS = {
     "last_successful_check",
     "last_error",
     "last_error_host",
+    "automatic_security_updates",
+    "postpone",
 }
 
 
 class TrustState(unittest.TestCase):
-    def test_every_state_has_the_schema_1_keys(self):
+    def test_every_state_has_the_schema_2_keys(self):
         for name in trust_state.NAMES:
             if name == "missing":
                 continue
@@ -56,6 +58,10 @@ class TrustState(unittest.TestCase):
             path = pathlib.Path(tmp, "run/athanor-update/state.json")
             trust_state.write("verified", trust_state.FROZEN, path)
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
-            self.assertEqual(json.loads(path.read_text())["schema"], 1)
+            written = json.loads(path.read_text())
+            self.assertEqual(written["schema"], 2)
+            self.assertIs(written["automatic_security_updates"], True)
+            self.assertIn("postpone", written)
+            self.assertIsNone(written["postpone"])
             trust_state.write("missing", trust_state.FROZEN, path)
             self.assertFalse(path.exists())
