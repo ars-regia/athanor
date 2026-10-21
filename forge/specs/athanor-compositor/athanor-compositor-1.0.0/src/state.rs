@@ -104,7 +104,7 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
     pub syncobj_state: Option<DrmSyncobjState>,
-    /// The clients' frame times, kept on the headless backend.
+    /// The clients' frame times and the outputs' draw times.
     pub frame_stats: Option<FrameStats>,
     /// The commits waiting on a fence, each with the event source that waits on it.
     pub held: Vec<HeldCommit>,
