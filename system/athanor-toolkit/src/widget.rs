@@ -70,9 +70,8 @@ pub enum Kind {
         active: bool,
     },
     /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
-    /// on its own. It fills the width of its column or group, or the cell of its row, which is as wide
-    /// as the row's widest child; activating it raises
-    /// [`Event::Toggled`].
+    /// on its own. It fills the width of its column or group, or its cell in a row, where every
+    /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
     Switch {
         /// The text of the switch, which names it for assistive technologies.
         label: String,
@@ -561,12 +560,11 @@ impl Ui {
 
     /// The focusable widget under the point, in logical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
-        (0..self.widgets.len())
-            .find(|&id| {
-                self.widgets[id].is_focusable()
-                    && self.widgets[id].rect.contains(x, y)
-                    && self.is_visible(id)
-            })
+        (0..self.widgets.len()).find(|&id| {
+            self.widgets[id].is_focusable()
+                && self.widgets[id].rect.contains(x, y)
+                && self.is_visible(id)
+        })
     }
 
     /// Presses the pointer at the point, in logical pixels, and returns the event of the widget there, if any.
@@ -775,10 +773,17 @@ mod tests {
             };
             let (row, track, knob) = parts(off);
             let margin = ui.theme.margin;
-            assert_eq!(row.w, w - 2.0 * margin, "rtl {rtl}: the switch fills the width");
+            assert_eq!(
+                row.w,
+                w - 2.0 * margin,
+                "rtl {rtl}: the switch fills the width"
+            );
             if rtl {
                 assert_eq!(track.x, row.x, "the track at the end edge, the left");
-                assert!(knob.x + knob.w > track.center_x(), "an off knob is at the right");
+                assert!(
+                    knob.x + knob.w > track.center_x(),
+                    "an off knob is at the right"
+                );
             } else {
                 assert_eq!(track.x + track.w, row.x + row.w);
                 assert!(knob.x < track.center_x(), "an off knob is at the left");
@@ -826,7 +831,10 @@ mod tests {
             ui.add_title_bar();
             let bar = ui.widget(Ui::ROOT).children[0];
             ui.set_visible(bar, false);
-            assert!(ui.is_visible(bar), "rtl {rtl}: the title bar cannot be hidden");
+            assert!(
+                ui.is_visible(bar),
+                "rtl {rtl}: the title bar cannot be hidden"
+            );
             let (w, h) = ui.layout();
             let r = ui.widget(bar).rect;
             assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");
