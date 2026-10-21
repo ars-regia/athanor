@@ -9,6 +9,7 @@ description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milest
 [dependencies]
 # The revision and its date are in README.md; deny.toml admits this URL and no other git source.
 smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
+libc = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
