@@ -147,15 +147,23 @@ fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
     Ok((ui, shown))
 }
 
+/// Shows the page of `selected` and hides the others; a selection that is not a page toggle,
+/// such as a toggle inside a page, changes nothing.
+fn show_page(ui: &mut Ui, pages: &[(WidgetId, WidgetId)], selected: WidgetId) {
+    if pages.iter().any(|&(toggle, _)| toggle == selected) {
+        for &(toggle, group) in pages {
+            ui.set_visible(group, toggle == selected);
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let run = || -> Result<(), String> {
         let options = Options::parse(std::env::args().skip(1))?;
         let (ui, pages) = build(&options)?;
         let on_event = move |ui: &mut Ui, event: Event| {
             if let Event::Selected(selected) = event {
-                for &(toggle, group) in &pages {
-                    ui.set_visible(group, toggle == selected);
-                }
+                show_page(ui, &pages, selected);
             }
         };
         driver::run_window(ui, "athanor-toolkit-gallery", Box::new(on_event))
@@ -167,5 +175,23 @@ fn main() -> ExitCode {
             eprintln!("athanor-toolkit-gallery: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_selection_inside_a_page_keeps_the_page() -> Result<(), String> {
+        let (mut ui, pages) = build(&Options::parse(std::iter::empty())?)?;
+        let (first, second) = (pages[0], pages[1]);
+        assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
+        // Not a page toggle: the group's own id stands for any widget inside a page.
+        show_page(&mut ui, &pages, first.1);
+        assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
+        show_page(&mut ui, &pages, second.0);
+        assert!(!ui.is_visible(first.1) && ui.is_visible(second.1));
+        Ok(())
     }
 }
