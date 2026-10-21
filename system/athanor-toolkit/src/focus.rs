@@ -2,14 +2,24 @@
 //! not depend on the reading direction; the arrows walk the visual order, from the laid-out
 //! rectangles, so they follow the mirrored layout in right-to-left.
 
-use crate::widget::{Key, Ui, WidgetId};
+use crate::widget::{Key, Kind, Ui, WidgetId};
 
-/// The visible, focusable widgets in logical order: the tree, depth first.
+/// The visible, focusable widgets in logical order: the tree, depth first. A list is one stop,
+/// on its focused row, else its selected row, else its first.
 pub fn chain(ui: &Ui) -> Vec<WidgetId> {
     let mut out = Vec::new();
     let mut stack = vec![Ui::ROOT];
     while let Some(id) = stack.pop() {
         if !ui.widget(id).visible {
+            continue;
+        }
+        if let Kind::List { selected, .. } = ui.widget(id).kind {
+            let rows = ui.visible_children(id);
+            let stop = [ui.focus(), selected]
+                .into_iter()
+                .flatten()
+                .find(|r| rows.contains(r));
+            out.extend(stop.or(rows.first().copied()));
             continue;
         }
         if ui.widget(id).is_focusable() {
@@ -106,7 +116,6 @@ pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
 mod tests {
     use super::*;
     use crate::theme::Theme;
-    use crate::widget::Kind;
 
     /// A row of three toggles, a field under it and a button under that.
     fn form(rtl: bool) -> (Ui, [WidgetId; 5]) {

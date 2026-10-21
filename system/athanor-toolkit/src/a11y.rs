@@ -116,6 +116,29 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::SetValue);
             node
         }
+        // How far the content is scrolled, in logical pixels, as GTK's ScrolledWindow.
+        Kind::Scroll { height, offset } => {
+            let mut node = Node::new(Role::ScrollView);
+            node.set_scroll_y(f64::from(*offset));
+            node.set_scroll_y_min(0.0);
+            node.set_scroll_y_max(f64::from((ui.content_height(id) - height).max(0.0)));
+            node
+        }
+        Kind::List { name, .. } => {
+            let mut node = Node::new(Role::ListBox);
+            node.set_label(name.as_str());
+            node
+        }
+        Kind::ListRow(text) => {
+            let mut node = Node::new(Role::ListBoxOption);
+            node.set_label(text.as_str());
+            // As GTK's rows, selected or not once the list has a selection, and neither before.
+            if let Some(selected) = widget.parent.and_then(|list| ui.selected(list)) {
+                node.set_selected(selected == id);
+            }
+            node.add_action(Action::Click);
+            node
+        }
     };
     if widget.is_focusable() {
         node.add_action(Action::Focus);
@@ -539,6 +562,80 @@ mod tests {
         let text = request(Action::SetValue, Some(ActionData::Value("3".into())));
         assert_eq!(ui.do_action(&text), None);
         assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_list_in_a_scroll_reads_as_gtks() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 100.0);
+        let list = ui.list(scroll, "Fruit");
+        let rows: Vec<WidgetId> = ["Apple", "Pear", "Plum", "Fig", "Lime", "Kiwi"]
+            .iter()
+            .map(|name| ui.list_row(list, name))
+            .collect();
+        ui.layout();
+        let unselected = tree_update(&ui, 1.0);
+        assert_eq!(unselected.nodes[rows[0]].1.is_selected(), None);
+        assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
+        ui.key(crate::Key::End);
+        let update = tree_update(&ui, 1.0);
+        let n = |id: WidgetId| &update.nodes[id].1;
+        assert_eq!(
+            (n(list).role(), n(list).label()),
+            (Role::ListBox, Some("Fruit"))
+        );
+        assert_eq!(
+            n(list).children(),
+            rows.iter().map(|&r| node_id(r)).collect::<Vec<_>>()
+        );
+        let read = |id: WidgetId| (n(id).role(), n(id).label(), n(id).is_selected());
+        assert_eq!(
+            read(rows[0]),
+            (Role::ListBoxOption, Some("Apple"), Some(false))
+        );
+        assert_eq!(
+            read(rows[5]),
+            (Role::ListBoxOption, Some("Kiwi"), Some(true))
+        );
+        assert!(
+            n(rows[0]).supports_action(Action::Click) && n(rows[0]).supports_action(Action::Focus)
+        );
+        assert_eq!(
+            update.focus,
+            node_id(rows[5]),
+            "the focus is the selected row"
+        );
+
+        // The scroll says how far it is scrolled; the rows above its viewport stay in the tree.
+        let content: f32 = rows.iter().map(|&r| ui.widget(r).rect.h).sum();
+        let offset = f64::from(content - 100.0);
+        assert_eq!(n(scroll).role(), Role::ScrollView);
+        let scrolled = (
+            n(scroll).scroll_y(),
+            n(scroll).scroll_y_min(),
+            n(scroll).scroll_y_max(),
+        );
+        assert_eq!(scrolled, (Some(offset), Some(0.0), Some(offset)));
+        assert!(ui.widget(rows[0]).rect.bottom() < ui.widget(scroll).rect.y);
+        assert!(update.nodes.iter().any(|(id, _)| *id == node_id(rows[0])));
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+
+        let request = |target: WidgetId, action| ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(target),
+            data: None,
+        };
+        assert_eq!(
+            ui.do_action(&request(rows[0], Action::Click)),
+            Some(Event::Selected(rows[0]))
+        );
+        assert_eq!(ui.selected(list), Some(rows[0]));
+        assert_eq!(ui.do_action(&request(rows[3], Action::Focus)), None);
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[3]), Some(rows[0]))
+        );
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {
