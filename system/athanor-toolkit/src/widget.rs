@@ -2177,8 +2177,8 @@ mod tests {
                 .iter()
                 .copied()
                 .find(|&r| ui.widget(r).rect.y > view.bottom());
-            let hidden = hidden.unwrap_or(Ui::ROOT);
-            let h = ui.widget(hidden).rect;
+            assert!(hidden.is_some(), "rtl {rtl}: a row lies under the viewport");
+            let h = ui.widget(hidden.unwrap_or(Ui::ROOT)).rect;
             assert!(!rows.contains(&ui.hit(h.x + 1.0, h.y + 1.0).unwrap_or(Ui::ROOT)));
 
             // The wheel scrolls the list under the pointer, and only there.
@@ -2188,16 +2188,13 @@ mod tests {
                 "rtl {rtl}"
             );
             assert_eq!(ui.widget(rows[0]).rect.y, view.y - 40.0, "rtl {rtl}");
-            assert!(
-                !ui.pointer_axis(view.x + 1.0, view.y + 1.0, -100.0) || {
-                    ui.widget(rows[0]).rect.y == view.y
-                }
-            );
+            assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -100.0), "rtl {rtl}");
             assert_eq!(
                 ui.widget(rows[0]).rect.y,
                 view.y,
                 "rtl {rtl}: not above the top"
             );
+            assert!(!ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1.0), "rtl {rtl}");
             assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
             let last = ui.widget(rows[49]).rect;
             assert_eq!(
