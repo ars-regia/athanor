@@ -5,6 +5,7 @@
 //! administrator's way to `GoBack()` from a console.
 mod check;
 mod goback;
+mod lineage;
 mod migrate;
 mod policy;
 mod recover;

@@ -7,12 +7,16 @@
 //!   `refused`         the digest the policy last refused; cleared by a download that passes
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
+//!   `lineage.json`    the lineage of security updates of UT13 (`crate::lineage`): the anchor,
+//!                     and the open lineage's first notice, boots left, postpone, last boot id
+//!   `automatic-security-updates`  `on` or `off`, the opt-out of UT13; absent is `on`
 //!   `migrated`        stamp of `athanor-update migrate`
 //!   `channel-absent`  `migrate` found no manifest for the channel; cleared when it finds one
 //!   `move-record`     `<digest> <failed boots> [<deployment>]`: deployments of that digest
 //!                     `migrate` staged that did not boot, and the one it staged last, until
 //!                     a later run sees what became of it; removed with the stamp
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
+use crate::lineage::Lineage;
 use athanor_trust_state::State;
 use std::fs::File;
 use std::io::Write as _;
@@ -236,11 +240,63 @@ impl Store {
         let json = serde_json::to_vec(state).map_err(std::io::Error::other)?;
         Self::replace(&self.run, "state.json", 0o644, &json)
     }
+
+    /// The lineage of UT13; a closed one with no anchor when the file is absent.
+    ///
+    /// # Errors
+    /// The file exists and cannot be read, or is not a lineage the service could have
+    /// written (`InvalidData`). It is left as it is: a reset would grant a new budget.
+    pub fn lineage(&self) -> std::io::Result<Lineage> {
+        let text = match std::fs::read(self.var.join("lineage.json")) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Lineage::default()),
+            Err(err) => return Err(err),
+        };
+        let invalid = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("lineage.json: {what}"));
+        let lineage: Lineage = serde_json::from_slice(&text).map_err(|err| invalid(err.to_string()))?;
+        match lineage.published() {
+            Some(postpone) if !postpone.consistent() => Err(invalid("boots or first notice out of range".into())),
+            _ => Ok(lineage),
+        }
+    }
+
+    /// # Errors
+    /// The file cannot be written.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+    pub fn set_lineage(&self, lineage: &Lineage) -> std::io::Result<()> {
+        let json = serde_json::to_vec(lineage).map_err(std::io::Error::other)?;
+        Self::replace(&self.var, "lineage.json", 0o644, &json)
+    }
+
+    /// The opt-out of UT13, inverted: `true` unless the file says `off`.
+    ///
+    /// # Errors
+    /// The file exists and cannot be read, or says neither `on` nor `off` (`InvalidData`),
+    /// an empty file included: an unreadable answer is never the default.
+    pub fn automatic_security_updates(&self) -> std::io::Result<bool> {
+        match std::fs::read_to_string(self.var.join("automatic-security-updates")) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(err) => Err(err),
+            Ok(text) => match text.trim() {
+                "on" => Ok(true),
+                "off" => Ok(false),
+                other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("automatic-security-updates: {other:?} is neither on nor off"))),
+            },
+        }
+    }
+
+    /// # Errors
+    /// The file cannot be written.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+    pub fn set_automatic_security_updates(&self, enabled: bool) -> std::io::Result<()> {
+        Self::replace(&self.var, "automatic-security-updates", 0o644, if enabled { "on\n" } else { "off\n" }.as_bytes())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lineage::Lineage;
 
     pub(crate) fn scratch(test: &str) -> Store {
         let dir = std::env::temp_dir().join(format!("athanor-update-store-{}-{test}", std::process::id()));
@@ -290,6 +346,53 @@ mod tests {
         let store = scratch("garbled");
         std::fs::write(store.var.join("newest-booted"), "soon\n").expect("write");
         assert_eq!(store.newest_booted().expect_err("garbled").kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn the_lineage_survives_and_starts_closed() {
+        let store = scratch("lineage");
+        assert_eq!(store.lineage().expect("absent"), Lineage::default());
+        let mut lineage = Lineage::default();
+        lineage.applied("sha256:aa");
+        lineage.notice(1_790_000_000, "boot-0");
+        store.set_lineage(&lineage).expect("write");
+        assert_eq!(store.lineage().expect("read"), lineage);
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(store.var.join("lineage.json")).expect("metadata").permissions());
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn a_malformed_lineage_file_is_a_storage_error() {
+        let store = scratch("lineage-malformed");
+        let good = r#"{"anchor":null,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
+        std::fs::write(store.var.join("lineage.json"), good).expect("write");
+        assert!(store.lineage().is_ok());
+        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#)] {
+            std::fs::write(store.var.join("lineage.json"), bad).expect("write");
+            assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
+            assert_eq!(std::fs::read_to_string(store.var.join("lineage.json")).expect("read"), bad, "the file is left as it is");
+        }
+        std::fs::remove_file(store.var.join("lineage.json")).expect("remove");
+        std::fs::create_dir(store.var.join("lineage.json")).expect("mkdir");
+        assert!(store.lineage().is_err(), "an unreadable file is not an absent one");
+    }
+
+    #[test]
+    fn a_malformed_opt_out_file_is_a_storage_error() {
+        let store = scratch("opt-out");
+        assert!(store.automatic_security_updates().expect("absent is on"));
+        store.set_automatic_security_updates(false).expect("write");
+        assert_eq!(std::fs::read_to_string(store.var.join("automatic-security-updates")).expect("read"), "off\n");
+        assert!(!store.automatic_security_updates().expect("read"));
+        store.set_automatic_security_updates(true).expect("write");
+        assert!(store.automatic_security_updates().expect("read"));
+        for bad in ["maybe\n", "", "\n", "On\n", "on off\n"] {
+            std::fs::write(store.var.join("automatic-security-updates"), bad).expect("write");
+            assert_eq!(store.automatic_security_updates().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
+        }
+        std::fs::remove_file(store.var.join("automatic-security-updates")).expect("remove");
+        std::fs::create_dir(store.var.join("automatic-security-updates")).expect("mkdir");
+        assert!(store.automatic_security_updates().is_err(), "an unreadable file is not an absent one");
     }
 
     #[test]

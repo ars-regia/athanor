@@ -15,7 +15,7 @@ use std::path::Path;
 /// Where `athanor-update` publishes the state.
 pub const STATE_PATH: &str = "/run/athanor-update/state.json";
 /// The only schema this crate reads and writes.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 /// A machine whose last successful check is older than this is not shown as verified.
 pub const STALE_AFTER_SECS: i64 = 14 * 24 * 60 * 60;
 /// The update service on the system bus (UT7). Its `State` method returns the state's JSON,
@@ -27,6 +27,10 @@ pub const UPDATE_INTERFACE: &str = "os.athanor.Update1";
 pub const STATE_METHOD: &str = "State";
 /// The prefix of the service's D-Bus error names.
 pub const ERROR_PREFIX: &str = "os.athanor.Update1.Error.";
+/// The postpone of a security update lasts this long from the first notice (UT13).
+pub const POSTPONE_SECS: i64 = 7 * 86_400;
+/// And at most this many boots, whichever comes first (UT13).
+pub const POSTPONE_BOOTS: u32 = 7;
 const MAX_STATE_BYTES: u64 = 64 * 1024;
 const MAX_DISPLAY_CHARS: usize = 128;
 
@@ -136,7 +140,32 @@ impl SecureBoot {
     }
 }
 
-/// Schema 1 of the state file.
+/// The lineage of security updates on this machine (UT13), published while one is open:
+/// a security digest has reached `will-apply-at-next-shutdown` since the anchor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Postpone {
+    /// The digest of the last security update applied on this machine; `None` before the first.
+    pub anchor: Option<String>,
+    /// The wall time at which the lineage's first security digest reached
+    /// `will-apply-at-next-shutdown`, seconds since the epoch.
+    pub first_notice_at: i64,
+    /// Boots left before the budget expires, from [`POSTPONE_BOOTS`] down to 0.
+    pub boots_remaining: u32,
+    /// The lineage's one postpone is used.
+    pub postponed: bool,
+}
+
+impl Postpone {
+    /// True when the values can be the service's: no more boots than the budget grants, and
+    /// a first notice from a clock at or after the epoch whose expiry is a representable time.
+    #[must_use]
+    pub fn consistent(&self) -> bool {
+        self.boots_remaining <= POSTPONE_BOOTS && (0..=i64::MAX - POSTPONE_SECS).contains(&self.first_notice_at)
+    }
+}
+
+/// Schema 2 of the state file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
@@ -155,6 +184,13 @@ pub struct State {
     pub last_error: ErrorCode,
     /// At most the registry's host name, and only beside a `network` or `registry` code.
     pub last_error_host: Option<String>,
+    /// The per-machine opt-out of UT13, inverted: `false` while the administrator has turned
+    /// the automatic application of security updates off.
+    pub automatic_security_updates: bool,
+    /// `None` while no lineage is open. Required in the file, as `null` at least: a reader
+    /// never takes an absent member for a closed lineage.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub postpone: Option<Postpone>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -164,7 +200,8 @@ pub enum ReadError {
     /// It is a link, not a regular file, not owned by the expected user, writable by
     /// others, or larger than a state file can be.
     Untrusted,
-    /// It is not schema 1, a list in it holds an unknown value, or its halves disagree.
+    /// It is not schema 2, a list in it holds an unknown value, or its values contradict each
+    /// other or the budget of a postpone.
     Malformed,
     Io(std::io::ErrorKind),
 }
@@ -173,14 +210,14 @@ pub enum ReadError {
 ///
 /// # Errors
 /// `Untrusted` when the text is larger than a state file can be, whether it came from the
-/// file or from `os.athanor.Update1.State`; `Malformed` when it is not schema 1 or
+/// file or from `os.athanor.Update1.State`; `Malformed` when it is not schema 2 or
 /// contradicts itself.
 pub fn parse(text: &str) -> Result<State, ReadError> {
     if u64::try_from(text.len()).map_or(true, |len| len > MAX_STATE_BYTES) {
         return Err(ReadError::Untrusted);
     }
     let state: State = serde_json::from_str(text).map_err(|_| ReadError::Malformed)?;
-    let consistent = state.verified.value == (state.verified.reason == Reason::Signature);
+    let consistent = state.verified.value == (state.verified.reason == Reason::Signature) && state.postpone.as_ref().is_none_or(Postpone::consistent);
     if state.schema != SCHEMA || !consistent {
         return Err(ReadError::Malformed);
     }
@@ -255,6 +292,13 @@ pub fn state_reply(
     }
 }
 
+/// The expiry shown as `postponed-until <time>` (UT13): the first notice plus seven days,
+/// only once the lineage's postpone is used.
+#[must_use]
+pub fn postponed_until(state: &State) -> Option<i64> {
+    state.postpone.as_ref().filter(|postpone| postpone.postponed).map(|postpone| postpone.first_notice_at.saturating_add(POSTPONE_SECS))
+}
+
 /// The three badges of SH12.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Badge {
@@ -326,7 +370,14 @@ mod tests {
             last_successful_check: Some(NOW - DAY),
             last_error: ErrorCode::None,
             last_error_host: None,
+            automatic_security_updates: true,
+            postpone: None,
         }
+    }
+
+    fn postponed_state() -> State {
+        let postpone = Postpone { anchor: Some(format!("sha256:{}", "c".repeat(64))), first_notice_at: NOW, boots_remaining: 5, postponed: true };
+        State { automatic_security_updates: false, postpone: Some(postpone), ..verified_state() }
     }
 
     #[test]
@@ -376,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn the_lists_are_closed_and_the_schema_is_one() {
+    fn the_lists_are_closed_and_the_schema_is_two() {
         let good = serde_json::to_string(&verified_state()).expect("serialize");
         assert_eq!(parse(&good), Ok(verified_state()));
         assert!(good.contains(r#""reason":"signature""#) && good.contains(r#""update":"none""#));
@@ -384,13 +435,91 @@ mod tests {
             (r#""reason":"signature""#, r#""reason":"trusted""#),
             (r#""update":"none""#, r#""update":"ready""#),
             (r#""last_error":"none""#, r#""last_error":"dns: lookup registry.example""#),
-            (r#""schema":1"#, r#""schema":2"#),
-            (r#""schema":1"#, r#""schema":1,"extra":true"#),
+            (r#""schema":2"#, r#""schema":3"#),
+            (r#""schema":2"#, r#""schema":2,"extra":true"#),
             // The two halves of `verified` disagree.
             (r#""reason":"signature""#, r#""reason":"media""#),
         ] {
             assert_eq!(parse(&good.replace(from, to)), Err(ReadError::Malformed), "{to}");
         }
+    }
+
+    #[test]
+    fn schema_1_is_malformed() {
+        let good = serde_json::to_string(&verified_state()).expect("serialize");
+        assert_eq!(parse(&good.replace(r#""schema":2"#, r#""schema":1"#)), Err(ReadError::Malformed));
+        let schema_1 = good.replace(r#""schema":2"#, r#""schema":1"#).replace(r#","automatic_security_updates":true,"postpone":null"#, "");
+        assert!(!schema_1.contains("postpone"), "the schema 1 document lacks both fields");
+        assert_eq!(parse(&schema_1), Err(ReadError::Malformed));
+    }
+
+    #[test]
+    fn schema_2_round_trips() {
+        for state in [verified_state(), postponed_state()] {
+            let text = serde_json::to_string(&state).expect("serialize");
+            assert_eq!(parse(&text), Ok(state));
+        }
+        let text = serde_json::to_string(&postponed_state()).expect("serialize");
+        assert!(text.contains(r#""automatic_security_updates":false"#) && text.contains(r#""postpone":{"anchor":"sha256:"#), "{text}");
+        let unanchored = State { postpone: Some(Postpone { anchor: None, ..postponed_state().postpone.expect("postpone") }), ..postponed_state() };
+        assert!(serde_json::to_string(&unanchored).expect("serialize").contains(r#""anchor":null"#));
+        assert_eq!(parse(&serde_json::to_string(&unanchored).expect("serialize")), Ok(unanchored));
+    }
+
+    #[test]
+    fn the_two_fields_of_schema_2_are_required() {
+        let good = serde_json::to_string(&verified_state()).expect("serialize");
+        for field in [r#","automatic_security_updates":true"#, r#","postpone":null"#] {
+            assert!(good.contains(field), "{field}");
+            assert_eq!(parse(&good.replace(field, "")), Err(ReadError::Malformed), "without {field}");
+        }
+    }
+
+    #[test]
+    fn boots_remaining_above_seven_is_malformed() {
+        let good = serde_json::to_string(&postponed_state()).expect("serialize");
+        assert!(good.contains(r#""boots_remaining":5"#));
+        assert!(parse(&good.replace(r#""boots_remaining":5"#, r#""boots_remaining":7"#)).is_ok());
+        assert!(parse(&good.replace(r#""boots_remaining":5"#, r#""boots_remaining":0"#)).is_ok());
+        for bad in [r#""boots_remaining":8"#, r#""boots_remaining":-1"#, r#""boots_remaining":null"#] {
+            assert_eq!(parse(&good.replace(r#""boots_remaining":5"#, bad)), Err(ReadError::Malformed), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_first_notice_outside_the_clock_range_is_malformed() {
+        let good = serde_json::to_string(&postponed_state()).expect("serialize");
+        let at = format!(r#""first_notice_at":{NOW}"#);
+        assert!(good.contains(&at));
+        assert!(parse(&good.replace(&at, r#""first_notice_at":0"#)).is_ok(), "a clock reset to 1970 is a real reading");
+        for bad in [r#""first_notice_at":-1"#.to_owned(), format!(r#""first_notice_at":{}"#, i64::MAX), r#""first_notice_at":null"#.to_owned()] {
+            assert_eq!(parse(&good.replace(&at, &bad)), Err(ReadError::Malformed), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_postpone_field_is_malformed() {
+        let good = serde_json::to_string(&postponed_state()).expect("serialize");
+        for (from, to) in [
+            (r#""postponed":true"#, r#""postponed":true,"until":1"#),
+            (r#""postponed":true"#, r#""postponed":"yes""#),
+            (r#""automatic_security_updates":false"#, r#""automatic_security_updates":"off""#),
+            (r#""postpone":{"#, r#""postpone":[{"#),
+        ] {
+            assert!(good.contains(from), "{from}");
+            assert_eq!(parse(&good.replace(from, to)), Err(ReadError::Malformed), "{to}");
+        }
+    }
+
+    #[test]
+    fn postponed_until_is_first_notice_plus_seven_days() {
+        let postpone = Postpone { anchor: None, first_notice_at: 1_790_000_000, boots_remaining: POSTPONE_BOOTS, postponed: true };
+        let state = State { postpone: Some(postpone.clone()), ..verified_state() };
+        assert_eq!(postponed_until(&state), Some(1_790_604_800));
+        let open = State { postpone: Some(Postpone { postponed: false, ..postpone }), ..verified_state() };
+        assert_eq!(postponed_until(&open), None);
+        assert_eq!(postponed_until(&verified_state()), None);
+        assert_eq!(POSTPONE_SECS, 604_800);
     }
 
     #[test]

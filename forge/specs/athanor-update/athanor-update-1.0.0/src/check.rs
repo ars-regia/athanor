@@ -362,7 +362,24 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
             (None, Some(Failure { code: ErrorCode::Storage, host: None }))
         }
     };
-    let failure = unreadable_refused.or(failure).or(unreadable_last);
+    // The opt-out and the lineage of UT13 are published as they are on disk. An unreadable
+    // file is reported and left as it is, never read as the default: the opt-out is published
+    // off, which is what the machine then does (it unlocks nothing), and no lineage is shown.
+    let (automatic_security_updates, unreadable_opt_out) = match ctx.store.automatic_security_updates() {
+        Ok(automatic) => (automatic, None),
+        Err(err) => {
+            tracing::error!(%err, "cannot read the opt-out of automatic security updates");
+            (false, Some(Failure { code: ErrorCode::Storage, host: None }))
+        }
+    };
+    let (postpone, unreadable_lineage) = match ctx.store.lineage() {
+        Ok(lineage) => (lineage.published(), None),
+        Err(err) => {
+            tracing::error!(%err, "cannot read the lineage of security updates");
+            (None, Some(Failure { code: ErrorCode::Storage, host: None }))
+        }
+    };
+    let failure = unreadable_refused.or(unreadable_opt_out).or(unreadable_lineage).or(failure).or(unreadable_last);
     let state = State {
         schema: SCHEMA,
         verified: reason(ctx, &policy, &status).into(),
@@ -376,6 +393,8 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         last_successful_check,
         last_error: failure.as_ref().map_or(ErrorCode::None, |failure| failure.code),
         last_error_host: failure.and_then(|failure| failure.host),
+        automatic_security_updates,
+        postpone,
     };
     ctx.store.publish(&state).map_err(storage)?;
     Ok(state)
@@ -665,6 +684,41 @@ pub(crate) mod tests {
         assert!(tools.called("download"));
         assert_eq!((state.update, state.last_error), (UpdateState::Downloaded, ErrorCode::Storage));
         assert_eq!(machine.store.refused().expect("cleared"), None);
+    }
+
+    #[test]
+    fn the_opt_out_and_the_lineage_are_published_as_stored() {
+        let machine = Machine::new("lineage-published", &["real/k1.pub"]);
+        let tools = Fake::booted(deployed(&digest(1), 1000));
+        let state = run(&machine.ctx(&tools, 5000), true).expect("check");
+        assert_eq!((state.schema, state.automatic_security_updates, state.postpone), (2, true, None), "a fresh machine: on, no lineage");
+        let mut lineage = crate::lineage::Lineage::default();
+        lineage.applied(&digest(1));
+        lineage.notice(4000, "boot-0");
+        machine.store.set_lineage(&lineage).expect("write");
+        machine.store.set_automatic_security_updates(false).expect("write");
+        let state = run(&machine.ctx(&tools, 5000), true).expect("check");
+        assert!(!state.automatic_security_updates);
+        assert_eq!(state.postpone, lineage.published());
+        assert_eq!(state.postpone.as_ref().map(|postpone| (postpone.anchor.clone(), postpone.first_notice_at)), Some((Some(digest(1)), 4000)));
+        assert_eq!(state.last_error, ErrorCode::None);
+    }
+
+    #[test]
+    fn an_unreadable_opt_out_or_lineage_is_published_as_storage_and_left_alone() {
+        for (name, text) in [("automatic-security-updates", "maybe\n"), ("lineage.json", "")] {
+            let machine = Machine::new(&format!("unreadable-{name}"), &["real/k1.pub"]);
+            std::fs::write(machine.store.var.join(name), text).expect("write");
+            let tools = Fake::booted(deployed(&digest(1), 1000));
+            let state = run(&machine.ctx(&tools, 5000), true).expect("a state is published");
+            assert_eq!(state.last_error, ErrorCode::Storage, "{name}");
+            assert_eq!(std::fs::read_to_string(machine.store.var.join(name)).expect("read"), text, "{name} is not reset");
+            if name == "lineage.json" {
+                assert_eq!((state.automatic_security_updates, state.postpone), (true, None));
+            } else {
+                assert!(!state.automatic_security_updates, "published as what the machine then does: nothing unlocks");
+            }
+        }
     }
 
     #[test]
