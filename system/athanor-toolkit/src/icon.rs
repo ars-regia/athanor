@@ -39,14 +39,18 @@ const THRESHOLDS: RangeInclusive<i64> = 0..=4096;
 /// lookup stats. hicolor lists about a hundred.
 const MAX_DIRECTORIES: usize = 256;
 
-/// The bytes of the regular file `path`, refused when it is larger than `cap` bytes.
 /// `O_NONBLOCK` of Linux on x86_64 and aarch64; libc is not a dependency of the toolkit.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 const O_NONBLOCK: i32 = 0o4000;
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+compile_error!("O_NONBLOCK is defined for x86_64 and aarch64 only: add this architecture's value");
 
+/// The bytes of the regular file `path`, refused when it is larger than `cap` bytes. The
+/// errors do not name the path, which the caller adds.
 fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, Error> {
     // A FIFO or a device would block the open or never end: only a regular file is opened.
     if !fs::metadata(path)?.is_file() {
-        return Err(format!("{}: not a regular file", path.display()).into());
+        return Err("not a regular file".into());
     }
     // Opened without blocking, should a FIFO take the file's place after the check, and checked
     // again on what was opened.
@@ -56,17 +60,17 @@ fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, Error> {
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
-        return Err(format!("{}: not a regular file", path.display()).into());
+        return Err("not a regular file".into());
     }
     let len = metadata.len();
     if len > cap {
-        return Err(format!("{}: {len} bytes, more than {cap}", path.display()).into());
+        return Err(format!("{len} bytes, more than {cap}").into());
     }
     let mut bytes = Vec::with_capacity(usize::try_from(len)?);
     // The file may grow after the check: never read past the cap.
     file.take(cap + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > cap {
-        return Err(format!("{}: more than {cap} bytes", path.display()).into());
+        return Err(format!("more than {cap} bytes").into());
     }
     Ok(bytes)
 }
@@ -118,11 +122,15 @@ impl Image {
     /// own size, and is scaled when drawn). Neither may be larger than [`MAX_IMAGE_SIDE`] on a
     /// side, and `px` is held to it.
     pub fn from_file(path: &Path, px: u16) -> Result<Self, Error> {
+        // The path is printed escaped: a theme's file name may carry control characters.
         let pixmap = match icon_extension(path) {
-            Some("png") => decode_png(&read_capped(path, MAX_IMAGE_FILE)?)?,
-            Some("svg") => rasterise(&read_capped(path, MAX_IMAGE_FILE)?, px)?,
-            _ => return Err(format!("{}: not a PNG or an SVG", path.display()).into()),
-        };
+            Some("png") => read_capped(path, MAX_IMAGE_FILE).and_then(|bytes| decode_png(&bytes)),
+            Some("svg") => {
+                read_capped(path, MAX_IMAGE_FILE).and_then(|bytes| rasterise(&bytes, px))
+            }
+            _ => Err("not a PNG or an SVG".into()),
+        }
+        .map_err(|error| format!("{path:?}: {error}"))?;
         Ok(Self {
             pixmap: Arc::new(pixmap),
         })
@@ -360,10 +368,10 @@ impl IconTheme {
         if let Some(path) = self.resolve(icon, size, scale) {
             match Image::from_file(&path, px) {
                 Ok(image) => return Ok(image),
-                Err(error) => eprintln!(
-                    "athanor-toolkit: icon {icon:?}: {}: {error}; drawing {FALLBACK_ICON}",
-                    path.display()
-                ),
+                // The error names the path, escaped.
+                Err(error) => {
+                    eprintln!("athanor-toolkit: icon {icon:?}: {error}; drawing {FALLBACK_ICON}")
+                }
             }
         }
         let path = self
@@ -633,6 +641,18 @@ mod tests {
         let theme = IconTheme::new(vec![dir], "t");
         assert_eq!(tail(theme.resolve("icon", 16, 1)), "t/apps/icon.png");
         assert_eq!(tail(theme.resolve("icon", 512, 16)), "t/apps/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn an_error_prints_the_path_escaped() -> Result<(), Error> {
+        let dir = scratch("escape", &[("red\x1b[31m.png", b"not a png")])?;
+        let error = match Image::from_file(&dir.join("red\x1b[31m.png"), 16) {
+            Ok(_) => return Err("a file that is not a PNG was decoded".into()),
+            Err(error) => error.to_string(),
+        };
+        assert!(!error.contains('\x1b'), "{error:?}");
+        assert!(error.contains("red\\u{1b}[31m.png"), "{error}");
         Ok(())
     }
 
