@@ -13,6 +13,8 @@
 //!                     `migrate` staged that did not boot, and the one it staged last, until
 //!                     a later run sees what became of it; removed with the stamp
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
+//!   `attestations/<hex>/`  the release attestation of a digest, as `skopeo copy … dir:` wrote
+//!                     it; its class is verified again at every read, never stored
 use athanor_trust_state::State;
 use std::fs::File;
 use std::io::Write as _;
@@ -224,8 +226,19 @@ impl Store {
     /// The directory of the signature object of `digest`; `None` for anything but `sha256:<64 hex>`.
     #[must_use]
     pub fn signature_dir(&self, digest: &str) -> Option<PathBuf> {
+        self.object_dir("signatures", digest)
+    }
+
+    /// The directory of the release attestation of `digest`; `None` for anything but `sha256:<64 hex>`.
+    #[must_use]
+    #[cfg_attr(not(test), allow(dead_code))] // read by the check from UT13's classification on
+    pub fn attestation_dir(&self, digest: &str) -> Option<PathBuf> {
+        self.object_dir("attestations", digest)
+    }
+
+    fn object_dir(&self, kind: &str, digest: &str) -> Option<PathBuf> {
         let hex = digest.strip_prefix("sha256:")?;
-        (hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| self.var.join("signatures").join(hex))
+        (hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| self.var.join(kind).join(hex))
     }
 
     /// Publishes the state: a temporary name in the same directory, then a rename.
@@ -317,11 +330,14 @@ mod tests {
     }
 
     #[test]
-    fn a_signature_directory_exists_only_for_a_sha256_digest() {
+    fn a_signature_or_attestation_directory_exists_only_for_a_sha256_digest() {
         let store = scratch("sigdir");
-        assert!(store.signature_dir(&format!("sha256:{}", "a".repeat(64))).is_some());
+        let digest = format!("sha256:{}", "a".repeat(64));
+        assert_eq!(store.signature_dir(&digest), Some(store.var.join("signatures").join("a".repeat(64))));
+        assert_eq!(store.attestation_dir(&digest), Some(store.var.join("attestations").join("a".repeat(64))));
         for bad in ["sha256:../../etc", "sha512:aa", "", &format!("sha256:{}", "A".repeat(64))] {
             assert_eq!(store.signature_dir(bad), None, "{bad}");
+            assert_eq!(store.attestation_dir(bad), None, "{bad}");
         }
     }
 

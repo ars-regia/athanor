@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerates the signature-object test vectors of athanor-update under tests/vectors/made.
+# Regenerates the signature-object and release-attestation test vectors of athanor-update
+# under tests/vectors/made.
 # Two throwaway P-256 keys are created, used and deleted: only public material is left
 # (public keys, payloads, signatures), and that is what gets committed. ECDSA signatures
 # are randomised, so a second run gives different bytes with the same meaning; the tests
@@ -104,5 +105,76 @@ sed -i "s/$good_hex/$other_hex/" "$out/descriptor-mismatch/manifest.json"
 # bundle: what cosign 3 publishes instead, an index with no layers of ours.
 mkdir "$out/bundle"
 printf '%s' '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","artifactType":"application/vnd.dev.sigstore.bundle.v0.3+json","digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","size":2}]}' > "$out/bundle/manifest.json"
+
+# Release attestations (ADR-0127 points 1 to 4), as `cosign attest --new-bundle-format=false`
+# stores `<repo>:sha256-<hex>.att`: one DSSE envelope per layer, signed over the DSSE
+# pre-authentication encoding of an in-toto statement. Each line on stdin is one layer, a
+# JSON object: `key` signs; `class` (absent: no class member), `repo`, `digest`,
+# `predicateType` and `payloadType` default to a valid statement for $REPO and $DIGEST;
+# `tamper` is `signature` (one byte flipped), `der` (the DER cut short), `pae` (signed over the
+# encoding less its last byte) or `payload` (feature signed, then the class changed to
+# security); `pad` adds that many spaces after the envelope.
+ATT_PY='
+import base64, hashlib, json, os, pathlib, subprocess, sys
+dest = pathlib.Path(sys.argv[1]); secrets = pathlib.Path(sys.argv[2]); dest.mkdir(parents=True)
+def pae(kind, body):
+    kind = kind.encode()
+    return b"DSSEv1 %d %s %d %s" % (len(kind), kind, len(body), body)
+layers = []
+for line in sys.stdin.read().splitlines():
+    spec = json.loads(line)
+    predicate = {"advisories": spec.get("advisories", []), "class_reason": "make.sh", "build_time": "2026-10-21T00:00:00Z",
+                 "revision": "0" * 40, "build_run_id": "1", "updateinfo_timestamp": None}
+    if "class" in spec:
+        predicate["class"] = spec["class"]
+    statement = {"_type": "https://in-toto.io/Statement/v1",
+                 "subject": [{"name": spec.get("repo", os.environ["REPO"]), "digest": {"sha256": spec.get("digest", os.environ["DIGEST"]).removeprefix("sha256:")}}],
+                 "predicateType": spec.get("predicateType", os.environ["PREDICATE"]), "predicate": predicate}
+    body = json.dumps(statement, separators=(",", ":")).encode()
+    kind = spec.get("payloadType", "application/vnd.in-toto+json")
+    tamper = spec.get("tamper")
+    signed = pae(kind, body)[:-1] if tamper == "pae" else pae(kind, body)
+    sig = subprocess.run(["openssl", "dgst", "-sha256", "-sign", str(secrets / (spec["key"] + ".pem"))], input=signed, capture_output=True, check=True).stdout
+    if tamper == "signature":
+        sig = sig[:-1] + bytes([sig[-1] ^ 1])
+    elif tamper == "der":
+        sig = sig[:-1]
+    elif tamper == "payload":
+        tampered = body.replace(b"\"class\":\"feature\"", b"\"class\":\"security\"")
+        assert tampered != body
+        body = tampered
+    envelope = {"payloadType": kind, "payload": base64.b64encode(body).decode(), "signatures": [{"keyid": "", "sig": base64.b64encode(sig).decode()}]}
+    blob = json.dumps(envelope, separators=(",", ":")).encode() + b" " * spec.get("pad", 0)
+    digest = hashlib.sha256(blob).hexdigest()
+    (dest / digest).write_bytes(blob)
+    layers.append({"mediaType": "application/vnd.dsse.envelope.v1+json", "digest": "sha256:" + digest, "size": len(blob),
+                   "annotations": {"dev.cosignproject.cosign/signature": "", "predicateType": statement["predicateType"]}})
+config = b"{}"
+config_digest = hashlib.sha256(config).hexdigest()
+(dest / config_digest).write_bytes(config)
+manifest = {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json", "digest": "sha256:" + config_digest, "size": len(config)},
+            "layers": layers}
+(dest / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
+'
+attestation() { # attestation NAME: reads one JSON layer specification per line on stdin
+  python3 -c "$ATT_PY" "$out/$1" "$secrets"
+}
+export REPO PREDICATE='https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b'
+security='"class":"security","advisories":["CVE-2026-0001"]'
+attestation att-security <<< "{\"key\":\"a\",$security}"
+attestation att-feature <<< '{"key":"a","class":"feature"}'
+attestation att-no-class <<< '{"key":"a"}'
+attestation att-bad-signature <<< "{\"key\":\"a\",$security,\"tamper\":\"signature\"}"
+attestation att-malformed-der <<< "{\"key\":\"a\",$security,\"tamper\":\"der\"}"
+attestation att-truncated-pae <<< "{\"key\":\"a\",$security,\"tamper\":\"pae\"}"
+attestation att-tampered-payload <<< '{"key":"a","class":"feature","tamper":"payload"}'
+attestation att-other-digest <<< "{\"key\":\"a\",$security,\"digest\":\"sha256:$(printf 'another manifest' | sha256sum | cut -d' ' -f1)\"}"
+attestation att-other-repo <<< "{\"key\":\"a\",$security,\"repo\":\"registry.example/owner/athanor-system-nvidia\"}"
+attestation att-wrong-type <<< "{\"key\":\"a\",$security,\"predicateType\":\"https://slsa.dev/provenance/v1\"}"
+attestation att-wrong-payload-type <<< "{\"key\":\"a\",$security,\"payloadType\":\"application/json\"}"
+attestation att-unknown-key <<< "{\"key\":\"b\",$security}"
+printf '%s\n' "{\"key\":\"b\",$security}" '{"key":"a","class":"feature"}' | attestation att-mixed
+attestation att-oversized <<< "{\"key\":\"a\",$security,\"pad\":70000}"
 
 find "$out" -type f | sort
