@@ -105,7 +105,10 @@ impl Store {
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(&temporary)?;
         file.write_all(contents)?;
         file.sync_all()?;
-        std::fs::rename(&temporary, dir.join(name))
+        std::fs::rename(&temporary, dir.join(name))?;
+        // The rename is durable only once the directory is: without this, a power cut can
+        // bring back the old file, and with an old lineage a postpone budget already spent.
+        File::open(dir)?.sync_all()
     }
 
     /// # Errors
