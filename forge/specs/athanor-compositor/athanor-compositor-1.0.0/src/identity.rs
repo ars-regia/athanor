@@ -1,0 +1,412 @@
+//! Who a client is, and what that grants it (doc_own_stack.md OS4, C1 task 5). The identity is
+//! read once, when the client connects: the peer's pidfd, then through its pid the executable and
+//! the cgroup, from which the systemd unit is derived. An allow-list under `/usr` maps
+//! (executable, unit) pairs to privileged globals. A client that `exec`s after connecting keeps
+//! what it connected as; unconfined code running as the user is out of scope (OS4).
+
+use crate::Error;
+use smithay::reexports::rustix;
+use std::io;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::path::{Component, Path, PathBuf};
+
+/// Where the image installs the allow-list.
+pub const ALLOW_LIST: &str = "/usr/share/athanor/compositor/privileged-clients";
+
+/// A privileged global, named in the allow-list by its interface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Privilege {
+    /// `zwlr_layer_shell_v1`: its top and overlay layers; the bottom and background layers are
+    /// every unconfined client's.
+    TopLayers,
+    ToplevelList,
+    ToplevelCaptureSource,
+    ImageCopyCapture,
+    SessionLock,
+}
+
+impl Privilege {
+    const ALL: [(Self, &'static str); 5] = [
+        (Self::TopLayers, "zwlr_layer_shell_v1"),
+        (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
+        (
+            Self::ToplevelCaptureSource,
+            "ext_foreign_toplevel_image_capture_source_manager_v1",
+        ),
+        (Self::ImageCopyCapture, "ext_image_copy_capture_manager_v1"),
+        (Self::SessionLock, "ext_session_lock_manager_v1"),
+    ];
+
+    fn named(interface: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .find(|(_, name)| *name == interface)
+            .map(|(privilege, _)| *privilege)
+    }
+}
+
+/// A process, as the compositor reads it at connect.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Identity {
+    /// What `/proc/<pid>/exe` names.
+    pub executable: PathBuf,
+    /// The systemd unit of its cgroup, if it is in one.
+    pub unit: Option<String>,
+}
+
+/// How the peer's pidfd was had.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mechanism {
+    /// `SO_PEERPIDFD` (Linux 6.5): the process that connected, with no pid-reuse race.
+    PeerPidfd,
+    /// `SO_PEERCRED` then `pidfd_open`: the pid can name another process if the peer exited
+    /// and its pid was reused before the pidfd was opened.
+    PeerCred,
+}
+
+/// Reads a process by its pid: `/proc` in the compositor, a fake in the fixture.
+pub trait Process {
+    fn executable(&self, pid: i32) -> io::Result<PathBuf>;
+    /// The contents of `/proc/<pid>/cgroup`.
+    fn cgroup(&self, pid: i32) -> io::Result<String>;
+}
+
+/// The processes of `/proc`.
+pub struct Proc;
+
+impl Process for Proc {
+    fn executable(&self, pid: i32) -> io::Result<PathBuf> {
+        std::fs::read_link(format!("/proc/{pid}/exe"))
+    }
+    fn cgroup(&self, pid: i32) -> io::Result<String> {
+        std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+    }
+}
+
+/// The identity of the process at the other end of `socket`, and how its pidfd was had. The
+/// executable and the cgroup are read through the pidfd's pid, which is then read again: unless
+/// it still names the same live process, the reads may be another process's, and the peer has
+/// no identity.
+pub fn identify(
+    socket: BorrowedFd<'_>,
+    process: &dyn Process,
+) -> Result<(Identity, Mechanism), Error> {
+    let (pidfd, mechanism) = peer_pidfd(socket)?;
+    let pid = pidfd_pid(pidfd.as_fd())?;
+    let executable = process.executable(pid)?;
+    let cgroup = process.cgroup(pid)?;
+    if pidfd_pid(pidfd.as_fd())? != pid {
+        return Err("the peer exited while it was read".into());
+    }
+    let unit = unit(&cgroup).map(str::to_owned);
+    Ok((Identity { executable, unit }, mechanism))
+}
+
+/// The peer's pidfd: `SO_PEERPIDFD`, or on a kernel without it `SO_PEERCRED` and `pidfd_open`.
+fn peer_pidfd(socket: BorrowedFd<'_>) -> io::Result<(OwnedFd, Mechanism)> {
+    match so_peerpidfd(socket) {
+        Ok(pidfd) => Ok((pidfd, Mechanism::PeerPidfd)),
+        Err(error) if error.raw_os_error() == Some(libc::ENOPROTOOPT) => {
+            let pid = rustix::net::sockopt::socket_peercred(socket)?.pid;
+            let pidfd = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?;
+            Ok((pidfd, Mechanism::PeerCred))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[allow(unsafe_code)]
+fn so_peerpidfd(socket: BorrowedFd<'_>) -> io::Result<OwnedFd> {
+    let mut fd: libc::c_int = -1;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: `fd` and `len` are live locals, and `len` is the size of `fd`: getsockopt writes
+    // at most that many bytes into it.
+    let done = unsafe {
+        libc::getsockopt(
+            socket.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERPIDFD,
+            (&raw mut fd).cast(),
+            &mut len,
+        )
+    };
+    if done != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if fd < 0 {
+        return Err(io::Error::other("SO_PEERPIDFD returned no descriptor"));
+    }
+    // SAFETY: on success the kernel installed a new pidfd at `fd` that nothing else owns.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// The pid `pidfd` names in the compositor's pid namespace, from its fdinfo: -1 once the process
+/// is reaped (its pid free for reuse), 0 if it is outside the namespace; both are refused.
+fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, Error> {
+    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd()))?;
+    let pid: i32 = info
+        .lines()
+        .find_map(|line| line.strip_prefix("Pid:"))
+        .ok_or("the pidfd's fdinfo names no pid")?
+        .trim()
+        .parse()?;
+    if pid <= 0 {
+        return Err(format!("the peer is gone or outside the namespace (pid {pid})").into());
+    }
+    Ok(pid)
+}
+
+/// The systemd unit of a process from its `/proc/<pid>/cgroup` (cgroup v2): the first component
+/// of the path that is not a slice, and under a user manager (`user@<uid>.service`) the first
+/// one below it. The first, not the last: a unit with `Delegate=yes` may name its own
+/// sub-cgroups as it likes, and one called `athanor-bar.service` stays inside its unit.
+pub fn unit(cgroup: &str) -> Option<&str> {
+    let path = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?;
+    let mut parts = path.split('/').filter(|part| !part.is_empty());
+    let not_slice = |part: &&str| !part.ends_with(".slice");
+    let mut unit = parts.find(not_slice)?;
+    if unit.starts_with("user@") && unit.ends_with(".service") {
+        unit = parts.find(not_slice)?;
+    }
+    (unit.ends_with(".service") || unit.ends_with(".scope")).then_some(unit)
+}
+
+/// The allow-list: which executable in which unit is granted which privileged globals. One
+/// grant per line, `<executable> <unit> <interface>...`, separated by spaces; `#` starts a
+/// comment line. The executable is an absolute path under `/usr`, the unit a `.service` or
+/// `.scope`, each interface one of `Privilege`'s.
+#[derive(Debug, Default, PartialEq)]
+pub struct AllowList(Vec<(PathBuf, String, Vec<Privilege>)>);
+
+impl AllowList {
+    /// The allow-list at `path`; empty, and logged, when it is missing, unreadable or malformed.
+    pub fn load(path: &Path) -> Self {
+        let parsed = std::fs::read_to_string(path)
+            .map_err(Error::from)
+            .and_then(|text| Self::parse(&text));
+        parsed.unwrap_or_else(|error| {
+            tracing::warn!(path = %path.display(), %error, "no privileged global is granted");
+            Self::default()
+        })
+    }
+
+    /// The allow-list in `text`, or an error naming the first line that is not a grant.
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        let mut grants = Vec::new();
+        for (number, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let bad = |what: &str| format!("line {}: {what}: {line}", number + 1);
+            let mut fields = line.split_whitespace();
+            let (Some(executable), Some(unit)) = (fields.next(), fields.next()) else {
+                return Err(bad("an executable and a unit").into());
+            };
+            if !executable.starts_with("/usr/")
+                || Path::new(executable)
+                    .components()
+                    .any(|c| c == Component::ParentDir)
+            {
+                return Err(bad("the executable is not a path under /usr").into());
+            }
+            if !(unit.ends_with(".service") || unit.ends_with(".scope")) || unit.contains('/') {
+                return Err(bad("the unit is not a service or a scope").into());
+            }
+            let privileges = fields
+                .map(|name| {
+                    Privilege::named(name).ok_or_else(|| bad(&format!("{name} is not privileged")))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if privileges.is_empty() {
+                return Err(bad("no interface").into());
+            }
+            grants.push((PathBuf::from(executable), unit.to_owned(), privileges));
+        }
+        Ok(Self(grants))
+    }
+
+    /// What `identity` is granted: the interfaces of every line naming its executable and unit.
+    pub fn grants(&self, identity: &Identity) -> Vec<Privilege> {
+        let Some(unit) = &identity.unit else {
+            return Vec::new();
+        };
+        self.0
+            .iter()
+            .filter(|(executable, u, _)| *executable == identity.executable && u == unit)
+            .flat_map(|(_, _, privileges)| privileges.iter().copied())
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    const BAR: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1\n";
+
+    fn bar() -> Identity {
+        Identity {
+            executable: "/usr/bin/athanor-bar".into(),
+            unit: Some("athanor-bar.service".into()),
+        }
+    }
+
+    #[test]
+    fn the_unit_is_the_first_below_the_slices_and_the_user_manager() {
+        let user =
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-bar.service\n";
+        assert_eq!(unit(user), Some("athanor-bar.service"));
+        let system = "0::/system.slice/greetd.service\n";
+        assert_eq!(unit(system), Some("greetd.service"));
+        let session = "0::/user.slice/user-1000.slice/session-2.scope\n";
+        assert_eq!(unit(session), Some("session-2.scope"));
+        // A delegated unit naming its sub-cgroup after the bar is still itself.
+        let delegated = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/x.service/athanor-bar.service\n";
+        assert_eq!(unit(delegated), Some("x.service"));
+        // cgroup v1 only, the root, a container's namespace, or a slice alone: no unit.
+        assert_eq!(unit("1:name=systemd:/athanor-bar.service\n"), None);
+        assert_eq!(unit("0::/\n"), None);
+        assert_eq!(unit("0::/user.slice\n"), None);
+        assert_eq!(
+            unit("0::/user.slice/user-1000.slice/user@1000.service\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_grant_needs_both_the_executable_and_the_unit() {
+        let list = AllowList::parse(BAR).expect("allow-list");
+        assert_eq!(
+            list.grants(&bar()),
+            [Privilege::TopLayers, Privilege::ToplevelList]
+        );
+        let other_executable = Identity {
+            executable: "/usr/bin/sh".into(),
+            ..bar()
+        };
+        assert!(list.grants(&other_executable).is_empty());
+        let other_unit = Identity {
+            unit: Some("app-sh.scope".into()),
+            ..bar()
+        };
+        assert!(list.grants(&other_unit).is_empty());
+        let no_unit = Identity {
+            unit: None,
+            ..bar()
+        };
+        assert!(list.grants(&no_unit).is_empty());
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_allow_list_grants_nothing() {
+        let missing = Path::new("/nonexistent/athanor/privileged-clients");
+        assert!(AllowList::load(missing).grants(&bar()).is_empty());
+        // A directory cannot be read as a file.
+        assert!(AllowList::load(Path::new("/")).grants(&bar()).is_empty());
+    }
+
+    #[test]
+    fn a_malformed_allow_list_grants_nothing() {
+        for bad in [
+            "/usr/bin/athanor-bar\n",
+            "/usr/bin/athanor-bar athanor-bar.service\n",
+            "/home/u/bar athanor-bar.service zwlr_layer_shell_v1\n",
+            "/usr/../home/u/bar athanor-bar.service zwlr_layer_shell_v1\n",
+            "/usr/bin/.. athanor-bar.service zwlr_layer_shell_v1\n",
+            "/usr/bin/athanor-bar athanor-bar zwlr_layer_shell_v1\n",
+            "/usr/bin/athanor-bar app.slice/athanor-bar.service zwlr_layer_shell_v1\n",
+            "/usr/bin/athanor-bar athanor-bar.service wl_compositor\n",
+        ] {
+            assert!(AllowList::parse(&format!("{BAR}{bad}")).is_err(), "{bad}");
+            let path =
+                std::env::temp_dir().join(format!("athanor-allow-list-{}", std::process::id()));
+            std::fs::write(&path, format!("{BAR}{bad}")).expect("write");
+            let loaded = AllowList::load(&path);
+            std::fs::remove_file(&path).expect("remove");
+            assert!(loaded.grants(&bar()).is_empty(), "{bad}");
+        }
+    }
+
+    /// The allow-list the image installs parses.
+    #[test]
+    fn the_shipped_allow_list_parses() {
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        assert!(!shipped.grants(&bar()).is_empty());
+    }
+
+    /// A process whose pid cannot be read has no identity.
+    #[test]
+    fn an_unreadable_peer_has_no_identity() {
+        struct Unreadable;
+        impl Process for Unreadable {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::PermissionDenied.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Ok("0::/app.slice/athanor-bar.service\n".into())
+            }
+        }
+        let (server, _client) = UnixStream::pair().expect("socket pair");
+        assert!(identify(server.as_fd(), &Unreadable).is_err());
+    }
+
+    /// A peer that exits, and is reaped, between the pidfd and the reads of its pid: what was
+    /// read may be another process's, so it has no identity.
+    #[test]
+    fn a_peer_that_exits_while_it_is_read_has_no_identity() {
+        struct Exits(std::sync::Mutex<std::process::Child>);
+        impl Process for Exits {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                let mut child = self.0.lock().expect("child");
+                child.kill()?;
+                child.wait()?;
+                Ok("/usr/bin/athanor-bar".into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Ok("0::/app.slice/athanor-bar.service\n".into())
+            }
+        }
+        let path =
+            std::env::temp_dir().join(format!("athanor-identity-{}.sock", std::process::id()));
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("listen");
+        let child = std::process::Command::new(std::env::current_exe().expect("executable"))
+            .args(["--exact", "identity::tests::peer", "--ignored", "--quiet"])
+            .env("ATHANOR_IDENTITY_PEER", &path)
+            .spawn()
+            .expect("the peer");
+        let (server, _) = listener.accept().expect("the peer connects");
+        std::fs::remove_file(&path).expect("remove");
+        let read = identify(server.as_fd(), &Exits(std::sync::Mutex::new(child)));
+        assert!(read.is_err(), "{read:?}");
+    }
+
+    /// The peer of `a_peer_that_exits_while_it_is_read_has_no_identity`: it connects and waits
+    /// to be killed.
+    #[test]
+    #[ignore = "run by a_peer_that_exits_while_it_is_read_has_no_identity"]
+    fn peer() {
+        use std::io::Read;
+        if let Some(path) = std::env::var_os("ATHANOR_IDENTITY_PEER") {
+            let mut stream = UnixStream::connect(path).expect("connect");
+            stream.read_exact(&mut [0]).expect("killed before any byte");
+        }
+    }
+
+    /// The production path, on the test's own process at the other end of a socket pair.
+    #[test]
+    fn the_identity_of_this_process_is_read_through_its_pidfd() {
+        let (server, _client) = UnixStream::pair().expect("socket pair");
+        let (identity, mechanism) = identify(server.as_fd(), &Proc).expect("identity");
+        eprintln!("peer identity through {mechanism:?}: {identity:?}");
+        let executable = std::env::current_exe().expect("executable");
+        assert_eq!(
+            identity.executable,
+            executable.canonicalize().expect("canonical")
+        );
+        let cgroup = std::fs::read_to_string("/proc/self/cgroup").expect("cgroup");
+        assert_eq!(identity.unit.as_deref(), unit(&cgroup));
+    }
+}

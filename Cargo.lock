@@ -429,6 +429,7 @@ dependencies = [
 name = "athanor-compositor"
 version = "1.0.0"
 dependencies = [
+ "libc",
  "smithay",
  "tracing",
  "tracing-subscriber",

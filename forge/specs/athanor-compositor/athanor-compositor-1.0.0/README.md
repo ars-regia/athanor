@@ -58,7 +58,7 @@ zones, which windows are placed inside, and `xdg_popup`s parented to a layer sur
 keyboard follows `keyboard_interactivity`: an exclusive surface on the top or overlay layer
 holds it while mapped, an on-demand one takes it on a click, and one with none never gets it.
 A popup grab is honoured only for a client that already holds the pointer or the keyboard.
-Every client may bind the protocol until task 5 grants the top and overlay layers by identity.
+Since task 5 the top and overlay layers are a privileged client's.
 
 Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
 windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
@@ -67,5 +67,54 @@ through the toplevel capture source, into a client's `wl_shm` buffer (`src/captu
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
 output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox connects: they
-see none of these globals but the idle notifier, nor the security context manager, until task 5
-grants them by identity.
+see none of these globals but the idle notifier, nor the security context manager.
+
+Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
+connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5; on an older
+kernel `SO_PEERCRED` and `pidfd_open`, which leaves the pid-reuse race open, and the log says
+which), the pidfd's pid from its fdinfo, then `/proc/<pid>/exe` and `/proc/<pid>/cgroup`, and
+reads the pidfd's pid again: unless it still names the same process, nothing is granted. The
+unit is the first component of the cgroup v2 path that is not a slice, below the user manager
+for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub-cgroup after
+another unit. The allow-list, `/usr/share/athanor/compositor/privileged-clients`
+(`data/privileged-clients`), has one grant per line, `<executable> <unit> <interface>...`; the
+executable is a path under `/usr`, the unit a service or a scope, each interface one of the
+privileged globals the compositor offers. A missing, unreadable or malformed allow-list grants
+nothing, and so does a peer whose identity cannot be read. A client that connects through a
+security context's listener is granted nothing, whatever its identity.
+
+| Global | Granted to |
+| --- | --- |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1` | the allow-list's clients, each global by its own line |
+| `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
+| `zwlr_layer_shell_v1`, bottom and background layers | every client |
+| `ext_workspace_manager_v1`, `wp_security_context_manager_v1` | every client outside a security context |
+
+The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
+the bar what the plan names, and the fixture grants its clients every privileged global as the
+bar (`FIXTURE_ALLOW_LIST`).
+
+What the check does not cover, for revision 2 of `doc_own_stack.md`:
+
+- **The identity is the one read at connect.** A client that `exec`s another program after
+  connecting keeps what it connected as, and one that connected as another program gains
+  nothing by `exec`ing the bar (`task5_exec_after_connect_keeps_the_connect_identity`). The
+  same holds for a connection handed to another process. Revision 2 must say whether that is
+  acceptable for programs under `/usr`, or ask for a check at each bind, through the pidfd kept
+  from connect.
+- **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
+  start a unit of any name with `systemd-run --user` and run the bar's executable in it.
+- **ext-workspace-v1 is not among OS4's privileged protocols**: every unconfined client may
+  switch workspaces. The bottom and background layers of `wlr-layer-shell` stay offered inside a
+  security context. Revision 2 decides both.
+- Input-method, virtual keyboard and pointer, data control and the private interface are not
+  offered yet; each joins the allow-list's interfaces when it is.
+- A granted client's exclusive overlay surface keeps the keyboard while it lives, with no escape
+  for the user.
+- The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
+  `rig.sh compositor-globals` checks that `wayland-info`, outside any unit, is refused the
+  privileged globals; the grant itself is checked by the fixture only, with the executable and
+  the cgroup faked and the pidfd real.
+- In the rig, on the laptop's Azoth 7.x kernel, the peer's pidfd comes from `SO_PEERPIDFD`
+  (`the_identity_of_this_process_is_read_through_its_pidfd` prints the mechanism). The
+  `SO_PEERCRED` fallback runs on no kernel the tests reach.

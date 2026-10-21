@@ -5,6 +5,7 @@
 
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
+use crate::identity::{AllowList, Process};
 use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
@@ -21,7 +22,7 @@ use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::protocol::{
@@ -108,6 +109,8 @@ struct Client {
     configure: Option<u32>,
     /// The serial, width and height of the last configure of a layer surface.
     layer_configure: Option<(u32, u32, u32)>,
+    /// A layer surface was closed by the compositor.
+    layer_closed: bool,
     frame_done: bool,
     /// Roundtrips answered (`Local::roundtrip`).
     synced: u32,
@@ -238,13 +241,14 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let zwlr_layer_surface_v1::Event::Configure {
-            serial,
-            width,
-            height,
-        } = event
-        {
-            client.layer_configure = Some((serial, width, height));
+        match event {
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height,
+            } => client.layer_configure = Some((serial, width, height)),
+            zwlr_layer_surface_v1::Event::Closed => client.layer_closed = true,
+            _ => {}
         }
     }
 }
@@ -608,6 +612,33 @@ struct Running {
     /// A message makes the client send a request; dropped, it lets the client go.
     quit: mpsc::Sender<()>,
     thread: std::thread::JoinHandle<()>,
+    /// The executable and cgroup of the next client to connect: the bar's at the start.
+    identity: Arc<Mutex<(&'static str, &'static str)>>,
+}
+
+/// The bar, as the fixture's clients connect by default: its executable and its cgroup.
+const BAR: (&str, &str) = (
+    "/usr/bin/athanor-bar",
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-bar.service\n",
+);
+
+/// What the fixture grants the bar: every privileged global, so that the tests of the earlier
+/// tasks run as the bar.
+const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 \
+    ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
+    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1\n";
+
+/// The process at the other end of the fixture's sockets, which is the test's own, as whatever
+/// executable and cgroup the test sets: the pidfd is read as the compositor reads it.
+struct Fake(Arc<Mutex<(&'static str, &'static str)>>);
+
+impl Process for Fake {
+    fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
+        Ok(self.0.lock().expect("identity").0.into())
+    }
+    fn cgroup(&self, _pid: i32) -> std::io::Result<String> {
+        Ok(self.0.lock().expect("identity").1.into())
+    }
 }
 
 impl Running {
@@ -620,7 +651,10 @@ impl Running {
             headless::start(&mut event_loop, display, node, &OUTPUTS).expect("headless backend");
 
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-        let client_state = state.client_state();
+        let identity = Arc::new(Mutex::new(BAR));
+        state.allow_list = AllowList::parse(FIXTURE_ALLOW_LIST).expect("allow-list");
+        state.process = Box::new(Fake(identity.clone()));
+        let client_state = state.client_state(&server_end, None);
         state
             .display_handle
             .insert_client(server_end, client_state)
@@ -658,6 +692,7 @@ impl Running {
             globals,
             quit,
             thread,
+            identity,
         }
     }
 
@@ -1063,7 +1098,7 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
         .clone();
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state();
+    let client_state = run.state.client_state(&server_end, None);
     run.state
         .display_handle
         .insert_client(server_end, client_state)
@@ -1152,7 +1187,7 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
 fn an_exclusive_surface_keeps_the_keyboard_in_its_own_popup() {
     let mut run = Running::start(None);
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state();
+    let client_state = run.state.client_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -1223,7 +1258,7 @@ fn a_bar_popup_leaves_the_keyboard_to_the_window() {
     let window = focus(&run.state);
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-    let client_state = run.state.client_state();
+    let client_state = run.state.client_state(&server_end, None);
     let shell_id = run
         .state
         .display_handle
@@ -1295,7 +1330,7 @@ impl Local {
     /// Connects to the compositor, inside `context` if any, and lists the globals.
     fn connect(run: &mut Running, context: Option<SecurityContext>) -> Self {
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
-        let data = run.state.contained_client_state(context);
+        let data = run.state.client_state(&server_end, context);
         let id = run
             .state
             .display_handle
@@ -1830,5 +1865,180 @@ fn task4_each_output_has_an_active_workspace() {
         bound.iter().all(|id| entered.contains(id)),
         "each output has its group"
     );
+    run.stop();
+}
+
+/// The privileged globals of OS4 that the compositor offers (C1 task 5).
+const PRIVILEGED: [&str; 4] = [
+    "ext_foreign_toplevel_list_v1",
+    "ext_foreign_toplevel_image_capture_source_manager_v1",
+    "ext_image_copy_capture_manager_v1",
+    "ext_session_lock_manager_v1",
+];
+
+/// Another executable, and another unit: a shell started in an application scope.
+const SH: &str = "/usr/bin/sh";
+const OTHER_UNIT: &str =
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-sh-1.scope\n";
+
+impl Local {
+    /// Whether the client sees every privileged global (true) or none (false); a mix fails.
+    fn privileged(&self) -> bool {
+        let seen: Vec<bool> = PRIVILEGED.iter().map(|g| self.sees(g)).collect();
+        assert!(
+            seen.iter().all(|s| *s == seen[0]),
+            "some privileged globals but not all: {seen:?}"
+        );
+        assert!(
+            [
+                "wl_compositor",
+                "zwlr_layer_shell_v1",
+                "ext_idle_notifier_v1"
+            ]
+            .iter()
+            .all(|g| self.sees(g)),
+            "the standard globals stay"
+        );
+        seen[0]
+    }
+
+    /// Lists the globals again, on a new registry.
+    fn relist(&mut self, run: &mut Running) {
+        self.client.globals.clear();
+        self.registry = self
+            .connection
+            .display()
+            .get_registry(&self.queue.handle(), ());
+        self.roundtrip(run);
+    }
+
+    /// A layer surface on `layer`, committed: whether the compositor configures it (true) or
+    /// closes it (false).
+    fn layer_kept(
+        &mut self,
+        run: &mut Running,
+        layer: zwlr_layer_shell_v1::Layer,
+    ) -> (
+        bool,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        wl_surface::WlSurface,
+    ) {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = self.bind(4);
+        let qh = self.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = shell.get_layer_surface(&surface, None, layer, "task5".into(), &qh, ());
+        layer.set_size(100, 100);
+        (self.answer(run, &surface), layer, surface)
+    }
+
+    /// Commits `surface`, a layer surface: whether it is configured (true) or closed (false).
+    fn answer(&mut self, run: &mut Running, surface: &wl_surface::WlSurface) -> bool {
+        self.client.layer_configure = None;
+        self.client.layer_closed = false;
+        surface.commit();
+        self.pump(run, "a configure or a close", |client, _| {
+            client.layer_configure.is_some() || client.layer_closed
+        });
+        !self.client.layer_closed
+    }
+}
+
+/// The bar's executable in the bar's unit is granted the privileged globals of the allow-list.
+#[test]
+fn task5_bar_unit_and_executable_get_privileged_globals() {
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.privileged(), "the bar sees the privileged globals");
+    run.stop();
+}
+
+/// Another executable in the bar's unit is granted nothing.
+#[test]
+fn task5_other_executable_in_the_bar_unit_gets_standard_globals() {
+    let mut run = Running::start(None);
+    *run.identity.lock().expect("identity") = (SH, BAR.1);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.privileged(), "another executable in the bar's unit");
+    run.stop();
+}
+
+/// The bar's executable in another unit is granted nothing.
+#[test]
+fn task5_other_unit_gets_standard_globals() {
+    let mut run = Running::start(None);
+    *run.identity.lock().expect("identity") = (BAR.0, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.privileged(), "the bar's executable in another unit");
+    run.stop();
+}
+
+/// The bar itself, connecting through a security context, is granted nothing.
+#[test]
+fn task5_security_context_gets_standard_globals() {
+    let mut run = Running::start(None);
+    let (_, creator) = fixture_window(&run);
+    let context = SecurityContext {
+        sandbox_engine: Some("org.flatpak".into()),
+        app_id: Some("org.example.App".into()),
+        instance_id: None,
+        creator_client_id: creator,
+    };
+    let sandboxed = Local::connect(&mut run, Some(context));
+    for global in PRIVILEGED {
+        assert!(!sandboxed.sees(global), "{global} inside a context");
+    }
+    run.stop();
+}
+
+/// The identity is the one read at connect: a client that connected as the bar keeps the
+/// bar's globals when its process becomes another executable, and one that connected as
+/// another gains nothing when it becomes the bar.
+#[test]
+fn task5_exec_after_connect_keeps_the_connect_identity() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    bar.relist(&mut run);
+    assert!(bar.privileged(), "connected as the bar");
+
+    let mut other = Local::connect(&mut run, None);
+    *run.identity.lock().expect("identity") = BAR;
+    other.relist(&mut run);
+    assert!(!other.privileged(), "connected as another");
+    run.stop();
+}
+
+/// The top and overlay layers are the granted client's: another one's surface there is closed,
+/// whether it asked for the layer at creation or moves there with `set_layer`; the bottom
+/// layer stays every unconfined client's.
+#[test]
+fn task5_top_layers_are_closed_to_a_client_not_granted_them() {
+    use zwlr_layer_shell_v1::Layer;
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    assert!(
+        bar.layer_kept(&mut run, Layer::Top).0,
+        "the bar's top layer"
+    );
+    assert!(
+        bar.layer_kept(&mut run, Layer::Overlay).0,
+        "the bar's overlay"
+    );
+
+    *run.identity.lock().expect("identity") = (SH, BAR.1);
+    let mut other = Local::connect(&mut run, None);
+    assert!(
+        !other.layer_kept(&mut run, Layer::Top).0,
+        "another's top layer"
+    );
+    assert!(
+        !other.layer_kept(&mut run, Layer::Overlay).0,
+        "another's overlay"
+    );
+    let (kept, layer, surface) = other.layer_kept(&mut run, Layer::Bottom);
+    assert!(kept, "another's bottom layer");
+    layer.set_layer(Layer::Top);
+    assert!(!other.answer(&mut run, &surface), "moved to the top layer");
     run.stop();
 }
