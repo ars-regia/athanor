@@ -29,8 +29,8 @@
         # Toolset POSIX di base incluso: rpmbuild, %autosetup e i Makefile upstream
         # danno per scontati grep, diff, patch, gzip, file, which, m4, gettext.
         # dbus: the %check of athanor-update runs its bus tests on a private dbus-daemon.
-        build-tools = with pkgs; [ rpm cpio dbus createrepo_c buildah skopeo jq git gnutar xz curl wget rsync flex bison bc zstd checkpolicy perl pkg-config meson ninja gobject-introspection glibc.bin autoconf automake libtool util-linux gnugrep diffutils patch which file gzip bzip2 unzip m4 gettext python3 go ];
-        system-deps = with pkgs; [ zlib openssl policycoreutils spdlog systemd nodejs_22 nlohmann_json fmt speechd gnupg ipxe ncurses iproute2 fio gtk4 pango cairo gtk4-layer-shell glib libpulseaudio pkg-config ];
+        build-tools = with pkgs; [ rpm cpio dbus createrepo-target buildah skopeo jq git gnutar xz curl wget rsync flex bison bc zstd checkpolicy perl pkg-config meson ninja gobject-introspection glibc.bin autoconf automake libtool util-linux gnugrep diffutils patch which file gzip bzip2 unzip m4 gettext python3 go ];
+        system-deps = with pkgs; [ zlib openssl_4_0 policycoreutils spdlog systemd nodejs_22 nlohmann_json fmt speechd gnupg ipxe ncurses iproute2 fio gtk4 pango cairo gtk4-layer-shell glib libpulseaudio pkg-config ];
         # Header e .pc delle librerie di sistema, cioè i -devel di Fedora: in nixpkgs
         # stanno nei dev output. closePropagation segue propagatedBuildInputs come fa
         # stdenv, così le catene Requires dei .pc (gtk4 → pango → harfbuzz → …) sono
@@ -50,8 +50,22 @@
         sqlite-target = pkgs.sqlite.overrideAttrs (old: {
           configureFlags = old.configureFlags ++ [ "--soname=legacy" ];
         });
+        # curl (and its libssh2 and ngtcp2) on the OpenSSL of the target, and poppler on that
+        # curl: the default ones propagate openssl 3, whose libssl.so and headers would sit in
+        # the /lib and /include unions beside OpenSSL 4's.
+        curl-target = pkgs.curl.override {
+          openssl = pkgs.openssl_4_0;
+          libssh2 = pkgs.libssh2.override { openssl = pkgs.openssl_4_0; };
+          ngtcp2 = pkgs.ngtcp2.override { openssl = pkgs.openssl_4_0; };
+        };
+        poppler-target = pkgs.poppler.override { curl = curl-target; };
+        # createrepo_c is a build tool, but its library lands in /lib beside the target's: it takes
+        # the target's OpenSSL and curl as well (builder-openssl-check).
+        createrepo-target = pkgs.createrepo_c.override { openssl = pkgs.openssl_4_0; curl = curl-target; };
         system-libs = with pkgs; [
-          zlib openssl curl spdlog systemd fmt speechd ncurses
+          # openssl_4_0: Fedora 45 ships OpenSSL 4 only (openssl-libs 4.0.x, libssl.so.4), so the
+          # target links against 4 and the rootfs needs no openssl3-libs (M3).
+          zlib openssl_4_0 curl-target spdlog systemd fmt speechd ncurses
           # polkit (forge/specs/polkit): its BuildRequires. meson, ninja, gobject-introspection and
           # glibc.bin (the ldd g-ir-scanner runs) are in build-tools.
           duktape linux-pam expat gobject-introspection dbus
@@ -61,7 +75,7 @@
           wayland wayland-protocols libgbm libdrm libglvnd libxkbcommon seatd libinput pipewire libdisplay-info-target pixman
           # athanor-launcher and athanor-preview-render: tinysparql (tracker-sys, the localsearch client),
           # poppler-glib (the PDF decoder), libseccomp and fontconfig (glycin)
-          tinysparql poppler libseccomp fontconfig
+          tinysparql poppler-target libseccomp fontconfig
           # athanor-greeter-ui: rusqlite reads lastlog2 through the system libsqlite3
           sqlite-target
         ];
@@ -76,7 +90,7 @@
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rust-toolchain just jq python3 pkg-config openssl
+            rust-toolchain just jq python3 pkg-config openssl_4_0
           ];
           shellHook = ''
             echo "========================================================"
@@ -85,7 +99,8 @@
           '';
         };
 
-        packages = rec {
+        # builder-contents is a list, not a package: the set keeps it for the image and its check.
+        packages = builtins.removeAttrs (rec {
           just-hermetic = pkgs.just;
 
           # Compatibilità FHS del builder: directory àncora e symlink verso la glibc e le
@@ -195,10 +210,37 @@
             paths = [ "${pkgs.rpm}/lib/rpm" builder-rpm-macros-systemd builder-rpm-macros-target ];
           };
 
+          builder-contents = [ builder-fhs-compat builder-containers-policy pkgs.dockerTools.fakeNss pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gawk pkgs.cacert pkgs.tzdata pkgs.shadow ] ++ security-tools ++ c-toolchain ++ rust-tools ++ build-tools ++ system-deps ++ system-dev ++ system-lib;
+
+          # The target has OpenSSL 4 only (M3): the image does not build while a library on the /lib
+          # search path, the union of every content's lib, still needs libssl.so.3 or
+          # libcrypto.so.3. Subdirectories (systemd's private libraries, plugins) are not on that
+          # path. A scan that finds no library at all fails too.
+          builder-openssl-check = pkgs.runCommand "athanor-builder-no-openssl-3" {
+            nativeBuildInputs = [ pkgs.binutils ];
+          } ''
+            found=0 scanned=0
+            for dir in ${pkgs.lib.concatMapStringsSep " " (d: "${d}/lib") builder-contents}; do
+              [ -d "$dir" ] || continue
+              while IFS= read -r -d "" f; do
+                [ "$(head -c 4 "$f" | tail -c 3)" = ELF ] || continue
+                scanned=$((scanned + 1))
+                needed=$(readelf -d "$f")
+                if grep -qE 'NEEDED.*\[lib(ssl|crypto)\.so\.3\]' <<< "$needed"; then
+                  echo "$f needs OpenSSL 3"
+                  found=1
+                fi
+              done < <(find "$dir" -maxdepth 1 -name '*.so*' -type f -print0)
+            done
+            echo "$scanned libraries scanned"
+            [ "$scanned" -gt 0 ] && [ "$found" = 0 ]
+            mkdir $out
+          '';
+
           builderImage = pkgs.dockerTools.buildLayeredImage {
             name = "athanor-builder";
             tag = "latest";
-            contents = [ builder-fhs-compat builder-containers-policy pkgs.dockerTools.fakeNss pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gawk pkgs.cacert pkgs.tzdata pkgs.shadow ] ++ security-tools ++ c-toolchain ++ rust-tools ++ build-tools ++ system-deps ++ system-dev ++ system-lib;
+            contents = builder-contents ++ [ builder-openssl-check ];
             config = {
               Cmd = [ "/bin/bash" ];
               Env = [
@@ -254,7 +296,7 @@
               mkdir -m 1777 -p tmp var/tmp
             '';
           };
-        };
+        }) [ "builder-contents" ];
       }
     );
 }
