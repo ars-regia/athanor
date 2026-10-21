@@ -114,6 +114,29 @@
   "value": ""
  },
  {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Values",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Values",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
   "depth": 3,
   "role": "grouping",
   "name": "",

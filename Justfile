@@ -138,7 +138,8 @@ check base="HEAD":
 
 # The Rust half of the gate: the tests of every crate of the root workspace, in the build stage
 # of the shell rig (forge/test/shell/Containerfile), which carries the GTK, glycin, PAM, TPM and
-# D-Bus headers the workspace links. athanor-preview-render runs in a second cargo command:
+# D-Bus headers the workspace links, and the tests of the toolkit's gallery, a workspace of its
+# own. athanor-preview-render runs in a second cargo command:
 # glycin needs zbus on async-io while the workspace enables zbus' tokio runtime, and cargo
 # unifies features within one command (CODE-N06). The visual shell tests are not here: pr.yml
 # runs them when changes.json selects `shell`.
@@ -152,7 +153,7 @@ check-rust:
     bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
     bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
     bash forge/test/shell/rig.sh cargo rustdoc --locked -p athanor-toolkit -- -D warnings
-    bash forge/test/shell/rig.sh cargo build --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml
+    bash forge/test/shell/rig.sh cargo test --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml
 
 # The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
 # licences, bans and sources. Advisories are not here: they depend on a database that changes
