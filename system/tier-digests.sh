@@ -47,10 +47,17 @@ resolve:1 | signed:2 | probe:2) ;;
 esac
 
 ISSUER=https://token.actions.githubusercontent.com
-# cosign v3 reports a missing or foreign signature with these messages. "no matching
-# signatures" is anchored to the end of the line: cosign appends a transient cause (a Rekor
-# lookup that failed) to the same prefix, and that is an error, not a missing signature.
-UNVERIFIED='no signatures found|no matching signatures: *$|no matching CertificateIdentity'
+# Only these messages of cosign v3 make a reference unsigned, every other failure is an error:
+#   "no signatures found"                 no signature at all;
+#   "no matching CertificateIdentity" and
+#   "none of the expected identities"     a keyless signature by another identity;
+#   "no matching signatures: error verifying bundle: empty key"
+#                                         a signature in the cosign v2 format or by a key, which
+#                                         no keyless identity can match;
+#   "no matching signatures:" ending the line.
+# Each "no matching signatures" form is anchored to the end of the line: cosign appends a
+# transient cause (a Rekor lookup that failed) to the same prefix, and that is an error.
+UNVERIFIED='no signatures found|no matching CertificateIdentity|none of the expected identities matched|no matching signatures: *$|no matching signatures: error verifying bundle: empty key *$'
 
 # trust: sets IDENTITY, the certificate identity regex of a trusted run. resolve never calls it.
 trust() {
@@ -88,6 +95,10 @@ probe() {
         # stderr: stdout is the verdict. The identity it did have is what a maintainer needs.
         if grep -q 'got "' "$err"; then
             sed -n "s|.*got \"\(.*\)\".*|tier-digests: $1 is signed as \1, not by a trusted run|p" "$err" >&2
+        elif grep -q 'got subjects \[' "$err"; then
+            sed -n "s|.*got subjects \[\(.*\)\].*|tier-digests: $1 is signed as \1, not by a trusted run|p" "$err" >&2
+        elif grep -q 'empty key' "$err"; then
+            echo "tier-digests: $1 has a signature in the legacy format or by a key, not by a trusted run" >&2
         else
             echo "tier-digests: $1 has no signature" >&2
         fi

@@ -168,6 +168,36 @@ class TierDigests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(self.resolve(*args).returncode, 2)
 
+    def cosign_stub(self, body):
+        """Replace the fake cosign with a bash script of BODY."""
+        stub = self.dir / "bin" / "cosign"
+        stub.unlink()
+        stub.write_text(f"#!/usr/bin/env bash\n{body}\n")
+        stub.chmod(0o755)
+
+    def test_a_legacy_or_key_signature_is_foreign(self):
+        # What cosign v3 prints for a cosign v2 signature or one made with a key.
+        empty_key = (
+            "Error: no matching signatures: error verifying bundle: empty key\n"
+            "main.go:74: error during command execution: no matching signatures: "
+            "error verifying bundle: empty key\n"
+        )
+        foreign = "https://github.com/fork/athanor/.github/workflows/x.yml@refs/heads/main"
+        subjects = (
+            "Error: none of the expected identities matched what was in the "
+            f"certificate, got subjects [{foreign}]\n"
+        )
+        for stderr, says in (
+            (empty_key, "has a signature in the legacy format or by a key"),
+            (empty_key + subjects, f"is signed as {foreign}, not by a trusted run"),
+        ):
+            with self.subTest(says=says):
+                (self.dir / "stderr").write_text(stderr)
+                self.cosign_stub(f"cat {self.dir}/stderr >&2; exit 1")
+                r = self.signed("tier0")
+                self.assertEqual((r.returncode, r.stdout), (0, "unsigned\n"), r.stderr)
+                self.assertIn(says, r.stderr)
+
     def test_resolve_records_the_registry_and_the_digest_each_tier_names(self):
         self.publish("ghcr.io/ars-regia", **DIGESTS)
         r = self.resolve("resolve")
