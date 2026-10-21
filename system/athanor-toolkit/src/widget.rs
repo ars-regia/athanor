@@ -23,6 +23,15 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// The part of the rectangle inside `other`, empty where they do not meet.
+    pub(crate) fn intersect(self, other: Rect) -> Rect {
+        let (x, y) = (self.x.max(other.x), self.y.max(other.y));
+        let right = (self.x + self.w).min(other.x + other.w);
+        let bottom = self.bottom().min(other.bottom());
+        let (w, h) = ((right - x).max(0.0), (bottom - y).max(0.0));
+        Rect { x, y, w, h }
+    }
+
     /// Whether the point is inside the rectangle; the right and bottom edges are outside.
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
@@ -606,16 +615,7 @@ impl Ui {
         while let Some(w) = at {
             if let Kind::Scroll { .. } = self.widgets[w].kind {
                 let v = self.widgets[w].rect;
-                clip = Some(match clip {
-                    None => v,
-                    Some(c) => {
-                        let (x, y) = (c.x.max(v.x), c.y.max(v.y));
-                        let right = (c.x + c.w).min(v.x + v.w);
-                        let bottom = c.bottom().min(v.bottom());
-                        let (w, h) = ((right - x).max(0.0), (bottom - y).max(0.0));
-                        Rect { x, y, w, h }
-                    }
-                });
+                clip = Some(clip.map_or(v, |c| c.intersect(v)));
             }
             at = self.widgets[w].parent;
         }
@@ -1163,9 +1163,10 @@ impl Ui {
             let at = rows.iter().position(|&r| r == id).unwrap_or(0);
             let last = rows.len().saturating_sub(1);
             let to = match key {
-                // Past either end the focus leaves the list, as GTK's ListBox does.
-                Key::Up if at == 0 => return self.navigate(Key::BackTab),
-                Key::Down if at == last => return self.navigate(Key::Tab),
+                // Past either end the focus leaves the list for the widget in that direction,
+                // if there is one, as GTK's ListBox does; it does not wrap round.
+                Key::Up if at == 0 => return self.navigate(Key::Up),
+                Key::Down if at == last => return self.navigate(Key::Down),
                 Key::Up => at - 1,
                 Key::Down => at + 1,
                 Key::Home => 0,
@@ -2104,6 +2105,61 @@ mod tests {
             (ui.focus(), ui.selected(list)),
             (Some(rows[2]), Some(rows[2]))
         );
+    }
+
+    #[test]
+    fn up_and_down_leave_a_list_only_toward_a_widget() {
+        // The list is the window's last widget: Down on its last row stays there, as GTK's
+        // directional focus does not wrap round to the first widget.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let rows: Vec<WidgetId> = (1..=20)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        ui.layout();
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[19])));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(rows[19])));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+
+        // The list is the first widget: Up on its first row stays there.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let first = ui.list_row(list, "Row 1");
+        ui.list_row(list, "Row 2");
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        ui.set_focus(Some(first));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(first)));
+        ui.key(Key::End);
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+    }
+
+    #[test]
+    fn the_arrows_reach_a_list_whose_selected_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        assert_eq!(ui.activate(rows[39]), Some(Event::Selected(rows[39])));
+        let view = ui.widget(scroll).rect;
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[39]));
+        ui.set_focus(Some(before));
+        ui.key(Key::Down);
+        assert_eq!(ui.focus(), Some(rows[39]), "Down from above enters the list");
+        assert!(in_view(&ui, scroll, rows[39]));
+
+        // And from below, with the first row selected and the list scrolled to its end.
+        ui.activate(rows[0]);
+        ui.set_focus(Some(after));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        ui.key(Key::Up);
+        assert_eq!(ui.focus(), Some(rows[0]), "Up from below enters the list");
+        assert!(in_view(&ui, scroll, rows[0]));
     }
 
     #[test]

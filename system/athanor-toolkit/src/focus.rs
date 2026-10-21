@@ -62,6 +62,18 @@ fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
     Some(chain[i])
 }
 
+/// Where the arrows find `id`: a list's stop, wherever its row is scrolled, at the part of its
+/// list in view.
+fn place(ui: &Ui, id: WidgetId) -> crate::widget::Rect {
+    match ui.widget(id).parent {
+        Some(list) if matches!(ui.widget(list).kind, Kind::List { .. }) => {
+            let r = ui.widget(list).rect;
+            ui.clip(list).map_or(r, |c| r.intersect(c))
+        }
+        _ => ui.widget(id).rect,
+    }
+}
+
 /// The nearest focusable widget on screen in the arrow's direction, if any.
 pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
     let chain = chain(ui);
@@ -72,7 +84,7 @@ pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
     let candidates = chain
         .into_iter()
         .filter(|&id| id != from)
-        .map(|id| (id, ui.widget(id).rect));
+        .map(|id| (id, place(ui, id)));
     let dx = |c: &crate::widget::Rect| (c.center_x() - r.center_x()).abs();
     // Each candidate gets a key that is smaller the better it fits: the gap along the arrow's
     // axis, then the distance across it.
