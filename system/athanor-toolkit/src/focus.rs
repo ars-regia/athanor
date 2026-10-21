@@ -4,11 +4,14 @@
 
 use crate::widget::{Key, Ui, WidgetId};
 
-/// The focusable widgets in logical order: the tree, depth first.
+/// The visible, focusable widgets in logical order: the tree, depth first.
 pub fn chain(ui: &Ui) -> Vec<WidgetId> {
     let mut out = Vec::new();
     let mut stack = vec![Ui::ROOT];
     while let Some(id) = stack.pop() {
+        if !ui.widget(id).visible {
+            continue;
+        }
         if ui.widget(id).is_focusable() {
             out.push(id);
         }

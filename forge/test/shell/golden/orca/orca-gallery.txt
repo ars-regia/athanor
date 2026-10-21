@@ -1,0 +1,17 @@
+Screen reader on.
+Gallery
+Buttons toggle button pressed.
+Choices toggle button not pressed.
+A button button.
+One toggle button pressed.
+Two toggle button not pressed.
+Three toggle button not pressed.
+Name text.
+Screen reader off.
+Screen reader on.
+Gallery
+Choices toggle button pressed.
+Option one check box checked.
+Option two check box not checked.
+A switch check box checked.
+Screen reader off.

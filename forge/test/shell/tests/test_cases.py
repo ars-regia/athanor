@@ -1,3 +1,4 @@
+import re
 import sys
 import unittest
 import zlib
@@ -24,6 +25,47 @@ class CasesTest(unittest.TestCase):
             self.assertRegex(
                 case.tag, r"^greeter-(light|dark)-(1\.0|1\.5)-(en|de|rtl)$"
             )
+
+    def test_a_gallery_has_every_page_at_both_scales_in_both_directions(self):
+        for surface in cases.GALLERIES:
+            found = cases.gallery_cases(surface)
+            self.assertEqual(
+                {(c.page, c.scale, c.direction) for c in found},
+                {
+                    (page, scale, direction)
+                    for page in cases.GALLERY_PAGES
+                    for scale in ("1.0", "1.5")
+                    for direction in ("ltr", "rtl")
+                },
+            )
+            self.assertEqual(len({c.tag for c in found}), len(found))
+            for case in found:
+                self.assertRegex(case.tag, rf"^{surface}-[a-z]+-(1\.0|1\.5)-(ltr|rtl)$")
+        with self.assertRaises(KeyError):
+            cases.gallery_cases("toolkit-chooser")
+
+    def test_a_walk_tabs_past_the_toggles_after_its_page_and_over_its_controls(self):
+        walks = dict(cases.gallery_walks())
+        self.assertEqual(set(walks), set(cases.GALLERY_PAGES))
+        pages = list(cases.GALLERY_PAGES)
+        for i, page in enumerate(pages):
+            self.assertEqual(
+                walks[page], len(pages) - 1 - i + cases.GALLERY_PAGES[page]
+            )
+
+    def test_the_two_galleries_list_the_same_pages_and_every_string_has_both_languages(self):
+        gallery = Path(__file__).resolve().parents[4] / "system/athanor-toolkit/gallery"
+        pages = re.search(
+            r"const PAGES: \[&str; \d+\] = \[(.*?)\];", (gallery / "src/main.rs").read_text()
+        )
+        self.assertEqual(re.findall(r'"([^"]+)"', pages.group(1)), list(cases.GALLERY_PAGES))
+        keys = []
+        for line in (gallery / "strings.tsv").read_text().splitlines():
+            self.assertEqual(len(line.split("\t")), 3, line)
+            keys.append(line.split("\t")[0])
+        self.assertEqual(len(set(keys)), len(keys))
+        for page in cases.GALLERY_PAGES:
+            self.assertIn(f"page.{page}", keys)
 
     def test_an_unknown_surface_is_an_error(self):
         with self.assertRaises(KeyError):

@@ -3,25 +3,35 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{Kind, Ui, WindowButton};
+use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::{Color, FontData};
 use vello_cpu::{Glyph, Pixmap, RenderContext};
 
+/// The error of drawing and of the GPU renderer: any error that can cross threads.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
 /// The calls the window's scene makes, which vello_cpu's `RenderContext` and vello_gpu's
 /// `Scene` both offer under the same names, on the types of their shared vello_common.
 pub trait Canvas {
+    /// What the canvas draws glyphs with and keeps between calls: a glyph cache or a font store.
     type Resources;
+    /// Sets the transform applied to what is drawn next.
     fn set_transform(&mut self, transform: Affine);
+    /// Sets the colour of the next fills.
     fn set_paint(&mut self, color: Color);
+    /// Sets the stroke of the next strokes.
     fn set_stroke(&mut self, stroke: Stroke);
+    /// Fills a rectangle with the current paint.
     fn fill_rect(&mut self, rect: &Rect);
+    /// Fills a path with the current paint.
     fn fill_path(&mut self, path: &BezPath);
+    /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
+    /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
+    /// Ends the innermost clip.
     fn pop_clip(&mut self);
     /// Fills a run of glyphs of one font and size, hinted.
     fn glyphs(
@@ -185,6 +195,9 @@ pub fn paint<C: Canvas>(
 
     let focus = ui.focus;
     for id in 0..ui.widgets.len() {
+        if !ui.is_visible(id) {
+            continue;
+        }
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
@@ -246,6 +259,42 @@ pub fn paint<C: Canvas>(
                         r.y + (r.h - layout.height()) / 2.0,
                     );
                     draw_text(ctx, resources, layout, at, ink)?;
+                }
+            }
+            Kind::Check { active, .. } | Kind::Switch { active, .. } => {
+                let active = *active;
+                let is_switch = matches!(widget.kind, Kind::Switch { .. });
+                let size = mark_size(is_switch, t.font_size);
+                let mark = mark_rect(r, ui.rtl, size, is_switch);
+                let fill = if active { t.accent } else { t.surface };
+                let radius = if is_switch { mark.h / 2.0 } else { mark.h / 4.0 };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(mark, 0.0, radius));
+                if !active {
+                    ctx.set_paint(color(t.border));
+                    ctx.set_stroke(Stroke::new(1.0));
+                    ctx.stroke_path(&rounded(mark, -0.5, radius));
+                }
+                if is_switch {
+                    let knob = knob_rect(mark, ui.rtl, active);
+                    let centre = (f64::from(knob.center_x()), f64::from(knob.y + knob.h / 2.0));
+                    ctx.set_paint(color(if active { t.on_accent } else { t.border }));
+                    ctx.fill_path(&Circle::new(centre, f64::from(knob.w / 2.0)).to_path(0.1));
+                } else if active {
+                    // A tick drawn as two lines, as the window buttons' marks.
+                    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
+                    ctx.set_paint(color(t.on_accent));
+                    ctx.set_stroke(Stroke::new(1.8));
+                    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
+                        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
+                        ctx.stroke_path(&line.to_path(0.1));
+                    }
+                }
+                if let Some(layout) = &widget.text {
+                    // The mark is at the left when `ui.rtl == is_switch`, as `mark_rect` puts it.
+                    let x = if ui.rtl == is_switch { r.x + r.w - layout.width() } else { r.x };
+                    let y = r.y + (r.h - layout.height()) / 2.0;
+                    draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
             }
             Kind::Field(field) => {

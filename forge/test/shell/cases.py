@@ -6,6 +6,9 @@ right-to-left pseudo-locale}. Layouts: the 27 cases of SH13 over the 14 layouts 
 
     cases.py <surface>              tag, variant, scale, locale, catalog (tab-separated)
     cases.py layout --outputs N     tag, preset, panel, dock, scale, width, height (tab-separated)
+    cases.py toolkit-gallery        tag, variant, scale, locale, catalog, page, direction (tab-separated);
+    cases.py gtk-gallery            every page of the gallery at both scales, left to right and right to left
+    cases.py gallery-pages          page, Tabs of its walk (tab-separated)
 """
 
 import sys
@@ -65,6 +68,13 @@ SURFACES = {
     "toolkit-chooser": {"variants": ("light",), "scales": ("1.0", "1.5")},
 }
 
+# doc_own_stack.md, OS10: the gallery, the toolkit's and its GTK twin, shows the same pages. Each
+# page and the number of controls on it; a widget task adds its page here. Both galleries start a
+# page with the focus on its toggle in the page row.
+GALLERY_PAGES = {"buttons": 5, "choices": 3}
+GALLERIES = ("toolkit-gallery", "gtk-gallery")
+GalleryCase = namedtuple("GalleryCase", "tag variant scale locale catalog page direction")
+
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).
 FACTORY = {
     "float": ("top", "visible"),
@@ -85,6 +95,35 @@ def surface_cases(surface):
         for variant, scale, (short, (locale, catalog)) in product(
             spec["variants"], spec["scales"], locales
         )
+    ]
+
+
+def gallery_cases(surface):
+    """Every page in English at both scales, left to right then right to left. The direction is
+    an argument of the gallery, not of the locale. The toolkit has no dark theme yet."""
+    if surface not in GALLERIES:
+        raise KeyError(surface)
+    locale, catalog = LOCALES["en"]
+    return [
+        GalleryCase(
+            f"{surface}-{page}-{scale}-{direction}",
+            "light",
+            scale,
+            locale,
+            catalog,
+            page,
+            direction,
+        )
+        for page, scale, direction in product(GALLERY_PAGES, ("1.0", "1.5"), ("ltr", "rtl"))
+    ]
+
+
+def gallery_walks():
+    """Each page with the Tabs of its walk in Orca: one for each page toggle after the page's
+    own and one for each control on it, from the focus on the page's toggle."""
+    pages = list(GALLERY_PAGES)
+    return [
+        (page, len(pages) - 1 - i + GALLERY_PAGES[page]) for i, page in enumerate(pages)
     ]
 
 
@@ -153,6 +192,14 @@ if __name__ == "__main__":
                         ]
                     )
                 )
+        sys.exit(0)
+    if len(args) == 1 and args[0] in GALLERIES:
+        for case in gallery_cases(args[0]):
+            print("\t".join(case))
+        sys.exit(0)
+    if args == ["gallery-pages"]:
+        for page, tabs in gallery_walks():
+            print(f"{page}\t{tabs}")
         sys.exit(0)
     if len(args) != 1 or args[0] not in SURFACES:
         print(__doc__, file=sys.stderr)

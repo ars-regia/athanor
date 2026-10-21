@@ -1,0 +1,17 @@
+Lettore schermo attivo.
+Galleria
+Pulsanti pulsante di commutazione premuto.
+Scelte pulsante di commutazione non premuto.
+Un pulsante button.
+Uno pulsante di commutazione premuto.
+Due pulsante di commutazione non premuto.
+Tre pulsante di commutazione non premuto.
+Nome testo.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Scelte pulsante di commutazione premuto.
+Opzione uno casella di spunta spuntata.
+Opzione due casella di spunta non spuntata.
+Un interruttore casella di spunta spuntata.
+Lettore schermo disattivato.

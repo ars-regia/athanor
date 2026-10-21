@@ -6,6 +6,7 @@
 pub struct Rgba(pub [u8; 4]);
 
 impl Rgba {
+    /// An opaque colour from its red, green and blue channels.
     pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self([r, g, b, 255])
     }
@@ -14,18 +15,25 @@ impl Rgba {
 /// The colours and sizes every widget draws with, in logical pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Theme {
+    /// The window's background.
     pub background: Rgba,
+    /// The fill of controls: buttons, fields and unselected toggles.
     pub surface: Rgba,
+    /// The colour of text on the background.
     pub text: Rgba,
+    /// The colour of the active toggle and of the primary marks.
     pub accent: Rgba,
     /// Text and marks drawn on the accent.
     pub on_accent: Rgba,
+    /// The outline of controls.
     pub border: Rgba,
     /// The title bar the window draws itself: Calmo's `bar` token, light variant.
     pub title_bar: Rgba,
     /// The focus ring around the focused widget.
     pub focus: Rgba,
+    /// The size of text, in logical pixels.
     pub font_size: f32,
+    /// The space between a control's edge and its content.
     pub padding: f32,
     /// Around the window's content, under the title bar.
     pub margin: f32,
@@ -33,8 +41,11 @@ pub struct Theme {
     pub section_gap: f32,
     /// Between the children of a group or a row.
     pub gap: f32,
+    /// The corner radius of controls.
     pub radius: f32,
+    /// The thickness of the focus ring.
     pub focus_width: f32,
+    /// The width of a text field, before its text widens it.
     pub field_width: f32,
 }
 

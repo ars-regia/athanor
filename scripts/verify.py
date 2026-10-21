@@ -1021,6 +1021,41 @@ def check_os_release():
 TOOLKIT = "system/athanor-toolkit"
 # SPDX identifier -> the licence file that carries its text.
 TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
+# The gallery is a client of the toolkit outside the workspace: its one dependency.
+GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
+GALLERY_DEPENDENCY = {"athanor-toolkit": {"path": ".."}}
+
+
+def dependency_tables(data, kinds):
+    """Every table of `kinds` in a manifest, at the top and under [target.*], with the
+    underscore spellings cargo still accepts (`build_dependencies`, `dev_dependencies`)."""
+    kinds = [spelling for kind in kinds for spelling in dict.fromkeys((kind, kind.replace("-", "_")))]
+    tables = [(kind, data.get(kind, {})) for kind in kinds]
+    for target, spec in data.get("target", {}).items():
+        tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
+    return tables
+
+
+def gallery_problems(root):
+    """The gallery depends on the toolkit by its path and on nothing else, as an application
+    outside Athanor would (ADR-0126)."""
+    if not (root / GALLERY_MANIFEST).is_file():
+        return []
+    try:
+        data = tomllib.loads(read(root / GALLERY_MANIFEST))
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
+    out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
+           for kind in ("patch", "replace") if kind in data]
+    out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
+            for key in data.get("workspace", {})]
+    for table, deps in tables:
+        for name, dep in deps.items():
+            if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
+                out.append(f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
+                           'the gallery depends only on athanor-toolkit = { path = ".." }')
+    return out
 
 
 def toolkit_boundary_problems(root=None):
@@ -1033,11 +1068,7 @@ def toolkit_boundary_problems(root=None):
         workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{manifest}: cannot read ({err})"]
-    tables = [("dependencies", data.get("dependencies", {})),
-              ("build-dependencies", data.get("build-dependencies", {}))]
-    for target, spec in data.get("target", {}).items():
-        tables += [(f"target.{target}.{kind}", spec.get(kind, {}))
-                   for kind in ("dependencies", "build-dependencies")]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies"))
     out = []
     for table, deps in tables:
         for name, dep in deps.items():
@@ -1061,7 +1092,7 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out
+    return out + gallery_problems(root)
 
 
 @check("toolkit-boundary", "The toolkit names no Athanor crate outside dev-dependencies, and its licence files match its license")
@@ -2689,6 +2720,8 @@ OWN_LICENCE_EXCEPTIONS = {
     # doc_own_stack.md OS7).
     "system/athanor-toolkit/Cargo.toml":
         ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
+    "system/athanor-toolkit/gallery/Cargo.toml":
+        ("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None),
 }
 # The crate whose dependency forces the greeter's exception above; a crate that depends on it
 # must be in the table with it as its dependency.
