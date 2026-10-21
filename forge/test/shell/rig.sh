@@ -888,8 +888,8 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggle (three pages), a button, three toggles and a field, and the
-        # title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
+        # The gallery's first page: the page toggle (three pages), a button, three toggles and a
+        # field, and the title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
         # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
         # hold all the reference holds, the GTK twin's, recorded (OS8).
         # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
