@@ -170,6 +170,19 @@ enum MenuAct {
     Unpin(String),
 }
 
+/// The pin row of the menu of the entry with the desktop id `id`, from the favourites as
+/// they are now rather than as the row was last drawn: a menu holds the row, so a change
+/// another writer made to the file shows in the next menu all the same. Pinning needs the
+/// favourites and a desktop id; without either there is no row.
+fn pin_act(favourites: Option<Vec<String>>, id: Option<String>) -> Option<MenuAct> {
+    let (ids, id) = (favourites?, id?);
+    Some(if ids.contains(&id) {
+        MenuAct::Unpin(id)
+    } else {
+        MenuAct::Pin(id)
+    })
+}
+
 /// The open menu of an entry.
 struct Menu {
     parent: SurfaceId,
@@ -707,12 +720,10 @@ impl Dock {
             };
             let row = ui.add(list, Kind::Button(open));
             acts.push((row, MenuAct::Launch(info.clone())));
-            // Pinning needs the favourites and a desktop id; without either there is no row.
-            if let (Some(_), Some(id)) = (self.favorites.ids(), entry.desktop_id.clone()) {
-                let (label, act) = if entry.pinned {
-                    (tr("Unpin from Dock"), MenuAct::Unpin(id))
-                } else {
-                    (tr("Pin to Dock"), MenuAct::Pin(id))
+            if let Some(act) = pin_act(self.favorites.ids(), entry.desktop_id.clone()) {
+                let label = match act {
+                    MenuAct::Unpin(_) => tr("Unpin from Dock"),
+                    _ => tr("Pin to Dock"),
                 };
                 let row = ui.add(list, Kind::Button(label));
                 acts.push((row, act));
@@ -920,5 +931,21 @@ impl Application for Dock {
         }
         self.limit_input(shell);
         self.notify_ready(shell);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pin_row_follows_the_favourites_as_they_are_now() {
+        let id = "org.athanor.CcWindow1.desktop".to_owned();
+        let pinned = Some(vec![id.clone()]);
+        assert!(matches!(pin_act(pinned, Some(id.clone())), Some(MenuAct::Unpin(i)) if i == id));
+        assert!(matches!(pin_act(Some(Vec::new()), Some(id.clone())), Some(MenuAct::Pin(i)) if i == id));
+        // Unavailable favourites, or an entry without a desktop id: no row.
+        assert!(pin_act(None, Some(id)).is_none());
+        assert!(pin_act(Some(Vec::new()), None).is_none());
     }
 }
