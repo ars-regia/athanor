@@ -58,7 +58,7 @@ KOJI=https://kojipkgs.fedoraproject.org/packages/kernel/${FEDORA_KERNEL_NVR%%-*}
 # the signed file back.
 SRPM_URL=$KOJI/src/$SRPM
 SRPM_SIG_URL=$KOJI/data/sigcache/${FEDORA_KEY_FPR: -8}/src/$SRPM.sig
-FEDORA_KEY=/usr/share/pki/rpm-gpg/RPM-GPG-KEY-fedora-${FEDORA_KERNEL_NVR##*.fc}-primary
+FEDORA_KEY=/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-${FEDORA_KERNEL_NVR##*.fc}-primary
 KVER=${CACHYOS_RELEASE#cachyos-}; KVER=${KVER%-*}     # cachyos-7.1.8-1 -> 7.1.8
 SERIES=$(cut -d. -f1,2 <<< "$KVER")                     # 7.1
 CACHY_TAR=$CACHYOS_RELEASE.tar.gz

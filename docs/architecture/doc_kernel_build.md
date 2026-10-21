@@ -4,9 +4,7 @@ Stato: **approvata il 2026-09-03** (serie `stable` 7.x, `-O2` dal 2026-09-05, de
 come OCI separato con retention di due versioni; dal 2026-09-04 Rust acceso,
 ThinLTO e `RANDSTRUCT` spenti, sezione 13); **revisione 2 del 2026-10-14**, approvata con la
 pull request che la introduce: allinea le sezioni 7 e 10 ai job reali dei workflow dei moduli NVIDIA
-(#388, ADR-0110); **revisione 3 del 2026-10-21**, approvata con la pull request che la
-introduce: il builder passa a Fedora 45 con il rebase di ADR-0078 (sezioni 2 e 5) e chiude
-la decisione 6 della sezione 13. Sostituisce il
+(#388, ADR-0110). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
 `prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
 comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
@@ -63,7 +61,7 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `fedora-wins.list`       | percorsi in cui un conflitto del merge tra base CachyOS e patch Red Hat si risolve con l'albero Fedora; ogni altro conflitto ferma la build                                                                                                                                      |
 | `cmdline`                | riga di comando del kernel, firmata nella UKI (sezione 6)                                                                                                                                                                                                                        |
 | `boot.sh`, `boot/`       | la boot matrix (sezione 7, gate 3): ambiente QEMU/OVMF/shim pinnato come il builder, PID 1 dell'initramfs di prova con le asserzioni                                                                                                                                             |
-| `builder/Containerfile`  | ambiente Fedora 45 (esiste già), base pinnata per digest                                                                                                                                                                                                                         |
+| `builder/Containerfile`  | ambiente Fedora 43 (esiste già), base pinnata per digest                                                                                                                                                                                                                         |
 | `builder/toolchain.lock` | gli RPM installati sopra la base del builder, per sha256: strumenti e BuildRequires dello spec pinnato (sezione 5)                                                                                                                                                              |
 | `*/*.packages`, `*/*.lock` | per ogni stadio degli ambienti `boot/` e `nvidia/` (`boot/schbench`, `boot/toolchain`, `nvidia/toolchain`), i pacchetti e il loro lock per sha256 (sezione 5)                                                                                                                  |
 | `lock.sh`                | rigenera i lock (`generate`), li controlla (`check`) e li installa da koji nei Containerfile (`install`)                                                                                                                                                                        |
@@ -258,8 +256,8 @@ da kconfig. Non serve uno script Athanor.
 
 ## 5. Toolchain
 
-clang, lld e llvm di Fedora 45 dal Containerfile, con la base
-`registry.fedoraproject.org/fedora:45@sha256:…` pinnata per digest e aggiornata
+clang, lld e llvm di Fedora 43 dal Containerfile, con la base
+`registry.fedoraproject.org/fedora:43@sha256:…` pinnata per digest e aggiornata
 dal bot. Tutto ciò che il builder installa sopra la base è in
 `builder/toolchain.lock`, per nome di file e sha256: gli strumenti di `builder/toolchain.packages`, le
 BuildRequires di kernel.spec con i bcond di `bconds.sh` e i pacchetti della base che
@@ -757,8 +755,6 @@ task_struct`.
    ha. `kernel-local` fissa la modalità casuale e `build.sh` si ferma quando il config
    generato riporta `CC_HAS_ALLOC_TOKEN=y`, per togliere il pin e tornare alla modalità per
    tipo scelta da Fedora, invece di restare in silenzio sulla protezione più debole.
-   (2026-10-21) Il builder Fedora 45 porta clang 23, che ha i token: il pin è tolto e vale
-   `KMALLOC_PARTITION_TYPED` di Fedora.
 7. (2026-09-16) Immagini di sistema: base `base-atomic:43` di Fedora al posto di
    `ermete-base-nvidia`, immagine predefinita con `nouveau` e NVK, varianti
    `athanor-system-nvidia` (pacchetti negativo17) e `athanor-system-nvidia-legacy` (RPM

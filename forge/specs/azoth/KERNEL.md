@@ -43,8 +43,8 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.2.9-300.fc45` |
-| `FEDORA_KEY_FPR` | `4f50a6114cd5c6976a7f1179655a4b02f577861e` |
+| `FEDORA_KERNEL_NVR` | `7.2.9-100.fc43` |
+| `FEDORA_KEY_FPR` | `c6e7f081cf80e13146676e88829b606631645531` |
 | `KERNEL_CHANNEL` | `stable` |
 | `CACHYOS_RELEASE` | `cachyos-7.2.9-2` |
 | `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
