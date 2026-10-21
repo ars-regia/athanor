@@ -6,8 +6,9 @@ use crate::theme::Rgba;
 use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
-use vello_cpu::peniko::{Color, FontData};
-use vello_cpu::{Glyph, Pixmap, RenderContext};
+use vello_cpu::peniko::{Color, FontData, ImageSampler};
+use std::sync::Arc;
+use vello_cpu::{Glyph, Image, ImageSource, Pixmap, RenderContext};
 
 /// The error of drawing and of the GPU renderer: any error that can cross threads.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -29,6 +30,8 @@ pub trait Canvas {
     fn fill_path(&mut self, path: &BezPath);
     /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
+    /// Fills a rectangle with an image, scaled to cover it.
+    fn fill_image(&mut self, rect: &Rect, pixmap: &Arc<Pixmap>);
     /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
@@ -64,6 +67,24 @@ macro_rules! canvas {
             }
             fn stroke_path(&mut self, path: &BezPath) {
                 <$canvas>::stroke_path(self, path);
+            }
+            fn fill_image(&mut self, rect: &Rect, pixmap: &Arc<Pixmap>) {
+                let source = ImageSource::Pixmap(pixmap.clone());
+                let image = Image {
+                    image: source,
+                    sampler: ImageSampler::default(),
+                };
+                <$canvas>::set_paint(self, image);
+                <$canvas>::set_paint_transform(
+                    self,
+                    Affine::translate((rect.x0, rect.y0))
+                        * Affine::scale_non_uniform(
+                            rect.width() / f64::from(pixmap.width()),
+                            rect.height() / f64::from(pixmap.height()),
+                        ),
+                );
+                <$canvas>::fill_rect(self, rect);
+                <$canvas>::set_paint_transform(self, Affine::IDENTITY);
             }
             fn push_clip_path(&mut self, path: &BezPath) {
                 <$canvas>::push_clip_path(self, path);
@@ -280,6 +301,15 @@ pub fn paint<C: Canvas>(
                 for line in lines {
                     ctx.stroke_path(&line.to_path(0.1));
                 }
+            }
+            Kind::Image { image, .. } => {
+                let rect = Rect::new(
+                    f64::from(r.x),
+                    f64::from(r.y),
+                    f64::from(r.x + r.w),
+                    f64::from(r.y + r.h),
+                );
+                ctx.fill_image(&rect, image.pixmap());
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
