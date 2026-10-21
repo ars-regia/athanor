@@ -105,7 +105,8 @@ if [[ -n $attestations ]]; then
     while read -r repository _ digest; do
         # ponytail: no retry.sh, which would hand a retried cosign an exhausted stdin; cosign
         # retries transient registry errors itself. A failed attest fails the job; a re-run
-        # attests again, and an identical second attestation verifies as the first.
+        # attests again, and an identical second attestation verifies as the first. One that
+        # differs never would: candidate refuses it first (release_attestation.py prior).
         cosign attest --key "$work/key" --type "$predicate_type" --tlog-upload=false --new-bundle-format=false \
             --predicate "$work/predicates/${digest#sha256:}.json" "$repository@$digest" < "$work/passphrase"
         echo "attested: $repository@$digest"

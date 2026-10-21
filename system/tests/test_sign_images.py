@@ -20,6 +20,7 @@ import release_attestation  # noqa: E402
 SIGN = ROOT / "system" / "sign-images.sh"
 DIGESTS = ROOT / "system" / "image-digests.sh"
 VERIFY = ROOT / "system" / "verify-images.sh"
+ATTESTATION = ROOT / "scripts" / "ci" / "release_attestation.py"
 TAG = ROOT / "system" / "tag-images.sh"
 A_KEY = (
     ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
@@ -140,7 +141,9 @@ COSIGN = textwrap.dedent("""\
     #!/usr/bin/env python3
     # A cosign that keeps the attestations it made in attested.json (digest -> envelopes) and
     # records every call in cosign.log. verify-attestation prints the envelopes of a digest whose
-    # predicate type is --type, one JSON document per line, as cosign does.
+    # predicate type is --type, one JSON document per line, as cosign does. STUB_ATTEST_FAIL fails
+    # attest; STUB_ONLY_KEY names the one public key that verifies, STUB_DOWN_KEY one that cannot
+    # reach the registry.
     import base64, json, os, pathlib, stat, sys
     state = pathlib.Path(os.environ["STUB_STATE"])
     args = sys.argv[1:]
@@ -155,6 +158,8 @@ COSIGN = textwrap.dedent("""\
         key = pathlib.Path(args[args.index("--key") + 1])
         mode, parent = stat.S_IMODE(key.stat().st_mode), stat.S_IMODE(key.parent.stat().st_mode)
         assert mode == 0o600 and parent == 0o700, (key, oct(mode), oct(parent))
+        if os.environ.get("STUB_ATTEST_FAIL"):
+            sys.exit("Error: signing attestation: PUT https://ghcr.io: unexpected status 500")
         statement = {
             "_type": "https://in-toto.io/Statement/v0.1",
             "predicateType": kind,
@@ -165,8 +170,16 @@ COSIGN = textwrap.dedent("""\
         attested.setdefault(digest, []).append({"payloadType": "application/vnd.in-toto+json", "payload": payload, "signatures": [{"keyid": "", "sig": "c3R1Yg=="}]})
         store.write_text(json.dumps(attested))
     elif args[0] == "verify-attestation":
-        found = [e for e in attested.get(digest, []) if json.loads(base64.b64decode(e["payload"]))["predicateType"] == kind]
-        if not found or os.environ.get("STUB_REFUSE"):
+        key = pathlib.Path(args[args.index("--key") + 1]).name
+        if key == os.environ.get("STUB_DOWN_KEY"):
+            sys.exit("Error: GET https://ghcr.io/v2/: dial tcp: connection refused")
+        def kind_of(envelope):  # one it cannot read is the test's forgery: print it
+            try:
+                return json.loads(base64.b64decode(envelope["payload"]))["predicateType"]
+            except ValueError:
+                return kind
+        found = [e for e in attested.get(digest, []) if kind_of(e) == kind]
+        if not found or os.environ.get("STUB_REFUSE") or os.environ.get("STUB_ONLY_KEY", key) != key:
             sys.exit("Error: no matching attestations")
         for envelope in found:
             print(json.dumps(envelope))
@@ -862,6 +875,87 @@ class SignImages(unittest.TestCase):
         r = self.verify("--attestations", str(statements))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("differs from the release statement", r.stderr)
+
+    def test_a_failing_cosign_attest_fails_the_script(self):
+        self.digests()
+        r = self.sign_attest(self.statements(), STUB_ATTEST_FAIL="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("attested: ", r.stdout)
+        self.assertEqual(len(self.cosign_calls()), 1, "the first failure stops the script")
+
+    def test_an_attestation_of_another_shape_fails_the_verification(self):
+        """payloadType, subject and payload encoding are the statement's too, not only the
+        predicate."""
+        self.digests()
+        statements = self.statements()
+        digest = self.tags[f"{REG}/athanor-system:412"]
+
+        def payload_type(envelope):
+            envelope["payloadType"] = "application/json"
+
+        def subject(envelope):
+            statement = json.loads(base64.b64decode(envelope["payload"]))
+            statement["subject"][0]["name"] = f"{REG}/athanor-system:412"
+            envelope["payload"] = base64.b64encode(json.dumps(statement).encode()).decode()
+
+        def encoding(envelope):
+            envelope["payload"] = "!" + envelope["payload"]
+
+        for change in (payload_type, subject, encoding):
+            with self.subTest(change=change.__name__):
+                (self.state / "attested.json").unlink(missing_ok=True)
+                self.assertEqual(self.sign_attest(statements).returncode, 0)
+                attested = json.loads((self.state / "attested.json").read_text())
+                change(attested[digest][0])
+                (self.state / "attested.json").write_text(json.dumps(attested))
+                r = self.verify("--attestations", str(statements))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(f"{digest}: an attestation differs from the release statement", r.stderr)
+
+    def test_with_several_keys_one_that_verifies_is_enough(self):
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        shutil.copy(self.dir / "keys" / "athanor-image-1.pub", self.dir / "keys" / "athanor-image-0.pub")
+        for only in ("athanor-image-0.pub", "athanor-image-1.pub"):
+            with self.subTest(only=only):
+                r = self.verify("--attestations", str(statements), STUB_ONLY_KEY=only)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.count("attestation verified: "), 3)
+        r = self.verify("--attestations", str(statements), STUB_ONLY_KEY="athanor-image-1.pub", STUB_DOWN_KEY="athanor-image-0.pub")
+        self.assertNotEqual(r.returncode, 0, "a key that fails for another reason is not a key without attestations")
+        self.assertIn("connection refused", r.stderr)
+
+    def prior(self, statements, **env):
+        return subprocess.run(
+            [sys.executable, "-B", str(ATTESTATION), "prior", "--dir", str(statements), "--keys-dir", str(self.dir / "keys")],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
+
+    def test_candidate_refuses_an_image_attested_with_another_statement(self):
+        """A re-run whose class changed would add a second attestation that contradicts the
+        first, and the image would never verify: candidate refuses it before anything is signed."""
+        self.digests()
+        statements = self.statements()
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("no prior attestation: "), 3)
+        self.sign_attest(statements)
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("matching prior attestation: "), 3)
+        path = next((statements / "athanor-system").iterdir())
+        statement = json.loads(path.read_text())
+        statement["predicate"]["class"] = "security"
+        path.write_text(json.dumps(statement))
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already carries an attestation that differs", r.stderr)
+        r = self.prior(statements, STUB_DOWN_KEY="athanor-image-1.pub")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("connection refused", r.stderr)
 
 
 if __name__ == "__main__":

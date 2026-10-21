@@ -12,6 +12,9 @@ public keys of the checkout.
   release_attestation.py verify --statement FILE --keys-dir DIR REPOSITORY@DIGEST
       For system/verify-images.sh: at least one attestation verifies with a key of DIR, and
       every one that verifies says what the statement says.
+  release_attestation.py prior --dir DIR --keys-dir DIR
+      For candidate: no image of a statement in DIR already carries an attestation that
+      verifies with a key of --keys-dir and says something else.
 
 Exit 1 with the reason on stderr when a statement or an attestation is refused.
 """
@@ -40,6 +43,9 @@ PREDICATE_KEYS = {
 }
 DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 TIMEOUT = 300  # seconds for one cosign verification
+# What cosign verify-attestation says when no attestation verifies with the key
+# (pkg/cosign/errors.go ErrNoMatchingAttestationsMessage).
+NO_MATCH = "no matching attestations"
 
 
 class Refused(Exception):
@@ -141,22 +147,20 @@ def predicates(digests, statements, out):
         )
 
 
-def verify(ref, statement_path, keys_dir):
-    repository, _, digest = ref.partition("@")
-    if not DIGEST.match(digest):
-        raise Refused(f"'{ref}' is not a reference by digest")
-    expected = load_statement(statement_path, repository, digest)
+def attestations(ref, keys_dir):
+    """The envelopes of PREDICATE_TYPE on ref that verify with a key of keys_dir. A key that
+    attested nothing here fails with cosign's "no matching attestations"; any other failure,
+    such as an unreachable registry, is refused rather than read as no attestation."""
     keys = sorted(keys_dir.glob("*.pub"))
     if not keys:
         raise Refused(f"no *.pub under {keys_dir}")
     envelopes = []
     for key in keys:
-        # A key that signed nothing here fails with its reason on stderr; another may verify.
         try:
             r = subprocess.run(
                 ["cosign", "verify-attestation", "--key", str(key), "--type", PREDICATE_TYPE,
                  "--insecure-ignore-tlog=true", "--new-bundle-format=false", ref],
-                stdout=subprocess.PIPE, text=True, timeout=TIMEOUT,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=TIMEOUT,
             )  # fmt: skip
         except subprocess.TimeoutExpired:
             raise Refused(
@@ -166,21 +170,61 @@ def verify(ref, statement_path, keys_dir):
             envelopes += [
                 json.loads(line) for line in r.stdout.splitlines() if line.strip()
             ]
+        elif NO_MATCH not in r.stderr:
+            raise Refused(
+                f"{ref}: cosign verify-attestation with {key} failed: {r.stderr.strip()}"
+            )
+    return envelopes
+
+
+def differs(envelope, expected):
+    try:
+        payload = json.loads(base64.b64decode(envelope["payload"], validate=True))
+        return envelope["payloadType"] != PAYLOAD_TYPE or any(
+            payload[k] != expected[k] for k in ("predicateType", "subject", "predicate")
+        )
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def verify(ref, statement_path, keys_dir):
+    repository, _, digest = ref.partition("@")
+    if not DIGEST.match(digest):
+        raise Refused(f"'{ref}' is not a reference by digest")
+    expected = load_statement(statement_path, repository, digest)
+    envelopes = attestations(ref, keys_dir)
     if not envelopes:
         raise Refused(f"{ref}: no attestation verifies with a key of {keys_dir}")
-    for envelope in envelopes:
+    if any(differs(e, expected) for e in envelopes):
+        raise Refused(
+            f"{ref}: an attestation differs from the release statement {statement_path}"
+        )
+
+
+def prior(statements, keys_dir):
+    """For candidate, before sign-images: refuses an image that already carries an attestation
+    which verifies and differs from its statement. A re-run would add a second one, and an image
+    with two that disagree never verifies (ADR-0127); one that matches is attested again."""
+    for path in sorted(p for p in statements.rglob("*") if p.is_file()):
         try:
-            payload = json.loads(base64.b64decode(envelope["payload"], validate=True))
-            same = envelope["payloadType"] == PAYLOAD_TYPE and all(
-                payload[k] == expected[k]
-                for k in ("predicateType", "subject", "predicate")
+            (subject,) = json.loads(path.read_text())["subject"]
+            repository, digest = (
+                subject["name"],
+                "sha256:" + subject["digest"]["sha256"],
             )
-        except (KeyError, TypeError, ValueError):
-            same = False
-        if not same:
+        except (OSError, ValueError, KeyError, TypeError):
+            raise Refused(f"{path}: not a release statement") from None
+        if path != path_of(statements, repository, digest):
+            raise Refused(f"{path}: not the release statement of {repository}@{digest}")
+        expected = load_statement(path, repository, digest)
+        ref = f"{repository}@{digest}"
+        envelopes = attestations(ref, keys_dir)
+        if any(differs(e, expected) for e in envelopes):
             raise Refused(
-                f"{ref}: an attestation differs from the release statement {statement_path}"
+                f"{ref} already carries an attestation that differs from {path}: "
+                "only a new build attests another class"
             )
+        print(f"{'matching' if envelopes else 'no'} prior attestation: {ref}")
 
 
 def main(argv):
@@ -197,6 +241,9 @@ def main(argv):
     v.add_argument("--statement", required=True, type=pathlib.Path)
     v.add_argument("--keys-dir", required=True, type=pathlib.Path)
     v.add_argument("ref")
+    r = sub.add_parser("prior")
+    r.add_argument("--dir", required=True, type=pathlib.Path)
+    r.add_argument("--keys-dir", required=True, type=pathlib.Path)
     a = p.parse_args(argv)
     try:
         if a.cmd == "write":
@@ -204,6 +251,8 @@ def main(argv):
                 print(f"release statement: {path}")
         elif a.cmd == "predicates":
             predicates(a.digests, a.dir, a.out)
+        elif a.cmd == "prior":
+            prior(a.dir, a.keys_dir)
         else:
             verify(a.ref, a.statement, a.keys_dir)
             print(f"attestation verified: {a.ref}")
