@@ -128,7 +128,7 @@
 
 - [ ] **Step 1: Maintainer checkpoint.** Name the files: `system/sign-images.sh`, the `sign-images` job of `.github/workflows/release.yml` (environment `signing`), the D43 lint in `scripts/verify.py`, `system/verify-images.sh`. Stop until the maintainer approves the D43 amendment of Task 1 point 5 and these edits. No step of this task uses a key; the first real signature happens in a release run the maintainer dispatches.
 - [ ] **Step 2: Write the failing tests:**
-  - `test_statement_shape`: `_type == "https://in-toto.io/Statement/v1"`, `predicateType == PREDICATE_TYPE`, one subject whose `digest.sha256` is the candidate hex, predicate keys exactly the nine of Task 1 point 3.
+  - `test_statement_shape`: `_type == "https://in-toto.io/Statement/v1"`, `predicateType == PREDICATE_TYPE`, one subject whose `digest.sha256` is the candidate hex, predicate keys exactly the seven of Task 1 point 3.
   - `test_feature_record_keeps_empty_advisories`: `advisories == []`, `class == "feature"`.
   - `test_write_statements_one_file_per_image` over a `release-candidate.json` fixture with two repositories.
   - `test_sign_images_attests_every_statement` (stub `cosign` records argv): one `cosign attest` per statement with `--key`, `--type <PREDICATE_TYPE>`, `--tlog-upload=false`, `--new-bundle-format=false`, `--predicate <file>` and the reference `<registry>/<repo>@sha256:<hex>`; the key file lives on tmpfs as the skopeo key already does.
