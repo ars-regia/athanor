@@ -194,6 +194,13 @@ def classes(verdicts, commit, sources):
     records = []
     for v in verdicts:
         repository = v["repository"]
+        if v["verdict"] == "equal":
+            # Nothing is compared, so a security release would read as feature. The re-run
+            # rule of PB4b (read back the recorded class) is later work; until then refuse.
+            raise Refused(
+                f"{repository}: :latest is already the candidate; deriving its class needs "
+                "the re-run rule of PB4b, which is not built yet"
+            )
         baseline = None
         if v["latest_digest"]:
             ref = f"{repository}@{v['latest_digest']}"
@@ -283,9 +290,10 @@ def check(out):
             shutil.copy(tmp / name, out / name)
     verdicts = order(repo, out / "image-digests.txt", request["commit"])
     records = classes(verdicts, request["commit"], release_class.PodmanSources(ROOT))
-    for r in records:
-        if r["class_reason"]:
-            print(f"{r['repository']}: class_reason {r['class_reason']}", file=sys.stderr)
+    notes = [f"- {r['repository']}: class_reason `{r['class_reason']}`\n" for r in records if r["class_reason"]]
+    if notes and os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write("Class derived by fallback (PL55):\n" + "".join(notes))
     candidate = {
         "schema_version": 2,
         "request": request,

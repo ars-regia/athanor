@@ -13,7 +13,7 @@ import sys
 
 UPDATEINFO = gzip.compress(b"<updates></updates>")
 REPOMD = (
-    '<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="updateinfo">'
+    '<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="updateinfo"><timestamp>1760000000</timestamp>'
     f'<checksum type="sha256">{hashlib.sha256(UPDATEINFO).hexdigest()}</checksum>'
     '<location href="repodata/updateinfo.xml.gz"/></data></repomd>'
 ).encode()
@@ -28,10 +28,10 @@ METALINK = (
 def main(name, args):
     with open(os.environ["FAKE_LOG"], "a") as log:
         log.write(" ".join([name, *args]) + "\n")
-    if name == "git" and not {"cat-file", "log", "show"} & set(args):
+    if name == "git" and not {"rev-parse", "ls-tree", "log", "rev-list", "show"} & set(args):
         os.execv("/usr/bin/git", ["git", *args])
     if name == "git":
-        return 0  # cat-file: the commit exists; log: no file in the range
+        return 0  # every commit exists, no release-class.toml is carried
     if name == "podman":
         if args[0] == "create":
             print("fake-container")
@@ -39,14 +39,15 @@ def main(name, args):
             dest = pathlib.Path(args[2])
             if dest.name == "rpm":
                 dest.mkdir()
+                (dest / "rpmdb.sqlite").write_text("")
             else:
                 dest.write_text('VERSION_ID="45"\n')
-        elif args[0] not in ("rm",):
+        elif args[0] not in ("rm", "rmi"):
             print(f"fake podman: {args[0]} is never run on a candidate", file=sys.stderr)
             return 2
         return 0
     if name == "rpm":
-        print("openssl 0:3.5.1-1.fc45")
+        print("openssl 0:3.5.1-1.fc45\nfilesystem 0:3.18-1.fc45\nglibc 0:2.42-1.fc45")
         return 0
     if name == "curl":
         url = args[-1]

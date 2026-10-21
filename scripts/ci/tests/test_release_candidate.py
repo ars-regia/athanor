@@ -169,7 +169,7 @@ class Candidate(Tool):
     def fixture(self):
         return json.loads((self.dir / "registry.json").read_text())
 
-    def check(self, run_id="412", ref="refs/heads/iso-v0"):
+    def check(self, run_id="412", ref="refs/heads/iso-v0", **extra):
         return subprocess.run(
             [
                 sys.executable,
@@ -182,7 +182,7 @@ class Candidate(Tool):
             capture_output=True,
             text=True,
             cwd=ROOT,
-            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref},
+            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref, **extra},
         )
 
     def order(self):
@@ -240,6 +240,13 @@ class Candidate(Tool):
         calls = (self.dir / "calls.log").read_text().splitlines()
         self.assertTrue([c for c in calls if c.startswith("podman create")])
         self.assertFalse([c for c in calls if c.split()[:2] in (["podman", "start"], ["podman", "run"])])
+
+    def test_a_class_reason_reaches_the_job_summary(self):
+        self.github(labels={"org.opencontainers.image.revision": ""})
+        summary = self.dir / "summary.md"
+        r = self.check(GITHUB_STEP_SUMMARY=str(summary))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("unlabelled-baseline", summary.read_text())
 
     def test_a_completed_build_is_a_candidate_too(self):
         self.github(run=run_object(status="completed", conclusion="success"))
@@ -344,14 +351,12 @@ class Candidate(Tool):
         self.github(latest=False, extra={"errors": [f"{REG}/athanor-system:latest"]})
         self.refused("athanor-system:latest cannot be read")
 
-    def test_latest_at_the_candidate_is_a_no_op(self):
+    def test_latest_at_the_candidate_refuses_until_the_rerun_rule_exists(self):
         self.github()
         fx = self.fixture()
         fx["tags"][f"{REG}/athanor-system:latest"] = digest(1)
         self.registry(fx)
-        r = self.check()
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.candidate()["order"][0]["verdict"], "equal")
+        self.refused("already the candidate")
 
     def test_an_older_candidate_refuses(self):
         self.github(labels={"org.opencontainers.image.created": "2026-10-12T00:00:00Z"})
