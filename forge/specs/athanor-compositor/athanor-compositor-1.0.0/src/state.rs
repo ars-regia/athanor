@@ -275,9 +275,12 @@ impl State {
     ) -> Arc<ClientState> {
         let grants = match &context {
             Some(_) => Vec::new(),
-            None => match crate::identity::identify(stream.as_fd(), self.process.as_ref()) {
-                Ok(identity) => {
-                    let grants = self.allow_list.grants(&identity, self.process.as_ref());
+            None => match crate::identity::identify(
+                stream.as_fd(),
+                self.process.as_ref(),
+                &self.allow_list,
+            ) {
+                Ok((identity, grants)) => {
                     tracing::debug!(?identity, ?grants, "a client connected");
                     grants
                 }

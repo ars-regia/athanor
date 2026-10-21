@@ -82,7 +82,10 @@ executable is a path under `/usr`, the unit a service or a scope, each interface
 privileged globals the compositor offers. A grant needs the executable's path, the unit, and
 the file: `stat` of `/proc/<pid>/exe` and `stat` of the allow-list's path in the compositor's
 mount namespace must name the same device and inode, since a sandbox whose own `/usr` holds a
-file at the bar's path reads back the bar's path. A bar still running after an update of its
+file at the bar's path reads back the bar's path. The `stat`s run only for a client whose path
+and unit match a line, and the pidfd's pid is read again after them: a `stat` reaches the
+client's own file system and blocks while a FUSE server stalls, and the compositor with it. A
+bar still running after an update of its
 package runs a deleted file, and a connection it opens then is granted nothing until it
 restarts. A missing, unreadable or malformed allow-list grants
 nothing, and so does a peer whose identity cannot be read. Each connection logs its identity and
@@ -109,6 +112,10 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
   same holds for a connection handed to another process. Revision 2 must say whether that is
   acceptable for programs under `/usr`, or ask for a check at each bind, through the pidfd kept
   from connect.
+- A client that names the bar's path and unit, from its own mount namespace with a stalled FUSE
+  mount at that path, still blocks the compositor in the `stat` of its executable. `statx` with
+  `AT_STATX_DONT_SYNC` would read the device and inode without asking the FUSE server; revision
+  2 decides.
 - **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
 - **ext-workspace-v1 is not among OS4's privileged protocols**: every unconfined client may

@@ -22,6 +22,7 @@ use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::backend::{ObjectId, WaylandError};
@@ -621,6 +622,8 @@ struct Running {
     identity: Arc<Mutex<(&'static str, &'static str)>>,
     /// The file its executable opens: the bar's at the start.
     executable_file: Arc<Mutex<FileId>>,
+    /// How many times the compositor has read the file a client's executable opens.
+    executable_stats: Arc<AtomicUsize>,
 }
 
 /// The bar, as the fixture's clients connect by default: its executable and its cgroup.
@@ -641,12 +644,19 @@ const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
 /// The process at the other end of the fixture's sockets, which is the test's own, as whatever
 /// executable, file and cgroup the test sets: the pidfd is read as the compositor reads it. The
 /// compositor's file system holds the bar's executable only.
-struct Fake(Arc<Mutex<(&'static str, &'static str)>>, Arc<Mutex<FileId>>);
+struct Fake(
+    Arc<Mutex<(&'static str, &'static str)>>,
+    Arc<Mutex<FileId>>,
+    Arc<AtomicUsize>,
+);
 
 impl Process for Fake {
-    fn executable(&self, _pid: i32) -> std::io::Result<(PathBuf, FileId)> {
-        let file = *self.1.lock().expect("file");
-        Ok((self.0.lock().expect("identity").0.into(), file))
+    fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
+        Ok(self.0.lock().expect("identity").0.into())
+    }
+    fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
+        self.2.fetch_add(1, Ordering::SeqCst);
+        Ok(*self.1.lock().expect("file"))
     }
     fn cgroup(&self, _pid: i32) -> std::io::Result<String> {
         Ok(self.0.lock().expect("identity").1.into())
@@ -672,8 +682,13 @@ impl Running {
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
         let identity = Arc::new(Mutex::new(BAR));
         let executable_file = Arc::new(Mutex::new(BAR_FILE));
+        let executable_stats = Arc::new(AtomicUsize::new(0));
         state.allow_list = AllowList::parse(FIXTURE_ALLOW_LIST).expect("allow-list");
-        state.process = Box::new(Fake(identity.clone(), executable_file.clone()));
+        state.process = Box::new(Fake(
+            identity.clone(),
+            executable_file.clone(),
+            executable_stats.clone(),
+        ));
         let client_state = state.client_state(&server_end, None);
         state
             .display_handle
@@ -714,6 +729,7 @@ impl Running {
             thread,
             identity,
             executable_file,
+            executable_stats,
         }
     }
 
@@ -2008,6 +2024,41 @@ fn task5_another_file_at_the_bar_s_path_gets_standard_globals() {
     *run.executable_file.lock().expect("file") = FileId { dev: 1, ino: 2 };
     let other = Local::connect(&mut run, None);
     assert!(!other.privileged(), "another file at the bar's path");
+    run.stop();
+}
+
+/// Only a client that names an allow-listed executable and unit has its executable's file read:
+/// that read can block on the client's own file system, a stalled FUSE mount, and the
+/// compositor with it.
+#[test]
+fn task5_only_an_allow_listed_name_has_its_file_read() {
+    let mut run = Running::start(None);
+    let stats = Arc::clone(&run.executable_stats);
+    let before = stats.load(Ordering::SeqCst);
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    Local::connect(&mut run, None);
+    assert_eq!(
+        stats.load(Ordering::SeqCst),
+        before,
+        "another executable, another unit"
+    );
+    *run.identity.lock().expect("identity") = (SH, BAR.1);
+    Local::connect(&mut run, None);
+    assert_eq!(
+        stats.load(Ordering::SeqCst),
+        before,
+        "another executable, the bar's unit"
+    );
+    *run.identity.lock().expect("identity") = (BAR.0, OTHER_UNIT);
+    Local::connect(&mut run, None);
+    assert_eq!(
+        stats.load(Ordering::SeqCst),
+        before,
+        "the bar's executable, another unit"
+    );
+    *run.identity.lock().expect("identity") = BAR;
+    Local::connect(&mut run, None);
+    assert_eq!(stats.load(Ordering::SeqCst), before + 1, "the bar");
     run.stop();
 }
 
