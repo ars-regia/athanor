@@ -5,8 +5,9 @@
 use crate::render::Error;
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::io::{Cursor, Read};
+use std::ops::RangeInclusive;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use vello_cpu::peniko::ImageAlphaType;
 use vello_cpu::{PixelMetadata, Pixmap};
@@ -17,6 +18,78 @@ pub const FALLBACK_ICON: &str = "application-x-executable-symbolic";
 /// The extensions an icon file may have, in the specification's order of preference.
 const EXTENSIONS: [&str; 2] = ["png", "svg"];
 
+/// The longest side of an image, in pixels: a PNG whose header names a larger one is refused
+/// before it is decoded, and an SVG is never rasterised larger. An icon is drawn far smaller.
+pub const MAX_IMAGE_SIDE: u16 = 1024;
+
+/// The largest PNG or SVG file read, in bytes.
+const MAX_IMAGE_FILE: u64 = 4 << 20;
+
+/// The largest `index.theme` read, in bytes.
+const MAX_INDEX_FILE: u64 = 1 << 20;
+
+/// The bounds of a directory's `Size`, `MinSize` and `MaxSize`, `Scale` and `Threshold`. They keep
+/// the lookup's arithmetic far from overflow: a directory with a value outside them is skipped.
+const SIZES: RangeInclusive<i64> = 1..=4096;
+const SCALES: RangeInclusive<i64> = 1..=16;
+const THRESHOLDS: RangeInclusive<i64> = 0..=4096;
+
+/// The bytes of the regular file `path`, refused when it is larger than `cap` bytes.
+fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, Error> {
+    // A FIFO or a device would block the open or never end: only a regular file is opened.
+    if !fs::metadata(path)?.is_file() {
+        return Err(format!("{}: not a regular file", path.display()).into());
+    }
+    let file = File::open(path)?;
+    let len = file.metadata()?.len();
+    if len > cap {
+        return Err(format!("{}: {len} bytes, more than {cap}", path.display()).into());
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(len)?);
+    // The file may grow after the check: never read past the cap.
+    file.take(cap + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > cap {
+        return Err(format!("{}: more than {cap} bytes", path.display()).into());
+    }
+    Ok(bytes)
+}
+
+/// The width and height a PNG's header names, from its first chunk, IHDR, which the format
+/// requires right after the signature.
+fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let chunk = bytes.strip_prefix(b"\x89PNG\r\n\x1a\n")?;
+    // The chunk's length, its type, then the width and the height, each four bytes.
+    if chunk.get(4..8)? != b"IHDR" {
+        return None;
+    }
+    let word = |at: usize| Some(u32::from_be_bytes(chunk.get(at..at + 4)?.try_into().ok()?));
+    Some((word(8)?, word(12)?))
+}
+
+/// Decodes a PNG once its header names a size within [`MAX_IMAGE_SIDE`]: the decoder allocates
+/// the whole image from the header before it reads a pixel.
+fn decode_png(bytes: &[u8]) -> Result<Pixmap, Error> {
+    let (width, height) = png_size(bytes).ok_or("not a PNG")?;
+    let side = u32::from(MAX_IMAGE_SIDE);
+    if width > side || height > side {
+        return Err(format!("a PNG of {width}x{height} pixels, over {side} on a side").into());
+    }
+    Ok(Pixmap::from_png(Cursor::new(bytes))?)
+}
+
+/// Whether `name` names an icon or a theme and nothing else: not empty, not `.` or `..`, and
+/// without a `/`. Names are not paths.
+fn is_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains('/')
+}
+
+/// Whether `dir`, a theme's subdirectory, stays inside the theme: relative and without `..`.
+fn is_subdirectory(dir: &str) -> bool {
+    Path::new(dir)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
 /// A decoded image, cheap to clone.
 #[derive(Clone, Debug)]
 pub struct Image {
@@ -25,11 +98,12 @@ pub struct Image {
 
 impl Image {
     /// Reads a PNG, or rasterises an SVG so that its longer side is `px` pixels (a PNG keeps its
-    /// own size, and is scaled when drawn).
+    /// own size, and is scaled when drawn). Neither may be larger than [`MAX_IMAGE_SIDE`] on a
+    /// side, and `px` is held to it.
     pub fn from_file(path: &Path, px: u16) -> Result<Self, Error> {
         let pixmap = match path.extension().and_then(|e| e.to_str()) {
-            Some("png") => Pixmap::from_png(BufReader::new(File::open(path)?))?,
-            Some("svg") => rasterise(&fs::read(path)?, px)?,
+            Some("png") => decode_png(&read_capped(path, MAX_IMAGE_FILE)?)?,
+            Some("svg") => rasterise(&read_capped(path, MAX_IMAGE_FILE)?, px)?,
             _ => return Err(format!("{}: not a PNG or an SVG", path.display()).into()),
         };
         Ok(Self {
@@ -54,9 +128,19 @@ impl Image {
 
 fn rasterise(svg: &[u8], px: u16) -> Result<Pixmap, Error> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_data(svg, &usvg::Options::default())?;
+    let options = usvg::Options {
+        // An icon is drawn from its own file alone. usvg's default resolver reads any path an
+        // <image> or a <feImage> names (/dev/zero or a FIFO included) and decodes data: URLs;
+        // icons need neither.
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_data(svg, &options)?;
     let size = tree.size();
-    let scale = f32::from(px) / size.width().max(size.height());
+    let scale = f32::from(px.min(MAX_IMAGE_SIDE)) / size.width().max(size.height());
     let dimension = |side: f32| (side * scale).ceil().max(1.0) as u32;
     let (w, h) = (dimension(size.width()), dimension(size.height()));
     let mut target = tiny_skia::Pixmap::new(w, h).ok_or("an SVG of no area")?;
@@ -161,16 +245,23 @@ impl Index {
             .unwrap_or_default();
         let directories = list(theme, "Directories")
             .into_iter()
+            .filter(|path| is_subdirectory(path))
             .filter_map(|path| {
                 let keys = &groups.iter().find(|(name, _)| *name == path)?.1;
-                let number = |name: &str| get(keys, name).and_then(|v| v.parse::<i64>().ok());
-                let size = number("Size")?;
+                // A value out of its bounds, or not a number, skips the directory; one that is
+                // absent takes its default.
+                let number =
+                    |name: &str, default: i64, bounds: RangeInclusive<i64>| match get(keys, name) {
+                        None => Some(default),
+                        Some(value) => value.parse().ok().filter(|n| bounds.contains(n)),
+                    };
+                let size = number("Size", 0, SIZES)?;
                 Some(Directory {
                     size,
-                    scale: number("Scale").unwrap_or(1),
-                    min: number("MinSize").unwrap_or(size),
-                    max: number("MaxSize").unwrap_or(size),
-                    threshold: number("Threshold").unwrap_or(2),
+                    scale: number("Scale", 1, SCALES)?,
+                    min: number("MinSize", size, SIZES)?,
+                    max: number("MaxSize", size, SIZES)?,
+                    threshold: number("Threshold", 2, THRESHOLDS)?,
                     coverage: match get(keys, "Type") {
                         Some("Fixed") => Coverage::Fixed,
                         Some("Scalable") => Coverage::Scalable,
@@ -181,7 +272,10 @@ impl Index {
             })
             .collect();
         Self {
-            inherits: list(theme, "Inherits"),
+            inherits: list(theme, "Inherits")
+                .into_iter()
+                .filter(|name| is_name(name))
+                .collect(),
             directories,
         }
     }
@@ -244,6 +338,9 @@ impl IconTheme {
     /// `hicolor`, each by the directory that matches `size` or else the closest; then an icon
     /// that belongs to no theme.
     pub fn lookup(&self, name: &str, size: u16, scale: u16) -> Option<PathBuf> {
+        if !is_name(name) {
+            return None;
+        }
         let (size, scale) = (i64::from(size), i64::from(scale.max(1)));
         self.chain()
             .iter()
@@ -257,7 +354,7 @@ impl IconTheme {
         let mut chain = Vec::new();
         let mut pending = vec![self.theme.clone()];
         while let Some(theme) = pending.pop() {
-            if !seen.insert(theme.clone()) {
+            if !is_name(&theme) || !seen.insert(theme.clone()) {
                 continue;
             }
             if let Some(index) = self.index(&theme) {
@@ -275,7 +372,10 @@ impl IconTheme {
     fn index(&self, theme: &str) -> Option<Index> {
         self.roots
             .iter()
-            .find_map(|root| fs::read_to_string(root.join(theme).join("index.theme")).ok())
+            .find_map(|root| {
+                read_capped(&root.join(theme).join("index.theme"), MAX_INDEX_FILE).ok()
+            })
+            .and_then(|bytes| String::from_utf8(bytes).ok())
             .map(|text| Index::parse(&text))
     }
 
@@ -375,6 +475,147 @@ mod tests {
         assert_eq!((svg.width(), svg.height()), (96, 96));
         let pixel = svg.pixmap().sample(48, 48);
         assert_eq!((pixel.r, pixel.g, pixel.b, pixel.a), (0xcc, 0, 0, 0xff));
+        Ok(())
+    }
+
+    /// A fresh directory holding `files`, each a path relative to it and its bytes.
+    pub(super) fn scratch(test: &str, files: &[(&str, &[u8])]) -> Result<PathBuf, Error> {
+        let dir = std::env::temp_dir().join(format!(
+            "athanor-toolkit-icon-{}-{test}",
+            std::process::id()
+        ));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+        for (path, bytes) in files {
+            let path = dir.join(path);
+            fs::create_dir_all(path.parent().ok_or("a file with no directory")?)?;
+            fs::write(path, bytes)?;
+        }
+        Ok(dir)
+    }
+
+    const PNG: &[u8] = include_bytes!("../tests/icons/fixture/16x16/apps/themed.png");
+
+    #[test]
+    fn a_png_whose_header_names_a_huge_image_is_refused_before_it_is_decoded() -> Result<(), Error>
+    {
+        // The signature, then IHDR: 65535 by 65535 pixels of 8-bit RGBA, 16 GiB decoded.
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&[
+            0, 0, 0xff, 0xff, 0, 0, 0xff, 0xff, 8, 6, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        let dir = scratch("huge-png", &[("huge.png", &png)])?;
+        let error = Image::from_file(&dir.join("huge.png"), 16)
+            .err()
+            .ok_or("a 65535x65535 PNG was decoded")?;
+        assert!(error.to_string().contains("over 1024 on a side"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn files_over_their_cap_are_not_read() -> Result<(), Error> {
+        let mut big = PNG.to_vec();
+        big.resize(4 << 20 | 1, 0);
+        let index = format!(
+            "[Icon Theme]\nDirectories=apps\n[apps]\nSize=16\nType=Fixed\n#{}\n",
+            "x".repeat(1 << 20)
+        );
+        let dir = scratch(
+            "caps",
+            &[
+                ("big.png", &big),
+                ("t/index.theme", index.as_bytes()),
+                ("t/apps/icon.png", PNG),
+            ],
+        )?;
+        let error = Image::from_file(&dir.join("big.png"), 16)
+            .err()
+            .ok_or("a PNG over 4 MiB was read")?;
+        assert!(error.to_string().contains("more than"), "{error}");
+        // An index.theme over 1 MiB is not read: the theme has no directories.
+        assert_eq!(IconTheme::new(vec![dir], "t").resolve("icon", 16, 1), None);
+        Ok(())
+    }
+
+    #[test]
+    fn an_svg_reads_no_file_it_names() -> Result<(), Error> {
+        let red = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/icons/fixture/scalable/apps/themed.svg");
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="16" height="16"><image xlink:href="{}" width="16" height="16"/></svg>"#,
+            red.display()
+        );
+        let dir = scratch("svg-href", &[("icon.svg", svg.as_bytes())])?;
+        let image = Image::from_file(&dir.join("icon.svg"), 16)?;
+        // The red square it names is not drawn.
+        assert_eq!(image.pixmap().sample(8, 8).a, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn an_svg_naming_dev_zero_renders_at_once() -> Result<(), Error> {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="16" height="16"><filter id="f"><feImage xlink:href="/dev/zero"/></filter><image xlink:href="/dev/zero" width="16" height="16"/><rect width="16" height="16" filter="url(#f)"/></svg>"#;
+        let dir = scratch("svg-dev-zero", &[("icon.svg", svg)])?;
+        let started = std::time::Instant::now();
+        Image::from_file(&dir.join("icon.svg"), 16)?;
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_with_values_out_of_bounds_is_skipped() -> Result<(), Error> {
+        let index = b"[Icon Theme]\nDirectories=huge,scaled,apps\n\
+            [huge]\nSize=9223372036854775807\nType=Threshold\n\
+            [scaled]\nSize=16\nScale=9223372036854775807\n\
+            [apps]\nSize=16\nType=Fixed\n";
+        let dir = scratch(
+            "bounds",
+            &[
+                ("t/index.theme", index),
+                ("t/huge/icon.png", PNG),
+                ("t/scaled/icon.png", PNG),
+                ("t/apps/icon.png", PNG),
+            ],
+        )?;
+        let theme = IconTheme::new(vec![dir], "t");
+        assert_eq!(tail(theme.resolve("icon", 16, 1)), "t/apps/icon.png");
+        assert_eq!(tail(theme.resolve("icon", 512, 16)), "t/apps/icon.png");
+        Ok(())
+    }
+
+    #[test]
+    fn names_and_directories_are_not_paths() -> Result<(), Error> {
+        let outside = scratch("paths-outside", &[("escaped.png", PNG)])?;
+        let index = format!(
+            "[Icon Theme]\nInherits=x/evil\nDirectories=apps,../outside,{abs}\n\
+             [apps]\nSize=16\nType=Fixed\n\
+             [../outside]\nSize=16\nType=Fixed\n\
+             [{abs}]\nSize=16\nType=Fixed\n",
+            abs = outside.display()
+        );
+        let evil = b"[Icon Theme]\nDirectories=apps\n[apps]\nSize=16\nType=Fixed\n";
+        let dir = scratch(
+            "paths",
+            &[
+                ("t/index.theme", index.as_bytes()),
+                ("t/apps/ok.png", PNG),
+                ("outside/escaped.png", PNG),
+                ("x/evil/index.theme", evil),
+                ("x/evil/apps/evil.png", PNG),
+            ],
+        )?;
+        let theme = IconTheme::new(vec![dir.clone()], "t");
+        assert_eq!(tail(theme.resolve("ok", 16, 1)), "t/apps/ok.png");
+        assert_eq!(theme.resolve("escaped", 16, 1), None);
+        assert_eq!(theme.resolve("evil", 16, 1), None);
+        assert_eq!(theme.resolve("apps/ok", 16, 1), None);
+        assert_eq!(theme.resolve("../t/apps/ok", 16, 1), None);
+        assert_eq!(
+            IconTheme::new(vec![dir], "x/evil").resolve("evil", 16, 1),
+            None
+        );
         Ok(())
     }
 }

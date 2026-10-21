@@ -30,8 +30,10 @@ pub trait Canvas {
     fn fill_path(&mut self, path: &BezPath);
     /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
-    /// Fills a rectangle with an image, scaled to cover it.
-    fn fill_image(&mut self, rect: &Rect, pixmap: &Arc<Pixmap>);
+    /// Fills `rect` with an image, scaled to it on each axis: the caller keeps the aspect ratio.
+    /// vello_cpu reads the pixmap as it draws; vello_gpu draws the copy uploaded to its atlas
+    /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no copy of.
+    fn fill_image(&mut self, resources: &Self::Resources, rect: &Rect, pixmap: &Arc<Pixmap>);
     /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
@@ -47,7 +49,7 @@ pub trait Canvas {
 }
 
 macro_rules! canvas {
-    ($canvas:ty, $resources:ty) => {
+    ($canvas:ty, $resources:ty, $image_source:path, $glyph_resources:path) => {
         impl Canvas for $canvas {
             type Resources = $resources;
             fn set_transform(&mut self, transform: Affine) {
@@ -68,8 +70,10 @@ macro_rules! canvas {
             fn stroke_path(&mut self, path: &BezPath) {
                 <$canvas>::stroke_path(self, path);
             }
-            fn fill_image(&mut self, rect: &Rect, pixmap: &Arc<Pixmap>) {
-                let source = ImageSource::Pixmap(pixmap.clone());
+            fn fill_image(&mut self, resources: &$resources, rect: &Rect, pixmap: &Arc<Pixmap>) {
+                let Some(source) = $image_source(resources, pixmap) else {
+                    return;
+                };
                 let image = Image {
                     image: source,
                     sampler: ImageSampler::default(),
@@ -99,7 +103,7 @@ macro_rules! canvas {
                 size: f32,
                 glyphs: impl Iterator<Item = Glyph> + Clone,
             ) -> Result<(), Error> {
-                self.glyph_run(resources, font)
+                self.glyph_run($glyph_resources(resources), font)
                     .font_size(size)
                     .hint(true)
                     .fill_glyphs(glyphs)?;
@@ -109,9 +113,24 @@ macro_rules! canvas {
     };
 }
 
-canvas!(RenderContext, vello_cpu::Resources);
+/// vello_cpu draws an image straight from its pixmap.
+fn cpu_image(_: &vello_cpu::Resources, pixmap: &Arc<Pixmap>) -> Option<ImageSource> {
+    Some(ImageSource::Pixmap(Arc::clone(pixmap)))
+}
+
+/// vello_cpu's resources are its glyph cache.
+fn cpu_glyphs(resources: &mut vello_cpu::Resources) -> &mut vello_cpu::Resources {
+    resources
+}
+
+canvas!(RenderContext, vello_cpu::Resources, cpu_image, cpu_glyphs);
 #[cfg(feature = "gpu")]
-canvas!(vello_gpu::Scene, vello_gpu::Resources);
+canvas!(
+    vello_gpu::Scene,
+    crate::gpu::Resources,
+    crate::gpu::Resources::image,
+    crate::gpu::Resources::glyphs
+);
 
 fn color(c: Rgba) -> Color {
     let [r, g, b, a] = c.0;
@@ -309,7 +328,7 @@ pub fn paint<C: Canvas>(
                     f64::from(r.x + r.w),
                     f64::from(r.y + r.h),
                 );
-                ctx.fill_image(&rect, image.pixmap());
+                ctx.fill_image(resources, &rect, image.pixmap());
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {

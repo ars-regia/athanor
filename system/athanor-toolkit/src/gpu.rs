@@ -7,13 +7,16 @@
 #![allow(unsafe_code)]
 
 use crate::render::{layout, paint, Error};
-use crate::widget::Ui;
+use crate::widget::{Kind, Ui};
 use std::future::Future;
 use std::pin::pin;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
-use vello_gpu::{ClearSettings, RenderSize, RenderTargetConfig, TargetInit, TextureBindings};
+use vello_gpu::{
+    ClearSettings, ImageId, ImageSource, Pixmap, RenderSize, RenderTargetConfig, TargetInit,
+    TextureBindings,
+};
 use wayland_client::{protocol::wl_surface::WlSurface, Connection, Proxy};
 use wgpu::rwh::{HasDisplayHandle, RawWindowHandle, WaylandWindowHandle};
 use wgpu::{CurrentSurfaceTexture, PresentMode, TextureFormat};
@@ -25,12 +28,45 @@ pub struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     renderer: vello_gpu::Renderer,
-    resources: vello_gpu::Resources,
+    resources: Resources,
     scene: vello_gpu::Scene,
     /// The first error wgpu reported outside a call's result, which the next frame returns.
     errors: Arc<Mutex<Option<String>>>,
     /// The adapter wgpu picked, as the start-up line names it.
     pub adapter: String,
+}
+
+/// The total area of the images uploaded to vello_gpu's atlas, in pixels: one atlas of the eight
+/// it may grow to. vello_gpu panics when an upload finds no room (`upload_image` unwraps the
+/// allocation), and an image is at most `MAX_IMAGE_SIDE` on a side, so the room this leaves
+/// keeps the packing from failing.
+// ponytail: an area budget, not the atlas's own accounting; read the allocator's free space
+// if vello_gpu ever exposes it.
+const ATLAS_BUDGET: u64 = 4096 * 4096;
+
+/// vello_gpu's resources, and the images of the window uploaded to its atlas. vello_gpu 0.3
+/// panics on an image paint that carries its pixmap ("pixmap image sources are not supported
+/// by Vello GPU"): an image must be uploaded first and drawn by the id the upload returns.
+pub struct Resources {
+    vello: vello_gpu::Resources,
+    /// Each uploaded pixmap with its id. The `Arc` is held, so that the address it is matched
+    /// by is not reused while it is listed.
+    images: Vec<(Arc<Pixmap>, ImageId)>,
+}
+
+impl Resources {
+    /// The uploaded copy of `pixmap`, if there is one.
+    pub(crate) fn image(&self, pixmap: &Arc<Pixmap>) -> Option<ImageSource> {
+        self.images
+            .iter()
+            .find(|(uploaded, _)| Arc::ptr_eq(uploaded, pixmap))
+            .map(|(_, id)| ImageSource::opaque_id(*id))
+    }
+
+    /// What vello_gpu draws glyphs with.
+    pub(crate) fn glyphs(&mut self) -> &mut vello_gpu::Resources {
+        &mut self.vello
+    }
 }
 
 /// The output of a future wgpu resolves at once, as its native backends do for adapters and
@@ -128,7 +164,10 @@ impl Gpu {
             queue,
             config,
             renderer,
-            resources,
+            resources: Resources {
+                vello: resources,
+                images: Vec::new(),
+            },
             scene: vello_gpu::Scene::new(1, 1),
             errors,
             adapter: adapter_name,
@@ -145,6 +184,8 @@ impl Gpu {
             self.surface.configure(&self.device, &self.config);
         }
         self.scene.reset_and_resize(width, height);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.upload_images(ui, &mut encoder)?;
         paint(ui, scale, &mut self.scene, &mut self.resources)?;
         let frame = match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) | CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -153,10 +194,9 @@ impl Gpu {
             other => return Err(format!("the window's surface has no frame: {other:?}").into()),
         };
         let view = frame.texture.create_view(&Default::default());
-        let mut encoder = self.device.create_command_encoder(&Default::default());
         self.renderer.render(
             &self.scene,
-            &mut self.resources,
+            &mut self.resources.vello,
             &self.device,
             &self.queue,
             &mut encoder,
@@ -174,6 +214,50 @@ impl Gpu {
         // commits the surface after this, so its frame callback comes in either case.
         self.check()?;
         Ok((width, height))
+    }
+
+    /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
+    /// holds any more. Fails, uploading nothing more, when the images would pass
+    /// [`ATLAS_BUDGET`].
+    fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) -> Result<(), Error> {
+        let wanted: Vec<&Arc<Pixmap>> = (0..ui.len())
+            .filter_map(|id| match &ui.widget(id).kind {
+                Kind::Image { image, .. } => Some(image.pixmap()),
+                _ => None,
+            })
+            .collect();
+        let resources = &mut self.resources;
+        let (kept, gone): (Vec<_>, Vec<_>) = std::mem::take(&mut resources.images)
+            .into_iter()
+            .partition(|(uploaded, _)| wanted.iter().any(|w| Arc::ptr_eq(w, uploaded)));
+        for (_, id) in gone {
+            self.renderer
+                .destroy_image(&mut resources.vello, encoder, id);
+        }
+        resources.images = kept;
+        let area = |pixmap: &Pixmap| u64::from(pixmap.width()) * u64::from(pixmap.height());
+        let mut used: u64 = resources.images.iter().map(|(p, _)| area(p)).sum();
+        for pixmap in wanted {
+            if resources.image(pixmap).is_some() {
+                continue;
+            }
+            used += area(pixmap);
+            if used > ATLAS_BUDGET {
+                return Err(format!(
+                    "the window's images pass the GPU atlas budget of {ATLAS_BUDGET} pixels"
+                )
+                .into());
+            }
+            let id = self.renderer.upload_image(
+                &mut resources.vello,
+                &self.device,
+                &self.queue,
+                encoder,
+                pixmap,
+            );
+            resources.images.push((Arc::clone(pixmap), id));
+        }
+        Ok(())
     }
 
     /// Fails with the first error wgpu reported since the last check.
