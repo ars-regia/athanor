@@ -3,7 +3,9 @@
 # call-system-image.yml, run inside the builder with the workspace mounted at /workspace and
 # the working directory /workspace/forge. The workflow starts the container; this runs in it.
 #
-# Environment: GITHUB_TOKEN GITHUB_ACTOR GITHUB_REPOSITORY_OWNER
+# Environment: GITHUB_TOKEN GITHUB_ACTOR GITHUB_REPOSITORY_OWNER GITHUB_REF, and for the keyless
+# signature of the tiers (UD44) GITHUB_REPOSITORY GITHUB_SERVER_URL ACTIONS_ID_TOKEN_REQUEST_URL
+# ACTIONS_ID_TOKEN_REQUEST_TOKEN
 # Writes /workspace/tier-digests/tier-digests.json, the digests the image build installs (UD28).
 set -euo pipefail
 
@@ -28,6 +30,8 @@ mkdir -p /workspace/var-tmp/containers
 export CONTAINERS_STORAGE_CONF=/var/tmp/storage.conf
 
 echo "${GITHUB_TOKEN}" | buildah login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+export DOCKER_CONFIG=/var/tmp/docker
+echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 bash "$here/fetch_repo_rpms.sh" "${GITHUB_REPOSITORY_OWNER}"
 
 # The tier images, and the digests the image build of this run installs (UD28).

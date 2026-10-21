@@ -3,7 +3,7 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
+use crate::widget::{knob_rect, label_x, mark_rect, mark_size, Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::{Color, FontData, ImageSampler};
@@ -387,8 +387,7 @@ pub fn paint<C: Canvas>(
                     }
                 }
                 if let Some(layout) = &widget.text {
-                    // The mark is at the left when `ui.rtl == is_switch`, as `mark_rect` puts it.
-                    let x = if ui.rtl == is_switch { r.x + r.w - layout.width() } else { r.x };
+                    let x = label_x(r, mark, ui.rtl, is_switch, t.gap, layout.width());
                     let y = r.y + (r.h - layout.height()) / 2.0;
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }

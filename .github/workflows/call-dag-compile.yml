@@ -19,7 +19,6 @@ env:
   # the repository's: the same knob forge-ghcr-cleanup.yml and promote-stable.yml read.
   REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
   BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ inputs.builder_hash }}
-  FEDORA_VERSION: 43
   SCCACHE_CACHE_SIZE: 10G
 
 permissions:
