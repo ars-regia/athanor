@@ -121,7 +121,7 @@ NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/s
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
 # Kept by hand, not by kernel-bump.yml, but an input of the kernel configuration like the pins: a
 # builder move can change it with them (clang 23 drops kernel-local's kmalloc partition pin), and
-# kernel-build.yml builds and boots it with them.
+# the kernel job of a pull request (call-kernel.yml) builds and boots it with them.
 KERNEL_CONFIG_FILES=(forge/specs/azoth/kernel-local)
 
 TMP=$(mktemp -d)
