@@ -1,11 +1,10 @@
 //! Who a client is, and what that grants it (doc_own_stack.md OS4, C1 task 5). The identity is
-//! read once, when the client connects: the peer's pidfd, then through its pid the executable and
-//! the cgroup, from which the systemd unit is derived. An allow-list under `/usr` maps
-//! (executable, unit) pairs to privileged globals. A client that `exec`s after connecting keeps
+//! read once, when the client connects: the peer's pidfd from `SO_PEERPIDFD`, then through its
+//! pid the executable and the cgroup, from which the systemd unit is derived. An allow-list
+//! under `/usr` maps (executable, unit) pairs to privileged globals. A client that `exec`s after connecting keeps
 //! what it connected as; unconfined code running as the user is out of scope (OS4).
 
 use crate::Error;
-use smithay::reexports::rustix;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::path::{Component, Path, PathBuf};
@@ -54,16 +53,6 @@ pub struct Identity {
     pub unit: Option<String>,
 }
 
-/// How the peer's pidfd was had.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Mechanism {
-    /// `SO_PEERPIDFD` (Linux 6.5): the process that connected, with no pid-reuse race.
-    PeerPidfd,
-    /// `SO_PEERCRED` then `pidfd_open`: the pid can name another process if the peer exited
-    /// and its pid was reused before the pidfd was opened.
-    PeerCred,
-}
-
 /// Reads a process by its pid: `/proc` in the compositor, a fake in the fixture.
 pub trait Process {
     fn executable(&self, pid: i32) -> io::Result<PathBuf>;
@@ -83,15 +72,11 @@ impl Process for Proc {
     }
 }
 
-/// The identity of the process at the other end of `socket`, and how its pidfd was had. The
-/// executable and the cgroup are read through the pidfd's pid, which is then read again: unless
-/// it still names the same live process, the reads may be another process's, and the peer has
-/// no identity.
-pub fn identify(
-    socket: BorrowedFd<'_>,
-    process: &dyn Process,
-) -> Result<(Identity, Mechanism), Error> {
-    let (pidfd, mechanism) = peer_pidfd(socket)?;
+/// The identity of the process at the other end of `socket`. The executable and the cgroup are
+/// read through the pid of the peer's pidfd, which is then read again: unless it still names
+/// the same live process, the reads may be another process's, and the peer has no identity.
+pub fn identify(socket: BorrowedFd<'_>, process: &dyn Process) -> Result<Identity, Error> {
+    let pidfd = so_peerpidfd(socket)?;
     let pid = pidfd_pid(pidfd.as_fd())?;
     let executable = process.executable(pid)?;
     let cgroup = process.cgroup(pid)?;
@@ -99,22 +84,12 @@ pub fn identify(
         return Err("the peer exited while it was read".into());
     }
     let unit = unit(&cgroup).map(str::to_owned);
-    Ok((Identity { executable, unit }, mechanism))
+    Ok(Identity { executable, unit })
 }
 
-/// The peer's pidfd: `SO_PEERPIDFD`, or on a kernel without it `SO_PEERCRED` and `pidfd_open`.
-fn peer_pidfd(socket: BorrowedFd<'_>) -> io::Result<(OwnedFd, Mechanism)> {
-    match so_peerpidfd(socket) {
-        Ok(pidfd) => Ok((pidfd, Mechanism::PeerPidfd)),
-        Err(error) if error.raw_os_error() == Some(libc::ENOPROTOOPT) => {
-            let pid = rustix::net::sockopt::socket_peercred(socket)?.pid;
-            let pidfd = rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())?;
-            Ok((pidfd, Mechanism::PeerCred))
-        }
-        Err(error) => Err(error),
-    }
-}
-
+/// The peer's pidfd, from `SO_PEERPIDFD` (Linux 6.5, older than every kernel Athanor ships).
+/// There is no fallback: `SO_PEERCRED` names a pid, which can be reused before it is opened,
+/// and is 0 for a peer outside the compositor's pid namespace. Without it, no identity.
 #[allow(unsafe_code)]
 fn so_peerpidfd(socket: BorrowedFd<'_>) -> io::Result<OwnedFd> {
     let mut fd: libc::c_int = -1;
@@ -131,7 +106,13 @@ fn so_peerpidfd(socket: BorrowedFd<'_>) -> io::Result<OwnedFd> {
         )
     };
     if done != 0 {
-        return Err(io::Error::last_os_error());
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ENOPROTOOPT) {
+            return Err(io::Error::other(
+                "the kernel has no SO_PEERPIDFD (Linux 6.5)",
+            ));
+        }
+        return Err(error);
     }
     if fd < 0 {
         return Err(io::Error::other("SO_PEERPIDFD returned no descriptor"));
@@ -395,12 +376,20 @@ mod tests {
         }
     }
 
+    /// A socket with no peer has no pidfd, and so no identity: no other way to a pid is tried.
+    #[test]
+    fn a_socket_with_no_peer_has_no_identity() {
+        let unbound = std::os::unix::net::UnixDatagram::unbound().expect("socket");
+        assert!(identify(unbound.as_fd(), &Proc).is_err());
+    }
+
     /// The production path, on the test's own process at the other end of a socket pair.
     #[test]
     fn the_identity_of_this_process_is_read_through_its_pidfd() {
         let (server, _client) = UnixStream::pair().expect("socket pair");
-        let (identity, mechanism) = identify(server.as_fd(), &Proc).expect("identity");
-        eprintln!("peer identity through {mechanism:?}: {identity:?}");
+        // SO_PEERPIDFD is the only way to the peer's pidfd: an identity proves the kernel has it.
+        let identity = identify(server.as_fd(), &Proc).expect("identity through SO_PEERPIDFD");
+        eprintln!("peer identity through SO_PEERPIDFD: {identity:?}");
         let executable = std::env::current_exe().expect("executable");
         assert_eq!(
             identity.executable,

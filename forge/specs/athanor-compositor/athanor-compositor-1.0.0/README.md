@@ -70,9 +70,9 @@ output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox
 see none of these globals but the idle notifier, nor the security context manager.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
-connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5; on an older
-kernel `SO_PEERCRED` and `pidfd_open`, which leaves the pid-reuse race open, and the log says
-which), the pidfd's pid from its fdinfo, then `/proc/<pid>/exe` and `/proc/<pid>/cgroup`, and
+connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
+every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse
+race open), the pidfd's pid from its fdinfo, then `/proc/<pid>/exe` and `/proc/<pid>/cgroup`, and
 reads the pidfd's pid again: unless it still names the same process, nothing is granted. The
 unit is the first component of the cgroup v2 path that is not a slice, below the user manager
 for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub-cgroup after
@@ -115,6 +115,6 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
   `rig.sh compositor-globals` checks that `wayland-info`, outside any unit, is refused the
   privileged globals; the grant itself is checked by the fixture only, with the executable and
   the cgroup faked and the pidfd real.
-- In the rig, on the laptop's Azoth 7.x kernel, the peer's pidfd comes from `SO_PEERPIDFD`
-  (`the_identity_of_this_process_is_read_through_its_pidfd` prints the mechanism). The
-  `SO_PEERCRED` fallback runs on no kernel the tests reach.
+- A kernel without `SO_PEERPIDFD` answers `ENOPROTOOPT`, and no client is granted anything;
+  no tested kernel lacks it, so that answer itself is not exercised
+  (`a_socket_with_no_peer_has_no_identity` checks the refusal on another error, `ENODATA`).
