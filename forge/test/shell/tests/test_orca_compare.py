@@ -55,6 +55,28 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Name entry.'", lines[0])
 
+    def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
+        lines, failures = compare.compare(
+            ["A switch check box checked.", "A switch check box not checked.",
+             "Un interruttore casella di spunta spuntata."],
+            ["A switch toggle button pressed.", "A switch toggle button not pressed.",
+             "Un interruttore pulsante di commutazione premuto."],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'A switch toggle button pressed.'", lines[0])
+
+    def test_a_check_box_that_is_not_a_switch_is_matched_as_it_is_said(self):
+        # The anchor is the switch's label with the role and state words: a real check box, or a
+        # switch spoken with other words, still fails.
+        for reference, heard in [
+            ("Option one check box checked.", "Option one toggle button pressed."),
+            ("A switch check box checked.", "A switch toggle button not pressed."),
+            ("A switch check box checked.", "A switch checked."),
+        ]:
+            self.assertEqual(
+                compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
+            )
+
     def test_a_label_that_ends_in_text_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Sample text"], ["Sample text"])[1], [])
         self.assertEqual(compare.compare(["Sample text"], ["Sample entry"])[1], ["'Sample text': missing"])

@@ -21,6 +21,24 @@ from pathlib import Path
 # and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
 # as an entry's. Only that line is rewritten: Orca ends a field's line with a full stop and a
 # label's without, so a label such as "Sample text" is matched as it is said.
+#
+# And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
+# button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` key
+# of its strings.tsv) with the role and the state words together is rewritten: a real check box,
+# whatever its label, spoken as a toggle button still fails.
+SWITCH_LABELS = [
+    line.split("\t")[1:]
+    for line in (Path(__file__).resolve().parents[3] / "system/athanor-toolkit/gallery/strings.tsv")
+    .read_text(encoding="utf-8")
+    .splitlines()
+    if line.startswith("switch\t")
+][0]
+SWITCH_SPEECH = {
+    "check box checked.": "toggle button pressed.",
+    "check box not checked.": "toggle button not pressed.",
+    "casella di spunta spuntata.": "pulsante di commutazione premuto.",
+    "casella di spunta non spuntata.": "pulsante di commutazione non premuto.",
+}
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
 
@@ -35,6 +53,10 @@ def heard_as(utterance):
     for role, said in SAME_FIELD_ROLE.items():
         if utterance.endswith(f" {role}."):
             yield f"{utterance[: -len(role) - 1]}{said}."
+    for label in SWITCH_LABELS:
+        for gtk, said in SWITCH_SPEECH.items():
+            if utterance == f"{label} {gtk}":
+                yield f"{label} {said}"
 
 
 def compare(reference, transcript):
