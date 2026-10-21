@@ -422,7 +422,8 @@ impl Ui {
     /// Adds a slider named `name` for assistive technologies, from `min` to `max` in steps of
     /// `step` counted from `min` (`max` is always a value, even when the step does not divide
     /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
-    /// number is finite, `min < max` and `step > 0`.
+    /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
+    /// at most [`Ui::SLIDER_MAX_STEPS`] steps.
     pub fn slider(
         &mut self,
         parent: WidgetId,
