@@ -170,7 +170,9 @@ fn verdict(statement: &[u8], repository: &str, hex: &str) -> Option<Class> {
     if about.kind != STATEMENT_TYPE || about.subject.len() != 1 {
         return Some(Class::Feature);
     }
-    let within_bounds = |advisories: &[String]| advisories.len() <= MAX_ADVISORIES && advisories.iter().all(|id| !id.is_empty() && id.len() <= MAX_ADVISORY_LEN);
+    // doc_update_trust.md item 18: the security class comes "with advisory ids", so a
+    // security statement that names none is of the feature class.
+    let within_bounds = |advisories: &[String]| !advisories.is_empty() && advisories.len() <= MAX_ADVISORIES && advisories.iter().all(|id| !id.is_empty() && id.len() <= MAX_ADVISORY_LEN);
     match serde_json::from_slice::<Statement<Predicate>>(statement) {
         Ok(Statement { predicate, .. }) if predicate.class == "security" && within_bounds(&predicate.advisories) => Some(Class::Security { advisories: predicate.advisories }),
         _ => Some(Class::Feature),
@@ -430,11 +432,11 @@ mod tests {
     }
 
     #[test]
-    fn a_security_statement_with_no_advisory_is_security() {
-        // ADR-0127 does not say otherwise: kept as written.
+    fn a_security_statement_with_no_advisory_is_feature() {
+        // doc_update_trust.md item 18: security class only "with advisory ids".
         assert_eq!(
             class("att-empty-advisories", &[key("a")]),
-            Class::Security { advisories: vec![] }
+            Class::Feature
         );
     }
 
