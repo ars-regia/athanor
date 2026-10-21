@@ -178,7 +178,8 @@ impl State {
         // or overlay layer (`layer_commit`).
         // ponytail: no escape from exclusive keyboard focus: a granted client's 1x1 transparent
         // exclusive overlay surface holds the keyboard for as long as it lives, acceptable only
-        // while the compositor runs nested or headless.
+        // while the compositor runs nested or headless. C1 task 8, the DRM backend, adds the
+        // escape: the compositor does not run on a console (task 9) without it.
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.

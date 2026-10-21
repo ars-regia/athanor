@@ -115,7 +115,8 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
 - Input-method, virtual keyboard and pointer, data control and the private interface are not
   offered yet; each joins the allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface keeps the keyboard while it lives, with no escape
-  for the user.
+  for the user. Task 8 of the C1 plan, the DRM backend, adds the escape: the compositor does not
+  run on a console (task 9) without it.
 - The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
   `rig.sh compositor-globals` checks that `wayland-info`, outside any unit, is refused the
   privileged globals; the grant itself is checked by the fixture only, with the executable and
