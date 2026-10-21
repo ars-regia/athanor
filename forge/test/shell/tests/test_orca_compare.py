@@ -58,9 +58,11 @@ class CompareTest(unittest.TestCase):
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",
-             "Un interruttore casella di spunta spuntata."],
+             "Un interruttore casella di spunta spuntata.",
+             "Un interruttore casella di spunta non spuntata."],
             ["A switch toggle button pressed.", "A switch toggle button not pressed.",
-             "Un interruttore pulsante di commutazione premuto."],
+             "Un interruttore pulsante di commutazione premuto.",
+             "Un interruttore pulsante di commutazione non premuto."],
         )
         self.assertEqual(failures, [])
         self.assertIn("as 'A switch toggle button pressed.'", lines[0])

@@ -291,7 +291,8 @@ pub fn paint<C: Canvas>(
                     }
                 }
                 if let Some(layout) = &widget.text {
-                    let x = if mark.x > r.x { r.x } else { r.x + r.w - layout.width() };
+                    // The mark is at the left when `ui.rtl == is_switch`, as `mark_rect` puts it.
+                    let x = if ui.rtl == is_switch { r.x + r.w - layout.width() } else { r.x };
                     let y = r.y + (r.h - layout.height()) / 2.0;
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }

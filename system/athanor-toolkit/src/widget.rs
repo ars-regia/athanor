@@ -70,7 +70,8 @@ pub enum Kind {
         active: bool,
     },
     /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
-    /// on its own. It fills the width of its column, row or group; activating it raises
+    /// on its own. It fills the width of its column or group, or the cell of its row, which is as wide
+    /// as the row's widest child; activating it raises
     /// [`Event::Toggled`].
     Switch {
         /// The text of the switch, which names it for assistive technologies.
