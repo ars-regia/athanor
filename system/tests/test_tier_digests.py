@@ -36,6 +36,7 @@ class TierDigests(unittest.TestCase):
                 "GITHUB_REPOSITORY",
                 "GITHUB_SERVER_URL",
                 "GITHUB_REF",
+                "GITHUB_BASE_REF",
                 "TIER_TRUSTED_REFS",
             )
         }
@@ -51,13 +52,13 @@ class TierDigests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, registry, signers=None, transient=(), **digests):
-        """Tag each tier :latest at its digest, signed by TRUSTED unless SIGNERS names another
+    def publish(self, registry, signers=None, transient=(), tag="latest", **digests):
+        """Tag each tier :TAG at its digest, signed by TRUSTED unless SIGNERS names another
         identity (None: no signature) for that tier; TRANSIENT tiers fail cosign verify with a
         Rekor outage."""
         signers = signers or {}
         tags = {
-            f"{registry}/athanor-forge-{tier}-repo:latest": d
+            f"{registry}/athanor-forge-{tier}-repo:{tag}": d
             for tier, d in digests.items()
         }
         signatures = {
@@ -178,6 +179,32 @@ class TierDigests(unittest.TestCase):
         r = self.resolve("resolve")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("'fix/c++' is not trusted for its own tiers", r.stderr)
+
+    def test_a_pull_request_into_a_rebase_branch_builds_on_that_branch_s_tiers_signed(self):
+        self.env["GITHUB_REF"] = "refs/pull/645/merge"
+        self.env["GITHUB_BASE_REF"] = "rebase/fedora-45"
+        base = f"{WORKFLOW}@refs/heads/rebase/fedora-45"
+        self.publish(
+            "ghcr.io/ars-regia",
+            tag="branch-rebase-fedora-45",
+            signers={f"tier{n}": base for n in range(4)},
+            **DIGESTS,
+        )
+        r = self.resolve("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.out.read_text())["tier2"], DIGESTS["tier2"])
+
+    def test_a_pull_request_into_iso_v0_reads_latest_and_trusts_no_other_branch_signed(self):
+        self.env["GITHUB_REF"] = "refs/pull/7/merge"
+        self.env["GITHUB_BASE_REF"] = "iso-v0"
+        self.publish(
+            "ghcr.io/ars-regia",
+            signers={"tier1": f"{WORKFLOW}@refs/heads/rebase/fedora-45"},
+            **DIGESTS,
+        )
+        r = self.resolve("resolve")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("tier1: not signed by a trusted run", r.stderr)
 
     def test_a_cosign_failure_is_an_error_not_a_missing_signature_signed(self):
         self.publish("ghcr.io/ars-regia", transient=("tier2",), **DIGESTS)

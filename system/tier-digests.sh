@@ -4,7 +4,7 @@
 #
 #   resolve     write tier-digests.json for a build outside the Orchestrator run that
 #               published the tiers (System Image Check and local builds): the registry, the
-#               digest that each athanor-forge-tier<N>-repo:latest names now, read once, so
+#               digest that each athanor-forge-tier<N>-repo:<tag> names now, read once, so
 #               every image the job builds installs the same tiers whatever is published
 #               meanwhile, and when it was resolved (UTC), which build-image.sh prints. The
 #               file is written only when every digest verifies, as verify does.
@@ -29,6 +29,12 @@
 # missing or foreign signature fails the check; any other failure of cosign (registry, Rekor,
 # TUF, network) is an error, never a missing signature. Needs skopeo, cosign and jq, and a
 # registry session when the tier images are private.
+#
+# resolve reads the tag `latest`, except in a pull request (GITHUB_BASE_REF set) into a branch
+# other than iso-v0 and main, such as a rebase integration branch (ADR-0125): there it reads the
+# tag `branch-<base>` that forge/scripts/publish_tiers.sh gives that branch's tiers, and trusts
+# that branch's signatures, so the check builds on the base it merges into. The check pushes
+# nothing, so this trust reaches no other run.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -69,6 +75,14 @@ if [[ ${GITHUB_REF:-} == refs/heads/* && $own =~ ^[A-Za-z0-9._/-]+$ ]]; then
     refs+="|${own//./\\.}"
 elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
     echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
+fi
+TAG=latest
+base=${GITHUB_BASE_REF:-}
+if [[ -n $base && $base != iso-v0 && $base != main ]]; then
+    [[ $base =~ ^[A-Za-z0-9._/-]+$ ]] || die "the base branch '$base' is not a branch name"
+    refs+="|${base//./\\.}"
+    base=${base,,}
+    TAG=branch-${base//[^a-z0-9._-]/-}
 fi
 IDENTITY="^${workflow}@refs/heads/(${refs})\$"
 # cosign v3 reports a missing or foreign signature with these messages. "no matching
@@ -133,7 +147,7 @@ resolve)
     args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     digests=()
     for n in 0 1 2 3; do
-        ref=$registry/athanor-forge-tier$n-repo:latest
+        ref=$registry/athanor-forge-tier$n-repo:$TAG
         digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref")
         [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$ref gave no digest: '$digest'"
         args+=(--arg "tier$n" "$digest")
