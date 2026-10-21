@@ -97,6 +97,17 @@ fn color(c: Rgba) -> Color {
     Color::from_rgba8(r, g, b, a)
 }
 
+/// `base` with `part` of `ink` mixed in: a hovered control's fill, darker or lighter toward its
+/// text as libadwaita's, whose buttons go from 10 to 15 percent of the text colour on hover.
+fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
+    let channel = |b: u8, i: u8| (f32::from(b) + (f32::from(i) - f32::from(b)) * part).round() as u8;
+    let ([r, g, b, a], [ri, gi, bi, _]) = (base.0, ink.0);
+    Rgba([channel(r, ri), channel(g, gi), channel(b, bi), a])
+}
+
+/// How much of its text colour a hovered control's fill takes.
+const HOVER: f32 = 0.05;
+
 fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     let o = f64::from(outset);
     RoundedRect::new(
@@ -193,7 +204,7 @@ pub fn paint<C: Canvas>(
     ctx.set_paint(color(t.background));
     ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
 
-    let focus = ui.focus;
+    let (focus, hover) = (ui.focus, ui.hovered());
     for id in 0..ui.widgets.len() {
         if !ui.is_visible(id) {
             continue;
@@ -201,7 +212,33 @@ pub fn paint<C: Canvas>(
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
-            Kind::Column | Kind::Row | Kind::Group(_) => {}
+            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu => {}
+            Kind::Separator => {
+                let y = f64::from((r.y + r.h / 2.0).floor());
+                ctx.set_paint(color(t.border));
+                ctx.fill_rect(&Rect::new(
+                    f64::from(r.x),
+                    y,
+                    f64::from(r.x + r.w),
+                    y + 1.0,
+                ));
+            }
+            // A flat row with its label at the start edge, filled only under the pointer.
+            Kind::MenuItem(_) => {
+                if hover == Some(id) {
+                    ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
+                if let Some(layout) = &widget.text {
+                    let x = if ui.rtl {
+                        r.x + r.w - t.padding - layout.width()
+                    } else {
+                        r.x + t.padding
+                    };
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+            }
             Kind::TitleBar => {
                 ctx.set_paint(color(t.title_bar));
                 ctx.fill_rect(&Rect::new(
@@ -221,7 +258,12 @@ pub fn paint<C: Canvas>(
             // A round button with its mark drawn as lines, as GTK's symbolic icons.
             Kind::WindowButton(button) => {
                 let (cx, cy) = (f64::from(r.center_x()), f64::from(r.y + r.h / 2.0));
-                ctx.set_paint(color(t.surface));
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
                 ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
                 let arm = f64::from(r.w) * 0.16;
                 let lines = match button {
@@ -239,7 +281,7 @@ pub fn paint<C: Canvas>(
                     ctx.stroke_path(&line.to_path(0.1));
                 }
             }
-            Kind::Label(_) => {
+            Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
                     draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
                 }
@@ -250,6 +292,11 @@ pub fn paint<C: Canvas>(
                     (t.accent, t.on_accent)
                 } else {
                     (t.surface, t.text)
+                };
+                let fill = if hover == Some(id) {
+                    mix(fill, ink, HOVER)
+                } else {
+                    fill
                 };
                 ctx.set_paint(color(fill));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
@@ -356,6 +403,28 @@ mod tests {
         // Half a pixel rounds away from zero; integer scales multiply.
         assert_eq!(physical(101.0, 1.5)?, 152);
         assert_eq!(physical(99.5, 2.0)?, 200);
+        Ok(())
+    }
+
+    #[test]
+    fn a_hovered_control_is_drawn_toward_its_text() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Hover", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
+        let plain = render(&mut ui, 1.0)?;
+        let r = ui.widget(button).rect;
+        ui.pointer_motion(r.x + 1.0, r.y + r.h / 2.0);
+        let hovered = render(&mut ui, 1.0)?;
+        let t = &ui.theme;
+        let fill = mix(t.surface, t.text, HOVER).0;
+        let at = |p: &Pixmap| {
+            let i = 4 * (usize::from(p.width()) * (r.y + r.h / 2.0) as usize + (r.x + 4.0) as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        assert_eq!(at(&plain), t.surface.0.to_vec());
+        assert_eq!(at(&hovered), fill.to_vec());
+        assert_ne!(fill, t.surface.0);
+        ui.pointer_leave();
+        assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         Ok(())
     }
 

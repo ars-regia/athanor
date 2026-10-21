@@ -68,6 +68,16 @@ pub enum Kind {
     TitleBar,
     /// One of the title bar's buttons.
     WindowButton(WindowButton),
+    /// A menu: its items and separators stacked top to bottom, all as wide as the widest. The
+    /// up and down arrows cycle through its items. Shown in a popup, see
+    /// [`crate::driver::Shell::open_popup`].
+    Menu,
+    /// An item of a [`Kind::Menu`], with its label; activating it raises [`Event::Clicked`].
+    MenuItem(String),
+    /// A line between groups of a menu's items. It takes no input.
+    Separator,
+    /// The text of a tooltip, which the driver shows in a popup of its own.
+    Tooltip(String),
 }
 
 /// A button of the title bar.
@@ -102,14 +112,36 @@ pub struct Widget {
     pub rect: Rect,
     pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
+    /// `Some` for a widget that opens a popup: whether it is open.
+    pub(crate) expanded: Option<bool>,
+    pub(crate) tooltip: Option<String>,
+    pub(crate) description: Option<String>,
 }
 
 impl Widget {
+    fn new(kind: Kind, parent: Option<WidgetId>) -> Self {
+        Self {
+            kind,
+            parent,
+            children: Vec::new(),
+            rect: Rect::default(),
+            visible: true,
+            text: None,
+            expanded: None,
+            tooltip: None,
+            description: None,
+        }
+    }
+
     /// Whether the keyboard can focus the widget.
     pub fn is_focusable(&self) -> bool {
         matches!(
             self.kind,
-            Kind::Button(_) | Kind::Toggle { .. } | Kind::Field(_) | Kind::WindowButton(_)
+            Kind::Button(_)
+                | Kind::Toggle { .. }
+                | Kind::Field(_)
+                | Kind::WindowButton(_)
+                | Kind::MenuItem(_)
         )
     }
 }
@@ -126,6 +158,38 @@ pub enum Event {
     Edited(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
+    /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
+    /// widget focused: the application may open its context menu.
+    ContextMenu(WidgetId),
+    /// The pointer, pressed on the widget, moved past [`Ui::DRAG_THRESHOLD`]. A drag never
+    /// activates the widget.
+    DragStarted(WidgetId),
+    /// The button that started a drag was released, over the widget `to` if any.
+    DragEnded {
+        /// The widget the drag started from.
+        from: WidgetId,
+        /// The widget under the pointer at the release, if any.
+        to: Option<WidgetId>,
+    },
+}
+
+/// A pointer button, as the driver maps it from the evdev codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PointerButton {
+    /// The primary button, the left one of a right-handed mouse: it activates and drags.
+    Primary,
+    /// The secondary button: it asks for the context menu.
+    Secondary,
+}
+
+/// A press of the primary button, until its release.
+#[derive(Clone, Copy, Debug)]
+struct Press {
+    widget: WidgetId,
+    x: f32,
+    y: f32,
+    dragging: bool,
 }
 
 /// A key, already translated from the keyboard layout by the driver.
@@ -152,6 +216,10 @@ pub enum Key {
     Delete,
     /// Text to type, which may be several characters (a composed or pasted character).
     Text(String),
+    /// Escape: closes the open popup, which the driver handles.
+    Escape,
+    /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
+    Menu,
 }
 
 /// One window's widgets, theme, reading direction and keyboard focus.
@@ -169,20 +237,15 @@ pub struct Ui {
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
     size: (f32, f32),
+    hover: Option<WidgetId>,
+    press: Option<Press>,
 }
 
 impl Ui {
     /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
     pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
         Self {
-            widgets: vec![Widget {
-                kind: Kind::Column,
-                parent: None,
-                children: Vec::new(),
-                rect: Rect::default(),
-                visible: true,
-                text: None,
-            }],
+            widgets: vec![Widget::new(Kind::Column, None)],
             title: title.to_owned(),
             theme,
             rtl,
@@ -191,6 +254,8 @@ impl Ui {
             text: TextContext::default(),
             title_bar: None,
             size: (0.0, 0.0),
+            hover: None,
+            press: None,
         }
     }
 
@@ -198,18 +263,14 @@ impl Ui {
     pub const ROOT: WidgetId = 0;
     /// The longest text a field takes from outside the keyboard, in characters.
     pub const FIELD_MAX_CHARS: usize = 1024;
+    /// How far the pointer moves on either axis, in logical pixels, from a press before a drag
+    /// starts: GTK's default `gtk-dnd-drag-threshold`.
+    pub const DRAG_THRESHOLD: f32 = 8.0;
 
     /// Adds `kind` as the last child of `parent`.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
         let id = self.widgets.len();
-        self.widgets.push(Widget {
-            kind,
-            parent: Some(parent),
-            children: Vec::new(),
-            rect: Rect::default(),
-            visible: true,
-            text: None,
-        });
+        self.widgets.push(Widget::new(kind, Some(parent)));
         self.widgets[parent].children.push(id);
         id
     }
@@ -269,6 +330,62 @@ impl Ui {
             Kind::Field(field) => Some(field.text()),
             _ => None,
         }
+    }
+
+    /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
+    /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
+    /// expands it while its menu is open.
+    pub fn set_has_popup(&mut self, id: WidgetId, has: bool) {
+        let expanded = &mut self.widgets[id].expanded;
+        *expanded = has.then_some(expanded.unwrap_or(false));
+    }
+
+    /// Whether widget `id` opens a popup.
+    pub fn has_popup(&self, id: WidgetId) -> bool {
+        self.widgets[id].expanded.is_some()
+    }
+
+    /// Marks the popup of widget `id` open or closed; a widget without one stays as it is.
+    pub fn set_expanded(&mut self, id: WidgetId, open: bool) {
+        if let Some(expanded) = &mut self.widgets[id].expanded {
+            *expanded = open;
+        }
+    }
+
+    /// Whether the popup of widget `id` is open.
+    pub fn is_expanded(&self, id: WidgetId) -> bool {
+        self.widgets[id].expanded == Some(true)
+    }
+
+    /// Sets the tooltip of widget `id`, or removes it with `None`. The driver shows it after
+    /// GTK's delay while the pointer rests on the widget or the keyboard focuses it, and it is
+    /// the widget's accessible description unless [`Ui::set_description`] gives another, as GTK's.
+    pub fn set_tooltip(&mut self, id: WidgetId, text: Option<&str>) {
+        self.widgets[id].tooltip = text.map(str::to_owned);
+    }
+
+    /// The tooltip of widget `id`, if any.
+    pub fn tooltip(&self, id: WidgetId) -> Option<&str> {
+        self.widgets[id].tooltip.as_deref()
+    }
+
+    /// Sets the accessible description of widget `id`, which assistive technologies read after
+    /// its name; `None` falls back to its tooltip.
+    pub fn set_description(&mut self, id: WidgetId, text: Option<&str>) {
+        self.widgets[id].description = text.map(str::to_owned);
+    }
+
+    /// The accessible description of widget `id`: the one set, else its tooltip.
+    pub fn description(&self, id: WidgetId) -> Option<&str> {
+        let widget = &self.widgets[id];
+        widget.description.as_deref().or(widget.tooltip.as_deref())
+    }
+
+    /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
+    /// collapsed, as when GTK's popover closes.
+    pub(crate) fn popup_closed(&mut self, id: WidgetId) {
+        self.set_expanded(id, false);
+        self.set_focus(Some(id));
     }
 
     /// The widget that has the keyboard focus, if any.
@@ -353,6 +470,12 @@ impl Ui {
         };
         let widget = &mut self.widgets[id];
         let (w, h) = match &mut widget.kind {
+            Kind::Menu => {
+                let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                (w, sizes.iter().map(|s| s.1).sum::<f32>())
+            }
+            // A line in the middle of a gap.
+            Kind::Separator => (0.0, gap + 1.0),
             Kind::Column | Kind::Group(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
@@ -382,13 +505,13 @@ impl Ui {
                 let w = widest * sizes.len() as f32 + spacing;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
-            Kind::Label(text) => {
+            Kind::Label(text) | Kind::Tooltip(text) => {
                 let layout = self.text.layout(text, size, rtl);
                 let wh = (layout.width(), layout.height());
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Button(text) | Kind::Toggle { label: text, .. } => {
+            Kind::Button(text) | Kind::Toggle { label: text, .. } | Kind::MenuItem(text) => {
                 let layout = self.text.layout(text, size, rtl);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
@@ -435,6 +558,14 @@ impl Ui {
                     }
                 }
             }
+            Kind::Menu => {
+                let mut cy = y;
+                for c in children {
+                    self.widgets[c].rect.w = outer.w;
+                    self.place(c, x, cy);
+                    cy += self.widgets[c].rect.h;
+                }
+            }
             Kind::TitleBar => {
                 let pad = self.theme.padding;
                 let Some((&title, buttons)) = children.split_first() else {
@@ -467,7 +598,7 @@ impl Ui {
                     children = &children[1..];
                 }
                 for &c in children {
-                    if matches!(self.widgets[c].kind, Kind::Row | Kind::Group(_)) {
+                    if matches!(self.widgets[c].kind, Kind::Row | Kind::Group(_) | Kind::Menu) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     let r = self.widgets[c].rect;
@@ -492,7 +623,7 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) => Some(Event::Clicked(id)),
+            Kind::Button(_) | Kind::MenuItem(_) => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Toggle { .. } => {
                 let siblings = self.widgets[id]
@@ -512,17 +643,80 @@ impl Ui {
 
     /// The focusable widget under the point, in logical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
-        (0..self.widgets.len())
-            .find(|&id| {
-                self.widgets[id].is_focusable()
-                    && self.widgets[id].rect.contains(x, y)
-                    && self.is_visible(id)
-            })
+        (0..self.widgets.len()).find(|&id| {
+            self.widgets[id].is_focusable()
+                && self.widgets[id].rect.contains(x, y)
+                && self.is_visible(id)
+        })
     }
 
-    /// Presses the pointer at the point, in logical pixels, and returns the event of the widget there, if any.
+    /// Presses and releases the primary button at the point, in logical pixels, and returns the
+    /// event of the widget there, if any.
     pub fn click(&mut self, x: f32, y: f32) -> Option<Event> {
-        self.hit(x, y).and_then(|id| self.activate(id))
+        self.pointer_press(x, y, PointerButton::Primary);
+        self.pointer_release(x, y, PointerButton::Primary)
+    }
+
+    /// The widget under the pointer, which is drawn highlighted, if any.
+    pub fn hovered(&self) -> Option<WidgetId> {
+        self.hover.filter(|&id| self.is_visible(id))
+    }
+
+    /// The pointer moved to the point, in logical pixels: the widget under it is hovered, and a
+    /// press that has moved past [`Ui::DRAG_THRESHOLD`] on either axis starts a drag.
+    pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
+        self.hover = self.hit(x, y);
+        let press = self.press.as_mut()?;
+        let moved = (x - press.x).abs().max((y - press.y).abs());
+        if press.dragging || moved <= Self::DRAG_THRESHOLD {
+            return None;
+        }
+        press.dragging = true;
+        Some(Event::DragStarted(press.widget))
+    }
+
+    /// The pointer left the surface: nothing is hovered.
+    pub fn pointer_leave(&mut self) {
+        self.hover = None;
+    }
+
+    /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
+    /// the widget there and waits for the release to activate it, as GTK's buttons do; the
+    /// secondary button asks for its context menu.
+    pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
+        let id = self.hit(x, y);
+        match button {
+            PointerButton::Primary => {
+                self.press = id.map(|widget| Press {
+                    widget,
+                    x,
+                    y,
+                    dragging: false,
+                });
+                self.set_focus(id.or(self.focus));
+                None
+            }
+            PointerButton::Secondary => id.map(Event::ContextMenu),
+        }
+    }
+
+    /// A pointer button was released at the point, in logical pixels: the primary button ends a
+    /// drag, or activates the widget it was pressed on if it is still under the pointer.
+    pub fn pointer_release(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
+        if button != PointerButton::Primary {
+            return None;
+        }
+        let press = self.press.take()?;
+        let to = self.hit(x, y);
+        if press.dragging {
+            return Some(Event::DragEnded {
+                from: press.widget,
+                to,
+            });
+        }
+        (to == Some(press.widget))
+            .then(|| self.activate(press.widget))
+            .flatten()
     }
 
     /// Handles a key: a focused field takes text, deletion and the horizontal arrows; otherwise
@@ -553,15 +747,30 @@ impl Ui {
         match key {
             Key::Enter => focused.and_then(|id| self.activate(id)),
             Key::Text(s) if s == " " => focused.and_then(|id| self.activate(id)),
+            Key::Menu => focused.map(Event::ContextMenu),
             key => self.navigate(key),
         }
     }
 
+    /// The menu the focus is in, or the first visible one when nothing has the focus.
+    fn menu(&self) -> Option<WidgetId> {
+        match self.focus {
+            Some(id) => self.widgets[id]
+                .parent
+                .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu)),
+            None => (0..self.widgets.len())
+                .find(|&id| matches!(self.widgets[id].kind, Kind::Menu) && self.is_visible(id)),
+        }
+    }
+
     fn navigate(&mut self, key: Key) -> Option<Event> {
-        let next = match key {
-            Key::Tab => focus::step(self, false),
-            Key::BackTab => focus::step(self, true),
-            Key::Left | Key::Right | Key::Up | Key::Down => focus::arrow(self, &key),
+        let next = match (key, self.menu()) {
+            // Up and down cycle through a menu's items, as in GTK's menus.
+            (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
+            (Key::Down, Some(menu)) => focus::cycle(self, menu, false),
+            (Key::Tab, _) => focus::step(self, false),
+            (Key::BackTab, _) => focus::step(self, true),
+            (key @ (Key::Left | Key::Right | Key::Up | Key::Down), _) => focus::arrow(self, &key),
             _ => None,
         };
         if next.is_some() {
@@ -674,7 +883,10 @@ mod tests {
             ui.add_title_bar();
             let bar = ui.widget(Ui::ROOT).children[0];
             ui.set_visible(bar, false);
-            assert!(ui.is_visible(bar), "rtl {rtl}: the title bar cannot be hidden");
+            assert!(
+                ui.is_visible(bar),
+                "rtl {rtl}: the title bar cannot be hidden"
+            );
             let (w, h) = ui.layout();
             let r = ui.widget(bar).rect;
             assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");
@@ -763,5 +975,199 @@ mod tests {
         assert_eq!(ui.focus(), Some(field));
         ui.set_visible(row, true);
         assert_eq!(ui.activate(b), Some(Event::Clicked(b)));
+    }
+
+    /// A menu of three items with a separator between the first and the second.
+    fn menu(rtl: bool) -> (Ui, [WidgetId; 4]) {
+        let mut ui = Ui::new("Menu", Theme::default(), rtl);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let first = ui.add(menu, Kind::MenuItem("New Window".into()));
+        ui.add(menu, Kind::Separator);
+        let second = ui.add(menu, Kind::MenuItem("Pin to Dock".into()));
+        let third = ui.add(menu, Kind::MenuItem("Quit".into()));
+        ui.layout();
+        (ui, [menu, first, second, third])
+    }
+
+    #[test]
+    fn the_arrows_cycle_through_a_menus_items_past_its_separators() {
+        for rtl in [false, true] {
+            let (mut ui, [_, first, second, third]) = menu(rtl);
+            assert_eq!(ui.focus(), None);
+            let mut walk = |key: Key| {
+                assert_eq!(ui.key(key), None);
+                ui.focus()
+            };
+            assert_eq!(walk(Key::Down), Some(first), "rtl {rtl}");
+            assert_eq!(
+                walk(Key::Down),
+                Some(second),
+                "rtl {rtl}: the separator is skipped"
+            );
+            assert_eq!(walk(Key::Down), Some(third), "rtl {rtl}");
+            assert_eq!(
+                walk(Key::Down),
+                Some(first),
+                "rtl {rtl}: down wraps, as GTK's menus"
+            );
+            assert_eq!(walk(Key::Up), Some(third), "rtl {rtl}: up wraps");
+            assert_eq!(walk(Key::Up), Some(second), "rtl {rtl}");
+            assert_eq!(walk(Key::Left), Some(second), "rtl {rtl}: no item beside");
+        }
+    }
+
+    #[test]
+    fn enter_space_and_a_click_activate_a_menu_item() {
+        let (mut ui, [_, first, second, third]) = menu(false);
+        ui.set_focus(Some(second));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Clicked(second)));
+        ui.set_focus(Some(third));
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Clicked(third)));
+        let r = ui.widget(first).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(first)));
+        assert_eq!(ui.focus(), Some(first));
+        // Every item spans the menu, so the pointer finds one anywhere across it.
+        let widths: Vec<f32> = [first, second, third].map(|id| ui.widget(id).rect.w).into();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{widths:?}");
+    }
+
+    /// A button with a popup and a plain button beside it.
+    fn with_popup() -> (Ui, WidgetId, WidgetId) {
+        let mut ui = Ui::new("Dock", Theme::default(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let app = ui.add(row, Kind::Button("Files".into()));
+        let other = ui.add(row, Kind::Button("Terminal".into()));
+        ui.set_has_popup(app, true);
+        ui.layout();
+        (ui, app, other)
+    }
+
+    #[test]
+    fn a_button_with_a_popup_is_collapsed_until_it_opens() {
+        let (mut ui, app, other) = with_popup();
+        assert!(ui.has_popup(app) && !ui.has_popup(other));
+        assert!(!ui.is_expanded(app));
+        ui.set_expanded(app, true);
+        assert!(ui.is_expanded(app));
+        ui.set_expanded(other, true);
+        assert!(
+            !ui.is_expanded(other),
+            "a button without a popup never expands"
+        );
+        // Closing returns the focus to the button and collapses it, as GTK's popover does.
+        ui.set_focus(Some(other));
+        ui.popup_closed(app);
+        assert_eq!((ui.focus(), ui.is_expanded(app)), (Some(app), false));
+    }
+
+    #[test]
+    fn the_secondary_button_and_the_menu_key_ask_for_the_context_menu() {
+        let (mut ui, app, other) = with_popup();
+        let r = ui.widget(app).rect;
+        let at = (r.x + 2.0, r.y + 2.0);
+        assert_eq!(
+            ui.pointer_press(at.0, at.1, PointerButton::Secondary),
+            Some(Event::ContextMenu(app))
+        );
+        assert_eq!(
+            ui.pointer_release(at.0, at.1, PointerButton::Secondary),
+            None
+        );
+        ui.set_focus(Some(other));
+        assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(other)));
+        ui.set_focus(None);
+        assert_eq!(ui.key(Key::Menu), None);
+    }
+
+    #[test]
+    fn the_primary_button_activates_on_release_over_the_pressed_widget() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        assert_eq!(
+            ui.pointer_press(a.x + 1.0, a.y + 1.0, PointerButton::Primary),
+            None
+        );
+        assert_eq!(
+            ui.focus(),
+            Some(app),
+            "a press takes the focus, as GTK's buttons"
+        );
+        assert_eq!(
+            ui.pointer_release(a.x + 3.0, a.y + 3.0, PointerButton::Primary),
+            Some(Event::Clicked(app))
+        );
+        // Released over another widget: nothing is activated, as GTK's buttons.
+        ui.pointer_press(a.x + 1.0, a.y + 1.0, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_release(o.x + 1.0, o.y + 1.0, PointerButton::Primary),
+            None
+        );
+    }
+
+    #[test]
+    fn a_drag_starts_once_the_pointer_moves_past_gtks_threshold() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_motion(x + Ui::DRAG_THRESHOLD, y),
+            None,
+            "8 px is not past"
+        );
+        assert_eq!(ui.pointer_motion(x, y - Ui::DRAG_THRESHOLD), None);
+        assert_eq!(
+            ui.pointer_motion(x + Ui::DRAG_THRESHOLD + 0.5, y),
+            Some(Event::DragStarted(app))
+        );
+        assert_eq!(ui.pointer_motion(x + 30.0, y), None, "it starts once");
+        assert_eq!(
+            ui.pointer_release(o.x + 1.0, o.y + 1.0, PointerButton::Primary),
+            Some(Event::DragEnded {
+                from: app,
+                to: Some(other)
+            }),
+            "a drag never activates"
+        );
+        // A press on no widget drags nothing.
+        ui.pointer_press(0.5, 0.5, PointerButton::Primary);
+        assert_eq!(ui.pointer_motion(40.0, 40.0), None);
+        assert_eq!(ui.pointer_release(40.0, 40.0, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn the_hovered_widget_follows_the_pointer() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        assert_eq!(ui.hovered(), None);
+        ui.pointer_motion(a.x + 1.0, a.y + 1.0);
+        assert_eq!(ui.hovered(), Some(app));
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        assert_eq!(ui.hovered(), Some(other));
+        ui.pointer_motion(0.5, 0.5);
+        assert_eq!(ui.hovered(), None);
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        ui.pointer_leave();
+        assert_eq!(ui.hovered(), None);
+        // A hidden widget takes no pointer input, hover included.
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        ui.set_visible(other, false);
+        assert_eq!(ui.hovered(), None);
+    }
+
+    #[test]
+    fn a_tooltip_is_the_description_unless_one_is_set() {
+        let (mut ui, app, _) = with_popup();
+        assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+        ui.set_tooltip(app, Some("Files"));
+        assert_eq!(
+            (ui.tooltip(app), ui.description(app)),
+            (Some("Files"), Some("Files"))
+        );
+        ui.set_description(app, Some("Running"));
+        assert_eq!(ui.description(app), Some("Running"));
+        ui.set_description(app, None);
+        ui.set_tooltip(app, None);
+        assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
     }
 }

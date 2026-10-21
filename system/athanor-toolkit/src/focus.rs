@@ -23,7 +23,19 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
 /// The next focusable widget after the focused one, or before it when `backwards`, wrapping
 /// around.
 pub fn step(ui: &Ui, backwards: bool) -> Option<WidgetId> {
-    let chain = chain(ui);
+    wrap(ui, chain(ui), backwards)
+}
+
+/// The next item of `menu` after the focused one, or before it when `backwards`, wrapping
+/// around: what the arrows do in a menu.
+pub fn cycle(ui: &Ui, menu: WidgetId, backwards: bool) -> Option<WidgetId> {
+    let items = chain(ui)
+        .into_iter()
+        .filter(|&id| ui.widget(id).parent == Some(menu));
+    wrap(ui, items.collect(), backwards)
+}
+
+fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
     let n = chain.len();
     if n == 0 {
         return None;

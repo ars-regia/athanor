@@ -1,15 +1,18 @@
-//! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows and wlr-layer-shell
-//! surfaces, several in one process, each drawn in shared memory by vello_cpu or through wgpu by
+//! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows, wlr-layer-shell surfaces
+//! and their xdg-popups (a menu, or a tooltip), several in one process, each drawn in shared memory by vello_cpu or through wgpu by
 //! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
 //! through text-input-v3, and one AccessKit adapter on AT-SPI per surface.
 
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
+use crate::popup::{Dismiss, OpenPopup, Tooltip, TOOLTIP_PADDING};
 use crate::render::{layout, render, Error};
-use crate::widget::{Event, Key, Rect, Ui, WindowButton};
+use crate::theme::Theme;
+use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
+use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::reexports::protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
@@ -22,6 +25,9 @@ use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::clie
 use smithay_client_toolkit::reexports::protocols::wp::text_input::zv3::client::{
     zwp_text_input_manager_v3::{self, ZwpTextInputManagerV3},
     zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3},
+};
+use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{
+    Anchor as Edge, ConstraintAdjustment, Gravity,
 };
 use smithay_client_toolkit::reexports::protocols::wp::viewporter::client::{
     wp_viewport::{self, WpViewport},
@@ -42,21 +48,23 @@ use smithay_client_toolkit::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
             cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT,
+            BTN_LEFT, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
     shell::{
         wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         xdg::{
+            popup::{Popup, PopupConfigure, PopupHandler},
             window::{DecorationMode, Window, WindowConfigure, WindowDecorations, WindowHandler},
-            XdgShell,
+            XdgPositioner, XdgShell, XdgSurface,
         },
         WaylandSurface,
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
@@ -115,6 +123,21 @@ pub struct LayerOptions {
     pub keyboard: KeyboardInteractivity,
     /// The part of the surface that takes the pointer, in logical pixels; `None` is all of it.
     pub input_region: Option<Vec<Rect>>,
+}
+
+/// The side of its widget a popup opens on, as GTK's `GtkPositionType`; left and right are the
+/// physical sides. The compositor flips the popup to the opposite side, and slides it along, to
+/// keep it on the output, as GTK's popovers ask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    /// Above the widget: from a dock along the bottom edge.
+    Top,
+    /// Below the widget: from a bar along the top edge.
+    Bottom,
+    /// To the left of the widget.
+    Left,
+    /// To the right of the widget.
+    Right,
 }
 
 /// What runs on the driver: the surfaces it opens, and what it does with their events.
@@ -212,6 +235,9 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
         actions,
         next: 0,
         surfaces: Vec::new(),
+        popup: None,
+        seat: None,
+        serial: None,
         exit: false,
     };
     let mut app = App {
@@ -235,6 +261,7 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
         ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
+        tooltip: Tooltip::default(),
         error: None,
     };
     for (ui, role) in app.application.start() {
@@ -315,6 +342,11 @@ pub struct Shell {
     actions: Sender<(SurfaceId, ActionRequest)>,
     next: u64,
     surfaces: Vec<Surface>,
+    /// The popup open, at most one.
+    popup: Option<OpenPopup<SurfaceId>>,
+    /// The seat, and the serial of its last press or key, which a menu's grab names.
+    seat: Option<wl_seat::WlSeat>,
+    serial: Option<u32>,
     /// A window was closed: [`run`] returns.
     exit: bool,
 }
@@ -371,14 +403,122 @@ impl Shell {
         self.surfaces.iter_mut().find(|s| s.wl_surface() == wl)
     }
 
-    /// Opens `ui` as `role`, on `output` for a layer surface. It is drawn at its first configure.
-    fn open(
+    /// Opens `ui` as a menu in a popup of the surface `parent`, on `side` of its widget `anchor`,
+    /// and closes the popup open before: one is open at a time, as GTK's popovers. The menu takes
+    /// the pointer and the keyboard, and its first item the focus; while it is open, `anchor`
+    /// reads as expanded if it has a popup ([`Ui::set_has_popup`]). It closes at Escape, at a
+    /// press outside it, when the compositor dismisses it or at [`Shell::close_popup`], and the
+    /// focus then returns to `anchor`. It is drawn at its first configure.
+    pub fn open_popup(
         &mut self,
-        mut ui: Ui,
-        role: Role,
-        output: Option<&wl_output::WlOutput>,
+        parent: SurfaceId,
+        anchor: WidgetId,
+        ui: Ui,
+        side: Side,
     ) -> Result<SurfaceId, Error> {
+        self.show_popup(parent, anchor, ui, side, true)
+    }
+
+    /// Closes the popup open, a menu or a tooltip, if any.
+    pub fn close_popup(&mut self) {
+        if let Some(open) = self.popup {
+            self.close(open.surface);
+        }
+    }
+
+    /// Opens a menu, or a tooltip, which takes neither the input nor the focus and keeps
+    /// [`TOOLTIP_PADDING`] away from its widget.
+    fn show_popup(
+        &mut self,
+        parent: SurfaceId,
+        anchor: WidgetId,
+        mut ui: Ui,
+        side: Side,
+        menu: bool,
+    ) -> Result<SurfaceId, Error> {
+        self.close_popup();
+        let xdg_shell = self
+            .xdg_shell
+            .as_ref()
+            .ok_or("no popup: the compositor does not offer xdg_wm_base")?;
+        let from = self
+            .surfaces
+            .iter()
+            .find(|s| s.id == parent)
+            .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        if anchor >= from.ui.len() {
+            return Err(format!("no widget {anchor} on {parent:?}").into());
+        }
+        layout(&mut ui, 1.0)?;
+        let (w, h) = logical_size(&ui);
+        let positioner = XdgPositioner::new(xdg_shell)?;
+        positioner.set_size(w as i32, h as i32);
+        // The widget's bounds in whole pixels of its surface, grown for a tooltip.
+        let r = from.ui.widget(anchor).rect;
+        let pad = if menu { 0.0 } else { TOOLTIP_PADDING };
+        let (x, y) = ((r.x - pad).floor(), (r.y - pad).floor());
+        let (right, bottom) = ((r.x + r.w + pad).ceil(), (r.y + r.h + pad).ceil());
+        positioner.set_anchor_rect(
+            x as i32,
+            y as i32,
+            ((right - x) as i32).max(1),
+            ((bottom - y) as i32).max(1),
+        );
+        let along_x = ConstraintAdjustment::FlipY | ConstraintAdjustment::SlideX;
+        let along_y = ConstraintAdjustment::FlipX | ConstraintAdjustment::SlideY;
+        let (edge, gravity, adjust) = match side {
+            Side::Top => (Edge::Top, Gravity::Top, along_x),
+            Side::Bottom => (Edge::Bottom, Gravity::Bottom, along_x),
+            Side::Left => (Edge::Left, Gravity::Left, along_y),
+            Side::Right => (Edge::Right, Gravity::Right, along_y),
+        };
+        positioner.set_anchor(edge);
+        positioner.set_gravity(gravity);
+        positioner.set_constraint_adjustment(adjust);
+        let (wl, fractional) = self.new_surface();
+        let of = match &from.shown {
+            Shown::Window(window) => Some(window.xdg_surface()),
+            Shown::Popup(popup) => Some(popup.xdg_surface()),
+            Shown::Layer(_) => None,
+        };
+        let popup = Popup::from_surface(of, &positioner, &self.qh, wl, xdg_shell)?;
+        if let Shown::Layer(layer) = &from.shown {
+            layer.get_popup(popup.xdg_popup());
+        }
+        // A menu grabs the input with the press or the key that opened it, before its first
+        // commit: the compositor then dismisses it at a press in another client.
+        if let (true, Some(seat), Some(serial)) = (menu, &self.seat, self.serial) {
+            popup.xdg_popup().grab(seat, serial);
+        }
         let id = SurfaceId(self.next);
+        let from = self
+            .get_mut(parent)
+            .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        let open = OpenPopup::opened(parent, anchor, id, &mut from.ui, &mut ui, menu);
+        from.dirty = true;
+        // A tooltip takes no pointer: it never stands between the pointer and its widget.
+        let input = (!menu).then(Vec::new);
+        match self.adopt(ui, Shown::Popup(popup), fractional, input) {
+            Ok(id) => {
+                self.popup = Some(open);
+                Ok(id)
+            }
+            Err(error) => {
+                if let Some(from) = self.get_mut(parent) {
+                    open.closed(&mut from.ui);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// A new wl_surface, with its fractional scale and viewport when the compositor offers both.
+    fn new_surface(
+        &self,
+    ) -> (
+        wl_surface::WlSurface,
+        Option<(WpFractionalScaleV1, WpViewport)>,
+    ) {
         let qh = &self.qh;
         let wl = self.compositor.create_surface(qh);
         // Fractional scale needs the viewport, which maps the buffer onto the logical size.
@@ -389,6 +529,18 @@ impl Shell {
             )),
             _ => None,
         };
+        (wl, fractional)
+    }
+
+    /// Opens `ui` as `role`, on `output` for a layer surface. It is drawn at its first configure.
+    fn open(
+        &mut self,
+        ui: Ui,
+        role: Role,
+        output: Option<&wl_output::WlOutput>,
+    ) -> Result<SurfaceId, Error> {
+        let (wl, fractional) = self.new_surface();
+        let qh = &self.qh;
         let mut input_region = None;
         let shown = match role {
             Role::Window { app_id } => {
@@ -422,6 +574,19 @@ impl Shell {
                 Shown::Layer(surface)
             }
         };
+        self.adopt(ui, shown, fractional, input_region)
+    }
+
+    /// Takes a surface just given its role: its renderer, its accessibility adapter, its size and
+    /// input region, then its first commit.
+    fn adopt(
+        &mut self,
+        mut ui: Ui,
+        shown: Shown,
+        fractional: Option<(WpFractionalScaleV1, WpViewport)>,
+        input_region: Option<Vec<Rect>>,
+    ) -> Result<SurfaceId, Error> {
+        let id = SurfaceId(self.next);
         #[cfg(feature = "gpu")]
         let gpu = if self.gpu {
             // SAFETY: the surface owns the wgpu surface and drops it before its wl_surface, by
@@ -449,6 +614,7 @@ impl Shell {
                 surface.set_size(size.0, size.1);
                 size
             }
+            Shown::Popup(_) => logical_size(&ui),
             Shown::Window(_) => (0, 0),
         };
         self.next += 1;
@@ -477,8 +643,17 @@ impl Shell {
         Ok(id)
     }
 
-    /// Closes the surface `id`.
+    /// Closes the surface `id`, and the popup open from it first. Closing a menu returns the focus
+    /// to its widget.
     fn close(&mut self, id: SurfaceId) {
+        if let Some(open) = self.popup.filter(|p| p.surface == id || p.parent == id) {
+            self.popup = None;
+            self.surfaces.retain(|s| s.id != open.surface);
+            if let Some(from) = self.get_mut(open.parent) {
+                open.closed(&mut from.ui);
+                from.dirty = true;
+            }
+        }
         self.surfaces.retain(|s| s.id != id);
     }
 
@@ -502,6 +677,7 @@ fn logical_size(ui: &Ui) -> (u32, u32) {
 enum Shown {
     Window(Window),
     Layer(LayerSurface),
+    Popup(Popup),
 }
 
 impl Shown {
@@ -509,8 +685,24 @@ impl Shown {
         match self {
             Shown::Window(window) => window.wl_surface(),
             Shown::Layer(surface) => surface.wl_surface(),
+            Shown::Popup(popup) => popup.wl_surface(),
         }
     }
+}
+
+/// A tooltip's widgets: its text in `parent`'s text and background colours swapped, as
+/// libadwaita's tooltips, with libadwaita's 6 pixels of padding.
+fn tooltip_ui(parent: &Ui, text: &str) -> Ui {
+    let t = &parent.theme;
+    let theme = Theme {
+        background: t.text,
+        text: t.background,
+        margin: 6.0,
+        ..t.clone()
+    };
+    let mut ui = Ui::new(text, theme, parent.rtl);
+    ui.add(Ui::ROOT, Kind::Tooltip(text.to_owned()));
+    ui
 }
 
 struct Surface {
@@ -872,6 +1064,8 @@ struct App {
     /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
+    /// When the tooltip of the widget under the pointer, or focused, shows.
+    tooltip: Tooltip<(SurfaceId, WidgetId)>,
     /// An error raised inside a callback, returned by [`run`].
     error: Option<Error>,
 }
@@ -983,6 +1177,124 @@ impl App {
         }
     }
 
+    /// Closes the popup open, and redraws the surface it was opened from.
+    fn close_popup(&mut self) {
+        if let Some(open) = self.shell.popup {
+            self.close(open.surface);
+            self.changed(open.parent, None);
+        }
+    }
+
+    /// Closes the tooltip shown, if the popup open is one.
+    fn close_tooltip(&mut self) {
+        if let Some(open) = self.shell.popup.filter(|p| !p.menu) {
+            self.close(open.surface);
+        }
+    }
+
+    /// A press, a key or a scroll hides the tooltip.
+    fn hide_tooltip(&mut self) {
+        if self.tooltip.hide(Instant::now()) {
+            self.close_tooltip();
+        }
+    }
+
+    /// The widget with a tooltip under the pointer, or newly focused, is now `target`: the
+    /// tooltip shown hides, and the target's shows after GTK's delay.
+    fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId)>) {
+        let (hide, wait) = self.tooltip.point(target, Instant::now());
+        if hide {
+            self.close_tooltip();
+        }
+        let Some((wait, generation)) = wait else {
+            return;
+        };
+        let timer = Timer::from_duration(wait);
+        let inserted = self
+            .loop_handle
+            .insert_source(timer, move |_, _, app: &mut App| {
+                app.tooltip_due(generation);
+                TimeoutAction::Drop
+            });
+        if let Err(error) = inserted {
+            self.fail(error.error.to_string().into());
+        }
+    }
+
+    /// The wait of `generation` ran out: the tooltip shows, unless a menu is open, as none shows
+    /// over GTK's open popover.
+    fn tooltip_due(&mut self, generation: u64) {
+        let Some((id, widget)) = self.tooltip.due(generation) else {
+            return;
+        };
+        if self.shell.popup.is_some_and(|p| p.menu) {
+            return;
+        }
+        let Some(ui) = self.shell.ui(id) else {
+            return;
+        };
+        let text = (widget < ui.len() && ui.is_visible(widget))
+            .then(|| ui.tooltip(widget))
+            .flatten();
+        let Some(text) = text else {
+            return;
+        };
+        let tip = tooltip_ui(ui, text);
+        // A tooltip that cannot be shown leaves the application running, and says why.
+        if let Err(error) = self.shell.show_popup(id, widget, tip, Side::Bottom, false) {
+            eprintln!("athanor-toolkit: no tooltip: {error}");
+        }
+    }
+
+    /// The pointer moved on `id`: the hovered widget follows it, a drag may start, and the
+    /// tooltip follows the hovered widget.
+    fn pointer_moved(&mut self, id: SurfaceId, x: f32, y: f32) {
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        let before = surface.ui.hovered();
+        let event = surface.ui.pointer_motion(x, y);
+        let hovered = surface.ui.hovered();
+        let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
+        if event.is_some() || hovered != before {
+            self.changed(id, event);
+        }
+        self.point_tooltip(target.map(|w| (id, w)));
+    }
+
+    /// A button pressed on `id`. A press outside the open menu closes it and goes no further,
+    /// as with GTK's popovers; a press on a window's title bar outside its buttons moves it.
+    fn pointer_pressed(&mut self, id: SurfaceId, (x, y): (f32, f32), button: u32, serial: u32) {
+        self.shell.serial = Some(serial);
+        self.hide_tooltip();
+        if self
+            .shell
+            .popup
+            .is_some_and(|p| p.dismissed_by(Dismiss::Press(id)))
+        {
+            self.close_popup();
+            return;
+        }
+        let button = match button {
+            BTN_LEFT => PointerButton::Primary,
+            BTN_RIGHT => PointerButton::Secondary,
+            _ => return,
+        };
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        if let (Shown::Window(window), PointerButton::Primary) = (&surface.shown, button) {
+            if surface.ui.hit(x, y).is_none() && surface.ui.in_title_bar(x, y) {
+                if let Some(seat) = &self.pointer_seat {
+                    window.move_(seat, serial);
+                }
+                return;
+            }
+        }
+        let event = surface.ui.pointer_press(x, y, button);
+        self.changed(id, event);
+    }
+
     /// Applies what the input method sent since the last `done`, in the protocol's order: the
     /// committed text replaces the preedit, then the new preedit is shown. A `done` that
     /// answers an older state sends no new state; the next one that answers the latest does.
@@ -1034,19 +1346,45 @@ impl App {
             Keysym::Return | Keysym::KP_Enter => Key::Enter,
             Keysym::BackSpace => Key::Backspace,
             Keysym::Delete => Key::Delete,
+            Keysym::Escape => Key::Escape,
+            Keysym::F10 if self.modifiers.shift => Key::Menu,
+            Keysym::Menu => Key::Menu,
             _ => match event.utf8 {
                 Some(text) if !text.chars().any(char::is_control) => Key::Text(text),
                 _ => return,
             },
         };
-        let Some(id) = self.keyboard_focus else {
+        self.hide_tooltip();
+        if key == Key::Escape
+            && self
+                .shell
+                .popup
+                .is_some_and(|p| p.dismissed_by(Dismiss::Escape))
+        {
+            self.close_popup();
+            return;
+        }
+        // An open menu takes the keys, whichever of the application's surfaces the compositor
+        // sends them to.
+        let target = match self.shell.popup {
+            Some(open) if open.menu => Some(open.surface),
+            _ => self.keyboard_focus,
+        };
+        let Some(id) = target else {
             return;
         };
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
+        let before = surface.ui.focus();
         let event = surface.ui.key(key);
+        let after = surface.ui.focus();
+        let tip = after.filter(|&w| surface.ui.tooltip(w).is_some());
         self.changed(id, event);
+        // The keyboard focus shows its widget's tooltip as the pointer does.
+        if after != before {
+            self.point_tooltip(tip.map(|w| (id, w)));
+        }
     }
 }
 
@@ -1196,6 +1534,37 @@ impl WindowHandler for App {
     }
 }
 
+impl PopupHandler for App {
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        popup: &Popup,
+        _: PopupConfigure,
+    ) {
+        // ponytail: the popup keeps its widgets' size and the place the compositor gave it; a
+        // menu whose items change while it is open would need a reposition.
+        let Some(surface) = self.shell.find(popup.wl_surface()) else {
+            return;
+        };
+        surface.configured = true;
+        let id = surface.id;
+        self.changed(id, None);
+    }
+
+    fn done(&mut self, _: &Connection, _: &QueueHandle<Self>, popup: &Popup) {
+        let Some(surface) = self.shell.find(popup.wl_surface()) else {
+            return;
+        };
+        let id = surface.id;
+        if self.shell.popup.is_some_and(|p| p.surface == id) {
+            self.close_popup();
+        } else {
+            self.close(id);
+        }
+    }
+}
+
 impl SeatHandler for App {
     fn seat_state(&mut self) -> &mut SeatState {
         &mut self.seat
@@ -1210,6 +1579,7 @@ impl SeatHandler for App {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        self.shell.seat = Some(seat.clone());
         let result: Result<(), Error> = match capability {
             Capability::Keyboard if self.keyboard.is_none() => {
                 if let (Some(manager), None) = (&self.text_input_manager, &self.text_input) {
@@ -1310,9 +1680,10 @@ impl KeyboardHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
-        _: u32,
+        serial: u32,
         event: KeyEvent,
     ) {
+        self.shell.serial = Some(serial);
         self.key(event);
     }
 
@@ -1366,28 +1737,34 @@ impl PointerHandler for App {
                         device.set_shape(serial, Shape::Default);
                     }
                 }
-                PointerEventKind::Press {
-                    button: BTN_LEFT,
-                    serial,
-                    ..
+                PointerEventKind::Leave { .. } => self.point_tooltip(None),
+                _ => {}
+            }
+            let Some(surface) = self.shell.find(&event.surface) else {
+                continue;
+            };
+            let id = surface.id;
+            let at = (event.position.0 as f32, event.position.1 as f32);
+            match event.kind {
+                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    self.pointer_moved(id, at.0, at.1);
+                }
+                PointerEventKind::Leave { .. } => {
+                    surface.ui.pointer_leave();
+                    self.changed(id, None);
+                }
+                PointerEventKind::Press { button, serial, .. } => {
+                    self.pointer_pressed(id, at, button, serial);
+                }
+                PointerEventKind::Release {
+                    button: BTN_LEFT, ..
                 } => {
-                    let Some(surface) = self.shell.find(&event.surface) else {
-                        continue;
-                    };
-                    let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                    // A press on a window's title bar outside its buttons moves the window.
-                    if let Shown::Window(window) = &surface.shown {
-                        if surface.ui.hit(x, y).is_none() && surface.ui.in_title_bar(x, y) {
-                            if let Some(seat) = &self.pointer_seat {
-                                window.move_(seat, serial);
-                            }
-                            continue;
-                        }
-                    }
-                    let event = surface.ui.click(x, y);
-                    let id = surface.id;
+                    let event = surface
+                        .ui
+                        .pointer_release(at.0, at.1, PointerButton::Primary);
                     self.changed(id, event);
                 }
+                PointerEventKind::Axis { .. } => self.hide_tooltip(),
                 _ => {}
             }
         }
