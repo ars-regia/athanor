@@ -24,6 +24,8 @@
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
+#                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
@@ -44,7 +46,8 @@
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
-#                           ATHANOR_DOCK_BIN runs another dock in `atspi dock` and `orca dock`
+#                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
+#                           and `surface dock`, whose captures and goldens it tags toolkit-
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
@@ -62,6 +65,8 @@ out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
 # The dock the atspi and orca scenes run, as a path inside the rig.
 dock_bin=${ATHANOR_DOCK_BIN:-/out/bin/athanor-dock}
 dock_app=${dock_bin##*/}
+# Another dock's captures sit beside the GTK dock's goldens under their own names.
+dock_tag=${ATHANOR_DOCK_BIN:+toolkit-}
 # RIG_HOLD is split into words, so the name it carries must be one word.
 case $dock_app in
 '' | *[[:space:]]*)
@@ -372,6 +377,7 @@ capture_dock() {
             /repo/forge/specs/athanor-dock/athanor-dock-1.0.0/po/athanor-dock.pot /out/dock-pseudo-rtl.po
         msgfmt -o /out/locale/dock/rtl.mo /out/dock-pseudo-rtl.po'
     while IFS=$'\t' read -r tag variant scale locale catalog; do
+        tag=$dock_tag$tag
         tags+=("$tag")
         seed_bar "$out/seed-$tag" float bottom visible "$variant"
         override=()
@@ -381,7 +387,7 @@ capture_dock() {
         in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
-            python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window
+            python3 /repo/forge/test/shell/bar_session.py --client "$dock_bin" --window
     done < <(python3 -B "$rig/cases.py" dock)
 }
 
@@ -637,6 +643,18 @@ build-dock)
                  && install -m 0755 /out/target/release/athanor-dock /out/bin/ \
                  && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-dock'
     ;;
+build-dock-toolkit)
+    # Installed as athanor-dock in a directory of its own: accesskit names the application
+    # after the executable, and the toolkit dock keeps the GTK dock's name on the bus.
+    mkdir -p "$out/toolkit-dock" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
+        bash -c 'cargo clippy --locked -p athanor-dock --no-default-features --features toolkit --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-dock --no-default-features --features toolkit \
+                 && cargo build --release --locked -p athanor-dock --no-default-features --features toolkit --bin athanor-dock-toolkit \
+                 && install -m 0755 /out/target/release/athanor-dock-toolkit /out/toolkit-dock/athanor-dock'
+    ;;
 build-launcher)
     mkdir -p "$out/bin" "$out/target"
     # ATHANOR_REQUIRE_QALC: the calculator's test runs the real qalc and may not skip here.
@@ -665,7 +683,7 @@ dock-roundtrip)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_roundtrip.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-roundtrip -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec /out/bin/athanor-dock"
+                 && exec $(printf %q "$dock_bin")"
     ;;
 shelld-e2e)
     rm -f "$out/shelld-e2e.log"
@@ -702,7 +720,7 @@ dock-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-dock --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable"
     ;;
 notifications-e2e)
     stage_greeter_icons

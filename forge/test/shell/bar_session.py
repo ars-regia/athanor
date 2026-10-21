@@ -22,8 +22,9 @@ root in the container, so the bar's check that root answered holds; it owns the 
 ALLOW_REPLACEMENT, so shield_e2e.py can put an impostor of another user in its place, and
 the private bus admits every user for that.
 
---client names the binary under /out/bin that runs as the client, athanor-bar by default;
-the dock's rig session runs athanor-dock through it, with every other flag unchanged, and the
+--client names the binary under /out/bin that runs as the client, athanor-bar by default, or
+an absolute path; the dock's rig session runs athanor-dock, or the dock ATHANOR_DOCK_BIN
+names, through it, with every other flag unchanged, and the
 greeter's captures run athanor-greeter-ui, whose seal asks the fake os.athanor.Update1 State.
 
 --notifications starts fake_notifications.py (athanor-shelld's private interface, faked:
