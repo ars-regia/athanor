@@ -988,25 +988,36 @@ def check_install_channel():
 # --------------------------------------------------------------------------- #
 
 OS_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/os-release"
+FEDORA_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/fedora-release"
 
 
 def os_release_problems(root=None):
-    """Every non-empty line of the shipped os-release is KEY=VALUE.
+    """Every non-empty line of the shipped os-release is KEY=VALUE, and fedora-release names the
+    release of its VERSION_ID.
 
     os-release(5) allows comment lines, but bootc-image-builder does not: it stops the ISO build
-    with "readOSRelease: invalid input" on any non-empty line without "=".
+    with "readOSRelease: invalid input" on any non-empty line without "=". fedora-release was left
+    at 43 when os-release moved to 45.
     """
     root = root or ROOT
     try:
         text = read(root / OS_RELEASE)
+        release = read(root / FEDORA_RELEASE)
     except OSError as err:
-        return [f"{OS_RELEASE}: cannot read ({err})"]
-    return [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
-            for number, line in enumerate(text.splitlines(), 1)
-            if line.strip() and "=" not in line]
+        return [f"cannot read ({err})"]
+    out = [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+           for number, line in enumerate(text.splitlines(), 1)
+           if line.strip() and "=" not in line]
+    version = next((line.split("=", 1)[1].strip().strip('"') for line in text.splitlines()
+                    if line.startswith("VERSION_ID=")), None)
+    named = re.search(r" release (\S+) ", release)
+    if not named or named.group(1) != version:
+        out.append(f"{FEDORA_RELEASE}: names release {named.group(1) if named else 'none'}, "
+                   f"os-release VERSION_ID is {version}")
+    return out
 
 
-@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires")
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires, and fedora-release names its VERSION_ID")
 def check_os_release():
     r = Result()
     for problem in os_release_problems():
