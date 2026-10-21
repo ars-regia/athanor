@@ -1039,15 +1039,16 @@ mod tests {
             ui.add(row, check("A much longer label"));
             ui.layout();
             let widget = ui.widget(bold);
-            let width = widget.text.as_ref().map_or(0.0, |layout| layout.width());
+            let width = widget.text.as_ref().expect("a laid-out label").width();
+            assert!(width > 0.0);
             let (r, gap) = (widget.rect, ui.theme.gap);
             let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
             assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
             let x = label_x(r, mark, rtl, false, gap, width);
             if rtl {
-                assert_eq!(x + width + gap, mark.x, "the label ends a gap before the box");
+                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
             } else {
-                assert_eq!(x, mark.x + mark.w + gap, "the label starts a gap after the box");
+                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
             }
             // A switch keeps the far edge.
             let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
