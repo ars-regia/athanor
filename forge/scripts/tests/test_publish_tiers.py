@@ -270,13 +270,20 @@ class PublishTiers(unittest.TestCase):
         self.env["GITHUB_REF"] = "refs/heads/feature/x"
         self.publish_current(*DIRS, signer=f"{WORKFLOW}@refs/heads/feature/x")
         self.publish_current("athanor-forge-tier1-repo", signer=f"{WORKFLOW}@refs/heads/main")
-        self.publish_current(
-            "athanor-forge-tier2-repo", signer=f"{WORKFLOW}@refs/heads/rebase/fedora-45"
-        )
         r = self.run_script()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.pushed(), [])
         self.assertEqual(self.signed(), [])
+
+    def test_a_tier_another_rebase_branch_signed_is_pushed_again_signed(self):
+        self.env["GITHUB_REF"] = "refs/heads/iso-v0"
+        self.publish_current(*DIRS)
+        self.publish_current(
+            "athanor-forge-tier2-repo", signer=f"{WORKFLOW}@refs/heads/rebase/x"
+        )
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.pushed(), [f"{REGISTRY}/athanor-forge-tier2-repo:latest"])
 
     def test_a_signature_check_error_fails_the_run_signed(self):
         self.publish_current(*DIRS)

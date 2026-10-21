@@ -22,9 +22,10 @@
 #
 # A trusted signature is one by .github/workflows/call-system-image.yml of GITHUB_SERVER_URL and
 # GITHUB_REPOSITORY (default https://github.com and ars-regia/athanor) run on a branch of
-# TIER_TRUSTED_REFS (space separated, default "iso-v0 main rebase/*"; a name ending in /* stands
-# for every branch under it), or on the branch of this run when GITHUB_REF is refs/heads/<name>:
-# a branch run builds from the tiers it published itself, and no trusted run accepts them. A
+# TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
+# GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
+# trusted run accepts them. No other branch is trusted, rebase/* included: creating a branch is
+# not protected, and a tier signed there could be adopted by the next iso-v0 run. A
 # missing or foreign signature fails the check; any other failure of cosign (registry, Rekor,
 # TUF, network) is an error, never a missing signature. Needs skopeo, cosign and jq, and a
 # registry session when the tier images are private.
@@ -52,17 +53,23 @@ ISSUER=https://token.actions.githubusercontent.com
 workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/call-system-image.yml"
 # Owner, repository, host and branch names hold no regex metacharacter other than the dot.
 workflow=${workflow//./\\.}
-read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main rebase/*}"
-[[ ${GITHUB_REF:-} != refs/heads/* ]] || trusted+=("${GITHUB_REF#refs/heads/}")
+command -v cosign > /dev/null || die "cosign is not on PATH"
+read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main}"
 refs=''
 for ref in "${trusted[@]}"; do
-    name=${ref%/\*}
-    [[ $name =~ ^[A-Za-z0-9._/-]+$ ]] || die "'$ref' is not a branch name (TIER_TRUSTED_REFS or GITHUB_REF)"
-    name=${name//./\\.}
-    [[ $ref != */\* ]] || name+='/[A-Za-z0-9._/-]+'
-    refs+="${refs:+|}$name"
+    [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || die "'$ref' of TIER_TRUSTED_REFS is not a branch name"
+    refs+="${refs:+|}${ref//./\\.}"
 done
 [[ -n $refs ]] || die "TIER_TRUSTED_REFS names no branch"
+# The run's own branch, when its name needs no escaping beyond the dot; any other name is left
+# out, which only makes the check stricter.
+own=${GITHUB_REF:-}
+own=${own#refs/heads/}
+if [[ ${GITHUB_REF:-} == refs/heads/* && $own =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    refs+="|${own//./\\.}"
+elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
+    echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
+fi
 IDENTITY="^${workflow}@refs/heads/(${refs})\$"
 # cosign v3 reports a missing or foreign signature with these messages. "no matching
 # signatures" is anchored to the end of the line: cosign appends a transient cause (a Rekor

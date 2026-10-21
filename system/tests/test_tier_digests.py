@@ -130,6 +130,9 @@ class TierDigests(unittest.TestCase):
             "https://github.com/fork/athanor/.github/workflows/call-system-image.yml@refs/heads/iso-v0",
             "https://github.com/ars-regia/athanor/.github/workflows/kernel-build.yml@refs/heads/iso-v0",
             f"{WORKFLOW}@refs/heads/iso-v0x",
+            f"{WORKFLOW}@refs/heads/main-evil",
+            f"{WORKFLOW}@refs/heads/rebase/fedora-45",
+            f"{WORKFLOW}@refs/heads/rebase",
         ):
             with self.subTest(identity=identity):
                 self.publish(
@@ -145,7 +148,7 @@ class TierDigests(unittest.TestCase):
     def test_the_trusted_branches_and_the_run_s_own_branch_are_signed(self):
         for identity, ref in (
             (f"{WORKFLOW}@refs/heads/main", None),
-            (f"{WORKFLOW}@refs/heads/rebase/fedora-45", None),
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-45", "refs/heads/rebase/fedora-45"),
             (f"{WORKFLOW}@refs/heads/feature/x", "refs/heads/feature/x"),
         ):
             with self.subTest(identity=identity):
@@ -165,7 +168,16 @@ class TierDigests(unittest.TestCase):
             signers={"tier0": f"{WORKFLOW}@refs/pull/7/merge"},
             **DIGESTS,
         )
-        self.assertEqual(self.resolve("resolve").returncode, 1)
+        r = self.resolve("resolve")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("tier0: not signed by a trusted run", r.stderr)
+
+    def test_a_branch_whose_name_needs_escaping_trusts_only_the_default_branches_signed(self):
+        self.env["GITHUB_REF"] = "refs/heads/fix/c++"
+        self.publish("ghcr.io/ars-regia", **DIGESTS)
+        r = self.resolve("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("'fix/c++' is not trusted for its own tiers", r.stderr)
 
     def test_a_cosign_failure_is_an_error_not_a_missing_signature_signed(self):
         self.publish("ghcr.io/ars-regia", transient=("tier2",), **DIGESTS)
