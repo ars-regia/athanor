@@ -281,6 +281,10 @@ impl Store {
     /// # Errors
     /// The file exists and cannot be read, or says neither `on` nor `off` (`InvalidData`),
     /// an empty file included: an unreadable answer is never the default.
+    ///
+    /// Code that decides (the unlock of a security digest, `Postpone()`) reads this and treats
+    /// an error as a failed operation, never the published `automatic_security_updates`, which
+    /// is `false` for an unreadable file too.
     pub fn automatic_security_updates(&self) -> std::io::Result<bool> {
         match std::fs::read_to_string(self.var.join("automatic-security-updates")) {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),

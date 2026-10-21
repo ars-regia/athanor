@@ -213,6 +213,7 @@
 **Interfaces:**
 - Consumes: Task 4 `class_of`, `Tools::fetch_attestation`, `Store::attestation_dir`; Task 5 `Lineage`, `Store::{lineage, set_lineage, automatic_security_updates}`.
 - Produces: `fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &str, digest: &str) -> Class` (fetch, then `class_of`; a failed fetch is `Feature`, logged, not a check failure); `fn settle_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, lineage: &mut Lineage, automatic: bool) -> Result<UpdateState, Failure>` (unlock or keep locked; opens the lineage on the first unlock); `Fake` gains `attestation(digest, Class)` and records `"fetch_attestation"`, `"apply_downloaded"`.
+- The decision reads `Store::automatic_security_updates()` and treats `Err` as a failed check (`Failure`, `Storage`), never the published `automatic_security_updates`, which is `false` for an unreadable file too.
 
 - [ ] **Step 1: Write the failing tests** in `check.rs`:
   - `a_security_digest_downloads_and_unlocks` (item 17): state `WillApplyAtNextShutdown`, calls include `download` then `apply_downloaded`, no reboot call, `postpone.first_notice_at == NOW`, `boots_remaining == 7`, `postponed == false`.

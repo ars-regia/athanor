@@ -185,7 +185,8 @@ pub struct State {
     /// At most the registry's host name, and only beside a `network` or `registry` code.
     pub last_error_host: Option<String>,
     /// The per-machine opt-out of UT13, inverted: `false` while the administrator has turned
-    /// the automatic application of security updates off.
+    /// the automatic application of security updates off. Display only: `false` also stands
+    /// for an opt-out file the service cannot read, so code that decides reads the store.
     pub automatic_security_updates: bool,
     /// `None` while no lineage is open. Required in the file, as `null` at least: a reader
     /// never takes an absent member for a closed lineage.

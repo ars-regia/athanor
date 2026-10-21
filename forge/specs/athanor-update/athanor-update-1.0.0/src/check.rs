@@ -365,6 +365,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
     // The opt-out and the lineage of UT13 are published as they are on disk. An unreadable
     // file is reported and left as it is, never read as the default: the opt-out is published
     // off, which is what the machine then does (it unlocks nothing), and no lineage is shown.
+    // The published bool is for display: the unlock reads the store and fails on an error.
     let (automatic_security_updates, unreadable_opt_out) = match ctx.store.automatic_security_updates() {
         Ok(automatic) => (automatic, None),
         Err(err) => {
