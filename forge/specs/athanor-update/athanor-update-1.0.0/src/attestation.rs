@@ -1,6 +1,7 @@
 //! The release attestation of an image, as `skopeo copy … dir:` stores
 //! `<repo>:sha256-<hex>.att` (docs/architecture/doc_update_trust.md, UT13; ADR-0127 points 1
-//! to 4). Each layer is a DSSE envelope of an in-toto Statement v1, and an object of more than
+//! to 4). Each layer is a DSSE envelope of an in-toto Statement, v0.1 as cosign 3.0.6 writes it
+//! or v1, and an object of more than
 //! `MAX_LAYERS` layers is not read. An envelope counts only when
 //! its signature, base64 ASN.1 DER ECDSA P-256 over the DSSE pre-authentication encoding,
 //! verifies with a key of the policy in force, and its payload type is the in-toto one. The
@@ -21,8 +22,8 @@ pub const PREDICATE_TYPE: &str =
     "https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b";
 pub const LAYER_MEDIA_TYPE: &str = "application/vnd.dsse.envelope.v1+json";
 pub const PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
-/// The in-toto statement type of ADR-0127, point 2.
-pub const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
+/// The in-toto statement types of ADR-0127, point 2: v0.1, which cosign 3.0.6 writes, and v1.
+pub const STATEMENT_TYPES: [&str; 2] = ["https://in-toto.io/Statement/v0.1", "https://in-toto.io/Statement/v1"];
 const MAX_MANIFEST: u64 = 1 << 20;
 const MAX_PAYLOAD: u64 = 64 << 10;
 /// Layers past this many make the object of the feature class unread.
@@ -167,7 +168,7 @@ fn verdict(statement: &[u8], repository: &str, hex: &str) -> Option<Class> {
     if !about.subject.iter().any(|subject| subject.name == repository && subject.digest.sha256 == hex) {
         return None;
     }
-    if about.kind != STATEMENT_TYPE || about.subject.len() != 1 {
+    if !STATEMENT_TYPES.contains(&about.kind.as_str()) || about.subject.len() != 1 {
         return Some(Class::Feature);
     }
     // doc_update_trust.md item 18: the security class comes "with advisory ids", so a
@@ -421,8 +422,20 @@ mod tests {
     }
 
     #[test]
-    fn a_statement_type_other_than_in_toto_v1_is_feature() {
-        assert_eq!(class("att-statement-v01", &[key("a")]), Class::Feature);
+    fn only_the_in_toto_statement_types_v0_1_and_v1_are_read() {
+        let security = Class::Security { advisories: vec!["CVE-2026-0001".into()] };
+        assert_eq!(class("att-statement-v01", &[key("a")]), security);
+        assert_eq!(class("att-security", &[key("a")]), security, "v1");
+        assert_eq!(class("att-statement-v2", &[key("a")]), Class::Feature);
+    }
+
+    #[test]
+    fn a_statement_shaped_as_cosign_writes_it_matches_the_repository_of_the_reference() {
+        let repository = crate::sigobj::repository_of("ghcr.io/ars-regia/athanor-system:stable");
+        assert_eq!(repository, "ghcr.io/ars-regia/athanor-system");
+        let security = Class::Security { advisories: vec!["CVE-2026-0001".into()] };
+        assert_eq!(class_of(&vectors("att-cosign"), &[key("a")], repository, &digest()), security);
+        assert_eq!(class_of(&vectors("att-cosign"), &[key("a")], REPO, &digest()), Class::Feature);
     }
 
     #[test]

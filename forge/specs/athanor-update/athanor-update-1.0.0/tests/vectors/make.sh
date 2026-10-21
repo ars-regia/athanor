@@ -111,7 +111,8 @@ printf '%s' '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+
 # pre-authentication encoding of an in-toto statement. Each line on stdin is one layer, a
 # JSON object: `key` signs; `class` (absent: no class member), `advisories`, `repo`, `digest`,
 # `type` (the statement's `_type`), `predicateType` and `payloadType` default to a valid
-# statement for $REPO and $DIGEST; `extraSubject` adds a second subject after the first;
+# statement for $REPO and $DIGEST; `cosign` orders the members as cosign 3.0.6 writes them,
+# `_type` v0.1 first; `extraSubject` adds a second subject after the first;
 # `duplicateClass` writes `"class":"feature"` before the class member, in the signed bytes;
 # `tamper` is `signature` (one byte flipped), `der` (the DER cut short), `pae` (signed over the
 # encoding less its last byte) or `payload` (feature signed, then the class changed to
@@ -133,8 +134,11 @@ for line in sys.stdin.read().splitlines():
     subject = [{"name": spec.get("repo", os.environ["REPO"]), "digest": {"sha256": spec.get("digest", os.environ["DIGEST"]).removeprefix("sha256:")}}]
     if spec.get("extraSubject"):
         subject.append({"name": os.environ["REPO"] + "-nvidia", "digest": subject[0]["digest"]})
-    statement = {"_type": spec.get("type", "https://in-toto.io/Statement/v1"), "subject": subject,
-                 "predicateType": spec.get("predicateType", os.environ["PREDICATE"]), "predicate": predicate}
+    if spec.get("cosign"):
+        statement = {"_type": "https://in-toto.io/Statement/v0.1", "predicateType": os.environ["PREDICATE"], "subject": subject, "predicate": predicate}
+    else:
+        statement = {"_type": spec.get("type", "https://in-toto.io/Statement/v1"), "subject": subject,
+                     "predicateType": spec.get("predicateType", os.environ["PREDICATE"]), "predicate": predicate}
     body = json.dumps(statement, separators=(",", ":")).encode()
     if spec.get("duplicateClass"):
         body = body.replace(b"\"class\":", b"\"class\":\"feature\",\"class\":", 1)
@@ -194,6 +198,10 @@ attestation att-unknown-key <<< "{\"key\":\"b\",$security}"
 printf '%s\n' "{\"key\":\"b\",$security}" '{"key":"a","class":"feature"}' | attestation att-mixed
 attestation att-oversized <<< "{\"key\":\"a\",$security,\"pad\":70000}"
 attestation att-statement-v01 <<< "{\"key\":\"a\",$security,\"type\":\"https://in-toto.io/Statement/v0.1\"}"
+attestation att-statement-v2 <<< "{\"key\":\"a\",$security,\"type\":\"https://in-toto.io/Statement/v2\"}"
+# cosign 3.0.6 (generateCustomStatement): `_type` v0.1, one subject named by the repository
+# without tag or digest, `{"sha256": <bare hex>}`.
+attestation att-cosign <<< "{\"key\":\"a\",$security,\"cosign\":true,\"repo\":\"ghcr.io/ars-regia/athanor-system\"}"
 attestation att-two-subjects <<< "{\"key\":\"a\",$security,\"extraSubject\":true}"
 attestation att-duplicate-class <<< "{\"key\":\"a\",$security,\"duplicateClass\":true}"
 attestation att-unpadded <<< "{\"key\":\"a\",$security,\"encoding\":\"unpadded\"}"
