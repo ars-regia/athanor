@@ -431,8 +431,8 @@ mod tests {
 
     #[test]
     fn a_statement_shaped_as_cosign_writes_it_matches_the_repository_of_the_reference() {
-        let repository = crate::sigobj::repository_of("ghcr.io/ars-regia/athanor-system:stable");
-        assert_eq!(repository, "ghcr.io/ars-regia/athanor-system");
+        let repository = crate::sigobj::repository_of("ghcr.io/owner/athanor-system:stable");
+        assert_eq!(repository, "ghcr.io/owner/athanor-system");
         let security = Class::Security { advisories: vec!["CVE-2026-0001".into()] };
         assert_eq!(class_of(&vectors("att-cosign"), &[key("a")], repository, &digest()), security);
         assert_eq!(class_of(&vectors("att-cosign"), &[key("a")], REPO, &digest()), Class::Feature);

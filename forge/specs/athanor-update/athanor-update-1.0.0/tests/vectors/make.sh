@@ -201,7 +201,7 @@ attestation att-statement-v01 <<< "{\"key\":\"a\",$security,\"type\":\"https://i
 attestation att-statement-v2 <<< "{\"key\":\"a\",$security,\"type\":\"https://in-toto.io/Statement/v2\"}"
 # cosign 3.0.6 (generateCustomStatement): `_type` v0.1, one subject named by the repository
 # without tag or digest, `{"sha256": <bare hex>}`.
-attestation att-cosign <<< "{\"key\":\"a\",$security,\"cosign\":true,\"repo\":\"ghcr.io/ars-regia/athanor-system\"}"
+attestation att-cosign <<< "{\"key\":\"a\",$security,\"cosign\":true,\"repo\":\"ghcr.io/owner/athanor-system\"}"
 attestation att-two-subjects <<< "{\"key\":\"a\",$security,\"extraSubject\":true}"
 attestation att-duplicate-class <<< "{\"key\":\"a\",$security,\"duplicateClass\":true}"
 attestation att-unpadded <<< "{\"key\":\"a\",$security,\"encoding\":\"unpadded\"}"
