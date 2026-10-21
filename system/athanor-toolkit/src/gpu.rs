@@ -24,16 +24,21 @@ use wgpu::{CurrentSurfaceTexture, PresentMode, TextureFormat};
 /// The GPU renderer of one Wayland surface, drawing with vello_gpu through wgpu.
 pub struct Gpu {
     surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    painter: Painter,
+    /// The adapter wgpu picked, as the start-up line names it.
+    pub adapter: String,
+}
+
+/// What draws a window on a wgpu device, whatever texture the frame goes to.
+struct Painter {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
     renderer: vello_gpu::Renderer,
     resources: Resources,
     scene: vello_gpu::Scene,
     /// The first error wgpu reported outside a call's result, which the next frame returns.
     errors: Arc<Mutex<Option<String>>>,
-    /// The adapter wgpu picked, as the start-up line names it.
-    pub adapter: String,
 }
 
 /// The total area of the images uploaded to vello_gpu's atlas, in pixels: one atlas of the eight
@@ -114,18 +119,6 @@ impl Gpu {
             "{} ({:?}, {:?}, {} {})",
             info.name, info.backend, info.device_type, info.driver, info.driver_info
         );
-        // vello_gpu needs no more than WebGL 2 offers; ask for what the adapter has.
-        let (device, queue) = ready(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))??;
-        let errors = Arc::new(Mutex::new(None));
-        let slot = Arc::clone(&errors);
-        device.on_uncaptured_error(Arc::new(move |error| {
-            if let Ok(mut slot) = slot.lock() {
-                slot.get_or_insert_with(|| error.to_string());
-            }
-        }));
         let capabilities = surface.get_capabilities(&adapter);
         // vello_gpu, as vello_cpu, writes sRGB-encoded values: the surface must not encode them
         // again.
@@ -152,27 +145,10 @@ impl Gpu {
                 .get_default_config(&adapter, 1, 1)
                 .ok_or_else(|| format!("{adapter_name} cannot present to the window"))?
         };
-        let (renderer, resources) = vello_gpu::Renderer::new(
-            &device,
-            &RenderTargetConfig {
-                format,
-                width: 1,
-                height: 1,
-            },
-        );
         Ok(Self {
             surface,
-            device,
-            queue,
             config,
-            renderer,
-            resources: Resources {
-                vello: resources,
-                images: Vec::new(),
-                skipped: Vec::new(),
-            },
-            scene: vello_gpu::Scene::new(1, 1),
-            errors,
+            painter: Painter::new(&adapter, format)?,
             adapter: adapter_name,
         })
     }
@@ -184,12 +160,8 @@ impl Gpu {
         let size = (u32::from(width), u32::from(height));
         if (self.config.width, self.config.height) != size {
             (self.config.width, self.config.height) = size;
-            self.surface.configure(&self.device, &self.config);
+            self.surface.configure(&self.painter.device, &self.config);
         }
-        self.scene.reset_and_resize(width, height);
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.upload_images(ui, &mut encoder);
-        paint(ui, scale, &mut self.scene, &mut self.resources)?;
         let frame = match self.surface.get_current_texture() {
             CurrentSurfaceTexture::Success(frame) | CurrentSurfaceTexture::Suboptimal(frame) => {
                 frame
@@ -197,6 +169,65 @@ impl Gpu {
             other => return Err(format!("the window's surface has no frame: {other:?}").into()),
         };
         let view = frame.texture.create_view(&Default::default());
+        self.painter.draw(ui, scale, (width, height), &view)?;
+        self.painter.queue.present(frame);
+        // A present that fails reaches the error slot; one that ends Outdated, Lost, Timeout or
+        // Occluded does not (wgpu 30 drops that status), and may commit nothing: the driver
+        // commits the surface after this, so its frame callback comes in either case.
+        self.painter.check()?;
+        Ok((width, height))
+    }
+}
+
+impl Painter {
+    /// Opens a device on `adapter` and vello_gpu's renderer, drawing in `format`.
+    fn new(adapter: &wgpu::Adapter, format: TextureFormat) -> Result<Self, Error> {
+        // vello_gpu needs no more than WebGL 2 offers; ask for what the adapter has.
+        let (device, queue) = ready(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))??;
+        let errors = Arc::new(Mutex::new(None));
+        let slot = Arc::clone(&errors);
+        device.on_uncaptured_error(Arc::new(move |error| {
+            if let Ok(mut slot) = slot.lock() {
+                slot.get_or_insert_with(|| error.to_string());
+            }
+        }));
+        let (renderer, resources) = vello_gpu::Renderer::new(
+            &device,
+            &RenderTargetConfig {
+                format,
+                width: 1,
+                height: 1,
+            },
+        );
+        Ok(Self {
+            device,
+            queue,
+            renderer,
+            resources: Resources {
+                vello: resources,
+                images: Vec::new(),
+                skipped: Vec::new(),
+            },
+            scene: vello_gpu::Scene::new(1, 1),
+            errors,
+        })
+    }
+
+    /// Draws `ui`, laid out at `scale` to `width` by `height`, onto `view`, and submits it.
+    fn draw(
+        &mut self,
+        ui: &mut Ui,
+        scale: f32,
+        (width, height): (u16, u16),
+        view: &wgpu::TextureView,
+    ) -> Result<(), Error> {
+        self.scene.reset_and_resize(width, height);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.upload_images(ui, &mut encoder);
+        paint(ui, scale, &mut self.scene, &mut self.resources)?;
         self.renderer.render(
             &self.scene,
             &mut self.resources.vello,
@@ -204,19 +235,13 @@ impl Gpu {
             &self.queue,
             &mut encoder,
             &RenderSize { width, height },
-            &view,
+            view,
             None,
             &TextureBindings::new(),
             TargetInit::Clear(ClearSettings::default()),
         )?;
         self.queue.submit([encoder.finish()]);
-        self.check()?;
-        self.queue.present(frame);
-        // A present that fails reaches the error slot; one that ends Outdated, Lost, Timeout or
-        // Occluded does not (wgpu 30 drops that status), and may commit nothing: the driver
-        // commits the surface after this, so its frame callback comes in either case.
-        self.check()?;
-        Ok((width, height))
+        self.check()
     }
 
     /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
@@ -289,5 +314,109 @@ impl Gpu {
             Some(error) => Err(format!("wgpu: {error}").into()),
             None => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::icon::Image;
+    use crate::Theme;
+    use std::sync::mpsc;
+    use vello_cpu::peniko::ImageAlphaType;
+    use vello_cpu::PixelMetadata;
+
+    /// Draws `image` alone on `painter`'s device and reads back the pixel at its centre.
+    fn centre_of(painter: &mut Painter, image: Image) -> Result<[u8; 4], Error> {
+        let mut ui = Ui::new("Image", Theme::default(), false);
+        let id = ui.add(
+            Ui::ROOT,
+            Kind::Image {
+                image,
+                size: 32.0,
+                description: String::new(),
+            },
+        );
+        let (width, height) = layout(&mut ui, 1.0)?;
+        let size = wgpu::Extent3d {
+            width: u32::from(width),
+            height: u32::from(height),
+            depth_or_array_layers: 1,
+        };
+        let texture = painter.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        painter.draw(&mut ui, 1.0, (width, height), &view)?;
+        // A row of a copy to a buffer is a multiple of 256 bytes.
+        let row = (size.width * 4).next_multiple_of(256);
+        let buffer = painter.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(row * size.height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = painter.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: None,
+                },
+            },
+            size,
+        );
+        painter.queue.submit([encoder.finish()]);
+        let (sender, mapped) = mpsc::channel();
+        buffer.map_async(wgpu::MapMode::Read, .., move |result| {
+            let _ = sender.send(result);
+        });
+        painter.device.poll(wgpu::PollType::wait_indefinitely())?;
+        mapped.recv()??;
+        painter.check()?;
+        let r = ui.widget(id).rect;
+        let (x, y) = ((r.x + r.w / 2.0) as u32, (r.y + r.h / 2.0) as u32);
+        let at = usize::try_from(y * row + x * 4)?;
+        let pixels = buffer.get_mapped_range(..)?;
+        let pixel = pixels
+            .get(at..at + 4)
+            .ok_or("the centre is outside the frame")?;
+        Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
+    }
+
+    fn solid(rgba: [u8; 4]) -> Image {
+        let metadata = PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false);
+        Image {
+            pixmap: Arc::new(Pixmap::from_parts(rgba.repeat(32 * 32), 32, 32, metadata)),
+        }
+    }
+
+    /// The image of a widget replaced by another of the same size: the second is uploaded to
+    /// the rectangle the first frees, and must survive the clear of that rectangle.
+    #[test]
+    #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
+    fn an_image_uploaded_where_another_was_freed_is_drawn() -> Result<(), Error> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        // No adapter fails the test: it runs only where one was asked for.
+        let adapter = ready(instance.request_adapter(&Default::default()))??;
+        eprintln!("adapter: {:?}", adapter.get_info());
+        let mut painter = Painter::new(&adapter, TextureFormat::Rgba8Unorm)?;
+        let red = [0xcc, 0, 0, 0xff];
+        let blue = [0, 0, 0xcc, 0xff];
+        assert_eq!(centre_of(&mut painter, solid(red))?, red);
+        assert_eq!(centre_of(&mut painter, solid(blue))?, blue);
+        assert_eq!(painter.resources.images.len(), 1);
+        Ok(())
     }
 }

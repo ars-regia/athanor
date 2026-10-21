@@ -110,7 +110,7 @@ fn is_subdirectory(dir: &str) -> bool {
 /// A decoded image, cheap to clone.
 #[derive(Clone, Debug)]
 pub struct Image {
-    pixmap: Arc<Pixmap>,
+    pub(crate) pixmap: Arc<Pixmap>,
 }
 
 impl Image {
