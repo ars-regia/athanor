@@ -11,7 +11,9 @@ import os
 import pathlib
 import sys
 
-UPDATEINFO = gzip.compress(b"<updates></updates>")
+# mtime=0: every process that runs this fake must serve the same bytes as the checksum in
+# REPOMD, which another process may have computed in a different second.
+UPDATEINFO = gzip.compress(b"<updates></updates>", mtime=0)
 REPOMD = (
     '<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="updateinfo"><timestamp>1760000000</timestamp>'
     f'<checksum type="sha256">{hashlib.sha256(UPDATEINFO).hexdigest()}</checksum>'
