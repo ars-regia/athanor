@@ -119,6 +119,8 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         // How far the content is scrolled, in logical pixels, as GTK's ScrolledWindow.
         Kind::Scroll { height, offset } => {
             let mut node = Node::new(Role::ScrollView);
+            // A hit test finds nothing of the content outside the viewport.
+            node.set_clips_children();
             node.set_scroll_y(f64::from(*offset));
             node.set_scroll_y_min(0.0);
             node.set_scroll_y_max(f64::from((ui.content_height(id) - height).max(0.0)));
@@ -610,6 +612,7 @@ mod tests {
         let content: f32 = rows.iter().map(|&r| ui.widget(r).rect.h).sum();
         let offset = f64::from(content - 100.0);
         assert_eq!(n(scroll).role(), Role::ScrollView);
+        assert!(n(scroll).clips_children(), "a hit test finds no row out of view");
         let scrolled = (
             n(scroll).scroll_y(),
             n(scroll).scroll_y_min(),
