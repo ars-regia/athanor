@@ -95,6 +95,17 @@ pub enum Kind {
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
+    /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
+    /// with its aspect ratio kept, centred. It takes no input.
+    Image {
+        /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
+        image: crate::icon::Image,
+        /// The side of the square, in logical pixels.
+        size: f32,
+        /// What the image shows, which names it for assistive technologies; empty for an image
+        /// that only decorates.
+        description: String,
+    },
 }
 
 /// A button of the title bar.
@@ -504,6 +515,7 @@ impl Ui {
             }
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
+            Kind::Image { size, .. } => (*size, *size),
             Kind::Column | Kind::Group(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
