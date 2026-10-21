@@ -272,7 +272,7 @@ fn fetch_attachment(repository: &str, digest: &str, suffix: &str, dest: &Path) -
 impl System {
     /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
     /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
-    #[allow(dead_code)] // called by the check from UT13's classification on
+    #[cfg_attr(not(test), allow(dead_code))] // called by the check from UT13's classification on
     pub fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
         fetch_attachment(repository, digest, "att", dest)
     }
@@ -489,6 +489,12 @@ mod tests {
         assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
         assert!(!access_denied("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
         assert!(access_denied("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
+    }
+
+    #[test]
+    fn an_attestation_is_fetched_only_for_a_sha256_digest() {
+        let refused = System.fetch_attestation("registry.example/o/a", "sha256:../../etc", Path::new("/nonexistent"));
+        assert_eq!(refused, Err(Failure { code: ErrorCode::Internal, host: None }));
     }
 
     #[test]

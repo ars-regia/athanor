@@ -109,11 +109,14 @@ printf '%s' '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+
 # Release attestations (ADR-0127 points 1 to 4), as `cosign attest --new-bundle-format=false`
 # stores `<repo>:sha256-<hex>.att`: one DSSE envelope per layer, signed over the DSSE
 # pre-authentication encoding of an in-toto statement. Each line on stdin is one layer, a
-# JSON object: `key` signs; `class` (absent: no class member), `repo`, `digest`,
-# `predicateType` and `payloadType` default to a valid statement for $REPO and $DIGEST;
+# JSON object: `key` signs; `class` (absent: no class member), `advisories`, `repo`, `digest`,
+# `type` (the statement's `_type`), `predicateType` and `payloadType` default to a valid
+# statement for $REPO and $DIGEST; `extraSubject` adds a second subject after the first;
+# `duplicateClass` writes `"class":"feature"` before the class member, in the signed bytes;
 # `tamper` is `signature` (one byte flipped), `der` (the DER cut short), `pae` (signed over the
 # encoding less its last byte) or `payload` (feature signed, then the class changed to
-# security); `pad` adds that many spaces after the envelope.
+# security); `encoding` writes the payload's base64 `unpadded` or with `trailing-bits` set;
+# `pad` adds that many spaces after the envelope.
 ATT_PY='
 import base64, hashlib, json, os, pathlib, subprocess, sys
 dest = pathlib.Path(sys.argv[1]); secrets = pathlib.Path(sys.argv[2]); dest.mkdir(parents=True)
@@ -127,10 +130,16 @@ for line in sys.stdin.read().splitlines():
                  "revision": "0" * 40, "build_run_id": "1", "updateinfo_timestamp": None}
     if "class" in spec:
         predicate["class"] = spec["class"]
-    statement = {"_type": "https://in-toto.io/Statement/v1",
-                 "subject": [{"name": spec.get("repo", os.environ["REPO"]), "digest": {"sha256": spec.get("digest", os.environ["DIGEST"]).removeprefix("sha256:")}}],
+    subject = [{"name": spec.get("repo", os.environ["REPO"]), "digest": {"sha256": spec.get("digest", os.environ["DIGEST"]).removeprefix("sha256:")}}]
+    if spec.get("extraSubject"):
+        subject.append({"name": os.environ["REPO"] + "-nvidia", "digest": subject[0]["digest"]})
+    statement = {"_type": spec.get("type", "https://in-toto.io/Statement/v1"), "subject": subject,
                  "predicateType": spec.get("predicateType", os.environ["PREDICATE"]), "predicate": predicate}
     body = json.dumps(statement, separators=(",", ":")).encode()
+    if spec.get("duplicateClass"):
+        body = body.replace(b"\"class\":", b"\"class\":\"feature\",\"class\":", 1)
+    if "encoding" in spec and len(body) % 3 == 0:
+        body += b" "
     kind = spec.get("payloadType", "application/vnd.in-toto+json")
     tamper = spec.get("tamper")
     signed = pae(kind, body)[:-1] if tamper == "pae" else pae(kind, body)
@@ -143,7 +152,15 @@ for line in sys.stdin.read().splitlines():
         tampered = body.replace(b"\"class\":\"feature\"", b"\"class\":\"security\"")
         assert tampered != body
         body = tampered
-    envelope = {"payloadType": kind, "payload": base64.b64encode(body).decode(), "signatures": [{"keyid": "", "sig": base64.b64encode(sig).decode()}]}
+    payload = base64.b64encode(body).decode()
+    if spec.get("encoding") == "unpadded":
+        payload = payload.rstrip("=")
+    elif spec.get("encoding") == "trailing-bits":
+        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        last = len(payload.rstrip("=")) - 1
+        payload = payload[:last] + alphabet[alphabet.index(payload[last]) + 1] + payload[last + 1:]
+    assert spec.get("encoding") is None or base64.b64decode(payload + "==") == body
+    envelope = {"payloadType": kind, "payload": payload, "signatures": [{"keyid": "", "sig": base64.b64encode(sig).decode()}]}
     blob = json.dumps(envelope, separators=(",", ":")).encode() + b" " * spec.get("pad", 0)
     digest = hashlib.sha256(blob).hexdigest()
     (dest / digest).write_bytes(blob)
@@ -176,5 +193,16 @@ attestation att-wrong-payload-type <<< "{\"key\":\"a\",$security,\"payloadType\"
 attestation att-unknown-key <<< "{\"key\":\"b\",$security}"
 printf '%s\n' "{\"key\":\"b\",$security}" '{"key":"a","class":"feature"}' | attestation att-mixed
 attestation att-oversized <<< "{\"key\":\"a\",$security,\"pad\":70000}"
+attestation att-statement-v01 <<< "{\"key\":\"a\",$security,\"type\":\"https://in-toto.io/Statement/v0.1\"}"
+attestation att-two-subjects <<< "{\"key\":\"a\",$security,\"extraSubject\":true}"
+attestation att-duplicate-class <<< "{\"key\":\"a\",$security,\"duplicateClass\":true}"
+attestation att-unpadded <<< "{\"key\":\"a\",$security,\"encoding\":\"unpadded\"}"
+attestation att-trailing-bits <<< "{\"key\":\"a\",$security,\"encoding\":\"trailing-bits\"}"
+attestation att-long-advisory <<< "{\"key\":\"a\",\"class\":\"security\",\"advisories\":[\"CVE-2026-$(printf '%0100d' 1)\"]}"
+attestation att-many-advisories <<< "{\"key\":\"a\",\"class\":\"security\",\"advisories\":$(python3 -c 'import json; print(json.dumps(["CVE-2026-%05d" % n for n in range(1025)]))')}"
+attestation att-empty-advisories <<< '{"key":"a","class":"security","advisories":[]}'
+# A verified statement of another predicate type says nothing of the class, either way.
+printf '%s\n' "{\"key\":\"a\",$security}" '{"key":"a","class":"feature","predicateType":"https://slsa.dev/provenance/v1"}' | attestation att-foreign-feature
+printf '%s\n' '{"key":"a","class":"feature"}' "{\"key\":\"a\",$security,\"predicateType\":\"https://slsa.dev/provenance/v1\"}" | attestation att-foreign-security
 
 find "$out" -type f | sort
