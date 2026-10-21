@@ -1025,6 +1025,17 @@ class CheckPlan(Repo):
         r = self.plan(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP, CACHYOS_PATCHES_COMMIT="f" * 40))
         self.assertEqual(r.returncode, 1)
 
+    def test_kernel_pin_bump_with_the_kernel_configuration_skips_every_build(self):
+        # A builder move changes kernel-local with the pins (KERNEL_CONFIG_FILES).
+        self.state("kernel-missing")
+        r = self.plan({**self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"), "forge/specs/azoth/kernel-local": "CONFIG_X=y\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_kernel_configuration_alone_does_not_explain_a_missing_kernel(self):
+        self.state("kernel-missing")
+        r = self.plan({"forge/specs/azoth/kernel-local": "CONFIG_X=y\n"})
+        self.assertEqual(r.returncode, 1)
+
     def test_kernel_missing_with_only_nvidia_pins_moved_fails(self):
         # only_kernel_pins is true (the diff touches only pins.env, a KERNEL_PIN_FILES member),
         # but no kernel pin actually moved: that never explains a missing kernel.
