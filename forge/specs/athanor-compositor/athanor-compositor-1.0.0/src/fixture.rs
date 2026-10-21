@@ -5,7 +5,7 @@
 
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
-use crate::identity::{AllowList, Process};
+use crate::identity::{AllowList, FileId, Process};
 use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
@@ -614,6 +614,8 @@ struct Running {
     thread: std::thread::JoinHandle<()>,
     /// The executable and cgroup of the next client to connect: the bar's at the start.
     identity: Arc<Mutex<(&'static str, &'static str)>>,
+    /// The file its executable opens: the bar's at the start.
+    executable_file: Arc<Mutex<FileId>>,
 }
 
 /// The bar, as the fixture's clients connect by default: its executable and its cgroup.
@@ -628,16 +630,28 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
     ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1\n";
 
+/// The bar's executable file, as the compositor sees it.
+const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
+
 /// The process at the other end of the fixture's sockets, which is the test's own, as whatever
-/// executable and cgroup the test sets: the pidfd is read as the compositor reads it.
-struct Fake(Arc<Mutex<(&'static str, &'static str)>>);
+/// executable, file and cgroup the test sets: the pidfd is read as the compositor reads it. The
+/// compositor's file system holds the bar's executable only.
+struct Fake(Arc<Mutex<(&'static str, &'static str)>>, Arc<Mutex<FileId>>);
 
 impl Process for Fake {
-    fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.0.lock().expect("identity").0.into())
+    fn executable(&self, _pid: i32) -> std::io::Result<(PathBuf, FileId)> {
+        let file = *self.1.lock().expect("file");
+        Ok((self.0.lock().expect("identity").0.into(), file))
     }
     fn cgroup(&self, _pid: i32) -> std::io::Result<String> {
         Ok(self.0.lock().expect("identity").1.into())
+    }
+    fn file(&self, path: &Path) -> std::io::Result<FileId> {
+        if path == Path::new(BAR.0) {
+            Ok(BAR_FILE)
+        } else {
+            Err(std::io::ErrorKind::NotFound.into())
+        }
     }
 }
 
@@ -652,8 +666,9 @@ impl Running {
 
         let (server_end, client_end) = UnixStream::pair().expect("socket pair");
         let identity = Arc::new(Mutex::new(BAR));
+        let executable_file = Arc::new(Mutex::new(BAR_FILE));
         state.allow_list = AllowList::parse(FIXTURE_ALLOW_LIST).expect("allow-list");
-        state.process = Box::new(Fake(identity.clone()));
+        state.process = Box::new(Fake(identity.clone(), executable_file.clone()));
         let client_state = state.client_state(&server_end, None);
         state
             .display_handle
@@ -693,6 +708,7 @@ impl Running {
             quit,
             thread,
             identity,
+            executable_file,
         }
     }
 
@@ -1970,6 +1986,17 @@ fn task5_other_unit_gets_standard_globals() {
     *run.identity.lock().expect("identity") = (BAR.0, OTHER_UNIT);
     let other = Local::connect(&mut run, None);
     assert!(!other.privileged(), "the bar's executable in another unit");
+    run.stop();
+}
+
+/// A file at the bar's path that is not the bar's file, as a sandbox with its own `/usr` has
+/// it, is granted nothing.
+#[test]
+fn task5_another_file_at_the_bar_s_path_gets_standard_globals() {
+    let mut run = Running::start(None);
+    *run.executable_file.lock().expect("file") = FileId { dev: 1, ino: 2 };
+    let other = Local::connect(&mut run, None);
+    assert!(!other.privileged(), "another file at the bar's path");
     run.stop();
 }
 

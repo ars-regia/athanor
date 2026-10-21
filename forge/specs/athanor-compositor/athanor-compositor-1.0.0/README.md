@@ -79,7 +79,12 @@ for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub
 another unit. The allow-list, `/usr/share/athanor/compositor/privileged-clients`
 (`data/privileged-clients`), has one grant per line, `<executable> <unit> <interface>...`; the
 executable is a path under `/usr`, the unit a service or a scope, each interface one of the
-privileged globals the compositor offers. A missing, unreadable or malformed allow-list grants
+privileged globals the compositor offers. A grant needs the executable's path, the unit, and
+the file: `stat` of `/proc/<pid>/exe` and `stat` of the allow-list's path in the compositor's
+mount namespace must name the same device and inode, since a sandbox whose own `/usr` holds a
+file at the bar's path reads back the bar's path. A bar still running after an update of its
+package runs a deleted file, and a connection it opens then is granted nothing until it
+restarts. A missing, unreadable or malformed allow-list grants
 nothing, and so does a peer whose identity cannot be read. A client that connects through a
 security context's listener is granted nothing, whatever its identity.
 

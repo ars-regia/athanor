@@ -276,7 +276,7 @@ impl State {
             Some(_) => Vec::new(),
             None => match crate::identity::identify(stream.as_fd(), self.process.as_ref()) {
                 Ok(identity) => {
-                    let grants = self.allow_list.grants(&identity);
+                    let grants = self.allow_list.grants(&identity, self.process.as_ref());
                     tracing::debug!(?identity, ?grants, "a client connected");
                     grants
                 }

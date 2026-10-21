@@ -47,28 +47,51 @@ impl Privilege {
 /// A process, as the compositor reads it at connect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Identity {
-    /// What `/proc/<pid>/exe` names.
+    /// What `/proc/<pid>/exe` names, as the process's own mount namespace has it.
     pub executable: PathBuf,
+    /// The file `/proc/<pid>/exe` opens, whichever mount namespace it is in.
+    pub file: FileId,
     /// The systemd unit of its cgroup, if it is in one.
     pub unit: Option<String>,
 }
 
-/// Reads a process by its pid: `/proc` in the compositor, a fake in the fixture.
+/// A file as `stat` names it, whatever path leads to it: its device and inode.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FileId {
+    pub dev: u64,
+    pub ino: u64,
+}
+
+/// Reads a process by its pid, and a file by its path in the compositor's own mount namespace:
+/// `/proc` and the file system in the compositor, a fake in the fixture.
 pub trait Process {
-    fn executable(&self, pid: i32) -> io::Result<PathBuf>;
+    /// What `/proc/<pid>/exe` names, and the file it opens.
+    fn executable(&self, pid: i32) -> io::Result<(PathBuf, FileId)>;
     /// The contents of `/proc/<pid>/cgroup`.
     fn cgroup(&self, pid: i32) -> io::Result<String>;
+    /// The file at `path`, as the compositor sees it.
+    fn file(&self, path: &Path) -> io::Result<FileId>;
 }
 
 /// The processes of `/proc`.
 pub struct Proc;
 
 impl Process for Proc {
-    fn executable(&self, pid: i32) -> io::Result<PathBuf> {
-        std::fs::read_link(format!("/proc/{pid}/exe"))
+    fn executable(&self, pid: i32) -> io::Result<(PathBuf, FileId)> {
+        let exe = format!("/proc/{pid}/exe");
+        Ok((std::fs::read_link(&exe)?, self.file(Path::new(&exe))?))
     }
     fn cgroup(&self, pid: i32) -> io::Result<String> {
         std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+    }
+    fn file(&self, path: &Path) -> io::Result<FileId> {
+        use std::os::unix::fs::MetadataExt;
+        // `metadata` follows `/proc/<pid>/exe` to the file itself, across mount namespaces.
+        let metadata = std::fs::metadata(path)?;
+        Ok(FileId {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+        })
     }
 }
 
@@ -78,13 +101,17 @@ impl Process for Proc {
 pub fn identify(socket: BorrowedFd<'_>, process: &dyn Process) -> Result<Identity, Error> {
     let pidfd = so_peerpidfd(socket)?;
     let pid = pidfd_pid(pidfd.as_fd())?;
-    let executable = process.executable(pid)?;
+    let (executable, file) = process.executable(pid)?;
     let cgroup = process.cgroup(pid)?;
     if pidfd_pid(pidfd.as_fd())? != pid {
         return Err("the peer exited while it was read".into());
     }
     let unit = unit(&cgroup).map(str::to_owned);
-    Ok(Identity { executable, unit })
+    Ok(Identity {
+        executable,
+        file,
+        unit,
+    })
 }
 
 /// The peer's pidfd, from `SO_PEERPIDFD` (Linux 6.5, older than every kernel Athanor ships).
@@ -207,14 +234,23 @@ impl AllowList {
         Ok(Self(grants))
     }
 
-    /// What `identity` is granted: the interfaces of every line naming its executable and unit.
-    pub fn grants(&self, identity: &Identity) -> Vec<Privilege> {
+    /// What `identity` is granted: the interfaces of every line naming its executable and unit,
+    /// where the executable's path, read by `process` in the compositor's mount namespace, is
+    /// the very file the process runs. A path alone is not enough: a sandbox whose own `/usr`
+    /// holds a file at the bar's path reads back the bar's path.
+    pub fn grants(&self, identity: &Identity, process: &dyn Process) -> Vec<Privilege> {
         let Some(unit) = &identity.unit else {
             return Vec::new();
         };
         self.0
             .iter()
-            .filter(|(executable, u, _)| *executable == identity.executable && u == unit)
+            .filter(|(executable, u, _)| {
+                *executable == identity.executable
+                    && u == unit
+                    && process
+                        .file(executable)
+                        .is_ok_and(|file| file == identity.file)
+            })
             .flat_map(|(_, _, privileges)| privileges.iter().copied())
             .collect()
     }
@@ -227,10 +263,33 @@ mod tests {
 
     const BAR: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1\n";
 
+    /// The bar's executable file, as the compositor sees it.
+    const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
+
     fn bar() -> Identity {
         Identity {
             executable: "/usr/bin/athanor-bar".into(),
+            file: BAR_FILE,
             unit: Some("athanor-bar.service".into()),
+        }
+    }
+
+    /// The compositor's file system: the bar's executable, and nothing else.
+    struct Files;
+
+    impl Process for Files {
+        fn executable(&self, _: i32) -> io::Result<(PathBuf, FileId)> {
+            Err(io::ErrorKind::NotFound.into())
+        }
+        fn cgroup(&self, _: i32) -> io::Result<String> {
+            Err(io::ErrorKind::NotFound.into())
+        }
+        fn file(&self, path: &Path) -> io::Result<FileId> {
+            if path == Path::new("/usr/bin/athanor-bar") {
+                Ok(BAR_FILE)
+            } else {
+                Err(io::ErrorKind::NotFound.into())
+            }
         }
     }
 
@@ -260,32 +319,46 @@ mod tests {
     fn a_grant_needs_both_the_executable_and_the_unit() {
         let list = AllowList::parse(BAR).expect("allow-list");
         assert_eq!(
-            list.grants(&bar()),
+            list.grants(&bar(), &Files),
             [Privilege::TopLayers, Privilege::ToplevelList]
         );
         let other_executable = Identity {
             executable: "/usr/bin/sh".into(),
             ..bar()
         };
-        assert!(list.grants(&other_executable).is_empty());
+        assert!(list.grants(&other_executable, &Files).is_empty());
         let other_unit = Identity {
             unit: Some("app-sh.scope".into()),
             ..bar()
         };
-        assert!(list.grants(&other_unit).is_empty());
+        assert!(list.grants(&other_unit, &Files).is_empty());
         let no_unit = Identity {
             unit: None,
             ..bar()
         };
-        assert!(list.grants(&no_unit).is_empty());
+        assert!(list.grants(&no_unit, &Files).is_empty());
+    }
+
+    /// A file at the bar's path that is not the bar's file, as in a sandbox with its own `/usr`,
+    /// is granted nothing.
+    #[test]
+    fn a_grant_needs_the_very_file_at_the_executable_s_path() {
+        let list = AllowList::parse(BAR).expect("allow-list");
+        let impostor = Identity {
+            file: FileId { dev: 1, ino: 2 },
+            ..bar()
+        };
+        assert!(list.grants(&impostor, &Files).is_empty());
     }
 
     #[test]
     fn a_missing_or_unreadable_allow_list_grants_nothing() {
         let missing = Path::new("/nonexistent/athanor/privileged-clients");
-        assert!(AllowList::load(missing).grants(&bar()).is_empty());
+        assert!(AllowList::load(missing).grants(&bar(), &Files).is_empty());
         // A directory cannot be read as a file.
-        assert!(AllowList::load(Path::new("/")).grants(&bar()).is_empty());
+        assert!(AllowList::load(Path::new("/"))
+            .grants(&bar(), &Files)
+            .is_empty());
     }
 
     #[test]
@@ -306,7 +379,7 @@ mod tests {
             std::fs::write(&path, format!("{BAR}{bad}")).expect("write");
             let loaded = AllowList::load(&path);
             std::fs::remove_file(&path).expect("remove");
-            assert!(loaded.grants(&bar()).is_empty(), "{bad}");
+            assert!(loaded.grants(&bar(), &Files).is_empty(), "{bad}");
         }
     }
 
@@ -315,7 +388,7 @@ mod tests {
     fn the_shipped_allow_list_parses() {
         let shipped =
             AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
-        assert!(!shipped.grants(&bar()).is_empty());
+        assert!(!shipped.grants(&bar(), &Files).is_empty());
     }
 
     /// A process whose pid cannot be read has no identity.
@@ -323,8 +396,11 @@ mod tests {
     fn an_unreadable_peer_has_no_identity() {
         struct Unreadable;
         impl Process for Unreadable {
-            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+            fn executable(&self, _: i32) -> io::Result<(PathBuf, FileId)> {
                 Err(io::ErrorKind::PermissionDenied.into())
+            }
+            fn file(&self, path: &Path) -> io::Result<FileId> {
+                Files.file(path)
             }
             fn cgroup(&self, _: i32) -> io::Result<String> {
                 Ok("0::/app.slice/athanor-bar.service\n".into())
@@ -340,11 +416,14 @@ mod tests {
     fn a_peer_that_exits_while_it_is_read_has_no_identity() {
         struct Exits(std::sync::Mutex<std::process::Child>);
         impl Process for Exits {
-            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+            fn executable(&self, _: i32) -> io::Result<(PathBuf, FileId)> {
                 let mut child = self.0.lock().expect("child");
                 child.kill()?;
                 child.wait()?;
-                Ok("/usr/bin/athanor-bar".into())
+                Ok(("/usr/bin/athanor-bar".into(), BAR_FILE))
+            }
+            fn file(&self, path: &Path) -> io::Result<FileId> {
+                Files.file(path)
             }
             fn cgroup(&self, _: i32) -> io::Result<String> {
                 Ok("0::/app.slice/athanor-bar.service\n".into())
@@ -395,6 +474,8 @@ mod tests {
             identity.executable,
             executable.canonicalize().expect("canonical")
         );
+        // The file /proc/<pid>/exe opens is the one at the executable's path.
+        assert_eq!(Proc.file(&executable).expect("stat"), identity.file);
         let cgroup = std::fs::read_to_string("/proc/self/cgroup").expect("cgroup");
         assert_eq!(identity.unit.as_deref(), unit(&cgroup));
     }
