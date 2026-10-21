@@ -555,9 +555,10 @@ build-toolkit)
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 tasks 1, 4 and 5: what a client of athanor-compositor binds. The rig
-    # has no systemd and no allow-list, so wayland-info runs in no unit and is granted none of
-    # the privileged globals of task 5; the fixture checks the grant.
+    # doc_own_stack.md, C1 tasks 1, 4 and 5: what a client of athanor-compositor binds.
+    # session.sh installs the shipped allow-list, but wayland-info is not listed in it and runs
+    # in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
+    # the grant.
     require athanor-compositor build-compositor
     rm -f "$out/compositor-globals.txt"
     in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
@@ -925,8 +926,8 @@ atspi)
         # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
         # 6: input source and tiling need zcosmic_keyboard_layout_manager_v1 and
-        # zcosmic_workspace_manager_v2, whose private replacements are still to be specified
-        # (docs/spikes/c1-protocols.md, section 3).
+        # zcosmic_workspace_manager_v2, whose private replacements docs/spikes/c1-protocols.md
+        # (section 3) proposes and revision 2 specifies.
         unit='' widgets=8
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
@@ -941,10 +942,17 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         # GTK keeps exporting the tree of a surface the compositor closed, so the walk alone
         # passes a bar that is not on screen; the compositor's log says when it closed one
-        # (src/layer.rs).
-        if [ -n "$unit" ] && grep -q "not granted them was closed" "$out/atspi-bar-compositor.log"; then
-            echo "atspi bar: athanor-compositor closed the bar's surface; see $out/atspi-bar-compositor.log" >&2
-            exit 1
+        # (src/layer.rs). A missing or empty log fails too: grep would find nothing in it.
+        if [ -n "$unit" ]; then
+            log="$out/atspi-bar-compositor.log"
+            if [ ! -s "$log" ]; then
+                echo "atspi bar: no compositor log at $log" >&2
+                exit 1
+            fi
+            if grep -q "not granted them was closed" "$log"; then
+                echo "atspi bar: athanor-compositor closed the bar's surface; see $log" >&2
+                exit 1
+            fi
         fi
         ;;
     bar-modules)

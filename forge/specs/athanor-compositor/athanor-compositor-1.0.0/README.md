@@ -140,9 +140,9 @@ same frame-time report as the headless one, every 10 seconds; its draw time is t
 not the submit, which waits on the parent. A frame with nothing to draw is not presented, so the
 parent does not pace the next one: the compositor waits a frame period before it asks for it.
 `forge/test/shell/compositor_soak.sh` takes the clients that draw only when something changes
-after `--idle`, and checks only that they stay up. The bar and the dock run outside their units
-and the image ships no allow-list, so their top-layer surfaces are closed: the soak shows that
-they connect and stay up, not that they are drawn.
+after `--idle`, and checks only that they stay up. The bar and the dock run there from outside
+`/usr` and in no unit, so the allow-list does not grant them and their top-layer surfaces are
+closed: the soak shows that they connect and stay up, not that they are drawn.
 
 Task 7 reads the bar through AT-SPI under the compositor, in the rig:
 `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar [it]`. The bar runs there as its unit
@@ -150,9 +150,10 @@ would: `session.sh` installs `data/privileged-clients` where the compositor read
 container runs in podman's systemd mode, whose cgroup tree is writable, and
 `bar_session.py --unit` starts `/usr/bin/athanor-bar` inside the cgroup `athanor-bar.service`, so
 the grant of task 5 is the real one, through the pidfd, the executable and the cgroup. GTK keeps
-exporting the tree of a surface the compositor closed, and the walk passed for a bar run without
-`--unit`, whose surface was closed and whose capture was empty; the check therefore also fails
-when the compositor's log says it closed the bar's surface. The bar
+exporting the tree of a surface the compositor closed: in one run of task 7 without `--unit` (an
+observation, not a fixture), the walk passed while the compositor's log said it closed the bar's
+surface and the capture was empty. The check therefore also fails when that log is missing or
+says it closed the bar's surface. The bar
 shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
 `zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
 replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies.
@@ -175,7 +176,8 @@ Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibil
   from the focused client; and AX4's admission at every call, the owner of
   `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
   `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
-  checks. About 500 lines with their tests (an estimate). For the rig to test it,
+  checks. Whether the image's session bus returns `ProcessFD` is unverified
+  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). For the rig to test it,
   `zwp_virtual_keyboard_v1` (Smithay's `VirtualKeyboardManagerState`), whose keys must go through
   the same filter, which cosmic-comp's do not: about 100 lines more (an estimate). Then
   `rig.sh orca` can run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.

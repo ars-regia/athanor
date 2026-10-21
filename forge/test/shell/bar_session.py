@@ -268,24 +268,26 @@ def rig_log(name):
 
 
 def as_unit(client):
-    """The executable and the function that moves the child into the cgroup of --unit."""
+    """The command that starts /usr/bin/<client> inside the cgroup of --unit.
+
+    A shell joins the cgroup and execs the client, so the pid stays the client's and nothing
+    runs in the forked child of this threaded process; a failed write ends the shell with an
+    error, and the session with it. The copy lands under a temporary name and is renamed over
+    the old one, so a respawn never writes a file a dying client still executes (ETXTBSY).
+    """
     executable = Path("/usr/bin") / client
-    shutil.copy2(BIN / client, executable)
+    staged = executable.with_name(f".{client}.new")
+    shutil.copy2(BIN / client, staged)
+    staged.replace(executable)
     cgroup = CGROUP_ROOT / f"{client}.service"
     cgroup.mkdir(exist_ok=True)
-    procs = cgroup / "cgroup.procs"
-
-    def join():
-        procs.write_text(f"{os.getpid()}\n", encoding="utf-8")
-
-    return executable, join
+    join = 'echo $$ > "$1/cgroup.procs" && exec "$2"'
+    return ["sh", "-c", join, "sh", str(cgroup), str(executable)]
 
 
 def start_bar(client, env, log, unit):
-    executable, join = as_unit(client) if unit else (BIN / client, None)
-    bar = subprocess.Popen(
-        [executable], env=env, stderr=rig_log(client) if log else None, preexec_fn=join
-    )
+    command = as_unit(client) if unit else [BIN / client]
+    bar = subprocess.Popen(command, env=env, stderr=rig_log(client) if log else None)
     PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
     return bar
 
