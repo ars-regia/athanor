@@ -24,6 +24,8 @@ pub struct Nested {
     pub backend: WinitGraphicsBackend<GlesRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
+    /// A redraw with nothing drawn has scheduled the next one: further ones do not add another.
+    frame_scheduled: bool,
 }
 
 /// Opens the window, its output at `scale`, and linux-dmabuf version 3 with the renderer's
@@ -51,6 +53,7 @@ pub fn start(
         backend,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
+        frame_scheduled: false,
     };
     let mut state = State::new(event_loop, display, Backend::Nested(Box::new(nested)))?;
     state.map_output(&output);
@@ -148,17 +151,27 @@ impl State {
         // A presented frame is paced by the parent; one with nothing to draw is not, and asking
         // for the next at once spins a core. It waits a frame period instead.
         // ponytail: an idle output still wakes at 60 Hz; redraw on damage only if that shows.
+        // A resize or an input event redraws as well: one timer at a time, or each such redraw
+        // would start another chain and the idle rate would double.
         if presented {
             request_redraw(self);
-        } else if let Err(error) =
-            self.loop_handle
-                .insert_source(Timer::from_duration(frame_period), |_, _, state| {
+        } else if let Backend::Nested(nested) = &mut self.backend {
+            if !nested.frame_scheduled {
+                let timer = Timer::from_duration(frame_period);
+                match self.loop_handle.insert_source(timer, |_, _, state| {
+                    if let Backend::Nested(nested) = &mut state.backend {
+                        nested.frame_scheduled = false;
+                    }
                     request_redraw(state);
                     TimeoutAction::Drop
-                })
-        {
-            tracing::warn!(error = %error.error, "the next frame could not be scheduled");
-            request_redraw(self);
+                }) {
+                    Ok(_) => nested.frame_scheduled = true,
+                    // The next parent event redraws: asking at once would spin, as above.
+                    Err(error) => {
+                        tracing::warn!(error = %error.error, "the next frame could not be scheduled")
+                    }
+                }
+            }
         }
     }
 }
