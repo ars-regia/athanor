@@ -122,6 +122,31 @@ class Statement(unittest.TestCase):
                 ra.write_statements(path, tmp / "attestations")
             self.assertFalse((tmp / "attestations").exists())
 
+    def test_advisories_are_unique_and_sorted(self):
+        """The schema refuses a repeated advisory; a statement whose advisories are not sorted
+        is not one candidate wrote, so the sign script refuses it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = pathlib.Path(tmp)
+            path = tmp / "release-candidate.json"
+            twice = ("CVE-2026-0001", "CVE-2026-0001")
+            path.write_text(
+                json.dumps(candidate(record("athanor-system", 1, "security", twice)))
+            )
+            with self.assertRaisesRegex(ValueError, "repeats an item"):
+                ra.write_statements(path, tmp / "attestations")
+            for advisories in (["CVE-2026-0002", "CVE-2026-0001"], ["A", "A"]):
+                with self.subTest(advisories=advisories):
+                    s = ra.statement(
+                        record("athanor-system", 1, "security", advisories),
+                        "2026-10-21T04:00:00Z",
+                        "c" * 40,
+                        "412",
+                    )
+                    path = tmp / "s.json"
+                    path.write_text(json.dumps(s))
+                    with self.assertRaises(ra.Refused):
+                        ra.load_statement(path, f"{REG}/athanor-system", digest(1))
+
 
 if __name__ == "__main__":
     unittest.main()

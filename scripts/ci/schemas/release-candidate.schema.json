@@ -35,7 +35,7 @@
           "baseline_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
           "candidate_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
           "class": {"enum": ["security", "feature"]},
-          "advisories": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}},
+          "advisories": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}},
           "class_reason": {"enum": ["", "no-baseline", "unlabelled-baseline"]},
           "updateinfo_timestamp": {"type": ["integer", "null"], "minimum": 0}
         }

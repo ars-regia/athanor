@@ -120,6 +120,9 @@ def load_statement(path, repository, digest):
         and s.get("subject") == subject
         and isinstance(s.get("predicate"), dict)
         and set(s["predicate"]) == PREDICATE_KEYS
+        and isinstance(s["predicate"]["advisories"], list)
+        and all(isinstance(a, str) for a in s["predicate"]["advisories"])
+        and s["predicate"]["advisories"] == sorted(set(s["predicate"]["advisories"]))
     ):
         raise Refused(f"{path}: not the release statement of {repository}@{digest}")
     return s
