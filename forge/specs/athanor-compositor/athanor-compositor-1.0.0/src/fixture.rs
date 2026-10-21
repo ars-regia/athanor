@@ -51,6 +51,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1, ext_workspace_handle_v1, ext_workspace_manager_v1,
 };
+use wayland_protocols::wp::security_context::v1::client::{
+    wp_security_context_manager_v1, wp_security_context_v1,
+};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -269,6 +272,8 @@ delegate_noop!(Client: ext_image_capture_source_v1::ExtImageCaptureSourceV1);
 delegate_noop!(Client: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1);
 delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
 delegate_noop!(Client: ext_idle_notifier_v1::ExtIdleNotifierV1);
+delegate_noop!(Client: wp_security_context_manager_v1::WpSecurityContextManagerV1);
+delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
 
 impl Dispatch<wl_callback::WlCallback, Synced> for Client {
     fn event(
@@ -1336,8 +1341,8 @@ struct Local {
     queue: wayland_client::EventQueue<Client>,
     registry: wl_registry::WlRegistry,
     client: Client,
-    /// Its id in the compositor.
-    id: ClientId,
+    /// Its id in the compositor, when the fixture inserted it.
+    id: Option<ClientId>,
     /// The buffers' files, open while their buffers are.
     files: Vec<std::fs::File>,
 }
@@ -1353,7 +1358,13 @@ impl Local {
             .insert_client(server_end, data)
             .expect("client")
             .id();
-        let connection = Connection::from_socket(client_end).expect("connection");
+        Self::over(run, client_end, Some(id))
+    }
+
+    /// A client on `stream`, connected already, and its id in the compositor if the fixture
+    /// inserted it; lists the globals.
+    fn over(run: &mut Running, stream: UnixStream, id: Option<ClientId>) -> Self {
+        let connection = Connection::from_socket(stream).expect("connection");
         let queue = connection.new_event_queue();
         let registry = connection.display().get_registry(&queue.handle(), ());
         let mut local = Self {
@@ -1762,7 +1773,7 @@ fn task4_the_lock_hides_and_takes_the_keyboard() {
     let (buffer, _) = local.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
-    let id = local.id.clone();
+    let id = local.id.clone().expect("a client the fixture inserted");
     let locker_has_it = move |state: &State| {
         focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
     };
@@ -2014,6 +2025,35 @@ fn task5_security_context_gets_standard_globals() {
     let sandboxed = Local::connect(&mut run, Some(context));
     for global in PRIVILEGED {
         assert!(!sandboxed.sees(global), "{global} inside a context");
+    }
+    run.stop();
+}
+
+/// The bar's own process, connecting through a security context's listener as a sandboxed
+/// application does, is granted nothing: the path from `wp_security_context_manager_v1` to the
+/// listener's clients.
+#[test]
+fn task5_a_security_context_listener_gets_standard_globals() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let path = std::env::temp_dir().join(format!("athanor-context-{}.sock", std::process::id()));
+    let listener = std::os::unix::net::UnixListener::bind(&path).expect("listen");
+    // The compositor listens until the write end closes.
+    let (close, _open) = std::io::pipe().expect("pipe");
+    let manager: wp_security_context_manager_v1::WpSecurityContextManagerV1 = bar.bind(1);
+    let qh = bar.queue.handle();
+    let context = manager.create_listener(listener.as_fd(), close.as_fd(), &qh, ());
+    context.set_sandbox_engine("org.flatpak".into());
+    context.set_app_id("org.example.App".into());
+    context.commit();
+    bar.roundtrip(&mut run);
+
+    let stream = UnixStream::connect(&path).expect("connect");
+    std::fs::remove_file(&path).expect("remove");
+    let sandboxed = Local::over(&mut run, stream, None);
+    assert!(sandboxed.sees("wl_compositor"), "the core");
+    for global in PRIVILEGED {
+        assert!(!sandboxed.sees(global), "{global} through the listener");
     }
     run.stop();
 }
