@@ -75,7 +75,7 @@ use wayland_client::{
 pub type Handler = Box<dyn FnMut(&mut Ui, Event)>;
 
 /// The variable that picks the renderer: `cpu` (the default) or `gpu`, which only a build with
-/// the `gpu` feature takes.
+/// the `gpu` feature takes. Popups draw on the CPU either way.
 pub const RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
 
 /// Whether [`RENDERER`]'s value asks for the GPU. Anything but `cpu`, `gpu` or unset is refused.
@@ -603,8 +603,11 @@ impl Shell {
         input_region: Option<Vec<Rect>>,
     ) -> Result<SurfaceId, Error> {
         let id = SurfaceId(self.next);
+        // ponytail: a popup draws on vello_cpu: a wgpu device of its own would cost every tooltip
+        // and menu a new instance, adapter, device and renderer in the event loop. Sharing the
+        // window's needs `Gpu` split into one device and a surface per wl_surface.
         #[cfg(feature = "gpu")]
-        let gpu = if self.gpu {
+        let gpu = if self.gpu && !matches!(shown, Shown::Popup(_)) {
             // SAFETY: the surface owns the wgpu surface and drops it before its wl_surface, by
             // the order of Surface's fields.
             #[allow(unsafe_code)]
