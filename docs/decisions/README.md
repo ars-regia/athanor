@@ -147,7 +147,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
 | ADR-0079 | 0079 | [Captive portals under strict DNS over TLS](0079-captive-portals-under-strict-dot.md) | amended by ADR-0103 | network, security |
-| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098, ADR-0104 | build, signing, security |
+| ADR-0080 | 0080 | [Pipeline architecture](0080-pipeline-architecture.md) | amended by ADR-0088, ADR-0098, ADR-0104, ADR-0127 | build, signing, security |
 | ADR-0081 | 0081 | [CRA compliance posture](0081-cra-compliance-posture.md) | amended by ADR-0103 | security, update, product |
 | ADR-0082 | 0082 | [Update control: postpone and opt-out](0082-update-control.md) | amended by ADR-0094 | update, security |
 | ADR-0083 | 0083 | [One supported desktop; derived images stay open](0083-one-desktop-derived-images-open.md) | accepted | product, shell, update |
@@ -194,3 +194,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0124 | 0124 | [Visual language revision 3: materials in tiers, the accent's measure, springs and the toolkit's surfaces](0124-visual-language-revision-3.md) | accepted | shell, accessibility |
 | ADR-0125 | 0125 | [A change of the Fedora base lands through a protected rebase integration branch](0125-rebase-integration-branches.md) | accepted | process, build, security |
 | ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | accepted | shell, process, security |
+| ADR-0127 | 0127 | [Settle the release attestation and the open details of security-class updates](0127-release-attestation-and-ut13-details.md) | accepted | update, security, build, release |
