@@ -888,7 +888,7 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggle, a button, three toggles and a field, and the
+        # The gallery's first page: the page toggle (three pages), a button, three toggles and a field, and the
         # title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
         # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
         # hold all the reference holds, the GTK twin's, recorded (OS8).
@@ -898,7 +898,7 @@ atspi)
         transcript=atspi-gallery${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
             bash -c "$enable && exec $bin --lang ${3:-en}"
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
