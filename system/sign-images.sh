@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Key-based signature of the published system images and, with --kernel-digests, of the kernel
 # artefacts a release consumes (docs/architecture/doc_update_trust.md, UT2; ADR-0096). Runs in a job that holds the key and does nothing else: it reads the digests file the
-# build job wrote, signs, ends. It starts no container and runs no tool beside skopeo
-# (scripts/verify.py, D43); system/verify-images.sh verifies the signatures as a machine does,
-# in a job of its own that holds no key.
+# build job wrote, signs, ends. It starts no container and runs no tool beside skopeo and, with
+# --attestations, `cosign attest` (scripts/verify.py, D43 as amended by ADR-0127);
+# system/verify-images.sh verifies the signatures as a machine does, in a job of its own that
+# holds no key.
 #
 # The signature must be the classic cosign attachment at <repo>:sha256-<hex>.sig, the only
 # format containers/image reads, so it is made with `skopeo copy
@@ -21,23 +22,33 @@
 # image-digests.sh --check requires it to name the default image and any NVIDIA variant the
 # run built, under the registry the caller gives, once each.
 #
-# Usage: sign-images.sh --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE
+# With --attestations DIR, the release statements candidate wrote (PB4b, ADR-0127), it then
+# attests each image with `cosign attest` and the same key, as <repo>:sha256-<hex>.att. cosign
+# writes there the classic DSSE attachment with --new-bundle-format=false, and takes the
+# statement's predicate; the subject is the reference it attests. Before anything is signed,
+# scripts/ci/release_attestation.py requires one statement per image of the digests file,
+# naming that image, and none for anything else. cosign reads the passphrase from stdin when
+# COSIGN_PASSWORD is not set, so it gets the same private file as skopeo and no environment.
+#
+# Usage: sign-images.sh --registry REGISTRY/OWNER [--kernel-digests FILE] [--attestations DIR]
+#                       DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 # Environment: COSIGN_PRIVATE_KEY, COSIGN_PASSWORD; SIGN_KEYS_DIR (default system/keys, for the
 #              rendered registries.d); the registry login is the caller's business.
 set -euo pipefail
 
-kernel=''
-if [[ $# -eq 5 && $3 == --kernel-digests ]]; then
-    kernel=$4
-    set -- "$1" "$2" "$5"
-fi
-[[ $# -eq 3 && $1 == --registry && -n $2 && -s $3 ]] || {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--kernel-digests FILE] DIGESTS_FILE" >&2
+usage() {
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--kernel-digests FILE] [--attestations DIR] DIGESTS_FILE" >&2
     exit 2
 }
-registry=$2
-digests=$3
+registry='' kernel='' attestations=''
+while [[ $# -gt 1 ]]; do
+    case $1 in --registry) registry=$2 ;; --kernel-digests) kernel=$2 ;; --attestations) attestations=$2 ;; *) usage ;; esac
+    shift 2
+done
+[[ $# -eq 1 && -n $registry && -s $1 ]] || usage
+[[ -z $attestations || -d $attestations ]] || usage
+digests=$1
 [[ -n ${COSIGN_PRIVATE_KEY:-} ]] || {
     echo "${0##*/}: COSIGN_PRIVATE_KEY is not available to this job: check the signing-images environment" >&2
     exit 2
@@ -72,6 +83,8 @@ keys_dir=$(cd "$keys_dir" && pwd)
 bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render-policy" \
     --registry "$registry" --keys-dir "$keys_dir" --out "$work/policy"
 [[ -z $kernel ]] || sed "s|@REGISTRY@|$kernel_registry|g" "$root/system/kernel-registries.d.yaml.in" > "$work/policy/registries.d/athanor-kernel.yaml"
+[[ -z $attestations ]] || python3 -B "$root/scripts/ci/release_attestation.py" predicates \
+    --digests "$digests" --dir "$attestations" --out "$work/predicates"
 
 sign_file() {
     while read -r repository _ digest; do
@@ -85,3 +98,16 @@ sign_file() {
 }
 sign_file "$digests"
 [[ -z $kernel ]] || sign_file "$kernel"
+
+# PREDICATE_TYPE of scripts/ci/release_attestation.py (ADR-0127 point 1).
+predicate_type='https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b'
+if [[ -n $attestations ]]; then
+    while read -r repository _ digest; do
+        # ponytail: no retry.sh, which would hand a retried cosign an exhausted stdin; cosign
+        # retries transient registry errors itself. A failed attest fails the job; a re-run
+        # attests again, and an identical second attestation verifies as the first.
+        cosign attest --key "$work/key" --type "$predicate_type" --tlog-upload=false --new-bundle-format=false \
+            --predicate "$work/predicates/${digest#sha256:}.json" "$repository@$digest" < "$work/passphrase"
+        echo "attested: $repository@$digest"
+    done < "$digests"
+fi

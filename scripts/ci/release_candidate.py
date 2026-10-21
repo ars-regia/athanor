@@ -304,6 +304,8 @@ def check(out):
     candidate = {
         "schema_version": 2,
         "request": request,
+        # The start of the attempt that built the images: the build_time of PB4b (ADR-0127).
+        "build_time": run["run_started_at"],
         "order": verdicts,
         "classes": records,
         "superseded": superseded(repo, run, verdicts),

@@ -4,10 +4,11 @@
   "description": "request is checked against release-request.schema.json on its own: the subset has no $ref.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "request", "order", "classes", "superseded"],
+  "required": ["schema_version", "request", "build_time", "order", "classes", "superseded"],
   "properties": {
     "schema_version": {"const": 2},
     "request": {"type": "object"},
+    "build_time": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$"},
     "order": {
       "type": "array",
       "items": {

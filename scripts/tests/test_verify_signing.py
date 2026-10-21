@@ -83,6 +83,40 @@ def workflow(*jobs):
     return "name: Sign\non: push\njobs:\n" + "".join(jobs)
 
 
+INSTALLER = "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6"
+IMAGE_SIGN = (
+    'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
+    " --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations"
+    ' artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"'
+)
+# The sign-images job of release.yml, as ADR-0127 point 5 admits it: the pinned cosign
+# installer, and COSIGN_* only on the step that signs and attests.
+ATTEST_JOB = f"""\
+  sign-images:
+    runs-on: ubuntu-24.04
+    environment: signing-images
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: {CHECKOUT}
+      - uses: {DOWNLOAD}
+        with:
+          name: release-candidate
+          path: artifacts
+      - uses: {INSTALLER}
+      - name: Login
+        env:
+          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
+          GITHUB_ACTOR: ${{{{ github.actor }}}}
+        run: echo "${{GITHUB_TOKEN}}" | skopeo login ghcr.io -u "${{GITHUB_ACTOR}}" --password-stdin
+      - name: Sign and attest
+        env:
+          COSIGN_PRIVATE_KEY: ${{{{ secrets.COSIGN_PRIVATE_KEY }}}}
+        run: {json.dumps(IMAGE_SIGN)}
+"""
+
+
 class SigningTest(unittest.TestCase):
     def problems(self, workflows, environments=ENVIRONMENTS, repository=REPOSITORY_SECRETS, keys=(), files=None):
         with tempfile.TemporaryDirectory() as tmp:
@@ -626,20 +660,59 @@ class SigningTest(unittest.TestCase):
     def test_rule_7_the_image_sign_step_also_signs_the_kernel_list(self):
         """ADR-0096: the image signing step signs the kernel artefacts too, from the allow-listed
         download directory. Another path, or the step without the kernel list, is not allowed."""
-        good = (
-            'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
-            ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
-            ' | tee -a "${GITHUB_STEP_SUMMARY}"'
-        )
+        good = IMAGE_SIGN
         self.assertRegex(good, verify.SIGN_SCRIPTS)
         self.assertIn(good, verify.SIGN_JOB_COMMANDS)
         for bad in (
             good.replace("artifacts/kernel-unsigned.txt", "out/kernel-unsigned.txt"),
             good.replace(" --kernel-digests artifacts/kernel-unsigned.txt", ""),
+            good.replace(" --attestations artifacts/attestations", ""),
+            good.replace("artifacts/attestations", "out/attestations"),
         ):
             with self.subTest(bad=bad):
                 self.assertIsNone(verify.SIGN_SCRIPTS.match(bad))
                 self.assertNotIn(bad, verify.SIGN_JOB_COMMANDS)
+
+    def test_sign_job_may_run_the_attesting_command(self):
+        """ADR-0127 point 5: sign-images of release.yml may install cosign with the pinned
+        installer, which receives no secret, and sign and attest in one step."""
+        self.assertEqual(self.problems({"release.yml": workflow(ATTEST_JOB)}), [])
+
+    def test_the_cosign_installer_is_admitted_only_in_sign_images_of_release_yml(self):
+        third_party = f"uses {INSTALLER}" + THIRD_PARTY
+        self.assertEqual(
+            self.problems({"k.yml": workflow(ATTEST_JOB)}),
+            [f"k.yml: signing job sign-images {third_party}"],
+        )
+        other = ATTEST_JOB.replace("  sign-images:\n", "  sign:\n")
+        self.assertEqual(
+            self.problems({"release.yml": workflow(other)}),
+            [f"release.yml: signing job sign {third_party}"],
+        )
+        by_tag = ATTEST_JOB.replace(INSTALLER, "sigstore/cosign-installer@v3")
+        self.assert_one({"release.yml": workflow(by_tag)}, r"uses sigstore/cosign-installer@v3: only checkout")
+        inputs = ATTEST_JOB.replace(f"      - uses: {INSTALLER}\n", f"      - uses: {INSTALLER}\n        with:\n          cosign-release: v9\n")
+        self.assert_one({"release.yml": workflow(inputs)}, r"sets cosign-release on sigstore/cosign-installer")
+        # The installer step never receives the key.
+        keyed = ATTEST_JOB.replace(
+            f"      - uses: {INSTALLER}\n",
+            f"      - uses: {INSTALLER}\n        env:\n          COSIGN_PRIVATE_KEY: ${{{{ secrets.COSIGN_PRIVATE_KEY }}}}\n",
+        )
+        self.assert_one({"release.yml": workflow(keyed)}, r"hands COSIGN_PRIVATE_KEY to a step that does not run only a sign script")
+
+    def test_sign_job_rejects_another_cosign_subcommand(self):
+        """Only cosign attest runs beside the key: cosign sign in a step of the job, or any cosign
+        subcommand but attest in the image sign script, fails the lint."""
+        step = 'cosign sign --key k "ghcr.io/o/athanor-system@sha256:x"'
+        job = ATTEST_JOB.replace("      - name: Login\n", f"      - run: {json.dumps(step)}\n      - name: Login\n")
+        self.assert_one({"release.yml": workflow(job)}, r"step 4 runs a command outside the allow-list of D43: cosign sign")
+        script = 'cosign attest --key "$work/key" --type "$type" "$ref" < "$work/passphrase"\n'
+        self.assertEqual(self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script}), [])
+        for line in ('cosign sign --key "$work/key" "$ref"', "bash \"$retry\" cosign copy a b", "x && cosign upload blob"):
+            with self.subTest(line=line):
+                problems = self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script + line + "\n"})
+                self.assertEqual(len(problems), 1, problems)
+                self.assertRegex(problems[0], r"^system/sign-images\.sh:2 runs cosign other than cosign attest")
 
     def test_without_pyyaml_the_lint_fails_closed(self):
         saved, verify.yaml = verify.yaml, None

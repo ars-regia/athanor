@@ -2,6 +2,7 @@
 system/tag-images.sh with a skopeo stub that keeps a registry in a directory
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import base64
 import json
 import os
 import pathlib
@@ -9,9 +10,13 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+import release_attestation  # noqa: E402
+
 SIGN = ROOT / "system" / "sign-images.sh"
 DIGESTS = ROOT / "system" / "image-digests.sh"
 VERIFY = ROOT / "system" / "verify-images.sh"
@@ -131,6 +136,43 @@ PODMAN = textwrap.dedent("""\
     cmd = args[args.index(image) + 1:]
     os.execvpe(cmd[0], cmd, {**os.environ, "STUB_IN_CONTAINER": "1"})
     """)
+COSIGN = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    # A cosign that keeps the attestations it made in attested.json (digest -> envelopes) and
+    # records every call in cosign.log. verify-attestation prints the envelopes of a digest whose
+    # predicate type is --type, one JSON document per line, as cosign does.
+    import base64, json, os, pathlib, stat, sys
+    state = pathlib.Path(os.environ["STUB_STATE"])
+    args = sys.argv[1:]
+    stdin = sys.stdin.read() if args[0] == "attest" else ""
+    with open(state / "cosign.log", "a") as log:
+        log.write(json.dumps({"args": args, "stdin": stdin, "env": sorted(k for k in os.environ if k.startswith("COSIGN_"))}) + "\\n")
+    store = state / "attested.json"
+    attested = json.loads(store.read_text()) if store.exists() else {}
+    kind = args[args.index("--type") + 1]
+    repository, digest = args[-1].split("@")
+    if args[0] == "attest":
+        key = pathlib.Path(args[args.index("--key") + 1])
+        mode, parent = stat.S_IMODE(key.stat().st_mode), stat.S_IMODE(key.parent.stat().st_mode)
+        assert mode == 0o600 and parent == 0o700, (key, oct(mode), oct(parent))
+        statement = {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": kind,
+            "subject": [{"name": repository, "digest": {"sha256": digest.removeprefix("sha256:")}}],
+            "predicate": json.loads(pathlib.Path(args[args.index("--predicate") + 1]).read_text()),
+        }
+        payload = base64.b64encode(json.dumps(statement).encode()).decode()
+        attested.setdefault(digest, []).append({"payloadType": "application/vnd.in-toto+json", "payload": payload, "signatures": [{"keyid": "", "sig": "c3R1Yg=="}]})
+        store.write_text(json.dumps(attested))
+    elif args[0] == "verify-attestation":
+        found = [e for e in attested.get(digest, []) if json.loads(base64.b64decode(e["payload"]))["predicateType"] == kind]
+        if not found or os.environ.get("STUB_REFUSE"):
+            sys.exit("Error: no matching attestations")
+        for envelope in found:
+            print(json.dumps(envelope))
+    else:
+        sys.exit(f"stub cosign: unsupported {args}")
+    """)
 BUILDER = "ab" * 32
 
 
@@ -145,6 +187,9 @@ class SignImages(unittest.TestCase):
         podman = self.dir / "bin" / "podman"
         podman.write_text(PODMAN)
         podman.chmod(0o755)
+        cosign = self.dir / "bin" / "cosign"
+        cosign.write_text(COSIGN)
+        cosign.chmod(0o755)
         self.state = self.dir / "state"
         self.state.mkdir()
         self.tags = {
@@ -218,6 +263,29 @@ class SignImages(unittest.TestCase):
             env={**self.env, **env},
         )
 
+    def statements(self):
+        """The release statements candidate writes, one per image of the digests file."""
+        out = self.dir / "artifacts" / "attestations"
+        for line in self.file.read_text().splitlines():
+            repository, _, digest = line.split()
+            record = {"repository": repository, "candidate_digest": digest, "class": "feature",
+                      "advisories": [], "class_reason": "no-baseline", "updateinfo_timestamp": None}
+            path = out / repository.rsplit("/", 1)[1] / f"{digest.removeprefix('sha256:')}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(release_attestation.statement(record, "2026-10-21T04:00:00Z", "c" * 40, "412")))
+        return out
+
+    def sign_attest(self, statements, **env):
+        return subprocess.run(
+            ["bash", str(SIGN), "--registry", REG, "--attestations", str(statements), str(self.file)],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
+
+    def cosign_calls(self):
+        log = self.state / "cosign.log"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def verify(self, *args, **env):
         # The verification job holds no key.
@@ -681,6 +749,119 @@ class SignImages(unittest.TestCase):
                 r = self.sign_kernel(path)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertFalse((self.state / "calls.log").exists())
+
+    def test_sign_images_attests_every_statement(self):
+        """ADR-0127 point 2: one cosign attest per image, after the skopeo signatures, by digest,
+        with the key file on tmpfs and the passphrase on stdin, never in the environment."""
+        self.digests()
+        statements = self.statements()
+        r = self.sign_attest(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
+        calls = self.cosign_calls()
+        self.assertEqual([c["args"][-1] for c in calls], [f"{REG}/{n}@{self.tags[f'{REG}/{n}:412']}" for n in NAMES])
+        for call in calls:
+            args = call["args"]
+            self.assertEqual(args[0], "attest")
+            self.assertEqual(args[args.index("--type") + 1], release_attestation.PREDICATE_TYPE)
+            self.assertIn("--tlog-upload=false", args)
+            self.assertIn("--new-bundle-format=false", args)
+            self.assertTrue(pathlib.Path(args[args.index("--key") + 1]).is_relative_to(self.dir / "runtime"))
+            self.assertIn("--predicate", args)
+            self.assertEqual(call["stdin"], "correct horse")
+            self.assertEqual(call["env"], [], "COSIGN_* must not be in the environment of cosign")
+            self.assertNotIn("not-a-real-key", " ".join(args))
+            self.assertNotIn("correct horse", " ".join(args))
+        attested = json.loads((self.state / "attested.json").read_text())
+        for name in NAMES:
+            digest = self.tags[f"{REG}/{name}:412"]
+            statement = json.loads((statements / name / f"{digest.removeprefix('sha256:')}.json").read_text())
+            (envelope,) = attested[digest]
+            payload = json.loads(base64.b64decode(envelope["payload"]))
+            self.assertEqual(payload["predicate"], statement["predicate"])
+            self.assertEqual(payload["subject"], statement["subject"])
+        self.assertEqual(r.stdout.count("attested: "), 3)
+        self.assertEqual(list((self.dir / "runtime").iterdir()), [], "the private directory is removed on exit")
+
+    def test_sign_images_refuses_a_statement_for_an_unlisted_digest(self):
+        """The statements come from another job: each must name an image of the checked digests
+        file, under its own file name, once; anything else fails before the registry."""
+        other = "9" * 64
+
+        def first(out):
+            digest = self.tags[f"{REG}/athanor-system:412"].removeprefix("sha256:")
+            return out / "athanor-system" / f"{digest}.json"
+
+        def unlisted(out):
+            statement = json.loads(first(out).read_text())
+            statement["subject"][0]["digest"]["sha256"] = other
+            first(out).unlink()
+            (out / "athanor-system" / f"{other}.json").write_text(json.dumps(statement))
+
+        def renamed(out):
+            statement = json.loads(first(out).read_text())
+            statement["subject"][0]["digest"]["sha256"] = other
+            first(out).write_text(json.dumps(statement))
+
+        def missing(out):
+            next((out / "athanor-system-nvidia").iterdir()).unlink()
+
+        def other_type(out):
+            statement = json.loads(first(out).read_text())
+            statement["predicateType"] = "https://example.com/other"
+            first(out).write_text(json.dumps(statement))
+
+        for change in (unlisted, renamed, missing, other_type):
+            with self.subTest(change=change.__name__):
+                shutil.rmtree(self.dir / "artifacts", ignore_errors=True)
+                (self.state / "calls.log").unlink(missing_ok=True)
+                (self.state / "cosign.log").unlink(missing_ok=True)
+                self.digests()
+                before = len(self.calls())
+                statements = self.statements()
+                change(statements)
+                r = self.sign_attest(statements)
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertEqual(self.cosign_calls(), [])
+                self.assertEqual(len(self.calls()), before, "nothing is signed")
+
+    def test_the_attestations_are_verified_against_the_statements(self):
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        before = len(self.cosign_calls())
+        r = self.verify("--attestations", str(statements))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.cosign_calls()[before:]
+        self.assertEqual([c["args"][0] for c in calls], ["verify-attestation"] * 3)
+        for call in calls:
+            args = call["args"]
+            self.assertEqual(args[args.index("--key") + 1], str(self.dir / "keys" / "athanor-image-1.pub"))
+            self.assertEqual(args[args.index("--type") + 1], release_attestation.PREDICATE_TYPE)
+            self.assertIn("--insecure-ignore-tlog=true", args)
+            self.assertIn("--new-bundle-format=false", args)
+        self.assertEqual(r.stdout.count("attestation verified: "), 3)
+
+    def test_an_image_without_its_attestation_fails_the_verification(self):
+        self.digests()
+        statements = self.statements()
+        self.sign()
+        r = self.verify("--attestations", str(statements))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no attestation verifies", r.stderr)
+
+    def test_an_attestation_that_differs_from_the_statement_fails_the_verification(self):
+        """What the registry holds is what candidate derived: a class changed on either side fails."""
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        path = next((statements / "athanor-system").iterdir())
+        statement = json.loads(path.read_text())
+        statement["predicate"]["class"] = "security"
+        path.write_text(json.dumps(statement))
+        r = self.verify("--attestations", str(statements))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("differs from the release statement", r.stderr)
 
 
 if __name__ == "__main__":
