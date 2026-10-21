@@ -198,6 +198,18 @@ class TierDigests(unittest.TestCase):
                 self.assertEqual((r.returncode, r.stdout), (0, "unsigned\n"), r.stderr)
                 self.assertIn(says, r.stderr)
 
+    def test_resolve_verifies_nothing(self):
+        """Negative control: the tiers are signed, but nothing enforces the signatures yet;
+        resolve never calls cosign."""
+        self.publish(
+            "ghcr.io/ars-regia", signers={f"tier{n}": None for n in range(4)}, **DIGESTS
+        )
+        log = self.dir / "cosign.log"
+        self.cosign_stub(f'printf "%s\\n" "$*" >> {log}; exit 1')
+        r = self.resolve("resolve")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(log.read_text() if log.exists() else "", "")
+
     def test_resolve_records_the_registry_and_the_digest_each_tier_names(self):
         self.publish("ghcr.io/ars-regia", **DIGESTS)
         r = self.resolve("resolve")
