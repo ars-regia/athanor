@@ -119,7 +119,8 @@ pub enum Kind {
     },
     /// A flat button that shows an image, named by its label for assistive technologies;
     /// activating it raises [`Event::Clicked`]. It is at least the theme's `button_min` on
-    /// each side, with the theme's padding on both sides of the image.
+    /// each side, with the theme's padding added left and right, as GTK's min-width and
+    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme.
     IconButton {
         /// The name assistive technologies read.
         label: String,
@@ -580,7 +581,8 @@ impl Ui {
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
             Kind::Image { size, .. } => (*size, *size),
-            Kind::IconButton { size, .. } => ((*size + 2.0 * pad).max(button_min), size.max(button_min)),
+            // GTK's box: the padding outside the minimum, across the line of text only.
+            Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
                 let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
@@ -1577,7 +1579,7 @@ mod tests {
         Theme {
             margin: 0.0,
             gap: 2.0,
-            padding: 12.0,
+            padding: 8.0,
             ..Theme::default()
         }
     }
@@ -1603,7 +1605,8 @@ mod tests {
                 margin: [24.0, 14.0, 24.0, 6.0],
             },
         );
-        // 16 + 2 * 12 wide and the 32 of `button_min` tall; then 24 + 2 * 12 by 32.
+        // The 32 of `button_min` and 2 * 8 of padding wide, as GTK's min-width and padding,
+        // by 32 tall: 48 by 32 for either image.
         let a = ui.add(island, icon("A", 16.0));
         let b = ui.add(island, icon("B", 24.0));
         // 48 + 2 * 4 + 6 + 14 wide; 32 + 2 + 32 + 2 * 4 + 24 + 24 tall.
@@ -1664,10 +1667,11 @@ mod tests {
             );
             let a = ui.add(island, icon("A", 16.0));
             let b = ui.add(island, icon("B", 24.0));
-            assert_eq!(ui.layout(), (134.0, 60.0));
+            // 18 + 4 + 48 + 2 + 48 + 4 + 18 wide: both buttons 48, whatever their image.
+            assert_eq!(ui.layout(), (142.0, 60.0));
             let (first, second) = if rtl { (b, a) } else { (a, b) };
             let (first, second) = (ui.widget(first).rect, ui.widget(second).rect);
-            assert_eq!((first.x, first.y, first.h), (22.0, 18.0, 32.0));
+            assert_eq!((first.x, first.y, first.w, first.h), (22.0, 18.0, 48.0, 32.0));
             assert_eq!((second.x, second.y), (22.0 + first.w + 2.0, 18.0));
         }
     }
