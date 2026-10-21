@@ -56,8 +56,10 @@ jobs:
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       # A re-run whose class changed would add an attestation that contradicts the first, and
       # the image would never verify again (ADR-0127): refuse it here, before anything is signed.
+      # It reads the registry, so retry.sh outlasts a dropped connection; a refusal is the same
+      # on every attempt, writes nothing, and costs the four minutes of the retries.
       - name: 📜 No image already carries another release statement (scripts/ci/release_attestation.py)
-        run: python3 -B scripts/ci/release_attestation.py prior --dir "${RUNNER_TEMP}/out/attestations" --keys-dir system/keys | tee -a "${GITHUB_STEP_SUMMARY}"
+        run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior --dir "${RUNNER_TEMP}/out/attestations" --keys-dir system/keys | tee -a "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-candidate

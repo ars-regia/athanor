@@ -171,6 +171,10 @@ COSIGN = textwrap.dedent("""\
         store.write_text(json.dumps(attested))
     elif args[0] == "verify-attestation":
         key = pathlib.Path(args[args.index("--key") + 1]).name
+        once = state / "down-once"
+        if os.environ.get("STUB_DOWN_ONCE") and not once.exists():
+            once.touch()
+            sys.exit("Error: GET https://ghcr.io/v2/: net/http: TLS handshake timeout")
         if key == os.environ.get("STUB_DOWN_KEY"):
             sys.exit("Error: GET https://ghcr.io/v2/: dial tcp: connection refused")
         def kind_of(envelope):  # one it cannot read is the test's forgery: print it
@@ -956,6 +960,23 @@ class SignImages(unittest.TestCase):
         r = self.prior(statements, STUB_DOWN_KEY="athanor-image-1.pub")
         self.assertEqual(r.returncode, 1)
         self.assertIn("connection refused", r.stderr)
+
+    def test_candidate_runs_prior_through_retry_and_outlasts_a_transient_error(self):
+        """release.yml runs the prior check through retry.sh, as verify-images reads the
+        registry: a dropped connection is read again, not fatal."""
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn("run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior ", workflow)
+        self.digests()
+        statements = self.statements()
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge" / "scripts" / "retry.sh"), sys.executable, "-B", str(ATTESTATION), "prior",
+             "--dir", str(statements), "--keys-dir", str(self.dir / "keys")],
+            capture_output=True, text=True, env={**self.env, "STUB_DOWN_ONCE": "1", "RETRY_ATTEMPTS": "2"},
+        )  # fmt: skip
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("TLS handshake timeout", r.stderr)
+        self.assertIn("attempt 1 of 2", r.stderr)
+        self.assertEqual(r.stdout.count("no prior attestation: "), 3)
 
 
 if __name__ == "__main__":
