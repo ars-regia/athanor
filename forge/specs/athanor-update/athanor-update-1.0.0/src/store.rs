@@ -94,6 +94,9 @@ impl Store {
         self.read_line(name)?.map(|line| line.parse().map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{name}: {err}")))).transpose()
     }
 
+    /// Writes `contents` to `dir/name` atomically and durably. An error from the final
+    /// directory sync comes after the rename, so the new file may already be in place:
+    /// callers treat an error as "not known to be durable", and write idempotently.
     pub(crate) fn replace(dir: &Path, name: &str, mode: u32, contents: &[u8]) -> std::io::Result<()> {
         let temporary = dir.join(format!(".{name}.{}", std::process::id()));
         // A leftover of a killed run would make create_new fail for ever. create_new is
