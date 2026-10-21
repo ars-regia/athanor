@@ -348,6 +348,8 @@ impl Ui {
 
     /// The root column every widget descends from.
     pub const ROOT: WidgetId = 0;
+    /// The most steps a slider may have between its minimum and its maximum.
+    pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
     /// The longest text a field takes from outside the keyboard, in characters.
     pub const FIELD_MAX_CHARS: usize = 1024;
     /// How far the pointer moves on either axis, in logical pixels, from a press before a drag
@@ -434,6 +436,12 @@ impl Ui {
         if !(finite && min < max && step > 0.0) {
             return None;
         }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
+            return None;
+        }
         let mut slider = Slider {
             name: name.to_owned(),
             value: min,
@@ -471,7 +479,7 @@ impl Ui {
         let Kind::Slider(slider) = &self.widgets[id].kind else {
             return None;
         };
-        let index = (slider.index(slider.value) + steps).clamp(0, slider.last());
+        let index = (slider.index(slider.value).saturating_add(steps)).clamp(0, slider.last());
         let value = slider.at(index);
         self.set_value(id, value)
     }
@@ -921,7 +929,9 @@ impl Ui {
 
     /// Handles a key: a focused field takes text, deletion and the horizontal arrows; otherwise
     /// Tab and Shift+Tab walk the logical order, the arrows the visual one, and Enter or Space
-    /// activates.
+    /// activates. A focused slider takes the arrows (Right moves the knob right, which lowers the
+    /// value when mirrored; Up and Down are not mirrored), Page Up and Page Down (ten steps) and
+    /// Home and End (the least and the greatest value).
     pub fn key(&mut self, key: Key) -> Option<Event> {
         let focused = self.focus;
         if let Some(id) = focused {
@@ -1593,6 +1603,23 @@ mod tests {
             assert_eq!(ui.slider(Ui::ROOT, "Level", min, max, step, value), None);
         }
         assert_eq!(ui.len(), 1, "a refused slider adds nothing");
+    }
+
+    #[test]
+    fn a_slider_refuses_a_range_it_cannot_count_or_draw() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        // The span overflows, and the steps do not fit comfortably.
+        assert_eq!(ui.slider(Ui::ROOT, "L", -1e308, 1e308, 1.0, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 100.0, 1e-300, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 1e12, 1.0, 0.0), None);
+        assert_eq!(ui.len(), 1);
+        // The most steps is still a slider, and its keys cannot overflow.
+        let id = ui.slider(Ui::ROOT, "L", 0.0, 2e9, 1.0, 2e9);
+        assert!(id.is_some());
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.step_value(id, i64::MAX), None);
+        assert_eq!(ui.step_value(id, i64::MAX).or(ui.step_value(id, -1)), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(2e9 - 1.0));
     }
 
     #[test]

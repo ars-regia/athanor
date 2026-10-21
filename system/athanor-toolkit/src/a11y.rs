@@ -496,6 +496,7 @@ mod tests {
         let update = tree_update(&ui, 1.0);
         let n = &update.nodes[id].1;
         assert_eq!((n.role(), n.label()), (Role::Slider, Some("Level")));
+        assert_eq!(n.orientation(), Some(Orientation::Horizontal));
         assert_eq!(
             (
                 n.numeric_value(),

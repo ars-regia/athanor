@@ -498,6 +498,42 @@ mod tests {
     }
 
     #[test]
+    fn a_slider_is_drawn_on_its_track_at_a_fractional_scale() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Slider", crate::Theme::default(), false);
+        let id = ui.slider(crate::Ui::ROOT, "Level", 0.0, 100.0, 1.0, 50.0);
+        let id = id.unwrap_or(crate::Ui::ROOT);
+        let scale = 1.5;
+        let pixmap = render(&mut ui, scale)?;
+        let (r, font) = (ui.widget(id).rect, ui.theme.font_size);
+        let at = |x: f32, y: f32| {
+            let (px, py) = ((x * scale) as usize, (y * scale) as usize);
+            let i = 4 * (usize::from(pixmap.width()) * py + px);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let cy = r.y + r.h / 2.0;
+        let knob = crate::widget::slider_knob_x(r, false, font, 0.5);
+        let (from, to) = (
+            crate::widget::slider_knob_x(r, false, font, 0.0),
+            crate::widget::slider_knob_x(r, false, font, 1.0),
+        );
+        let t = &ui.theme;
+        // The knob's centre, the accent before it and the plain track after it, at the scaled
+        // pixels, and nothing on the rows above the track.
+        assert_eq!(at(knob, cy), t.on_accent.0.to_vec());
+        assert_eq!(at((from + knob) / 2.0, cy), t.accent.0.to_vec());
+        assert_eq!(at((knob + to) / 2.0, cy), t.border.0.to_vec());
+        assert_eq!(at((from + knob) / 2.0, cy - 6.0), t.background.0.to_vec());
+        // The track and the knob stay inside the widget's rectangle.
+        assert!(from - slider_knob_edge(font) >= r.x - 0.01);
+        assert!(to + slider_knob_edge(font) <= r.x + r.w + 0.01);
+        Ok(())
+    }
+
+    fn slider_knob_edge(font: f32) -> f32 {
+        crate::widget::slider_knob(font) / 2.0
+    }
+
+    #[test]
     fn a_scale_that_is_not_positive_is_refused() {
         let mut ui = chooser::build(&athanor_i18n::Catalog::empty(), false).ui;
         for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
