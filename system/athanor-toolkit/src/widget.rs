@@ -643,11 +643,12 @@ impl Ui {
 
     /// The focusable widget under the point, in logical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
-        (0..self.widgets.len()).find(|&id| {
-            self.widgets[id].is_focusable()
-                && self.widgets[id].rect.contains(x, y)
-                && self.is_visible(id)
-        })
+        (0..self.widgets.len())
+            .find(|&id| {
+                self.widgets[id].is_focusable()
+                    && self.widgets[id].rect.contains(x, y)
+                    && self.is_visible(id)
+            })
     }
 
     /// Presses and releases the primary button at the point, in logical pixels, and returns the
@@ -883,10 +884,7 @@ mod tests {
             ui.add_title_bar();
             let bar = ui.widget(Ui::ROOT).children[0];
             ui.set_visible(bar, false);
-            assert!(
-                ui.is_visible(bar),
-                "rtl {rtl}: the title bar cannot be hidden"
-            );
+            assert!(ui.is_visible(bar), "rtl {rtl}: the title bar cannot be hidden");
             let (w, h) = ui.layout();
             let r = ui.widget(bar).rect;
             assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");

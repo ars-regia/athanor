@@ -78,6 +78,19 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
     }
 }
 
+/// The surface whose accessibility adapter is the focused window, given the open popup and the
+/// surface with the keyboard: an open menu takes the application's keys, whichever surface the
+/// compositor sends them to, so it is the focused window while the application has them.
+pub(crate) fn focused_window<S: Copy>(
+    open: Option<OpenPopup<S>>,
+    keyboard: Option<S>,
+) -> Option<S> {
+    match open {
+        Some(popup) if popup.menu => keyboard.map(|_| popup.surface),
+        _ => keyboard,
+    }
+}
+
 /// When the tooltip of the widget under the pointer, or of the focused one, shows. `T` names
 /// the widget; each wait carries a generation, and a timer of an older one is stale.
 #[derive(Debug)]
@@ -256,5 +269,39 @@ mod tests {
         assert!(!parent.is_expanded(app));
         tip.closed(&mut parent);
         assert_eq!(parent.focus(), Some(other));
+    }
+
+    #[test]
+    fn the_open_menu_is_the_focused_window_while_the_application_has_the_keys() {
+        let menu = OpenPopup {
+            surface: 2,
+            parent: 1,
+            anchor: 5,
+            menu: true,
+        };
+        let tooltip = OpenPopup {
+            menu: false,
+            ..menu
+        };
+        assert_eq!(focused_window(None, Some(1)), Some(1));
+        assert_eq!(
+            focused_window(Some(menu), Some(1)),
+            Some(2),
+            "the compositor kept the keyboard on the parent"
+        );
+        assert_eq!(focused_window(Some(menu), Some(2)), Some(2));
+        assert_eq!(
+            focused_window(Some(menu), Some(3)),
+            Some(2),
+            "another surface"
+        );
+        assert_eq!(focused_window(Some(menu), None), None, "no keyboard");
+        assert_eq!(
+            focused_window(Some(tooltip), Some(1)),
+            Some(1),
+            "a tooltip takes no keys"
+        );
+        // Once the menu closes, the window focus returns to the surface with the keyboard.
+        assert_eq!(focused_window::<u32>(None, Some(1)), Some(1));
     }
 }

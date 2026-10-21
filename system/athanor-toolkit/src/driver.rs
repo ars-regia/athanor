@@ -6,7 +6,7 @@
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
-use crate::popup::{Dismiss, OpenPopup, Tooltip, TOOLTIP_PADDING};
+use crate::popup::{focused_window, Dismiss, OpenPopup, Tooltip, TOOLTIP_PADDING};
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
@@ -250,6 +250,7 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
         shm,
         keyboard: None,
         keyboard_focus: None,
+        window_focus: None,
         pointer: None,
         // Optional: without it, the pointer keeps the compositor's cursor.
         cursor_shape: CursorShapeManager::bind(&globals, &qh).ok(),
@@ -269,12 +270,16 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
     }
     while !app.shell.exit {
         event_loop.dispatch(None, &mut app)?;
+        app.sync_window_focus();
         if let Some(error) = app.error.take() {
             return Err(error);
         }
     }
     Ok(())
 }
+
+/// Why a popup cannot be had without xdg-shell.
+const NO_XDG_SHELL: &str = "no popup: the compositor does not offer xdg_wm_base";
 
 /// The layer shell, or why a layer surface cannot be had: the check doc_shell.md SH4 asks of
 /// every layer surface. The driver speaks the protocol itself, so a surface it opens on this
@@ -404,11 +409,12 @@ impl Shell {
     }
 
     /// Opens `ui` as a menu in a popup of the surface `parent`, on `side` of its widget `anchor`,
-    /// and closes the popup open before: one is open at a time, as GTK's popovers. The menu takes
-    /// the pointer and the keyboard, and its first item the focus; while it is open, `anchor`
-    /// reads as expanded if it has a popup ([`Ui::set_has_popup`]). It closes at Escape, at a
-    /// press outside it, when the compositor dismisses it or at [`Shell::close_popup`], and the
-    /// focus then returns to `anchor`. It is drawn at its first configure.
+    /// and closes the popup open before: one is open at a time, as GTK's popovers, so `parent`
+    /// is a window or a layer surface, never a popup. A refused request leaves the open popup
+    /// open. The menu takes the pointer and the keyboard, and its first item the focus; while it
+    /// is open, `anchor` reads as expanded if it has a popup ([`Ui::set_has_popup`]). It closes
+    /// at Escape, at a press outside it, when the compositor dismisses it or at
+    /// [`Shell::close_popup`], and the focus then returns to `anchor`. It is drawn at its first configure.
     pub fn open_popup(
         &mut self,
         parent: SurfaceId,
@@ -436,25 +442,33 @@ impl Shell {
         side: Side,
         menu: bool,
     ) -> Result<SurfaceId, Error> {
-        self.close_popup();
-        let xdg_shell = self
-            .xdg_shell
-            .as_ref()
-            .ok_or("no popup: the compositor does not offer xdg_wm_base")?;
+        // Everything that can refuse the request is checked before the open popup closes: a
+        // refused request leaves it open.
+        let xdg_shell = self.xdg_shell.as_ref().ok_or(NO_XDG_SHELL)?;
         let from = self
             .surfaces
             .iter()
             .find(|s| s.id == parent)
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        if matches!(from.shown, Shown::Popup(_)) {
+            return Err(format!("no popup of the popup {parent:?}: one is open at a time").into());
+        }
         if anchor >= from.ui.len() {
             return Err(format!("no widget {anchor} on {parent:?}").into());
         }
+        let r = from.ui.widget(anchor).rect;
         layout(&mut ui, 1.0)?;
         let (w, h) = logical_size(&ui);
         let positioner = XdgPositioner::new(xdg_shell)?;
+        self.close_popup();
+        let xdg_shell = self.xdg_shell.as_ref().ok_or(NO_XDG_SHELL)?;
+        let from = self
+            .surfaces
+            .iter()
+            .find(|s| s.id == parent)
+            .ok_or_else(|| format!("no open surface {parent:?}"))?;
         positioner.set_size(w as i32, h as i32);
         // The widget's bounds in whole pixels of its surface, grown for a tooltip.
-        let r = from.ui.widget(anchor).rect;
         let pad = if menu { 0.0 } else { TOOLTIP_PADDING };
         let (x, y) = ((r.x - pad).floor(), (r.y - pad).floor());
         let (right, bottom) = ((r.x + r.w + pad).ceil(), (r.y + r.h + pad).ceil());
@@ -478,17 +492,19 @@ impl Shell {
         let (wl, fractional) = self.new_surface();
         let of = match &from.shown {
             Shown::Window(window) => Some(window.xdg_surface()),
-            Shown::Popup(popup) => Some(popup.xdg_surface()),
-            Shown::Layer(_) => None,
+            _ => None,
         };
         let popup = Popup::from_surface(of, &positioner, &self.qh, wl, xdg_shell)?;
         if let Shown::Layer(layer) = &from.shown {
             layer.get_popup(popup.xdg_popup());
         }
         // A menu grabs the input with the press or the key that opened it, before its first
-        // commit: the compositor then dismisses it at a press in another client.
-        if let (true, Some(seat), Some(serial)) = (menu, &self.seat, self.serial) {
-            popup.xdg_popup().grab(seat, serial);
+        // commit: the compositor then dismisses it at a press in another client. Each input
+        // grabs once; a menu opened without one, as by an assistive technology, grabs nothing.
+        if menu {
+            if let (Some(seat), Some(serial)) = (&self.seat, self.serial.take()) {
+                popup.xdg_popup().grab(seat, serial);
+            }
         }
         let id = SurfaceId(self.next);
         let from = self
@@ -1051,6 +1067,8 @@ struct App {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     /// The surface that has the keyboard.
     keyboard_focus: Option<SurfaceId>,
+    /// The surface whose accessibility adapter is the focused window.
+    window_focus: Option<SurfaceId>,
     pointer: Option<wl_pointer::WlPointer>,
     cursor_shape: Option<CursorShapeManager>,
     cursor_shape_device: Option<WpCursorShapeDeviceV1>,
@@ -1177,6 +1195,23 @@ impl App {
         }
     }
 
+    /// Moves the accessibility adapters' window focus to the surface that takes the keys, after
+    /// every event: the open menu's while it holds them, though the compositor may keep the
+    /// keyboard on its parent, then back to the parent once it closes. An adapter emits its
+    /// focus events only while its window is focused.
+    fn sync_window_focus(&mut self) {
+        let focused = focused_window(self.shell.popup, self.keyboard_focus);
+        if focused == self.window_focus {
+            return;
+        }
+        for (id, is_focused) in [(self.window_focus, false), (focused, true)] {
+            if let Some(surface) = id.and_then(|id| self.shell.get_mut(id)) {
+                surface.a11y.update_window_focus_state(is_focused);
+            }
+        }
+        self.window_focus = focused;
+    }
+
     /// Closes the popup open, and redraws the surface it was opened from.
     fn close_popup(&mut self) {
         if let Some(open) = self.shell.popup {
@@ -1224,12 +1259,12 @@ impl App {
     /// The wait of `generation` ran out: the tooltip shows, unless a menu is open, as none shows
     /// over GTK's open popover.
     fn tooltip_due(&mut self, generation: u64) {
-        let Some((id, widget)) = self.tooltip.due(generation) else {
-            return;
-        };
         if self.shell.popup.is_some_and(|p| p.menu) {
             return;
         }
+        let Some((id, widget)) = self.tooltip.due(generation) else {
+            return;
+        };
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
@@ -1655,10 +1690,7 @@ impl KeyboardHandler for App {
         _: &[u32],
         _: &[Keysym],
     ) {
-        self.keyboard_focus = self.shell.find(wl).map(|surface| {
-            surface.a11y.update_window_focus_state(true);
-            surface.id
-        });
+        self.keyboard_focus = self.shell.find(wl).map(|surface| surface.id);
     }
 
     fn leave(
@@ -1666,12 +1698,9 @@ impl KeyboardHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
-        wl: &wl_surface::WlSurface,
+        _: &wl_surface::WlSurface,
         _: u32,
     ) {
-        if let Some(surface) = self.shell.find(wl) {
-            surface.a11y.update_window_focus_state(false);
-        }
         self.keyboard_focus = None;
     }
 
