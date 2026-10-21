@@ -512,7 +512,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn a_report_logs_the_period_and_starts_the_next() {
+    fn a_report_resets_the_period_and_forgets_idle_surfaces() {
         let mut stats = FrameStats::default();
         stats.drew(Duration::from_millis(5));
         stats.drew(Duration::from_millis(40));
