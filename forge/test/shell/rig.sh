@@ -890,7 +890,7 @@ atspi)
         transcript=atspi-gallery${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 6" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
             bash -c "$enable && exec $bin --lang ${3:-en}"
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \

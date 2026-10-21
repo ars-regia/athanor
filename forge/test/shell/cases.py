@@ -71,7 +71,7 @@ SURFACES = {
 # doc_own_stack.md, OS10: the gallery, the toolkit's and its GTK twin, shows the same pages. Each
 # page and the number of controls on it; a widget task adds its page here. Both galleries start a
 # page with the focus on its toggle in the page row.
-GALLERY_PAGES = {"buttons": 5}
+GALLERY_PAGES = {"buttons": 5, "choices": 3}
 GALLERIES = ("toolkit-gallery", "gtk-gallery")
 GalleryCase = namedtuple("GalleryCase", "tag variant scale locale catalog page direction")
 

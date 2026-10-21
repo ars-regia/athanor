@@ -65,6 +65,23 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // A check box or a switch with a toggled state, named by its label.
+        Kind::Check { label, active } | Kind::Switch { label, active } => {
+            let role = if matches!(widget.kind, Kind::Switch { .. }) {
+                Role::Switch
+            } else {
+                Role::CheckBox
+            };
+            let mut node = Node::new(role);
+            node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
         Kind::Field(field) => {
             let mut node = Node::new(Role::TextInput);
             node.set_label(field.name.as_str());
@@ -255,6 +272,44 @@ mod tests {
             );
         }
         assert_eq!(missing(ui, &update), Vec::<WidgetId>::new());
+    }
+
+    #[test]
+    fn a_check_and_a_switch_read_as_gtks() {
+        let mut ui = Ui::new("Choices", Theme::default(), false);
+        let choice = |switch, label: &str, active| {
+            let label = label.into();
+            if switch {
+                Kind::Switch { label, active }
+            } else {
+                Kind::Check { label, active }
+            }
+        };
+        let check = ui.add(Ui::ROOT, choice(false, "Check", true));
+        let switch = ui.add(Ui::ROOT, choice(true, "Switch", false));
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let read = |id: WidgetId| {
+            let n = &update.nodes[id].1;
+            (
+                n.role(),
+                n.label().map(str::to_owned),
+                n.toggled(),
+                n.supports_action(Action::Click),
+            )
+        };
+        let (checked, off) = (Some(Toggled::True), Some(Toggled::False));
+        assert_eq!(read(check), (Role::CheckBox, Some("Check".into()), checked, true));
+        assert_eq!(read(switch), (Role::Switch, Some("Switch".into()), off, true));
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(switch),
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), Some(Event::Toggled(switch)));
+        assert!(ui.is_active(switch));
     }
 
     #[test]

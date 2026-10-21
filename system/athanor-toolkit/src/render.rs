@@ -3,7 +3,7 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{Kind, Ui, WindowButton};
+use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
 use vello_cpu::peniko::{Color, FontData};
@@ -259,6 +259,41 @@ pub fn paint<C: Canvas>(
                         r.y + (r.h - layout.height()) / 2.0,
                     );
                     draw_text(ctx, resources, layout, at, ink)?;
+                }
+            }
+            Kind::Check { active, .. } | Kind::Switch { active, .. } => {
+                let active = *active;
+                let is_switch = matches!(widget.kind, Kind::Switch { .. });
+                let size = mark_size(is_switch, t.font_size);
+                let mark = mark_rect(r, ui.rtl, size, is_switch);
+                let fill = if active { t.accent } else { t.surface };
+                let radius = if is_switch { mark.h / 2.0 } else { mark.h / 4.0 };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(mark, 0.0, radius));
+                if !active {
+                    ctx.set_paint(color(t.border));
+                    ctx.set_stroke(Stroke::new(1.0));
+                    ctx.stroke_path(&rounded(mark, -0.5, radius));
+                }
+                if is_switch {
+                    let knob = knob_rect(mark, ui.rtl, active);
+                    let centre = (f64::from(knob.center_x()), f64::from(knob.y + knob.h / 2.0));
+                    ctx.set_paint(color(if active { t.on_accent } else { t.border }));
+                    ctx.fill_path(&Circle::new(centre, f64::from(knob.w / 2.0)).to_path(0.1));
+                } else if active {
+                    // A tick drawn as two lines, as the window buttons' marks.
+                    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
+                    ctx.set_paint(color(t.on_accent));
+                    ctx.set_stroke(Stroke::new(1.8));
+                    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
+                        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
+                        ctx.stroke_path(&line.to_path(0.1));
+                    }
+                }
+                if let Some(layout) = &widget.text {
+                    let x = if mark.x > r.x { r.x } else { r.x + r.w - layout.width() };
+                    let y = r.y + (r.h - layout.height()) / 2.0;
+                    draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
             }
             Kind::Field(field) => {
