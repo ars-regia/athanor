@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:71.fc43}
+Release:        %{?autorelease}%{!?autorelease:72.fc45}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -10,7 +10,7 @@ BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
 # athanor-session passes --keep-shortcuts, which Athanor's cosmic-comp patch adds (#144).
-Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
+Requires: cosmic-comp >= 1.10.0-2.fc45.athanor1
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
@@ -84,6 +84,10 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+- Fedora 45 base: the release takes the fc45 dist tag, and the cosmic-comp requirement names
+  Athanor's fc45 build, which Fedora's own 1.10.0-2.fc45 does not satisfy.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
   bwrap's read-only remount of devtmpfs is refused to xdm_t, and the greeter never started
