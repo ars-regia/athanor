@@ -21,7 +21,9 @@ pub mod widget;
 
 pub use icon::{IconTheme, Image};
 pub use theme::{Rgba, Theme};
-pub use widget::{Event, Key, Kind, PointerButton, Rect, Ui, Widget, WidgetId, WindowButton};
+pub use widget::{
+    Event, Key, Kind, PointerButton, Rect, Slider, Ui, Widget, WidgetId, WindowButton,
+};
 
 #[cfg(test)]
 #[path = "../examples/chooser/tree.rs"]

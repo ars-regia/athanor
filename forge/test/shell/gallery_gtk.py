@@ -82,6 +82,14 @@ def fill_page(page, container, text):
         row.append(label)
         row.append(switch)
         container.append(row)
+    elif page == "values":
+        scale = Gtk.Scale(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            adjustment=Gtk.Adjustment(value=50, lower=0, upper=100, step_increment=1, page_increment=10),
+        )
+        scale.set_draw_value(False)
+        scale.update_property([Gtk.AccessibleProperty.LABEL], [text["slider"]])
+        container.append(scale)
     else:
         raise ValueError(f"no page {page!r}")
 
