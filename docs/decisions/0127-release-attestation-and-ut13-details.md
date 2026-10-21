@@ -57,10 +57,13 @@ predicate type of point 1 as written below:
    and `updateinfo_timestamp` (an integer or `null`).
 4. **Signing key.** The image key that the policy in force trusts for the repository: key 1
    today, key 2 after PB5b (row 7). The client verifies the attestation with the same
-   `keyPaths` as the image signature.
+   `keyPaths` as the image signature. It accepts it only when the DSSE signature verifies,
+   the predicate type is the one of point 1 and the one subject names the repository and the
+   digest it is judging; any mismatch makes the image of the feature class.
 5. **D43.** `sign-images` may run `cosign attest` beside the key, with cosign installed by
    `sigstore/cosign-installer` pinned by full commit SHA. `system/sign-images.sh` still starts
-   no container.
+   no container. `COSIGN_*` is set only on the steps that sign and attest, never at the job
+   level, so the installer step does not receive it.
 6. **`release-class.toml`.** One file per motivating change, at
    `release/class/<YYYY-MM-DD>-<slug>.toml`, with `class = "security"`,
    `advisories = ["CVE-…", "FEDORA-…"]` and an optional `repositories = [...]`, whose absence
@@ -91,7 +94,8 @@ predicate type of point 1 as written below:
     opt-out is on: `NothingDownloaded`, because nothing applies by itself, so there is nothing
     to postpone.
 15. **Logging of the switch.** Each change is logged to the journal at notice, with the
-    fixed `MESSAGE_ID` `d479a5966dcf495db2fa18bf983a72ae`, the caller's uid and the new value. This
+    fixed `MESSAGE_ID` `d479a5966dcf495db2fa18bf983a72ae` (named
+    `os.athanor.update.automatic-changed` in code and tests), the caller's uid and the new value. This
     decides the point ADR-0094 left open.
 16. **Texts.** The security notice, its "Postpone" action, the warning shown before the switch
     turns off, the persistent warning row and the `postponed-until <time>` row, in English and

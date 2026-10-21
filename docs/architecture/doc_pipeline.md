@@ -81,8 +81,8 @@ These are the maintainer's, and this document does not reopen them.
    signing keys; its job signs the NVIDIA modules and `vmlinuz`, published as `azoth-boot`.
    `signing-images` holds the cosign key. Both deploy only from the protected branches
    `iso-v0` and `main`. A release cycle asks for **at most two approvals** (amends A2-27).
-   A job that holds a key builds nothing and runs no third-party action, and
-   `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired.
+   A job that holds a key builds nothing and runs no third-party action but the pinned
+   cosign installer of `sign-images` (ADR-0127), and `verify.py workflows` enforces it. `MOK_PRIVATE_KEY` is retired.
    [ADR-0088](../decisions/0088-pipeline-revision-2.md) amends ADR-0080: the plan gains PB5b
    and the stages gain `call-iso.yml` (section 3.2); Build L3 is claimed for artifacts built
    on GitHub-hosted runners and Build L2 for the self-hosted kernel and the signed derivatives
@@ -387,13 +387,14 @@ Release-path builds restore no cache: a cache is an input the provenance does no
 cache step in a release-path job. Today `call-dag-compile.yml` restores a Rust and an
 sccache cache on the release path; they go with PB11.
 
-**PL11. A job that holds a signing key builds nothing and runs no third-party action**
+**PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
 `verify.py workflows` rejects any other step in a job that names an environment with a key,
 and such a job in a reusable workflow (section 3.2). *Amended on 2026-10-21 (ADR-0127):* the
 one exception is `sign-images`, which installs cosign with `sigstore/cosign-installer`, pinned
 by full commit SHA, and runs `cosign attest` beside the image key to sign the release
-attestation of PB4b (D43).
+attestation of PB4b (D43). `COSIGN_*` is set only on the steps that sign and attest, never at
+the job level, so the installer step does not receive it.
 
 ### 4.3 Intermediate artifacts
 
