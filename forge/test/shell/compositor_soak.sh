@@ -4,12 +4,14 @@
 # error line, of the compositor and of each client.
 #
 #   compositor_soak.sh <out> <seconds> <compositor> [<argument>...] -- <client command>...
+#       [--idle <client command>...]
 #
 # Each client command is one string, run by bash with WAYLAND_DISPLAY set; its output goes to
 # <out>/client-<n>.log. The compositor's log is <out>/compositor.log. The soak fails when the
 # compositor or a client exits before the time is up, when the compositor never listens, or when
 # the compositor's last frame times report has no line for a client with a mean commit interval
-# under two frames of 60 Hz: a client starved or throttled as occluded.
+# under two frames of 60 Hz: a client starved or throttled as occluded. A client after --idle,
+# a bar or a terminal that draws only when something changes, must only stay up.
 set -euo pipefail
 
 out=$1 seconds=$2
@@ -20,7 +22,7 @@ while [ $# -gt 0 ] && [ "$1" != -- ]; do
     shift
 done
 [ $# -gt 0 ] || {
-    echo "usage: $0 <out> <seconds> <compositor> [<argument>...] -- <client>..." >&2
+    echo "usage: $0 <out> <seconds> <compositor> [<argument>...] -- <client>... [--idle <client>...]" >&2
     exit 2
 }
 shift
@@ -56,13 +58,18 @@ done
 }
 echo "compositor on $socket"
 
-n=0
+n=0 drawing=
 for client in "$@"; do
+    if [ "$client" = --idle ] && [ -z "$drawing" ]; then
+        drawing=$n
+        continue
+    fi
     n=$((n + 1))
     WAYLAND_DISPLAY=$socket bash -c "$client" &> "$out/client-$n.log" &
     pids+=($!)
-    echo "client $n: $client"
+    echo "client $n: $client${drawing:+ (idle)}"
 done
+drawing=${drawing:-$n}
 
 sleep "$seconds"
 status=0
@@ -78,7 +85,7 @@ echo "--- frame times, last report"
 report=$(sed 's/\x1b\[[0-9;]*m//g' "$out/compositor.log" |
     awk '/frame times: outputs drawn/ { block = "" } { block = block $0 "\n" } END { printf "%s", block }')
 grep 'frame times: outputs drawn' <<< "$report" || [ $? -eq 1 ]
-for i in $(seq "$n"); do
+for i in $(seq "$drawing"); do
     # Each client runs through exec, so its pid is the one the compositor logs. Every surface
     # of the client counts, and each must have committed on at least half the frames of the
     # 10 s window, two frames apart at most on average: a mean alone hides a client that
