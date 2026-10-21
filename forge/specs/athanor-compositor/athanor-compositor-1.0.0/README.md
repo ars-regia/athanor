@@ -85,7 +85,8 @@ mount namespace must name the same device and inode, since a sandbox whose own `
 file at the bar's path reads back the bar's path. A bar still running after an update of its
 package runs a deleted file, and a connection it opens then is granted nothing until it
 restarts. A missing, unreadable or malformed allow-list grants
-nothing, and so does a peer whose identity cannot be read. A client that connects through a
+nothing, and so does a peer whose identity cannot be read. Each connection logs its identity and
+grants at debug level, and an identity that cannot be read as a warning. A client that connects through a
 security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
@@ -97,7 +98,8 @@ security context's listener is granted nothing, whatever its identity.
 
 The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
 the bar what the plan names, and the fixture grants its clients every privileged global as the
-bar (`FIXTURE_ALLOW_LIST`).
+bar (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+can lock the session until one is added.
 
 What the check does not cover, for revision 2 of `doc_own_stack.md`:
 
