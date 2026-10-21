@@ -99,7 +99,8 @@
           '';
         };
 
-        packages = rec {
+        # builder-contents is a list, not a package: the set keeps it for the image and its check.
+        packages = builtins.removeAttrs (rec {
           just-hermetic = pkgs.just;
 
           # Compatibilità FHS del builder: directory àncora e symlink verso la glibc e le
@@ -295,7 +296,7 @@
               mkdir -m 1777 -p tmp var/tmp
             '';
           };
-        };
+        }) [ "builder-contents" ];
       }
     );
 }
