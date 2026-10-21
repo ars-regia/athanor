@@ -104,7 +104,6 @@ class SystemImages(Tool):
         self.assertEqual(self.prune(versions, self.index(1, 12)), [99])
 
 
-
 TIER = "athanor-forge-tier0-repo"
 
 
@@ -132,6 +131,12 @@ class SignedPackages(Tool):
         r, deleted = self.run_janitor(raw={**self.index(1, 12), **self.index(4, 42)})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(deleted, [2, 20, 21, 22])
+
+    def test_a_version_without_tags_deletes_nothing(self):
+        self.VERSIONS = [*SignedPackages.VERSIONS, {"id": 5, "name": f"sha256:{5:064x}", "created_at": f"{OLD}T00:00:00Z", "metadata": {"container": {}}}]
+        r, deleted = self.run_janitor(raw={**self.index(1, 12), **self.index(4, 42)})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(deleted, [])
 
     def test_an_unreadable_signature_index_deletes_nothing(self):
         r, deleted = self.run_janitor(raw=self.index(4, 42), errors=[f"ghcr.io/hr-mes/{TIER}:sha256-{1:064x}"])

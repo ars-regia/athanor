@@ -47,24 +47,25 @@ delete() { # delete PACKAGE API: version ids on stdin
   done
 }
 
-keep_signed() { # keep_signed PACKAGE API VERSIONS: the kept digests on stdin
-  # Deletes every version that is neither kept nor part of a kept digest's signatures.
-  local package=$1 api=$2 versions=$3 digest hex member index members
+keep_signed() { # keep_signed PACKAGE API VERSIONS KEPT: KEPT holds one kept digest per line
+  # Deletes every version that is neither kept nor part of a kept digest's signatures. Every
+  # list is read into a variable before its loop: a failure inside a process substitution would
+  # not stop the janitor, and what the list should have kept would be deleted as unreachable.
+  local package=$1 api=$2 versions=$3 kept=$4 digest hex member signatures index members
   local -A live=()
   while IFS= read -r digest; do
     [[ -n $digest ]] || continue
     live[$digest]=1
     hex=${digest#sha256:}
-    while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done < <(jq -r --arg hex "$hex" '
+    signatures=$(jq -r --arg hex "$hex" '
       .[] | select(.metadata.container.tags | any(startswith("sha256-" + $hex))) | .name' <<< "$versions")
+    while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done <<< "$signatures"
     if jq -e --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<< "$versions" > /dev/null; then
-      # Read before the loop: a failure inside a process substitution would not stop the
-      # janitor, and the index's members would be deleted as unreachable.
       index=$(skopeo inspect --raw "docker://${REGISTRY_HOST}/${OWNER}/${package}:sha256-${hex}")
       members=$(jq -r '.manifests[]?.digest' <<< "$index")
       while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done <<< "$members"
     fi
-  done
+  done <<< "$kept"
   echo "${package}: ${#live[@]} manifests reachable from a kept image"
   while read -r id digest; do
     [[ -n ${live[$digest]:-} ]] || echo "$id"
@@ -72,13 +73,14 @@ keep_signed() { # keep_signed PACKAGE API VERSIONS: the kept digests on stdin
 }
 
 prune_system_image() { # prune_system_image PACKAGE API VERSIONS
-  local cutoff=$((NOW - RETENTION_DAYS * 86400))
-  keep_signed "$@" < <(jq -r --argjson cutoff "$cutoff" '
+  local cutoff=$((NOW - RETENTION_DAYS * 86400)) kept
+  kept=$(jq -r --argjson cutoff "$cutoff" '
     .[]
     | select(.metadata.container.tags | any(startswith("sha256-") | not))
     | select((.metadata.container.tags | any(test("^(latest|stable|stable-previous|stable-[0-9]{8}|promoted-[0-9]+)$")))
           or ((.created_at | fromdateiso8601) >= $cutoff))
     | .name' <<< "$3")
+  keep_signed "$@" "$kept"
 }
 
 keep_isos() { # keep_isos REASON: stops the janitor before it deletes any ISO
@@ -124,11 +126,12 @@ while IFS= read -r package; do
   if [[ $package == athanor-iso ]]; then promoted=$(promoted_runs "$versions"); fi
   # A signature's tag (sha256-<hex>...) does not make a version one of the two newest: it stays
   # exactly as long as the digest it signs.
-  keep_signed "$package" "$api" "$versions" < <(jq -r --argjson promoted "$promoted" '
+  kept=$(jq -r --argjson promoted "$promoted" '
     ([.[] | select(.metadata.container.tags | any(startswith("sha256-") | not))]
       | sort_by(.created_at) | reverse | .[:2] | map(.id)) as $newest
     | .[]
     | select((.id as $id | $newest | index($id))
           or (.metadata.container.tags | any(test("^(latest|main|stable)$") or IN($promoted[]))))
     | .name' <<< "$versions")
+  keep_signed "$package" "$api" "$versions" "$kept"
 done <<< "$packages"
