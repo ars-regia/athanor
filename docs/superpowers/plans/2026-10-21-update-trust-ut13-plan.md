@@ -46,11 +46,11 @@
 - Consumes: nothing.
 - Produces: the decided values every later task cites: `PREDICATE_TYPE`, the `release-class.toml` path and format, the attestation tag and layer media type, the cosign flags of `sign-images`, the texts of the notice, the switch warning and the persistent warning (EN and IT), the refusal of `Postpone()` per state, the nullability of `postpone`, the shutdown hook.
 
-- [ ] **Step 1: Maintainer checkpoint.** Show the maintainer the points below with the proposed default of each, and stop until each is answered in the conversation. They touch an approved document's text, signing (D43) and on-disk state.
+- [x] **Step 1: Maintainer checkpoint.** *Answered 2026-10-21: every default below accepted, point 1 as amended; task 10 adds rows to the existing GTK shield sheet.* Show the maintainer the points below with the proposed default of each, and stop until each is answered in the conversation. They touch an approved document's text, signing (D43) and on-disk state.
 
 | # | Point | Proposed default |
 |---|---|---|
-| 1 | Predicate type URI of the release attestation | `https://athanor.os/attestation/release/v1` |
+| 1 | Predicate type URI of the release attestation | `https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b` (a URL the project controls that leads to the specification) |
 | 2 | Envelope and transport | in-toto Statement v1 in a DSSE envelope, attached by `cosign attest --key … --type <URI> --tlog-upload=false --new-bundle-format=false` as `<repo>:sha256-<hex>.att`, layer media type `application/vnd.dsse.envelope.v1+json` (retention already keeps `.att`, UT10) |
 | 3 | Predicate fields | `class` (`security`\|`feature`), `advisories` (sorted, unique ids), `class_reason`, `build_time` (RFC 3339), `revision` (40-hex commit), `build_run_id` (decimal string), `updateinfo_timestamp` (integer or `null`); subject `[{name: <repository>, digest: {sha256: <hex>}}]` |
 | 4 | Signing key | the image key the policy in force trusts for the repository (key 1 today, key 2 after PB5b, row 7); the client uses the same `keyPaths` as for image signatures |
