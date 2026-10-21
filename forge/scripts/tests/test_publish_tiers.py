@@ -16,6 +16,8 @@ REGISTRY = (
 )
 DIRS = {f"athanor-forge-tier{n}-repo": f"repo-cache/repo-tier{n}" for n in range(4)}
 DIRS["athanor-forge-rolling-repo"] = "repo-cache/repo"
+WORKFLOW = "https://github.com/ars-regia/athanor/.github/workflows/call-system-image.yml"
+TRUSTED = f"{WORKFLOW}@refs/heads/iso-v0"
 
 
 def digest(name, generation):
@@ -31,6 +33,8 @@ class PublishTiers(unittest.TestCase):
             self.dir / "published"
         )  # <name>.json: what skopeo inspect answers
         self.published.mkdir()
+        self.signatures = self.dir / "signatures"  # sha256(ref): the signer's identity
+        self.signatures.mkdir()
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
         stubs = {
@@ -54,6 +58,30 @@ class PublishTiers(unittest.TestCase):
                 esac
                 """,
             "createrepo_c": "mkdir -p repodata\n",
+            # verify answers from the signatures directory with cosign v3's messages; sign
+            # records the reference. COSIGN_ERROR names a reference whose verification fails on
+            # a transport error, FAIL_SIGN one whose signature fails.
+            "cosign": f"""\
+                printf '%s\\n' "$*" >> {self.dir}/cosign.log
+                ref=${{*: -1}}
+                case $1 in
+                  sign)
+                    [[ $ref != "${{FAIL_SIGN:-}}" ]] || exit 1
+                    printf '%s\\n' "$ref" >> {self.dir}/signed.log ;;
+                  verify)
+                    if [[ $ref == "${{COSIGN_ERROR:-}}" ]]; then
+                      echo 'Error: getting trusted root: GET https://tuf-repo-cdn.sigstore.dev/timestamp.json: 502 Bad Gateway' >&2
+                      exit 1
+                    fi
+                    f={self.signatures}/$(printf '%s' "$ref" | sha256sum | cut -d' ' -f1)
+                    [[ -f $f ]] || {{ echo 'Error: no signatures found' >&2; exit 10; }}
+                    identity=$(< "$f")
+                    if ! [[ $identity =~ $3 ]]; then
+                      echo "Error: no matching signatures: failed to verify certificate identity: no matching CertificateIdentity found, last error: expected SAN value to match regex \\"$3\\", got \\"$identity\\"" >&2
+                      exit 1
+                    fi ;;
+                esac
+                """,
         }
         for tool, body in stubs.items():
             (bin_dir / tool).write_text(
@@ -68,8 +96,17 @@ class PublishTiers(unittest.TestCase):
             k: v
             for k, v in os.environ.items()
             if k
-            not in ("REGISTRY_HOST", "GITHUB_REPOSITORY_OWNER", "FAIL_PUSH", "GITHUB_REF")
+            not in (
+                "REGISTRY_HOST",
+                "GITHUB_REPOSITORY_OWNER",
+                "GITHUB_REPOSITORY",
+                "GITHUB_SERVER_URL",
+                "TIER_TRUSTED_REFS",
+                "FAIL_PUSH",
+                "GITHUB_REF",
+            )
         }
+        self.env["RETRY_ATTEMPTS"] = "1"
         self.env["PATH"] = f"{bin_dir}:{os.environ['PATH']}"
         self.env["GITHUB_REPOSITORY_OWNER"] = "owner"
         self.env["GITHUB_REF"] = "refs/heads/iso-v0"
@@ -86,9 +123,20 @@ class PublishTiers(unittest.TestCase):
         )
         return hashlib.sha256(lines.encode()).hexdigest()
 
-    def publish_current(self, *names):
-        """Publish NAMES with the RPM content they have now, at generation "old"."""
+    def sign(self, ref, identity):
+        key = hashlib.sha256(ref.encode()).hexdigest()
+        (self.signatures / key).write_text(identity)
+
+    def signed(self):
+        log = self.dir / "signed.log"
+        return log.read_text().split() if log.exists() else []
+
+    def publish_current(self, *names, signer=TRUSTED):
+        """Publish NAMES with the RPM content they have now, at generation "old", signed by
+        SIGNER (None: unsigned)."""
         for name in names:
+            if signer is not None:
+                self.sign(f"{REGISTRY}/{name}@{digest(name, 'old')}", signer)
             (self.published / f"{name}.json").write_text(
                 json.dumps(
                     {
@@ -180,6 +228,70 @@ class PublishTiers(unittest.TestCase):
             "athanor-forge-tier3-repo",
         )
         self.env["FAIL_PUSH"] = f"{REGISTRY}/athanor-forge-tier2-repo:latest"
+        r = self.run_script()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.out.exists())
+
+    def test_every_pushed_digest_is_signed_and_a_reused_one_is_not_signed_again(self):
+        self.publish_current("athanor-forge-tier0-repo", "athanor-forge-tier2-repo")
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertCountEqual(
+            self.signed(),
+            [
+                f"{REGISTRY}/athanor-forge-{t}-repo@{digest(f'athanor-forge-{t}-repo', 'new')}"
+                for t in ("tier1", "tier3", "rolling")
+            ],
+        )
+
+    def test_an_unsigned_or_foreign_signed_tier_is_pushed_again_and_signed(self):
+        for signer in (
+            None,
+            f"{WORKFLOW}@refs/heads/feature",
+            "https://github.com/fork/athanor/.github/workflows/call-system-image.yml@refs/heads/iso-v0",
+        ):
+            with self.subTest(signer=signer):
+                for log in ("buildah.log", "signed.log"):
+                    (self.dir / log).unlink(missing_ok=True)
+                self.publish_current(*DIRS)
+                self.publish_current("athanor-forge-tier2-repo", signer=signer)
+                key = f"{REGISTRY}/athanor-forge-tier2-repo@{digest('athanor-forge-tier2-repo', 'old')}"
+                if signer is None:
+                    (self.signatures / hashlib.sha256(key.encode()).hexdigest()).unlink()
+                r = self.run_script()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("not signed by a trusted run: pushed again", r.stdout)
+                self.assertEqual(self.pushed(), [f"{REGISTRY}/athanor-forge-tier2-repo:latest"])
+                new = digest("athanor-forge-tier2-repo", "new")
+                self.assertEqual(self.signed(), [f"{REGISTRY}/athanor-forge-tier2-repo@{new}"])
+                self.assertEqual(json.loads(self.out.read_text())["tier2"], new)
+
+    def test_a_branch_run_reuses_what_its_branch_or_a_trusted_one_signed(self):
+        self.env["GITHUB_REF"] = "refs/heads/feature/x"
+        self.publish_current(*DIRS, signer=f"{WORKFLOW}@refs/heads/feature/x")
+        self.publish_current("athanor-forge-tier1-repo", signer=f"{WORKFLOW}@refs/heads/main")
+        self.publish_current(
+            "athanor-forge-tier2-repo", signer=f"{WORKFLOW}@refs/heads/rebase/fedora-45"
+        )
+        r = self.run_script()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.pushed(), [])
+        self.assertEqual(self.signed(), [])
+
+    def test_a_signature_check_error_fails_the_run_signed(self):
+        self.publish_current(*DIRS)
+        self.env["COSIGN_ERROR"] = (
+            f"{REGISTRY}/athanor-forge-tier1-repo@{digest('athanor-forge-tier1-repo', 'old')}"
+        )
+        r = self.run_script()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("502 Bad Gateway", r.stderr)
+        self.assertFalse(self.out.exists())
+
+    def test_a_failed_signature_fails_the_run_signed(self):
+        self.env["FAIL_SIGN"] = (
+            f"{REGISTRY}/athanor-forge-tier3-repo@{digest('athanor-forge-tier3-repo', 'new')}"
+        )
         r = self.run_script()
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(self.out.exists())
