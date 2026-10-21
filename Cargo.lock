@@ -508,11 +508,15 @@ dependencies = [
  "athanor-i18n",
  "athanor-layout",
  "athanor-style",
+ "athanor-toolkit",
  "athanor-unit",
+ "gio",
+ "gio-unix",
  "glib",
  "gtk4",
  "gtk4-layer-shell",
  "tracing",
+ "wayland-client",
 ]
 
 [[package]]
