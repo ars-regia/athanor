@@ -143,7 +143,7 @@ pub fn start(
         None => tracing::info!("explicit sync: none, Pixman draws without a render node"),
     }
 
-    state.frame_stats = Some(FrameStats::default());
+    report_frame_times(event_loop, &mut state)?;
     let period = Duration::from_secs_f64(1_000.0 / f64::from(REFRESH));
     event_loop
         .handle()
@@ -152,6 +152,15 @@ pub fn start(
             TimeoutAction::ToDuration(period)
         })
         .map_err(|e| e.error)?;
+    Ok(state)
+}
+
+/// Keeps the frame times of `state` and logs them every `REPORT_EVERY`, on either backend.
+pub fn report_frame_times(
+    event_loop: &EventLoop<'static, State>,
+    state: &mut State,
+) -> Result<(), Error> {
+    state.frame_stats = Some(FrameStats::default());
     event_loop
         .handle()
         .insert_source(Timer::from_duration(REPORT_EVERY), |_, _, state| {
@@ -161,7 +170,7 @@ pub fn start(
             TimeoutAction::ToDuration(REPORT_EVERY)
         })
         .map_err(|e| e.error)?;
-    Ok(state)
+    Ok(())
 }
 
 /// Opens the render node at `path` and its GBM device under the GPU manager.
@@ -445,7 +454,7 @@ impl FrameStats {
         commits.syncobj += u64::from(syncobj);
     }
 
-    fn drew(&mut self, took: Duration) {
+    pub fn drew(&mut self, took: Duration) {
         self.draws.add(took);
     }
 
@@ -493,5 +502,38 @@ impl State {
             .draw(index, &self.space, self.lock.as_ref(), true)?
             .pixels
             .ok_or_else(|| "the frame was not read back".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FrameStats;
+    use smithay::reexports::wayland_server::backend::ObjectId;
+    use std::time::Duration;
+
+    #[test]
+    fn a_report_logs_the_period_and_starts_the_next() {
+        let mut stats = FrameStats::default();
+        stats.drew(Duration::from_millis(5));
+        stats.drew(Duration::from_millis(40));
+        assert_eq!(stats.draws.count, 2);
+        assert_eq!(stats.draws.max, Duration::from_millis(40));
+        // Only the draw above two frames of 60 Hz is late.
+        assert_eq!(stats.draws.late, 1);
+        // One commit is no interval yet; the second is one.
+        stats.commit(ObjectId::null(), Some(7), true, false);
+        assert_eq!(stats.surfaces[&ObjectId::null()].gaps.count, 0);
+        stats.commit(ObjectId::null(), Some(7), true, true);
+        assert_eq!(stats.surfaces[&ObjectId::null()].gaps.count, 1);
+
+        stats.report();
+        assert_eq!(stats.draws.count, 0);
+        let kept = &stats.surfaces[&ObjectId::null()];
+        assert_eq!((kept.gaps.count, kept.dmabuf, kept.syncobj), (0, 0, 0));
+        assert_eq!(kept.pid, Some(7));
+        assert!(kept.last.is_some());
+        // A surface with no new buffer for a whole period is forgotten.
+        stats.report();
+        assert!(stats.surfaces.is_empty());
     }
 }

@@ -1,6 +1,7 @@
 //! The nested backend: a window of the parent compositor is the output; its events are input,
 //! resizes and the redraws that paint the space.
 
+use crate::headless::report_frame_times;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -12,7 +13,7 @@ use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Transform;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The output's refresh, in mHz: the parent compositor paces the redraws.
 const REFRESH: i32 = 60_000;
@@ -53,6 +54,7 @@ pub fn start(
     let mut state = State::new(event_loop, display, Backend::Nested(Box::new(nested)))?;
     state.map_output(&output);
     state.dmabuf_state.create_global::<State>(&dh, formats);
+    report_frame_times(event_loop, &mut state)?;
 
     event_loop
         .handle()
@@ -92,16 +94,22 @@ impl State {
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
                 let view = View::of(&self.space, self.lock.as_ref(), &output);
-                draw_view(
+                let started = Instant::now();
+                let drawn = draw_view(
                     renderer,
                     &mut framebuffer,
                     &output,
                     age,
                     view,
                     &mut nested.damage_tracker,
-                )
-                .map(|result| (result.damage.cloned(), result.states))
-                .map_err(|error| error.to_string())
+                );
+                // The draw alone, as on the headless backend: the submit waits on the parent.
+                if let (Ok(_), Some(stats)) = (&drawn, &mut self.frame_stats) {
+                    stats.drew(started.elapsed());
+                }
+                drawn
+                    .map(|result| (result.damage.cloned(), result.states))
+                    .map_err(|error| error.to_string())
             }
             Err(error) => Err(error.to_string()),
         };
