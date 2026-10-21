@@ -70,6 +70,18 @@ def fill_page(page, container, text):
         field = Gtk.Entry()
         field.update_property([Gtk.AccessibleProperty.LABEL], [text["field"]])
         container.append(field)
+    elif page == "choices":
+        container.append(Gtk.CheckButton(label=text["check1"], active=True))
+        container.append(Gtk.CheckButton(label=text["check2"]))
+        # A switch has no label of its own: the label beside it names it, and the toolkit's
+        # switch draws both as one widget.
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        label = Gtk.Label(label=text["switch"], xalign=0, hexpand=True)
+        switch = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [text["switch"]])
+        row.append(label)
+        row.append(switch)
+        container.append(row)
     else:
         raise ValueError(f"no page {page!r}")
 
@@ -105,13 +117,10 @@ def present(application, options, text):
         shown.append(container)
 
     def select(button):
+        # The toggles are one group: GTK keeps one of them active, as the toolkit's radio toggles do.
         if button.get_active():
             for toggle, container in zip(toggles, shown):
                 container.set_visible(toggle is button)
-        elif not any(toggle.get_active() for toggle in toggles):
-            # A page selector always names a page: pressing the selected page's toggle again
-            # keeps it selected, as the toolkit's radio toggles do.
-            button.set_active(True)
 
     for toggle in toggles:
         toggle.connect("toggled", select)

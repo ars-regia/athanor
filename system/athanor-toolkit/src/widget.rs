@@ -61,6 +61,23 @@ pub enum Kind {
         /// Whether this toggle is the active one of its group.
         active: bool,
     },
+    /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
+    /// that share a parent are independent; activating one raises [`Event::Toggled`].
+    Check {
+        /// The text beside the box.
+        label: String,
+        /// Whether the box is checked.
+        active: bool,
+    },
+    /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
+    /// on its own. It fills the width of its column or group, or its cell in a row, where every
+    /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
+    Switch {
+        /// The text of the switch, which names it for assistive technologies.
+        label: String,
+        /// Whether the switch is on.
+        active: bool,
+    },
     /// A single-line text field.
     Field(Box<TextField>),
     /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
@@ -139,6 +156,8 @@ impl Widget {
             self.kind,
             Kind::Button(_)
                 | Kind::Toggle { .. }
+                | Kind::Check { .. }
+                | Kind::Switch { .. }
                 | Kind::Field(_)
                 | Kind::WindowButton(_)
                 | Kind::MenuItem(_)
@@ -154,6 +173,8 @@ pub enum Event {
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
+    /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
+    Toggled(WidgetId),
     /// A field's committed text changed.
     Edited(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
@@ -319,9 +340,15 @@ impl Ui {
         self.widgets.is_empty()
     }
 
-    /// Whether `id` is a toggle that is the active one of its group.
+    /// Whether `id` is a toggle that is the active one of its group, or a check button that is
+    /// checked, or a switch that is on.
     pub fn is_active(&self, id: WidgetId) -> bool {
-        matches!(self.widgets[id].kind, Kind::Toggle { active: true, .. })
+        matches!(
+            self.widgets[id].kind,
+            Kind::Toggle { active: true, .. }
+                | Kind::Check { active: true, .. }
+                | Kind::Switch { active: true, .. }
+        )
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
@@ -461,6 +488,7 @@ impl Ui {
         let (margin, section_gap, min_width) = (t.margin, t.section_gap, self.min_width);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
+        let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
         let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
@@ -514,6 +542,16 @@ impl Ui {
             Kind::Button(text) | Kind::Toggle { label: text, .. } | Kind::MenuItem(text) => {
                 let layout = self.text.layout(text, size, rtl);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::Check { label, .. } | Kind::Switch { label, .. } => {
+                let (mark_w, mark_h) = mark_size(is_switch, size);
+                let layout = self.text.layout(label, size, rtl);
+                let wh = (
+                    mark_w + gap + layout.width(),
+                    mark_h.max(layout.height()) + pad,
+                );
                 widget.text = Some(layout);
                 wh
             }
@@ -598,7 +636,10 @@ impl Ui {
                     children = &children[1..];
                 }
                 for &c in children {
-                    if matches!(self.widgets[c].kind, Kind::Row | Kind::Group(_) | Kind::Menu) {
+                    if matches!(
+                        self.widgets[c].kind,
+                        Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Switch { .. }
+                    ) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     let r = self.widgets[c].rect;
@@ -616,7 +657,7 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group. Either takes the focus.
+    /// its group, a check button or a switch turns over. Each takes the focus.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
         if !self.is_visible(id) {
             return None;
@@ -625,6 +666,10 @@ impl Ui {
         match self.widgets[id].kind {
             Kind::Button(_) | Kind::MenuItem(_) => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
+            Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
+                *active = !*active;
+                Some(Event::Toggled(id))
+            }
             Kind::Toggle { .. } => {
                 let siblings = self.widgets[id]
                     .parent
@@ -643,12 +688,11 @@ impl Ui {
 
     /// The focusable widget under the point, in logical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
-        (0..self.widgets.len())
-            .find(|&id| {
-                self.widgets[id].is_focusable()
-                    && self.widgets[id].rect.contains(x, y)
-                    && self.is_visible(id)
-            })
+        (0..self.widgets.len()).find(|&id| {
+            self.widgets[id].is_focusable()
+                && self.widgets[id].rect.contains(x, y)
+                && self.is_visible(id)
+        })
     }
 
     /// Presses and releases the primary button at the point, in logical pixels, and returns the
@@ -819,6 +863,46 @@ impl Ui {
     }
 }
 
+/// The size of the box of a check button, or of the track of a switch, at text size `font`, in
+/// logical pixels.
+pub(crate) fn mark_size(is_switch: bool, font: f32) -> (f32, f32) {
+    if is_switch {
+        (font * 3.2, font * 1.6)
+    } else {
+        (font * 1.2, font * 1.2)
+    }
+}
+
+/// Where the mark of a check button (at the start edge) or of a switch (at the end edge) sits in
+/// the widget's rectangle `r`, centred vertically; the label takes the rest.
+pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) -> Rect {
+    let left = rtl == at_end;
+    Rect {
+        x: if left { r.x } else { r.x + r.w - w },
+        y: r.y + (r.h - h) / 2.0,
+        w,
+        h,
+    }
+}
+
+/// The knob inside the `track` of a switch: at the start edge when off, at the end edge when on,
+/// so that it mirrors in right-to-left.
+pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
+    let inset = 2.0;
+    let d = track.h - 2.0 * inset;
+    let left = active == rtl;
+    Rect {
+        x: if left {
+            track.x + inset
+        } else {
+            track.x + track.w - inset - d
+        },
+        y: track.y + inset,
+        w: d,
+        h: d,
+    }
+}
+
 /// Bidirectional overrides, isolates and marks, and the line and paragraph separators: they
 /// change how text reads without being seen.
 fn is_invisible_format(c: char) -> bool {
@@ -860,6 +944,76 @@ mod tests {
     }
 
     #[test]
+    fn a_check_toggles_on_click_and_space() {
+        let mut ui = Ui::new("Checks", Theme::default(), false);
+        let check = |label: &str, active| Kind::Check {
+            label: label.into(),
+            active,
+        };
+        let a = ui.add(Ui::ROOT, check("A", false));
+        let b = ui.add(Ui::ROOT, check("B", true));
+        ui.layout();
+        assert_eq!(crate::focus::chain(&ui), [a, b]);
+
+        let r = ui.widget(a).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Toggled(a)));
+        // Checks under one parent are independent, unlike toggles.
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [true, true]);
+        assert_eq!(ui.focus(), Some(a));
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Toggled(a)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, true]);
+        ui.set_focus(Some(b));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Toggled(b)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, false]);
+    }
+
+    #[test]
+    fn a_switch_mirrors_its_knob() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Switch", Theme::default(), rtl);
+            ui.min_width = 300.0;
+            let switch = |label: &str, active| Kind::Switch {
+                label: label.into(),
+                active,
+            };
+            let off = ui.add(Ui::ROOT, switch("Off", false));
+            let on = ui.add(Ui::ROOT, switch("On", true));
+            let (w, _) = ui.layout();
+            let parts = |id: WidgetId| {
+                let widget = ui.widget(id);
+                let size = mark_size(true, ui.theme.font_size);
+                let track = mark_rect(widget.rect, rtl, size, true);
+                (widget.rect, track, knob_rect(track, rtl, ui.is_active(id)))
+            };
+            let (row, track, knob) = parts(off);
+            let margin = ui.theme.margin;
+            assert_eq!(
+                row.w,
+                w - 2.0 * margin,
+                "rtl {rtl}: the switch fills the width"
+            );
+            if rtl {
+                assert_eq!(track.x, row.x, "the track at the end edge, the left");
+                assert!(
+                    knob.x + knob.w > track.center_x(),
+                    "an off knob is at the right"
+                );
+            } else {
+                assert_eq!(track.x + track.w, row.x + row.w);
+                assert!(knob.x < track.center_x(), "an off knob is at the left");
+            }
+            let (_, track, knob) = parts(on);
+            assert_eq!(
+                knob.x + knob.w > track.center_x(),
+                !rtl,
+                "rtl {rtl}: an on knob is at the other side"
+            );
+            assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
+            assert!(ui.is_active(off));
+        }
+    }
+
+    #[test]
     fn a_row_fills_its_column_with_children_of_one_width() {
         for rtl in [false, true] {
             let mut ui = Ui::new("Row", Theme::default(), rtl);
@@ -891,7 +1045,10 @@ mod tests {
             ui.add_title_bar();
             let bar = ui.widget(Ui::ROOT).children[0];
             ui.set_visible(bar, false);
-            assert!(ui.is_visible(bar), "rtl {rtl}: the title bar cannot be hidden");
+            assert!(
+                ui.is_visible(bar),
+                "rtl {rtl}: the title bar cannot be hidden"
+            );
             let (w, h) = ui.layout();
             let r = ui.widget(bar).rect;
             assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");

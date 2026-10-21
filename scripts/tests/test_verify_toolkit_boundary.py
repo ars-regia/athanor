@@ -51,6 +51,11 @@ class ToolkitBoundary(unittest.TestCase):
         out = self.problems('[build-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n')
         self.assertTrue(out)
 
+    def test_an_athanor_build_dependency_spelt_with_an_underscore_fails(self):
+        for table in ("[build_dependencies]", "[target.'cfg(unix)'.build_dependencies]"):
+            out = self.problems(f'{table}\nathanor-i18n = {{ path = "../athanor-i18n" }}\n')
+            self.assertEqual(len(out), 2, table)
+
     def test_a_target_dependency_fails(self):
         out = self.problems('[target.\'cfg(unix)\'.dependencies]\nathanor-i18n = "0.1"\n')
         self.assertTrue(out)
@@ -91,6 +96,10 @@ class ToolkitBoundary(unittest.TestCase):
         base = '[dependencies]\nathanor-toolkit = { path = ".." }\n'
         for extra in ('[dev-dependencies]\nserde = "1"\n',
                       '[target.\'cfg(unix)\'.dev-dependencies]\nserde = "1"\n',
+                      '[dev_dependencies]\nserde = "1"\n',
+                      '[build_dependencies]\nathanor-i18n = { path = "../../athanor-i18n" }\n',
+                      '[target.\'cfg(unix)\'.build_dependencies]\nserde = "1"\n',
+                      '[workspace]\nmembers = ["../../athanor-i18n"]\n',
                       '[patch.crates-io]\nserde = { path = "x" }\n',
                       '[replace]\n"serde:1.0.0" = { path = "x" }\n'):
             self.assertTrue(self.gallery(base + extra), extra)
