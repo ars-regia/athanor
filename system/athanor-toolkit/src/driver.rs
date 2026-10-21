@@ -6,7 +6,7 @@
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
-use crate::popup::{focused_window, Dismiss, OpenPopup, Tooltip, TOOLTIP_PADDING};
+use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
@@ -237,7 +237,7 @@ pub fn run(application: impl Application + 'static) -> Result<(), Error> {
         surfaces: Vec::new(),
         popup: None,
         seat: None,
-        serial: None,
+        grab: GrabSerial::default(),
         exit: false,
     };
     let mut app = App {
@@ -349,9 +349,9 @@ pub struct Shell {
     surfaces: Vec<Surface>,
     /// The popup open, at most one.
     popup: Option<OpenPopup<SurfaceId>>,
-    /// The seat, and the serial of its last press or key, which a menu's grab names.
+    /// The seat, and the serial of the input under way, which a menu's grab names.
     seat: Option<wl_seat::WlSeat>,
-    serial: Option<u32>,
+    grab: GrabSerial,
     /// A window was closed: [`run`] returns.
     exit: bool,
 }
@@ -499,10 +499,10 @@ impl Shell {
             layer.get_popup(popup.xdg_popup());
         }
         // A menu grabs the input with the press or the key that opened it, before its first
-        // commit: the compositor then dismisses it at a press in another client. Each input
-        // grabs once; a menu opened without one, as by an assistive technology, grabs nothing.
+        // commit: the compositor then dismisses it at a press in another client. A menu opened
+        // with no input under way, as by an assistive technology, grabs nothing.
         if menu {
-            if let (Some(seat), Some(serial)) = (&self.seat, self.serial.take()) {
+            if let (Some(seat), Some(serial)) = (&self.seat, self.grab.serial()) {
                 popup.xdg_popup().grab(seat, serial);
             }
         }
@@ -1303,7 +1303,7 @@ impl App {
     /// A button pressed on `id`. A press outside the open menu closes it and goes no further,
     /// as with GTK's popovers; a press on a window's title bar outside its buttons moves it.
     fn pointer_pressed(&mut self, id: SurfaceId, (x, y): (f32, f32), button: u32, serial: u32) {
-        self.shell.serial = Some(serial);
+        self.shell.grab.pressed(serial);
         self.hide_tooltip();
         if self
             .shell
@@ -1715,8 +1715,9 @@ impl KeyboardHandler for App {
         serial: u32,
         event: KeyEvent,
     ) {
-        self.shell.serial = Some(serial);
+        self.shell.grab.key(Some(serial));
         self.key(event);
+        self.shell.grab.key(None);
     }
 
     fn repeat_key(
@@ -1772,32 +1773,39 @@ impl PointerHandler for App {
                 PointerEventKind::Leave { .. } => self.point_tooltip(None),
                 _ => {}
             }
-            let Some(surface) = self.shell.find(&event.surface) else {
-                continue;
-            };
-            let id = surface.id;
-            let at = (event.position.0 as f32, event.position.1 as f32);
-            match event.kind {
-                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
-                    self.pointer_moved(id, at.0, at.1);
+            if let Some(surface) = self.shell.find(&event.surface) {
+                let id = surface.id;
+                let at = (event.position.0 as f32, event.position.1 as f32);
+                match event.kind {
+                    PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                        self.pointer_moved(id, at.0, at.1);
+                    }
+                    PointerEventKind::Leave { .. } => {
+                        surface.ui.pointer_leave();
+                        self.changed(id, None);
+                    }
+                    PointerEventKind::Press { button, serial, .. } => {
+                        self.pointer_pressed(id, at, button, serial);
+                    }
+                    PointerEventKind::Release {
+                        button: BTN_LEFT, ..
+                    } => {
+                        let event = surface
+                            .ui
+                            .pointer_release(at.0, at.1, PointerButton::Primary);
+                        self.changed(id, event);
+                    }
+                    PointerEventKind::Axis { .. } => self.hide_tooltip(),
+                    _ => {}
                 }
-                PointerEventKind::Leave { .. } => {
-                    surface.ui.pointer_leave();
-                    self.changed(id, None);
-                }
-                PointerEventKind::Press { button, serial, .. } => {
-                    self.pointer_pressed(id, at, button, serial);
-                }
-                PointerEventKind::Release {
-                    button: BTN_LEFT, ..
-                } => {
-                    let event = surface
-                        .ui
-                        .pointer_release(at.0, at.1, PointerButton::Primary);
-                    self.changed(id, event);
-                }
-                PointerEventKind::Axis { .. } => self.hide_tooltip(),
-                _ => {}
+            }
+            // The press grabs no more once its button is up or the pointer has left, on any
+            // surface, one closed since included.
+            if matches!(
+                event.kind,
+                PointerEventKind::Release { .. } | PointerEventKind::Leave { .. }
+            ) {
+                self.shell.grab.released();
             }
         }
     }

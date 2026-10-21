@@ -91,6 +91,38 @@ pub(crate) fn focused_window<S: Copy>(
     }
 }
 
+/// The serial a menu's xdg_popup.grab names: the press of the button held, until its release or
+/// the pointer's leave, or the key being handled, as GTK grabs with its implicit grab's serial.
+/// A menu opened with no input under way, as by an assistive technology's action, grabs nothing:
+/// mutter and KWin refuse a stale serial and dismiss the popup at once.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct GrabSerial {
+    press: Option<u32>,
+    key: Option<u32>,
+}
+
+impl GrabSerial {
+    /// A button was pressed with `serial`.
+    pub fn pressed(&mut self, serial: u32) {
+        self.press = Some(serial);
+    }
+
+    /// A button was released, or the pointer left: no press is held.
+    pub fn released(&mut self) {
+        self.press = None;
+    }
+
+    /// The key pressed with `serial` is being handled; `None` once it has been.
+    pub fn key(&mut self, serial: Option<u32>) {
+        self.key = serial;
+    }
+
+    /// The serial to grab with, while an input is under way.
+    pub fn serial(&self) -> Option<u32> {
+        self.key.or(self.press)
+    }
+}
+
 /// When the tooltip of the widget under the pointer, or of the focused one, shows. `T` names
 /// the widget; each wait carries a generation, and a timer of an older one is stale.
 #[derive(Debug)]
@@ -303,5 +335,30 @@ mod tests {
         );
         // Once the menu closes, the window focus returns to the surface with the keyboard.
         assert_eq!(focused_window::<u32>(None, Some(1)), Some(1));
+    }
+
+    #[test]
+    fn a_menu_grabs_only_with_the_input_under_way() {
+        let mut grab = GrabSerial::default();
+        assert_eq!(grab.serial(), None);
+        // A plain button pressed and released: a menu opened at the release grabs with the
+        // press, which grabs no more once the button is up.
+        grab.pressed(7);
+        assert_eq!(grab.serial(), Some(7));
+        grab.released();
+        assert_eq!(
+            grab.serial(),
+            None,
+            "a menu an assistive technology's Click opens grabs nothing"
+        );
+        // A key grabs while it is handled, before a press held under it.
+        grab.pressed(8);
+        grab.key(Some(9));
+        assert_eq!(grab.serial(), Some(9));
+        grab.key(None);
+        assert_eq!(grab.serial(), Some(8), "the button is still down");
+        // The pointer left with the button down: the release goes elsewhere.
+        grab.released();
+        assert_eq!(grab.serial(), None);
     }
 }
