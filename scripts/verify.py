@@ -1026,6 +1026,16 @@ GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
 GALLERY_DEPENDENCY = {"athanor-toolkit": {"path": ".."}}
 
 
+def dependency_tables(data, kinds):
+    """Every table of `kinds` in a manifest, at the top and under [target.*], with the
+    underscore spellings cargo still accepts (`build_dependencies`, `dev_dependencies`)."""
+    kinds = [spelling for kind in kinds for spelling in dict.fromkeys((kind, kind.replace("-", "_")))]
+    tables = [(kind, data.get(kind, {})) for kind in kinds]
+    for target, spec in data.get("target", {}).items():
+        tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
+    return tables
+
+
 def gallery_problems(root):
     """The gallery depends on the toolkit by its path and on nothing else, as an application
     outside Athanor would (ADR-0126)."""
@@ -1035,12 +1045,11 @@ def gallery_problems(root):
         data = tomllib.loads(read(root / GALLERY_MANIFEST))
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
-    kinds = ("dependencies", "build-dependencies", "dev-dependencies")
-    tables = [(kind, data.get(kind, {})) for kind in kinds]
-    for target, spec in data.get("target", {}).items():
-        tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
     out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
            for kind in ("patch", "replace") if kind in data]
+    out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
+            for key in data.get("workspace", {})]
     for table, deps in tables:
         for name, dep in deps.items():
             if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
@@ -1059,11 +1068,7 @@ def toolkit_boundary_problems(root=None):
         workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{manifest}: cannot read ({err})"]
-    tables = [("dependencies", data.get("dependencies", {})),
-              ("build-dependencies", data.get("build-dependencies", {}))]
-    for target, spec in data.get("target", {}).items():
-        tables += [(f"target.{target}.{kind}", spec.get(kind, {}))
-                   for kind in ("dependencies", "build-dependencies")]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies"))
     out = []
     for table, deps in tables:
         for name, dep in deps.items():
