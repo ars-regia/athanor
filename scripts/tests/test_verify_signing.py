@@ -89,8 +89,9 @@ IMAGE_SIGN = (
     " --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations"
     ' artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"'
 )
+COSIGN_LOGIN = 'echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin'
 # The sign-images job of release.yml, as ADR-0127 point 5 admits it: the pinned cosign
-# installer, and COSIGN_* only on the step that signs and attests.
+# installer, a cosign login of its own, and COSIGN_* only on the step that signs and attests.
 ATTEST_JOB = f"""\
   sign-images:
     runs-on: ubuntu-24.04
@@ -110,6 +111,11 @@ ATTEST_JOB = f"""\
           GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
           GITHUB_ACTOR: ${{{{ github.actor }}}}
         run: echo "${{GITHUB_TOKEN}}" | skopeo login ghcr.io -u "${{GITHUB_ACTOR}}" --password-stdin
+      - name: Cosign login
+        env:
+          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
+          GITHUB_ACTOR: ${{{{ github.actor }}}}
+        run: {json.dumps(COSIGN_LOGIN)}
       - name: Sign and attest
         env:
           COSIGN_PRIVATE_KEY: ${{{{ secrets.COSIGN_PRIVATE_KEY }}}}
@@ -680,14 +686,15 @@ class SigningTest(unittest.TestCase):
 
     def test_the_cosign_installer_is_admitted_only_in_sign_images_of_release_yml(self):
         third_party = f"uses {INSTALLER}" + THIRD_PARTY
-        self.assertEqual(
+        login = f"step 5 runs a command outside the allow-list of D43: {COSIGN_LOGIN}"
+        self.assertCountEqual(
             self.problems({"k.yml": workflow(ATTEST_JOB)}),
-            [f"k.yml: signing job sign-images {third_party}"],
+            [f"k.yml: signing job sign-images {third_party}", f"k.yml: signing job sign-images {login}"],
         )
         other = ATTEST_JOB.replace("  sign-images:\n", "  sign:\n")
-        self.assertEqual(
+        self.assertCountEqual(
             self.problems({"release.yml": workflow(other)}),
-            [f"release.yml: signing job sign {third_party}"],
+            [f"release.yml: signing job sign {third_party}", f"release.yml: signing job sign {login}"],
         )
         by_tag = ATTEST_JOB.replace(INSTALLER, "sigstore/cosign-installer@v3")
         self.assert_one({"release.yml": workflow(by_tag)}, r"uses sigstore/cosign-installer@v3: only checkout")
@@ -699,6 +706,21 @@ class SigningTest(unittest.TestCase):
             f"      - uses: {INSTALLER}\n        env:\n          COSIGN_PRIVATE_KEY: ${{{{ secrets.COSIGN_PRIVATE_KEY }}}}\n",
         )
         self.assert_one({"release.yml": workflow(keyed)}, r"hands COSIGN_PRIVATE_KEY to a step that does not run only a sign script")
+
+    def test_the_cosign_login_is_admitted_only_in_sign_images_of_release_yml(self):
+        """cosign reads the docker config, not the auth file of skopeo login: sign-images logs
+        cosign in to ghcr.io with the job token, and no other signing job runs cosign login."""
+        self.assertNotIn(COSIGN_LOGIN, verify.SIGN_JOB_COMMANDS)
+        elsewhere = SIGN_JOB.replace(
+            "    steps:\n",
+            f"    steps:\n      - env:\n          GITHUB_TOKEN: x\n        run: {json.dumps(COSIGN_LOGIN)}\n",
+            1,
+        )
+        self.assert_one({"k.yml": workflow(elsewhere)}, r"step 1 runs a command outside the allow-list of D43: echo .* cosign login")
+        for bad in (COSIGN_LOGIN.replace("ghcr.io", "quay.io"), COSIGN_LOGIN + " && cosign sign x"):
+            with self.subTest(bad=bad):
+                job = ATTEST_JOB.replace(json.dumps(COSIGN_LOGIN), json.dumps(bad))
+                self.assert_one({"release.yml": workflow(job)}, r"step 5 runs a command outside the allow-list of D43")
 
     def test_sign_job_rejects_another_cosign_subcommand(self):
         """Only cosign attest runs beside the key: cosign sign in a step of the job, or any cosign

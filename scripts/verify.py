@@ -196,6 +196,9 @@ SIGN_ONLY_INPUTS = {
 # and only in sign-images of release.yml, for `cosign attest` (D43 as amended by ADR-0127).
 COSIGN_INSTALLER = re.compile(r"^sigstore/cosign-installer@[0-9a-f]{40}$")
 COSIGN_INSTALLER_JOB = ("release.yml", "sign-images")
+# The login cosign attest reads in that job alone: cosign reads the docker config that cosign
+# login writes (go-containerregistry authn.DefaultKeychain), not the auth file of skopeo login.
+COSIGN_LOGIN = 'echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin'
 # Where a sign-only job may download: a directory that is not in the checkout, so an artifact
 # never replaces the sign script (a download without a path lands on the workspace root).
 SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
@@ -685,9 +688,9 @@ SIGN_JOB_DEFAULTS = {"run": {"shell": "bash"}}
 def signing_job_problems(where, job, steps, environment, holders, attests=False):
     """A job of a signing environment: GitHub-hosted, no container, no defaults but the bash
     shell, only the pinned actions with their allowed inputs (with attests, the job of
-    COSIGN_INSTALLER_JOB, also the cosign installer), only the allow-listed commands, no shell or
-    working directory of its own, and in env only the secrets of its environment and plain
-    values."""
+    COSIGN_INSTALLER_JOB, also the cosign installer and COSIGN_LOGIN), only the allow-listed
+    commands, no shell or working directory of its own, and in env only the secrets of its
+    environment and plain values."""
     problems = []
     runs_on = job.get("runs-on")
     if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
@@ -715,7 +718,7 @@ def signing_job_problems(where, job, steps, environment, holders, attests=False)
         for key in ("shell", "working-directory"):
             if key in step:
                 problems.append(f"{where} step {index + 1} sets {key} (D43)")
-        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS:
+        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS | ({COSIGN_LOGIN} if attests else set()):
             command = str(step["run"]).strip().splitlines()[0] if str(step["run"]).strip() else ""
             problems.append(f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}")
         if "uses" not in step:

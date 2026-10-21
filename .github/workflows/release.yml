@@ -94,6 +94,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      # cosign reads the docker config its own login writes, not the auth file of skopeo login
+      # (go-containerregistry authn.DefaultKeychain): cosign attest pushes the attestations.
+      - name: 🔑 Login to the registry for cosign attest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       - name: 🔏 Sign and attest by digest (system/sign-images.sh)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
