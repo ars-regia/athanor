@@ -133,3 +133,13 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
 - A kernel without `SO_PEERPIDFD` answers `ENOPROTOOPT`, and no client is granted anything;
   no tested kernel lacks it, so that answer itself is not exercised
   (`a_socket_with_no_peer_has_no_identity` checks the refusal on another error, `ENODATA`).
+
+Task 6 runs it nested in a real session: on the desktop, inside cosmic-comp on NVIDIA's EGL, for
+an hour, with the bar, the dock, a terminal and `gtk_animation.py`. The nested backend logs the
+same frame-time report as the headless one, every 10 seconds; its draw time is the draw alone,
+not the submit, which waits on the parent. A frame with nothing to draw is not presented, so the
+parent does not pace the next one: the compositor waits a frame period before it asks for it.
+`forge/test/shell/compositor_soak.sh` takes the clients that draw only when something changes
+after `--idle`, and checks only that they stay up. The bar and the dock run outside their units
+and the image ships no allow-list, so their top-layer surfaces are closed: the soak shows that
+they connect and stay up, not that they are drawn.
