@@ -248,6 +248,22 @@ class Candidate(Tool):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("unlabelled-baseline", summary.read_text())
 
+    def test_a_class_reason_goes_to_stderr_without_a_summary_file(self):
+        self.github(labels={"org.opencontainers.image.revision": ""})
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("unlabelled-baseline", r.stderr)
+
+    def test_a_command_that_hangs_refuses(self):
+        import release_candidate as module
+
+        saved, module.TIMEOUT = module.TIMEOUT, 0.1
+        try:
+            with self.assertRaisesRegex(module.Refused, "timed out"):
+                module.tool("sleep", "5")
+        finally:
+            module.TIMEOUT = saved
+
     def test_a_completed_build_is_a_candidate_too(self):
         self.github(run=run_object(status="completed", conclusion="success"))
         self.assertEqual(self.check().returncode, 0)

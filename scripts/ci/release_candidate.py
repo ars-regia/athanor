@@ -37,6 +37,7 @@ IMAGE_JOB = "system-image / 💿 System Image & Disk Build"
 ARTIFACTS = ["release-request", "image-digests", "kernel-digests"]
 FILES = ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"]
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+TIMEOUT = 300  # seconds for one external command
 CREATED = "org.opencontainers.image.created"
 REVISION = "org.opencontainers.image.revision"
 
@@ -50,8 +51,16 @@ def sha256(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
+def sh(args, **kw):
+    """subprocess.run, with a timeout that refuses the release instead of hanging it."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=TIMEOUT, **kw)
+    except subprocess.TimeoutExpired:
+        raise Refused(f"{' '.join(args)}: timed out after {TIMEOUT} s") from None
+
+
 def tool(*args):
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = sh(args)
     if r.returncode:
         raise Refused(f"{' '.join(args)}: {r.stderr.strip()}")
     return r.stdout
@@ -107,16 +116,14 @@ def order(repo, digests, commit):
             "verdict": "absent",
         }
         verdicts.append(entry)
-        r = subprocess.run(
+        r = sh(
             [
                 "skopeo",
                 "inspect",
                 "--format",
                 "{{.Digest}}",
                 f"docker://{repository}:latest",
-            ],
-            capture_output=True,
-            text=True,
+            ]
         )
         if r.returncode:
             if "manifest unknown" not in r.stderr:
@@ -267,7 +274,7 @@ def check(out):
         ]
         if [j["conclusion"] for j in jobs if j["name"] == IMAGE_JOB] != ["success"]:
             why.append(f"image job '{IMAGE_JOB}' did not succeed once")
-        trusted = subprocess.run(
+        trusted = sh(
             [
                 "bash",
                 str(ROOT / "system/trusted-run.sh"),
@@ -275,8 +282,6 @@ def check(out):
                 run_id,
                 BUILD_WORKFLOW,
             ],
-            capture_output=True,
-            text=True,
             env={**os.environ, "RELEASE_BRANCH": BRANCH},
         )
         if trusted.returncode:
@@ -294,6 +299,8 @@ def check(out):
     if notes and os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write("Class derived by fallback (PL55):\n" + "".join(notes))
+    else:
+        sys.stderr.write("".join(notes))
     candidate = {
         "schema_version": 2,
         "request": request,

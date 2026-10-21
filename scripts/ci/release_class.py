@@ -18,13 +18,14 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import zlib
 import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import NamedTuple
 
 CLASS_DIR = "release/class/"
-CLASS_NAME = re.compile(r"^release/class/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.toml$")
-ADVISORY_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+CLASS_NAME = re.compile(r"release/class/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.toml")
+ADVISORY_ID = re.compile(r"[A-Za-z0-9._-]+")
 SANITY = ("filesystem", "glibc")  # every Fedora image has them: an empty list is a failed read
 TIMEOUT = 900  # seconds for one external command; a pull of an image is the longest
 MAX_FILESIZE = 256 * 1024 * 1024  # bytes of one download from a Fedora mirror
@@ -142,13 +143,20 @@ def git(root, *args, ok=(0,)):
     """stdout of git; a status outside ok is an error, never an absence."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, timeout=TIMEOUT
+            ["git", "-C", str(root), *args], capture_output=True, timeout=TIMEOUT
         )
     except subprocess.TimeoutExpired:
         raise ClassError(f"git {' '.join(args)}: timed out") from None
     if r.returncode not in ok:
-        raise ClassError(f"git {' '.join(args)}: exit {r.returncode}: {r.stderr.strip()}")
-    return r.stdout if r.returncode == 0 else None
+        raise ClassError(
+            f"git {' '.join(args)}: exit {r.returncode}: {r.stderr.decode(errors='replace').strip()}"
+        )
+    if r.returncode:
+        return None
+    try:
+        return r.stdout.decode()
+    except UnicodeDecodeError:
+        raise ClassError(f"git {' '.join(args)}: output is not UTF-8") from None
 
 
 def nul(text):
@@ -170,7 +178,7 @@ def git_half(base, candidate, repo_root, repository):
             f"{base}..{candidate}", "--", CLASS_DIR,
         )
     )  # fmt: skip
-    bad = sorted(p for p in {*carried, *touched} if not CLASS_NAME.match(p))
+    bad = sorted(p for p in {*carried, *touched} if not CLASS_NAME.fullmatch(p))
     if bad:
         raise ClassError(f"{bad} under {CLASS_DIR} do not match <YYYY-MM-DD>-<slug>.toml")
     in_range = set(
@@ -196,7 +204,7 @@ def git_half(base, candidate, repo_root, repository):
             or extra
             or not isinstance(advisories, list)
             or not advisories
-            or not all(isinstance(a, str) and ADVISORY_ID.match(a) for a in advisories)
+            or not all(isinstance(a, str) and ADVISORY_ID.fullmatch(a) for a in advisories)
             or not (scope is None or isinstance(scope, list) and all(isinstance(s, str) for s in scope))
         ):
             raise ClassError(
@@ -249,13 +257,17 @@ def fedora_half(old, new, advisories):
 
 def run(*args, text=True, timeout=TIMEOUT, input=None):
     try:
-        r = subprocess.run(args, capture_output=True, text=text, timeout=timeout, input=input)
+        r = subprocess.run(args, capture_output=True, timeout=timeout, input=input)
     except subprocess.TimeoutExpired:
         raise ClassError(f"{' '.join(args)}: timed out") from None
     if r.returncode:
-        err = r.stderr if text else r.stderr.decode(errors="replace")
-        raise ClassError(f"{' '.join(args)}: {err.strip()}")
-    return r.stdout
+        raise ClassError(f"{' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
+    if not text:
+        return r.stdout
+    try:
+        return r.stdout.decode()
+    except UnicodeDecodeError:
+        raise ClassError(f"{' '.join(args)}: output is not UTF-8") from None
 
 
 def local_name(e):
@@ -274,17 +286,18 @@ class PodmanSources(Sources):
             return self._seen[ref]
         with tempfile.TemporaryDirectory() as tmp:
             tmp = pathlib.Path(tmp)
-            failure = None
-            ctr = run("podman", "create", "--entrypoint", "/bin/true", ref).strip()
+            failure, ctr = None, None
             try:
+                ctr = run("podman", "create", "--entrypoint", "/bin/true", ref).strip()
                 run("podman", "cp", f"{ctr}:/usr/lib/sysimage/rpm", str(tmp / "rpm"))
                 run("podman", "cp", f"{ctr}:/usr/lib/os-release", str(tmp / "os-release"))
             except ClassError as error:
                 failure = error
-            cleanup = []
-            for cmd in (("podman", "rm", ctr), ("podman", "rmi", ref)):
+            cleanup = []  # the pulled image goes on every path, a failed create included
+            for cmd in (("podman", "rm", ctr) if ctr else None, ("podman", "rmi", ref)):
                 try:
-                    run(*cmd)
+                    if cmd:
+                        run(*cmd)
                 except ClassError as error:
                     cleanup.append(str(error))
             if failure:
@@ -292,7 +305,7 @@ class PodmanSources(Sources):
             for line in cleanup:
                 print(f"release_class: cleanup: {line}", file=sys.stderr)
             packages = self._packages(ref, tmp / "rpm")
-            match = re.search(r'^VERSION_ID="?([0-9]+)"?$', (tmp / "os-release").read_text(), re.M)
+            match = re.search(r'^VERSION_ID="?([0-9]+)"?$', (tmp / "os-release").read_text(errors="replace"), re.M)
         if not match:
             raise ClassError(f"{ref}: os-release has no VERSION_ID")
         self._seen[ref] = packages, match.group(1)
@@ -308,7 +321,10 @@ class PodmanSources(Sources):
         )  # fmt: skip
         packages = {}
         for line in listing.splitlines():
-            name, version = line.split()
+            fields = line.split()
+            if len(fields) != 2:
+                raise ClassError(f"{ref}: rpm printed '{line}', not 'name epoch:version-release'")
+            name, version = fields
             if name not in packages or evrcmp(version, packages[name]) > 0:
                 packages[name] = version
         missing = [n for n in SANITY if n not in packages]
@@ -375,15 +391,18 @@ class PodmanSources(Sources):
         if "timestamp" in field:
             try:
                 stamp = int(float(field["timestamp"].text))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 raise ClassError(f"updateinfo timestamp '{field['timestamp'].text}' is not a number") from None
         blob = self._fetch(urllib.parse.urljoin(base, loc))
         if hashlib.sha256(blob).hexdigest() != checksum.text:
             raise ClassError(f"{loc} does not match the repomd.xml checksum")
-        if loc.endswith(".gz"):
-            return stamp, gzip.decompress(blob)
-        if loc.endswith(".xz"):
-            return stamp, lzma.decompress(blob)
+        try:
+            if loc.endswith(".gz"):
+                return stamp, gzip.decompress(blob)
+            if loc.endswith(".xz"):
+                return stamp, lzma.decompress(blob)
+        except (OSError, EOFError, zlib.error, lzma.LZMAError) as error:
+            raise ClassError(f"{loc} is corrupt: {error}") from None
         if loc.endswith(".zst"):
             return stamp, run("zstd", "-dc", text=False, input=blob, timeout=300)
         return stamp, blob
@@ -414,7 +433,7 @@ def derive(repository, baseline, candidate, commit, sources):
                 sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
             )
         )
-        bad = sorted(i for i in ids if not ADVISORY_ID.match(i))
+        bad = sorted(i for i in ids if not ADVISORY_ID.fullmatch(i))
         if bad:
             raise ClassError(f"advisory ids {bad} are not of the form [A-Za-z0-9._-]+")
     except ClassError as error:

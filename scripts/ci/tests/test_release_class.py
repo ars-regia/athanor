@@ -262,14 +262,40 @@ class Podman(unittest.TestCase):
         self.assertIn("--max-filesize", args)
         self.assertEqual(args[-2:], ("--", "https://m/x"))
 
-    def repomd(self, stamp):
+    def repomd(self, stamp, href="repodata/u.xml", body=b"<updates/>"):
         t = f"<timestamp>{stamp}</timestamp>" if stamp else ""
-        digest = hashlib.sha256(b"<updates/>").hexdigest()
+        digest = hashlib.sha256(body).hexdigest()
         return (
             '<repomd xmlns="http://x"><data type="updateinfo">' + t
             + f'<checksum type="sha256">{digest}</checksum>'
-            + '<location href="repodata/u.xml"/></data></repomd>'
+            + f'<location href="{href}"/></data></repomd>'
         ).encode()  # fmt: skip
+
+    def test_an_infinite_timestamp_is_a_class_error(self):
+        s = self.sources()
+        s._fetch = lambda url: b"<updates/>"
+        with self.assertRaisesRegex(rc.ClassError, "not a number"):
+            s._updateinfo("https://m/", self.repomd("inf"))
+
+    def test_corrupt_compressed_data_is_a_class_error(self):
+        s = self.sources()
+        for href in ("u.xml.gz", "u.xml.xz"):
+            with self.subTest(href=href):
+                s._fetch = lambda url: b"not compressed"
+                with self.assertRaisesRegex(rc.ClassError, "corrupt"):
+                    s._updateinfo("https://m/", self.repomd(1, href, b"not compressed"))
+
+    def test_a_bad_rpm_line_is_a_class_error(self):
+        self.listing = "openssl\n"
+        with self.assertRaisesRegex(rc.ClassError, "img.*openssl"):
+            self.sources().packages("img")
+
+    def test_a_failed_create_still_removes_the_pulled_image(self):
+        self.fail = {("podman", "create"): "no space"}
+        with self.assertRaisesRegex(rc.ClassError, "no space"):
+            self.sources().packages("img")
+        self.assertIn(("podman", "rmi", "img"), self.calls)
+        self.assertFalse([c for c in self.calls if c[:2] == ("podman", "rm")])
 
     def test_the_timestamp_is_the_one_of_the_repomd_entry(self):
         s = self.sources()
@@ -281,6 +307,20 @@ class Podman(unittest.TestCase):
 
 
 class Malformed(Derive):
+    def test_a_blob_that_is_not_utf8_is_a_class_error(self):
+        base = self.commit()
+        path = self.root / "release/class/2026-10-21-x.toml"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'# \xff\nclass = "security"\nadvisories = ["A-1"]\n')
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "binary")
+        with self.assertRaisesRegex(rc.ClassError, "UTF-8"):
+            self.derive(base, self.git("rev-parse", "HEAD"))
+
+    def test_an_advisory_id_with_a_trailing_newline_fails(self):
+        with self.assertRaisesRegex(rc.ClassError, REPO):
+            self.derive("", self.commit(), info=updateinfo(("FEDORA-1\n", "security", "2.fc45")))
+
     def test_a_bad_epoch_is_a_class_error(self):
         with self.assertRaises(rc.ClassError):
             rc.evr("x:1-2")
