@@ -50,12 +50,13 @@
         sqlite-target = pkgs.sqlite.overrideAttrs (old: {
           configureFlags = old.configureFlags ++ [ "--soname=legacy" ];
         });
-        # curl (and its libssh2) on the OpenSSL of the target, and poppler on that curl: the
-        # default ones propagate openssl 3, whose libssl.so and headers would sit in the /lib
-        # and /include unions beside OpenSSL 4's.
+        # curl (and its libssh2 and ngtcp2) on the OpenSSL of the target, and poppler on that
+        # curl: the default ones propagate openssl 3, whose libssl.so and headers would sit in
+        # the /lib and /include unions beside OpenSSL 4's.
         curl-target = pkgs.curl.override {
           openssl = pkgs.openssl_4_0;
           libssh2 = pkgs.libssh2.override { openssl = pkgs.openssl_4_0; };
+          ngtcp2 = pkgs.ngtcp2.override { openssl = pkgs.openssl_4_0; };
         };
         poppler-target = pkgs.poppler.override { curl = curl-target; };
         system-libs = with pkgs; [
@@ -205,10 +206,31 @@
             paths = [ "${pkgs.rpm}/lib/rpm" builder-rpm-macros-systemd builder-rpm-macros-target ];
           };
 
+          # The target has OpenSSL 4 only (M3): the image does not build while a library on the /lib
+          # search path still needs libssl.so.3 or libcrypto.so.3. Subdirectories (systemd's
+          # private libraries, plugins) are not on that path.
+          builder-openssl-check = pkgs.runCommand "athanor-builder-no-openssl-3" {
+            nativeBuildInputs = [ pkgs.binutils ];
+          } ''
+            found=0
+            for dir in ${pkgs.lib.concatMapStringsSep " " (d: "${d}/lib") system-lib}; do
+              [ -d "$dir" ] || continue
+              while IFS= read -r -d "" f; do
+                [ "$(head -c 4 "$f" | tail -c 3)" = ELF ] || continue
+                if readelf -d "$f" | grep -qE 'NEEDED.*\[lib(ssl|crypto)\.so\.3\]'; then
+                  echo "$f needs OpenSSL 3"
+                  found=1
+                fi
+              done < <(find "$dir" -maxdepth 1 -name '*.so*' -type f -print0)
+            done
+            [ "$found" = 0 ]
+            mkdir $out
+          '';
+
           builderImage = pkgs.dockerTools.buildLayeredImage {
             name = "athanor-builder";
             tag = "latest";
-            contents = [ builder-fhs-compat builder-containers-policy pkgs.dockerTools.fakeNss pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gawk pkgs.cacert pkgs.tzdata pkgs.shadow ] ++ security-tools ++ c-toolchain ++ rust-tools ++ build-tools ++ system-deps ++ system-dev ++ system-lib;
+            contents = [ builder-fhs-compat builder-containers-policy pkgs.dockerTools.fakeNss pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gawk pkgs.cacert pkgs.tzdata pkgs.shadow ] ++ security-tools ++ c-toolchain ++ rust-tools ++ build-tools ++ system-deps ++ system-dev ++ system-lib ++ [ builder-openssl-check ];
             config = {
               Cmd = [ "/bin/bash" ];
               Env = [
