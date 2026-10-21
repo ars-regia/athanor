@@ -22,7 +22,7 @@
 - Docs under `docs/`, `scripts/verify.py` and `forge/config/packages.json` change only through an exact-match replacement script, never Edit or Write (the format hook rewrites the whole file); check `git diff --numstat` after.
 - Builds and tests at most 4 CPU threads (`cargo -j 4`, podman `--cpus 4`); cargo targets under `/var/tmp`; one VM at a time.
 - Crates that link GTK test through `forge/test/shell/rig.sh cargo test -p <crate>` after `rig.sh build-image`.
-- Nothing new is born in GTK (2026-10-18): Task 11 adds rows and a button to the existing shield sheet, the surface BR6 already specifies; no new GTK surface.
+- Nothing new is born in GTK (2026-10-18): Task 10 adds rows and a button to the existing shield sheet, the surface BR6 already specifies; no new GTK surface.
 
 ## Review Focus
 
@@ -107,7 +107,7 @@
   - `test_malformed_release_class_toml_fails` (unknown `class` value, non-list `advisories`): `ClassError`.
   - In `test_release_candidate.py`: `test_check_writes_one_class_record_per_repository`, asserting the record validates against the schema at `schema_version == 2`.
 - [ ] **Step 2: Run** `python3 -B -m unittest discover -s scripts/ci/tests -p 'test_release_c*.py'`. Expected: FAIL, `ModuleNotFoundError: release_class`.
-- [ ] **Step 3: Implement** the interfaces above in `scripts/ci/release_class.py`: NEVRA comparison with `rpm.labelCompare` semantics written in the standard library (epoch, then `rpmvercmp` on version and release); RPM databases read with `podman run --rm --network=none <image@digest> rpm -qa --qf '%{NAME} %{EPOCH}:%{VERSION}-%{RELEASE}\n'`; updateinfo via the metalink, repomd checksum checked, `.zst`/`.xz`/`.gz` decompressed with the standard library or `zstd` on the runner. `release_candidate.py check` calls `derive` per repository of `image-digests.txt` and writes `classes` into `release-candidate.json`; it prints `class_reason` into the job summary when non-empty.
+- [ ] **Step 3: Implement** the interfaces above in `scripts/ci/release_class.py`: NEVRA comparison with `rpm.labelCompare` semantics written in the standard library (epoch, then `rpmvercmp` on version and release); RPM databases read without running any code of the candidate, since this job decides which release is signed as security: `podman create` (never started), `podman cp <container>:/usr/lib/sysimage/rpm <dir>`, `podman rm`, then the runner's own rpm, `rpm --dbpath <dir> -qa --qf '%{NAME} %|EPOCH?{%{EPOCH}}:{0}|:%{VERSION}-%{RELEASE}\n'` (an absent epoch prints `0`, never `(none)`); updateinfo via the metalink, repomd checksum checked, `.zst`/`.xz`/`.gz` decompressed with the standard library or `zstd` on the runner. `release_candidate.py check` calls `derive` per repository of `image-digests.txt` and writes `classes` into `release-candidate.json`; it prints `class_reason` into the job summary when non-empty.
 - [ ] **Step 4: Run** the Step 2 command and `python3 scripts/verify.py workflows`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(release): derive the security class and advisories in candidate (PL55)`.
 
@@ -218,6 +218,7 @@
   - `a_security_digest_downloads_and_unlocks` (item 17): state `WillApplyAtNextShutdown`, calls include `download` then `apply_downloaded`, no reboot call, `postpone.first_notice_at == NOW`, `boots_remaining == 7`, `postponed == false`.
   - `a_feature_digest_stays_downloaded` (item 18): `Downloaded`, no `apply_downloaded`.
   - `a_digest_without_an_attestation_is_feature`: fetch fails, `Downloaded`, `last_error == None`.
+  - `a_staged_digest_attested_later_is_settled_as_security`: the first check fails to fetch the attestation and stages the digest as feature (`Downloaded`); the second check, same candidate, fetches a security attestation: `settle_security` runs and the state reads `WillApplyAtNextShutdown`.
   - `a_security_digest_downloads_on_a_metered_connection` and `a_feature_digest_waits_on_a_metered_connection` (UT12 kept): `Available`, no `download`.
   - `with_the_opt_out_on_nothing_downloads_on_metered_and_nothing_unlocks` (ADR-0094 point 7, item 17): metered gives `Available`; unmetered gives `Downloaded` with no `apply_downloaded`; `automatic_security_updates == false` published.
   - `a_postponed_lineage_keeps_a_newer_security_digest_locked`: lineage `postponed`, not expired: `Downloaded`, no `apply_downloaded`, `first_notice_at` unchanged.
@@ -229,7 +230,7 @@
   - `check_offline_counts_one_boot_per_boot_id`.
   - Review Focus 2: `an_unreadable_opt_out_file_unlocks_nothing`: `last_error == Storage`, no `apply_downloaded`.
 - [ ] **Step 2: Run** `cargo test -j 4 -p athanor-update check::`. Expected: FAIL.
-- [ ] **Step 3: Implement.** In `online_update`, classify after `offerable` returns `Available` and before the metered test; the metered test becomes `ctx.tools.metered() && !(class is Security && automatic)`; after a staged download-only deployment of the candidate, call `settle_security`. In `run`, before `online_update`: read the boot id from `/proc/sys/kernel/random/boot_id` (a `Context` field so tests set it), call `lineage.boot`, detect "applied" (Task 1 point 10) and call `lineage.applied`; in offline mode also unlock an expired postpone. Persist the lineage once per run, under the store lock already taken.
+- [ ] **Step 3: Implement.** In `online_update`, classify after `offerable` returns `Available` and before the metered test, and also on the early return for a candidate already staged: a staged digest not yet known as security is classified again on each check, so an attestation that failed to fetch once does not leave a security digest waiting for `Apply()`; the metered test becomes `ctx.tools.metered() && !(class is Security && automatic)`; after a staged download-only deployment of the candidate, call `settle_security`. In `run`, before `online_update`: read the boot id from `/proc/sys/kernel/random/boot_id` (a `Context` field so tests set it), call `lineage.boot`, detect "applied" (Task 1 point 10) and call `lineage.applied`; in offline mode also unlock an expired postpone. Persist the lineage once per run, under the store lock already taken.
 - [ ] **Step 4: Run** the Step 2 command, then `cargo test -j 4 -p athanor-update`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(update): apply security-class digests at the next shutdown (UT13)`.
 
@@ -254,7 +255,7 @@
   - `test_units.py`: `test_state_unit_evaluates_at_shutdown` asserts `RemainAfterExit=yes`, `ExecStop=/usr/bin/athanor-update shutdown`, `After=` contains `ostree-finalize-staged.service`, `TimeoutStopSec=30`, and the hardening lines unchanged.
 - [ ] **Step 2: Run** `cargo test -j 4 -p athanor-update shutdown` and `python3 -B -m unittest discover -s forge/specs/athanor-update/tests`. Expected: FAIL.
 - [ ] **Step 3: Implement** `at_shutdown` and the unit change of Task 1 point 13. `PrivateNetwork=yes` stays: the evaluation needs no network.
-- [ ] **Step 4: Run** the Step 2 commands and `python3 scripts/verify.py services`. Expected: PASS. The stop ordering against `ostree-finalize-staged.service` is proved on the dev VM in Task 12.
+- [ ] **Step 4: Run** the Step 2 commands and `python3 scripts/verify.py services`. Expected: PASS. The stop ordering against `ostree-finalize-staged.service` is proved on the dev VM in Task 11 (`stage_postpone`).
 - [ ] **Step 5: Commit** `feat(update): unlock an expired postpone at shutdown (UT13)`.
 
 ---
