@@ -257,6 +257,11 @@ impl Store {
         };
         let invalid = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("lineage.json: {what}"));
         let lineage: Lineage = serde_json::from_slice(&text).map_err(|err| invalid(err.to_string()))?;
+        // The anchor is a booted digest the check recorded: anything else was not written by
+        // the service, and a long one would push the published state past its size cap.
+        if lineage.anchor.as_deref().is_some_and(|anchor| !sha256_digest(anchor)) {
+            return Err(invalid("the anchor is not a sha256 digest".into()));
+        }
         match lineage.published() {
             Some(postpone) if !postpone.consistent() => Err(invalid("boots or first notice out of range".into())),
             _ => Ok(lineage),
@@ -294,6 +299,11 @@ impl Store {
     pub fn set_automatic_security_updates(&self, enabled: bool) -> std::io::Result<()> {
         Self::replace(&self.var, "automatic-security-updates", 0o644, if enabled { "on\n" } else { "off\n" }.as_bytes())
     }
+}
+
+/// True for `sha256:` and 64 lowercase hex digits, the form `signature_dir` accepts.
+fn sha256_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
 }
 
 #[cfg(test)]
@@ -356,7 +366,7 @@ mod tests {
         let store = scratch("lineage");
         assert_eq!(store.lineage().expect("absent"), Lineage::default());
         let mut lineage = Lineage::default();
-        lineage.applied("sha256:aa");
+        lineage.applied(&format!("sha256:{}", "a".repeat(64)));
         lineage.notice(1_790_000_000, "boot-0");
         store.set_lineage(&lineage).expect("write");
         assert_eq!(store.lineage().expect("read"), lineage);
@@ -378,6 +388,23 @@ mod tests {
         std::fs::remove_file(store.var.join("lineage.json")).expect("remove");
         std::fs::create_dir(store.var.join("lineage.json")).expect("mkdir");
         assert!(store.lineage().is_err(), "an unreadable file is not an absent one");
+    }
+
+    #[test]
+    fn a_lineage_anchor_that_is_no_digest_is_a_storage_error() {
+        let store = scratch("lineage-anchor");
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"open":null}}"#);
+        for good in ["null".to_owned(), format!("\"{digest}\"")] {
+            std::fs::write(store.var.join("lineage.json"), with(&good)).expect("write");
+            assert!(store.lineage().is_ok(), "{good}");
+        }
+        let long = format!("sha256:{}", "a".repeat(70_000));
+        let upper = format!("sha256:{}", "A".repeat(64));
+        for bad in ["sha256:aa", "sha512:aa", "", "aaaa", &upper, &long, &format!("{digest}\n")] {
+            std::fs::write(store.var.join("lineage.json"), with(&serde_json::to_string(bad).expect("json"))).expect("write");
+            assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:.20?}");
+        }
     }
 
     #[test]
