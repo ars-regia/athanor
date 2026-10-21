@@ -730,7 +730,15 @@ class SigningTest(unittest.TestCase):
         self.assert_one({"release.yml": workflow(job)}, r"step 4 runs a command outside the allow-list of D43: cosign sign")
         script = 'cosign attest --key "$work/key" --type "$type" "$ref" < "$work/passphrase"\n'
         self.assertEqual(self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script}), [])
-        for line in ('cosign sign --key "$work/key" "$ref"', "bash \"$retry\" cosign copy a b", "x && cosign upload blob"):
+        for line in (
+            'cosign sign --key "$work/key" "$ref"',
+            "bash \"$retry\" cosign copy a b",
+            "x && cosign upload blob",
+            '"$(command -v cosign)" sign "$ref"',
+            'exec "cosign" sign "$ref"',
+            'c=cosign; "$c" sign "$ref"',
+            "/usr/bin/cosign attest x",
+        ):
             with self.subTest(line=line):
                 problems = self.problems({"release.yml": workflow(ATTEST_JOB)}, files={"system/sign-images.sh": script + line + "\n"})
                 self.assertEqual(len(problems), 1, problems)

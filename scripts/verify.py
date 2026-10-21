@@ -226,7 +226,10 @@ SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KE
 # by design: it runs a digest-pinned signer image it verifies first. Of cosign it runs only
 # `cosign attest` (ADR-0127 point 5).
 IMAGE_SIGN_SCRIPT = "system/sign-images.sh"
-COSIGN_OTHER_THAN_ATTEST = re.compile(r"\bcosign\s+(?!attest\b)\S")
+# Every word cosign on a line of it, quoted, in a substitution or an assignment alike, and
+# the bare command cosign followed by attest, which alone it may be.
+COSIGN_WORD = re.compile(r"\bcosign\b")
+COSIGN_ATTEST = re.compile(r"(?:^|(?<=[\s;&|(]))cosign\s+attest\b")
 # A container engine as a command, not the docker:// transport of an image reference.
 CONTAINER_ENGINE = re.compile(r"\b(?:podman|docker|buildah|nerdctl|crun|runc)\b(?!://)")
 # The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
@@ -626,8 +629,11 @@ def policy_pull_problems(root):
 
 def image_sign_script_problems(root):
     """The image sign script starts no container and runs no cosign subcommand but attest: a
-    line outside a comment that names a container engine as a command, or cosign with another
-    subcommand, is a problem (D43, ADR-0127)."""
+    line outside a comment that names a container engine as a command, or names cosign anywhere
+    but as the bare command `cosign attest` (quoted, through a variable, a substitution or a path
+    alike), is a problem (D43, ADR-0127). The scripts it runs are not read here: of those,
+    scripts/ci/release_attestation.py runs cosign only in verify, which verify-images.sh calls in
+    a job without the key, where the pinned installer puts cosign beside no secret."""
     path = Path(root) / IMAGE_SIGN_SCRIPT
     if not path.is_file():
         return []
@@ -639,7 +645,7 @@ def image_sign_script_problems(root):
         if CONTAINER_ENGINE.search(code):
             problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
                             "signatures in a job without it, system/verify-images.sh (D43)")
-        if COSIGN_OTHER_THAN_ATTEST.search(code):
+        if len(COSIGN_WORD.findall(code)) != len(COSIGN_ATTEST.findall(code)):
             problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs cosign other than cosign attest beside the "
                             "key (D43, ADR-0127)")
     return problems
