@@ -1415,6 +1415,12 @@ def update_trust_problems(root=None):
     return problems
 
 
+# The one RPM signature override of the image build: athanor-base-config from the digest-pinned
+# tier 0 image, at rpm's digest level (UD44: the forge's RPMs are not signed).
+TIER0_DIGEST_INSTALL = "rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps \"$BASE_CONFIG\"; \\"
+SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--nogpgcheck|gpgcheck=(0|false|False)")
+
+
 def image_policy_problems(root=None):
     """system/Containerfile puts the policy in force and system/keys holds public keys only."""
     root = root or ROOT
@@ -1433,6 +1439,11 @@ def image_policy_problems(root=None):
     for key in keys:
         if key.suffix != ".pub":
             problems.append(f"system/keys/{key.name}: only *.pub files belong under system/keys")
+    for number, line in enumerate(containerfile.splitlines(), 1):
+        if SIGNATURE_OVERRIDE.search(line) and (line.strip() != TIER0_DIGEST_INSTALL
+                                                or "BASE_CONFIG=$(find /tmp/tier0-repo " not in containerfile):
+            problems.append(f"system/Containerfile:{number}: overrides RPM signature checking; only "
+                            "athanor-base-config from the tier 0 image installs at the digest level (UD44)")
     return problems
 
 
