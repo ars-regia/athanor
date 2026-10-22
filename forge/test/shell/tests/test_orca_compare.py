@@ -76,6 +76,15 @@ class CompareTest(unittest.TestCase):
             ["'Sample text': missing", "'The end.': missing"],
         )
 
+    def test_only_a_text_area_of_the_gallery_joins_its_line(self):
+        # A single-line field's line and the next utterance are two things to hear.
+        self.assertEqual(
+            compare.compare(
+                ["Name text.", "Screen reader off."], ["Name entry Screen reader off."]
+            )[1],
+            ["'Name text.': missing", "'Screen reader off.': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",

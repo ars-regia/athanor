@@ -25,21 +25,32 @@ from pathlib import Path
 #
 # A multi-line field too: GTK's GtkTextView reaches AT-SPI as a text, AccessKit's
 # Role::MultilineTextInput as a multi-line entry, and Orca says the line of the caret after a
-# text's line but in the same utterance as an entry's. So a text's line and the utterance that
-# follows it in the reference may be heard together, as an entry's line that ends in that
-# utterance; neither alone, nor a line after anything but a text.
+# text's line but in the same utterance as an entry's. So the line of a text area of the gallery
+# (the `notes` key of its strings.tsv) and the utterance that follows it in the reference may be
+# heard together, as an entry's line that ends in that utterance; neither alone, nor a line after
+# anything else, a single-line field's line included.
 #
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` key
 # of its strings.tsv) with the role and the state words together is rewritten: a real check box,
 # whatever its label, spoken as a toggle button still fails.
-SWITCH_LABELS = [
-    line.split("\t")[1:]
-    for line in (Path(__file__).resolve().parents[3] / "system/athanor-toolkit/gallery/strings.tsv")
-    .read_text(encoding="utf-8")
-    .splitlines()
-    if line.startswith("switch\t")
-][0]
+
+
+def gallery_labels(key):
+    """The texts of `key` in the gallery's strings.tsv, one per language."""
+    return [
+        line.split("\t")[1:]
+        for line in (
+            Path(__file__).resolve().parents[3] / "system/athanor-toolkit/gallery/strings.tsv"
+        )
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith(f"{key}\t")
+    ][0]
+
+
+SWITCH_LABELS = gallery_labels("switch")
+AREA_LABELS = gallery_labels("notes")
 SWITCH_SPEECH = {
     "check box checked.": "toggle button pressed.",
     "check box not checked.": "toggle button not pressed.",
@@ -75,9 +86,11 @@ def compare(reference, transcript):
         return lines, ["the reference holds no utterance"]
     together = {}
     for field, after in pairwise(reference):
-        for role, said in SAME_FIELD_ROLE.items():
-            if field.endswith(f" {role}."):
-                joined = f"{field[: -len(role) - 1]}{said} {after}"
+        for label in AREA_LABELS:
+            for role, said in SAME_FIELD_ROLE.items():
+                if field != f"{label} {role}.":
+                    continue
+                joined = f"{label} {said} {after}"
                 if joined in spoken:
                     together.setdefault(field, joined)
                     together.setdefault(after, joined)
