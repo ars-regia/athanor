@@ -418,7 +418,7 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
 **Il check unico.** Il job `gate` di `kernel-build.yml` (check `Kernel gate`)
 dipende da tutti gli altri ed è verde solo se `lint` (il lint condiviso,
 `call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso, oppure se su una
-pull request `inputs` è verde e `build`, `boot` e `kmod` sono saltati per input invariati
+pull request `lint` e `inputs` sono verdi e `build`, `boot` e `kmod` sono saltati per input invariati
 ("Pull request skip", sotto). È l'unico check del kernel richiesto
 dalla protezione di `main`; su `iso-v0` Kernel Build non parte sulle PR: il
 controllo gira una volta sola in `pr.yml` (`call-kernel.yml`) e l'auto-merge del
@@ -474,17 +474,18 @@ last 90 days, the maximum allowed; when the artifact is missing or expired, the 
 required there; `main` keeps it.
 
 **Pull request skip (revision 3, maintainer decision of 2026-10-22).** On a `pull_request` run
-whose `key` step finds no published kernel, `scripts/ci/kernel_unchanged.py` compares the pull
-request's head with its base: the output of each commit's own `build-inputs.py`, and the git
+whose `key` step finds no published kernel, `scripts/ci/kernel_unchanged.py` compares the
+checked-out merge commit with the pull request's base (a base that moved since only adds
+differences, so a build): the output of each commit's own `build-inputs.py`, and the git
 objects of what shapes the build or the `boot` and `kmod` jobs outside it (its `CHECKED` list:
 `nvr.sh`, the source keys, the boot, builder, signer and NVIDIA image directories, the NVIDIA
 pins, `cmdline`, `keys/`, the scripts and workflows those jobs run). When both are equal,
-`build`, `boot` and `kmod` are skipped and the verdict, like `Kernel gate`, passes on a green
-`inputs`, citing the push build of the base, which builds and publishes those inputs. Any error
+`build`, `boot` and `kmod` are skipped and the verdict passes on a green `inputs` (`Kernel
+gate` also on a green `lint`), citing the push build of the base, which builds and publishes those inputs. Any error
 in the comparison means a build. Push, dispatch and schedule runs never skip this way. A test
 requires every directory with a package lock that `lock.sh check` verifies to be in `CHECKED`.
-The measured cost it removes: a documentation pull request built the kernel for an hour while
-the base's own push build had not yet published it.
+The cost it removes: a documentation pull request (#702) built the kernel because the base's own
+push build had not yet published it.
 
 ## 8. Auto-manutenzione: il bot di bump
 
