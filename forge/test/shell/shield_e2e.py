@@ -57,6 +57,10 @@ def logged(line):
     return line in LOG.read_text(encoding="utf-8").splitlines()
 
 
+def count(line):
+    return LOG.read_text(encoding="utf-8").splitlines().count(line)
+
+
 def applies():
     return LOG.read_text(encoding="utf-8").splitlines().count("Apply")
 
@@ -482,6 +486,40 @@ def main():
         wait_for(lambda: logged("SetAutomaticSecurityUpdates False"), 3),
     )
     toggle_sheet(app, Atspi, False)
+
+    # A refused call leaves the switch on what the daemon says, and asks again. NotAuthorized
+    # is polkit's refusal; Failed stands for any other os.athanor.Update1 error.
+    off = "SetAutomaticSecurityUpdates False"
+    for error, words in (
+        ("NotAuthorized", "Not authorised"),
+        ("Failed", "The request failed; the system journal says why"),
+    ):
+        before = count(off)
+        REFUSE_FILE.write_text(f"{error}\n", encoding="utf-8")
+        trust_state.write("verified")
+        check(f"the sheet opens for a {error} switch", toggle_sheet(app, Atspi, True))
+        check(f"{error}: turning it off asks first", press_switch(app, Atspi))
+        check(f"{error}: confirming Turn Off", confirm(app, Atspi, "Turn Off"))
+        check(f"{error}: the call reaches the service", wait_for(lambda: count(off) > before, 3))
+        check(f"{error} is said in the sheet", wait_for(lambda: shows(app, Atspi, words), 5))
+        check(
+            f"{error}: the switch shows the daemon's state, on",
+            wait_for(lambda: switch_on(app, Atspi) is True, 3),
+        )
+        REFUSE_FILE.unlink()
+        check(f"{error}: a second press asks again", press_switch(app, Atspi))
+        check(
+            f"{error}: the warning shows again",
+            wait_for(
+                lambda: shows_label(app, Atspi, "Turn off automatic security updates?"), 3
+            ),
+        )
+        check(f"{error}: Cancel backs out", press(app, Atspi, "Cancel"))
+        check(
+            f"{error}: and calls nothing more",
+            never(lambda: count(off) > before + 1, 2),
+        )
+        toggle_sheet(app, Atspi, False)
 
     # No update downloaded: no Restart to update in the power menu.
     trust_state.write("verified")
