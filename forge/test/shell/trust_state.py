@@ -36,7 +36,7 @@ def deployment(digit, version, build_time):
 def state(name, now):
     booted = deployment("1", "43.20260915.2", now - 3 * DAY)
     base = {
-        "schema": 1,
+        "schema": 2,
         "booted": booted,
         "downloaded": None,
         "previous": deployment("0", "43.20260901.1", now - 17 * DAY),
@@ -57,6 +57,8 @@ def state(name, now):
         "last_successful_check": now - 30 * 3600,
         "last_error": "none",
         "last_error_host": None,
+        "automatic_security_updates": True,
+        "postpone": None,
     }
     if name == "verified":
         return base

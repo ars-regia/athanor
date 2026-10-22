@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_session.py [--client NAME] [--hang METHOD] [--window] [--pinnable] [--notifications] [--tray]
-[--respawn] [--fixtures [--discovering]] [--trust-state NAME] [--beside PROGRAM]... [--log] - athanor-bar in the rig, as its unit runs it: a private system bus with a
+[--respawn] [--fixtures [--discovering]] [--trust-state NAME] [--beside PROGRAM]... [--log] [--unit] - athanor-bar in the rig, as its unit runs it: a private system bus with a
 fake logind on it, NOTIFY_SOCKET for Type=notify, and with --window one test window for the running
 applications. --pinnable installs a desktop entry for the test window's app id, so the bar offers to
 pin it. It is scene.sh's client and exits with the bar's status.
@@ -47,12 +47,19 @@ layout cases run athanor-dock beside the bar this way, and chooser-e2e the choos
 appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program's to
 /out/$RIG_TAG-<basename>.log, where the checks read the "layout applied" lines.
 
+--unit runs the client as its unit would for athanor-compositor's allow-list (doc_own_stack.md
+OS4): from /usr/bin/<client>, a copy of /out/bin/<client>, inside the cgroup <client>.service,
+which it joins before it runs, so that the compositor reads that unit when it connects. It needs
+a writable cgroup tree: rig.sh's in_rig runs the container in systemd mode for
+RIG_COMPOSITOR=athanor.
+
 It is a small Gio service, not python3-dbusmock: dbusmock replies to each call from the
 method's code, and the power menu must also meet a logind that never replies.
 """
 
 import argparse
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -72,6 +79,7 @@ PID_FILE = Path("/tmp/athanor-bar.pid")
 SHELLD_PID_FILE = Path("/tmp/athanor-shelld.pid")
 SHELLD_STATE = "/tmp/athanor-shelld-state"
 BIN = Path("/out/bin")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 SHELLD = "/out/bin/athanor-shelld"
 HERE = "/repo/forge/test/shell"
 WINDOW = f"{HERE}/cc_window.py"
@@ -259,8 +267,27 @@ def rig_log(name):
     return open(f"/out/{os.environ.get('RIG_TAG', 'bar')}-{name}.log", "a", encoding="utf-8")
 
 
-def start_bar(client, env, log):
-    bar = subprocess.Popen([BIN / client], env=env, stderr=rig_log(client) if log else None)
+def as_unit(client):
+    """The command that starts /usr/bin/<client> inside the cgroup of --unit.
+
+    A shell joins the cgroup and execs the client, so the pid stays the client's and nothing
+    runs in the forked child of this threaded process; a failed write ends the shell with an
+    error, and the session with it. The copy lands under a temporary name and is renamed over
+    the old one, so a respawn never writes a file a dying client still executes (ETXTBSY).
+    """
+    executable = Path("/usr/bin") / client
+    staged = executable.with_name(f".{client}.new")
+    shutil.copy2(BIN / client, staged)
+    staged.replace(executable)
+    cgroup = CGROUP_ROOT / f"{client}.service"
+    cgroup.mkdir(exist_ok=True)
+    join = 'echo $$ > "$1/cgroup.procs" && exec "$2"'
+    return ["sh", "-c", join, "sh", str(cgroup), str(executable)]
+
+
+def start_bar(client, env, log, unit):
+    command = as_unit(client) if unit else [BIN / client]
+    bar = subprocess.Popen(command, env=env, stderr=rig_log(client) if log else None)
     PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
     return bar
 
@@ -279,6 +306,7 @@ def parse(argv):
     parser.add_argument("--discovering", action="store_true")
     parser.add_argument("--beside", metavar="PROGRAM", action="append", default=[])
     parser.add_argument("--log", action="store_true")
+    parser.add_argument("--unit", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -410,7 +438,7 @@ def main():
         env = {k: v for k, v in env.items() if k != "LD_PRELOAD" and not k.startswith("FAKETIME")}
     if args.fixtures:
         env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
-    running = {"bar": start_bar(args.client, env, args.log), "shelld": shelld}
+    running = {"bar": start_bar(args.client, env, args.log, args.unit), "shelld": shelld}
     status = {"code": None}
     loop = GLib.MainLoop()
 
@@ -419,7 +447,7 @@ def main():
         if bar.poll() is not None:
             if args.respawn and bar.returncode == -signal.SIGKILL:
                 READY_FILE.unlink(missing_ok=True)
-                running["bar"] = start_bar(args.client, env, args.log)
+                running["bar"] = start_bar(args.client, env, args.log, args.unit)
                 return True
             status["code"] = bar.returncode
             loop.quit()

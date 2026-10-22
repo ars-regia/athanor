@@ -7,12 +7,18 @@
 //!   `refused`         the digest the policy last refused; cleared by a download that passes
 //!   `newest-booted`   the newest build time this machine has booted, seconds since the epoch
 //!   `last-success`    when the registry last answered a check, seconds since the epoch
+//!   `lineage.json`    the lineage of security updates of UT13 (`crate::lineage`): the anchor,
+//!                     and the open lineage's first notice, boots left, postpone, last boot id
+//!   `automatic-security-updates`  `on` or `off`, the opt-out of UT13; absent is `on`
 //!   `migrated`        stamp of `athanor-update migrate`
 //!   `channel-absent`  `migrate` found no manifest for the channel; cleared when it finds one
 //!   `move-record`     `<digest> <failed boots> [<deployment>]`: deployments of that digest
 //!                     `migrate` staged that did not boot, and the one it staged last, until
 //!                     a later run sees what became of it; removed with the stamp
 //!   `signatures/<hex>/`  the signature object of a digest, as `skopeo copy … dir:` wrote it
+//!   `attestations/<hex>/`  the release attestation of a digest, as `skopeo copy … dir:` wrote
+//!                     it; its class is verified again at every read, never stored
+use crate::lineage::Lineage;
 use athanor_trust_state::State;
 use std::fs::File;
 use std::io::Write as _;
@@ -90,6 +96,9 @@ impl Store {
         self.read_line(name)?.map(|line| line.parse().map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{name}: {err}")))).transpose()
     }
 
+    /// Writes `contents` to `dir/name` atomically and durably. An error from the final
+    /// directory sync comes after the rename, so the new file may already be in place:
+    /// callers treat an error as "not known to be durable", and write idempotently.
     pub(crate) fn replace(dir: &Path, name: &str, mode: u32, contents: &[u8]) -> std::io::Result<()> {
         let temporary = dir.join(format!(".{name}.{}", std::process::id()));
         // A leftover of a killed run would make create_new fail for ever. create_new is
@@ -101,7 +110,10 @@ impl Store {
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(&temporary)?;
         file.write_all(contents)?;
         file.sync_all()?;
-        std::fs::rename(&temporary, dir.join(name))
+        std::fs::rename(&temporary, dir.join(name))?;
+        // The rename is durable only once the directory is: without this, a power cut can
+        // bring back the old file, and with an old lineage a postpone budget already spent.
+        File::open(dir)?.sync_all()
     }
 
     /// # Errors
@@ -224,8 +236,19 @@ impl Store {
     /// The directory of the signature object of `digest`; `None` for anything but `sha256:<64 hex>`.
     #[must_use]
     pub fn signature_dir(&self, digest: &str) -> Option<PathBuf> {
+        self.object_dir("signatures", digest)
+    }
+
+    /// The directory of the release attestation of `digest`; `None` for anything but `sha256:<64 hex>`.
+    #[must_use]
+    #[cfg_attr(not(test), allow(dead_code))] // read by the check from UT13's classification on
+    pub fn attestation_dir(&self, digest: &str) -> Option<PathBuf> {
+        self.object_dir("attestations", digest)
+    }
+
+    fn object_dir(&self, kind: &str, digest: &str) -> Option<PathBuf> {
         let hex = digest.strip_prefix("sha256:")?;
-        (hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| self.var.join("signatures").join(hex))
+        (hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| self.var.join(kind).join(hex))
     }
 
     /// Publishes the state: a temporary name in the same directory, then a rename.
@@ -236,11 +259,77 @@ impl Store {
         let json = serde_json::to_vec(state).map_err(std::io::Error::other)?;
         Self::replace(&self.run, "state.json", 0o644, &json)
     }
+
+    /// The lineage of UT13; a closed one with no anchor when the file is absent.
+    ///
+    /// # Errors
+    /// The file exists and cannot be read, or is not a lineage the service could have
+    /// written (`InvalidData`). It is left as it is: a reset would grant a new budget.
+    pub fn lineage(&self) -> std::io::Result<Lineage> {
+        let text = match std::fs::read(self.var.join("lineage.json")) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Lineage::default()),
+            Err(err) => return Err(err),
+        };
+        let invalid = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("lineage.json: {what}"));
+        let lineage: Lineage = serde_json::from_slice(&text).map_err(|err| invalid(err.to_string()))?;
+        // The anchor is a booted digest the check recorded: anything else was not written by
+        // the service, and a long one would push the published state past its size cap.
+        if lineage.anchor.as_deref().is_some_and(|anchor| !sha256_digest(anchor)) {
+            return Err(invalid("the anchor is not a sha256 digest".into()));
+        }
+        match lineage.published() {
+            Some(postpone) if !postpone.consistent() => Err(invalid("boots or first notice out of range".into())),
+            _ => Ok(lineage),
+        }
+    }
+
+    /// # Errors
+    /// The file cannot be written.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+    pub fn set_lineage(&self, lineage: &Lineage) -> std::io::Result<()> {
+        let json = serde_json::to_vec(lineage).map_err(std::io::Error::other)?;
+        Self::replace(&self.var, "lineage.json", 0o644, &json)
+    }
+
+    /// The opt-out of UT13, inverted: `true` unless the file says `off`.
+    ///
+    /// # Errors
+    /// The file exists and cannot be read, or says neither `on` nor `off` (`InvalidData`),
+    /// an empty file included: an unreadable answer is never the default.
+    ///
+    /// Code that decides (the unlock of a security digest, `Postpone()`) reads this and treats
+    /// an error as a failed operation, never the published `automatic_security_updates`, which
+    /// is `false` for an unreadable file too.
+    pub fn automatic_security_updates(&self) -> std::io::Result<bool> {
+        match std::fs::read_to_string(self.var.join("automatic-security-updates")) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
+            Err(err) => Err(err),
+            Ok(text) => match text.trim() {
+                "on" => Ok(true),
+                "off" => Ok(false),
+                other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("automatic-security-updates: {other:?} is neither on nor off"))),
+            },
+        }
+    }
+
+    /// # Errors
+    /// The file cannot be written.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+    pub fn set_automatic_security_updates(&self, enabled: bool) -> std::io::Result<()> {
+        Self::replace(&self.var, "automatic-security-updates", 0o644, if enabled { "on\n" } else { "off\n" }.as_bytes())
+    }
+}
+
+/// True for `sha256:` and 64 lowercase hex digits, the form `signature_dir` accepts.
+fn sha256_digest(digest: &str) -> bool {
+    digest.strip_prefix("sha256:").is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lineage::Lineage;
 
     pub(crate) fn scratch(test: &str) -> Store {
         let dir = std::env::temp_dir().join(format!("athanor-update-store-{}-{test}", std::process::id()));
@@ -293,6 +382,70 @@ mod tests {
     }
 
     #[test]
+    fn the_lineage_survives_and_starts_closed() {
+        let store = scratch("lineage");
+        assert_eq!(store.lineage().expect("absent"), Lineage::default());
+        let mut lineage = Lineage::default();
+        lineage.applied(&format!("sha256:{}", "a".repeat(64)));
+        lineage.notice(1_790_000_000, "boot-0");
+        store.set_lineage(&lineage).expect("write");
+        assert_eq!(store.lineage().expect("read"), lineage);
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(store.var.join("lineage.json")).expect("metadata").permissions());
+        assert_eq!(mode & 0o777, 0o644);
+    }
+
+    #[test]
+    fn a_malformed_lineage_file_is_a_storage_error() {
+        let store = scratch("lineage-malformed");
+        let good = r#"{"anchor":null,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
+        std::fs::write(store.var.join("lineage.json"), good).expect("write");
+        assert!(store.lineage().is_ok());
+        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#)] {
+            std::fs::write(store.var.join("lineage.json"), bad).expect("write");
+            assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
+            assert_eq!(std::fs::read_to_string(store.var.join("lineage.json")).expect("read"), bad, "the file is left as it is");
+        }
+        std::fs::remove_file(store.var.join("lineage.json")).expect("remove");
+        std::fs::create_dir(store.var.join("lineage.json")).expect("mkdir");
+        assert!(store.lineage().is_err(), "an unreadable file is not an absent one");
+    }
+
+    #[test]
+    fn a_lineage_anchor_that_is_no_digest_is_a_storage_error() {
+        let store = scratch("lineage-anchor");
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"open":null}}"#);
+        for good in ["null".to_owned(), format!("\"{digest}\"")] {
+            std::fs::write(store.var.join("lineage.json"), with(&good)).expect("write");
+            assert!(store.lineage().is_ok(), "{good}");
+        }
+        let long = format!("sha256:{}", "a".repeat(70_000));
+        let upper = format!("sha256:{}", "A".repeat(64));
+        for bad in ["sha256:aa", "sha512:aa", "", "aaaa", &upper, &long, &format!("{digest}\n")] {
+            std::fs::write(store.var.join("lineage.json"), with(&serde_json::to_string(bad).expect("json"))).expect("write");
+            assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:.20?}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_opt_out_file_is_a_storage_error() {
+        let store = scratch("opt-out");
+        assert!(store.automatic_security_updates().expect("absent is on"));
+        store.set_automatic_security_updates(false).expect("write");
+        assert_eq!(std::fs::read_to_string(store.var.join("automatic-security-updates")).expect("read"), "off\n");
+        assert!(!store.automatic_security_updates().expect("read"));
+        store.set_automatic_security_updates(true).expect("write");
+        assert!(store.automatic_security_updates().expect("read"));
+        for bad in ["maybe\n", "", "\n", "On\n", "on off\n"] {
+            std::fs::write(store.var.join("automatic-security-updates"), bad).expect("write");
+            assert_eq!(store.automatic_security_updates().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
+        }
+        std::fs::remove_file(store.var.join("automatic-security-updates")).expect("remove");
+        std::fs::create_dir(store.var.join("automatic-security-updates")).expect("mkdir");
+        assert!(store.automatic_security_updates().is_err(), "an unreadable file is not an absent one");
+    }
+
+    #[test]
     fn a_second_taker_of_the_lock_is_told_it_is_busy() {
         let _spawning = crate::goback::tests::SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let store = scratch("lock");
@@ -317,11 +470,14 @@ mod tests {
     }
 
     #[test]
-    fn a_signature_directory_exists_only_for_a_sha256_digest() {
+    fn a_signature_or_attestation_directory_exists_only_for_a_sha256_digest() {
         let store = scratch("sigdir");
-        assert!(store.signature_dir(&format!("sha256:{}", "a".repeat(64))).is_some());
+        let digest = format!("sha256:{}", "a".repeat(64));
+        assert_eq!(store.signature_dir(&digest), Some(store.var.join("signatures").join("a".repeat(64))));
+        assert_eq!(store.attestation_dir(&digest), Some(store.var.join("attestations").join("a".repeat(64))));
         for bad in ["sha256:../../etc", "sha512:aa", "", &format!("sha256:{}", "A".repeat(64))] {
             assert_eq!(store.signature_dir(bad), None, "{bad}");
+            assert_eq!(store.attestation_dir(bad), None, "{bad}");
         }
     }
 

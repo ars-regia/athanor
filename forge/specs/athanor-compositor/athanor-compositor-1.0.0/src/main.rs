@@ -2,12 +2,14 @@
 //! C1). It runs nested, on the winit backend, in a parent compositor, or headless, on virtual
 //! outputs drawn off screen (OS6).
 
-// One function writes a client's wl_shm buffer through a raw pointer (`capture::copy_into`).
+// One function writes a client's wl_shm buffer through a raw pointer (`capture::copy_into`);
+// one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
 #![deny(unsafe_code)]
 
 mod capture;
 mod handlers;
 mod headless;
+mod identity;
 mod input;
 mod layer;
 mod lock;

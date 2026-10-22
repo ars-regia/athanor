@@ -3,6 +3,7 @@
 
 use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
+use crate::identity::{AllowList, Privilege, Proc, Process};
 use crate::lock::Lock;
 use crate::winit::Nested;
 use crate::workspace::Group;
@@ -60,6 +61,9 @@ use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::xdg_activation::XdgActivationState;
 use std::ffi::OsString;
+use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -100,7 +104,7 @@ pub struct State {
     pub data_device_state: DataDeviceState,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
     pub syncobj_state: Option<DrmSyncobjState>,
-    /// The clients' frame times, kept on the headless backend.
+    /// The clients' frame times and the outputs' draw times.
     pub frame_stats: Option<FrameStats>,
     /// The commits waiting on a fence, each with the event source that waits on it.
     pub held: Vec<HeldCommit>,
@@ -122,6 +126,11 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
+
+    /// Which client is granted which privileged global (OS4), read when the compositor starts.
+    pub allow_list: AllowList,
+    /// Where a connecting client's executable and cgroup are read.
+    pub process: Box<dyn Process>,
 }
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
@@ -165,10 +174,12 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        // ponytail: every client may bind it; task 5 grants the top and overlay layers by identity (OS4).
-        // Task 5 must also give the compositor an escape from exclusive keyboard focus: today a
-        // 1x1 transparent exclusive overlay surface holds the keyboard for as long as it lives,
-        // which is acceptable only while the compositor runs nested or headless.
+        // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
+        // or overlay layer (`layer_commit`).
+        // ponytail: no escape from exclusive keyboard focus: a granted client's 1x1 transparent
+        // exclusive overlay surface holds the keyboard for as long as it lives, acceptable only
+        // while the compositor runs nested or headless. C1 task 8, the DRM backend, adds the
+        // escape: the compositor does not run on a console (task 9) without it.
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
@@ -180,16 +191,21 @@ impl State {
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         // GDK will not open a display without wl_data_device_manager.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
-        // ponytail: every client outside a security context may bind these five; task 5 grants
-        // each by identity (OS4): the toplevel list and capture to the dock, the lock to the lock
-        // screen, the workspaces to the bar.
-        let foreign_toplevel_state =
-            ForeignToplevelListState::new_with_filter::<Self>(&dh, unconfined);
+        // The privileged globals of OS4, each to the clients the allow-list grants it.
+        let foreign_toplevel_state = ForeignToplevelListState::new_with_filter::<Self>(&dh, |c| {
+            granted(c, Privilege::ToplevelList)
+        });
         let toplevel_capture_state =
-            ToplevelCaptureSourceState::new_with_filter::<Self, _>(&dh, unconfined);
+            ToplevelCaptureSourceState::new_with_filter::<Self, _>(&dh, |c| {
+                granted(c, Privilege::ToplevelCaptureSource)
+            });
         let image_copy_capture_state =
-            ImageCopyCaptureState::new_with_filter::<Self, _>(&dh, unconfined);
-        let lock_state = SessionLockManagerState::new::<Self, _>(&dh, unconfined);
+            ImageCopyCaptureState::new_with_filter::<Self, _>(&dh, |c| {
+                granted(c, Privilege::ImageCopyCapture)
+            });
+        let lock_state =
+            SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
+        // ext-workspace-v1 is not among OS4's privileged protocols: every unconfined client's.
         crate::workspace::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
@@ -237,6 +253,8 @@ impl State {
             lock: None,
             idle_notifier_state,
             workspace_groups: Vec::new(),
+            allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
+            process: Box::new(Proc),
         })
     }
 
@@ -246,18 +264,37 @@ impl State {
         self.idle_notifier_state.notify_activity(&seat);
     }
 
-    /// What the compositor keeps for a client that connects now.
-    pub fn client_state(&self) -> Arc<ClientState> {
-        self.contained_client_state(None)
-    }
-
-    /// What the compositor keeps for a client that connects now through `context`'s listener,
-    /// or through the compositor's own socket without one.
-    pub fn contained_client_state(&self, context: Option<SecurityContext>) -> Arc<ClientState> {
+    /// What the compositor keeps for a client that connects now on `stream`, through
+    /// `context`'s listener or through the compositor's own socket without one. The privileged
+    /// globals it is granted are decided here, once: inside a security context none, outside
+    /// one what the allow-list grants its identity, and none when its identity cannot be read.
+    pub fn client_state(
+        &self,
+        stream: &UnixStream,
+        context: Option<SecurityContext>,
+    ) -> Arc<ClientState> {
+        let grants = match &context {
+            Some(_) => Vec::new(),
+            None => match crate::identity::identify(
+                stream.as_fd(),
+                self.process.as_ref(),
+                &self.allow_list,
+            ) {
+                Ok((identity, grants)) => {
+                    tracing::debug!(?identity, ?grants, "a client connected");
+                    grants
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "a client's identity cannot be read: no privileged global");
+                    Vec::new()
+                }
+            },
+        };
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             security_context: context,
+            grants,
         })
     }
 
@@ -610,10 +647,8 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
     let name = socket.socket_name().to_os_string();
     handle
         .insert_source(socket, |stream, _, state| {
-            if let Err(error) = state
-                .display_handle
-                .insert_client(stream, state.client_state())
-            {
+            let data = state.client_state(&stream, None);
+            if let Err(error) = state.display_handle.insert_client(stream, data) {
                 tracing::warn!(%error, "a client could not connect");
             }
         })
@@ -627,10 +662,19 @@ pub struct ClientState {
     gone: channel::Sender<ClientId>,
     /// The security context the client connected through, if any (a sandboxed application).
     pub security_context: Option<SecurityContext>,
+    /// The privileged globals granted when it connected.
+    grants: Vec<Privilege>,
 }
 
-/// Whether `client` connected outside a security context: only such a client sees the
-/// privileged globals.
+/// Whether `client` was granted `privilege` when it connected.
+pub fn granted(client: &Client, privilege: Privilege) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_some_and(|data| data.grants.contains(&privilege))
+}
+
+/// Whether `client` connected outside a security context: only such a client sees
+/// ext-workspace-v1 and the security context manager.
 pub fn unconfined(client: &Client) -> bool {
     client
         .get_data::<ClientState>()

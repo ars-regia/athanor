@@ -96,6 +96,15 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("note: role 'panel'", lines[0])
 
+    def test_a_text_said_as_an_entry_is_a_note(self):
+        lines, failures = compare.compare([node("text", "Name")], [node("entry", "Name")])
+        self.assertEqual(failures, [])
+        self.assertIn("note: role 'entry'", lines[0])
+
+    def test_a_label_is_not_an_entry(self):
+        _, failures = compare.compare([node("label", "Sample text")], [node("entry", "Sample text")])
+        self.assertEqual(failures, ["label 'Sample text': role 'entry'"])
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)

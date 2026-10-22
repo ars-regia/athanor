@@ -11,6 +11,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "system/tests"))
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+import schema  # noqa: E402
 from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
@@ -67,6 +69,7 @@ def run_object(**over):
         "status": "in_progress",
         "conclusion": None,
         "created_at": "2026-10-11T04:00:00Z",
+        "run_started_at": "2026-10-11T04:00:05Z",
         "head_repository": {"full_name": R},
         **over,
     }
@@ -83,6 +86,11 @@ def jobs(*extra, image="success"):
 
 
 class Candidate(Tool):
+    def setUp(self):
+        super().setUp()
+        for tool in ("podman", "rpm", "curl", "git"):
+            (self.dir / "bin" / tool).symlink_to(pathlib.Path(__file__).with_name("fake_release_tools.py"))
+
     def github(
         self,
         req=None,
@@ -162,7 +170,7 @@ class Candidate(Tool):
     def fixture(self):
         return json.loads((self.dir / "registry.json").read_text())
 
-    def check(self, run_id="412", ref="refs/heads/iso-v0"):
+    def check(self, run_id="412", ref="refs/heads/iso-v0", **extra):
         return subprocess.run(
             [
                 sys.executable,
@@ -175,7 +183,7 @@ class Candidate(Tool):
             capture_output=True,
             text=True,
             cwd=ROOT,
-            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref},
+            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref, **extra},
         )
 
     def order(self):
@@ -218,6 +226,45 @@ class Candidate(Tool):
             ("kernel-digests.txt", KERNEL),
         ):
             self.assertEqual((self.dir / "out" / name).read_text(), text)
+
+    def test_check_writes_one_class_record_per_repository(self):
+        self.github()
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        got = self.candidate()
+        self.assertEqual(got["schema_version"], 2)
+        self.assertEqual(got["build_time"], "2026-10-11T04:00:05Z")
+        schema.validate(got, schema.load("release-candidate"))
+        self.assertEqual(
+            [(c["repository"], c["baseline_digest"], c["candidate_digest"], c["class"]) for c in got["classes"]],
+            [(f"{REG}/{n}", digest(i + 8), digest(i + 1), "feature") for i, n in enumerate(NAMES)],
+        )
+        calls = (self.dir / "calls.log").read_text().splitlines()
+        self.assertTrue([c for c in calls if c.startswith("podman create")])
+        self.assertFalse([c for c in calls if c.split()[:2] in (["podman", "start"], ["podman", "run"])])
+
+    def test_a_class_reason_reaches_the_job_summary(self):
+        self.github(labels={"org.opencontainers.image.revision": ""})
+        summary = self.dir / "summary.md"
+        r = self.check(GITHUB_STEP_SUMMARY=str(summary))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("unlabelled-baseline", summary.read_text())
+
+    def test_a_class_reason_goes_to_stderr_without_a_summary_file(self):
+        self.github(labels={"org.opencontainers.image.revision": ""})
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("unlabelled-baseline", r.stderr)
+
+    def test_a_command_that_hangs_refuses(self):
+        import release_candidate as module
+
+        saved, module.TIMEOUT = module.TIMEOUT, 0.1
+        try:
+            with self.assertRaisesRegex(module.Refused, "timed out"):
+                module.tool("sleep", "5")
+        finally:
+            module.TIMEOUT = saved
 
     def test_a_completed_build_is_a_candidate_too(self):
         self.github(run=run_object(status="completed", conclusion="success"))
@@ -322,14 +369,12 @@ class Candidate(Tool):
         self.github(latest=False, extra={"errors": [f"{REG}/athanor-system:latest"]})
         self.refused("athanor-system:latest cannot be read")
 
-    def test_latest_at_the_candidate_is_a_no_op(self):
+    def test_latest_at_the_candidate_refuses_until_the_rerun_rule_exists(self):
         self.github()
         fx = self.fixture()
         fx["tags"][f"{REG}/athanor-system:latest"] = digest(1)
         self.registry(fx)
-        r = self.check()
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.candidate()["order"][0]["verdict"], "equal")
+        self.refused("already the candidate")
 
     def test_an_older_candidate_refuses(self):
         self.github(labels={"org.opencontainers.image.created": "2026-10-12T00:00:00Z"})

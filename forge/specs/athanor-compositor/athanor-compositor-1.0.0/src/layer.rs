@@ -5,13 +5,15 @@
 //! overlay layer holds the keyboard while it is mapped, an on-demand one takes it when clicked,
 //! and one with none never has it.
 
-use crate::state::State;
+use crate::identity::Privilege;
+use crate::state::{granted, State};
 use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, LayerSurface, WindowSurfaceType,
 };
 use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::shell::wlr_layer::{
     KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
     WlrLayerShellState,
@@ -74,6 +76,9 @@ impl State {
     /// out when its size changed or it has had none, and the keyboard follows its
     /// interactivity.
     pub fn layer_commit(&mut self, surface: &WlSurface) {
+        if self.refuse_top_layers(surface) {
+            return;
+        }
         let Some(layer) = self.space.outputs().find_map(|output| {
             let mut map = layer_map_for_output(output);
             let layer = map
@@ -107,6 +112,39 @@ impl State {
         } else if focused && !(layer.can_receive_keyboard_focus() && mapped(surface)) {
             self.refocus(surface);
         }
+    }
+
+    /// A surface on the top or overlay layer, whether asked for at its creation or by
+    /// `set_layer` since, of a client not granted them (OS4): unmapped and closed. A layer takes
+    /// effect at a commit, so a refused surface is never drawn there.
+    fn refuse_top_layers(&mut self, surface: &WlSurface) -> bool {
+        if surface
+            .client()
+            .is_some_and(|client| granted(&client, Privilege::TopLayers))
+        {
+            return false;
+        }
+        let refused = self.space.outputs().find_map(|output| {
+            let mut map = layer_map_for_output(output);
+            let layer = map
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .cloned()?;
+            if !matches!(layer.layer(), Layer::Top | Layer::Overlay) {
+                return None;
+            }
+            map.unmap_layer(&layer);
+            Some(layer)
+        });
+        let Some(layer) = refused else {
+            return false;
+        };
+        tracing::info!(
+            namespace = layer.namespace(),
+            "a surface on the top layers of a client not granted them was closed"
+        );
+        layer.layer_surface().send_close();
+        self.refocus(surface);
+        true
     }
 
     /// Gives the keyboard to `surface`, the exclusive layer. A popup grab that holds the

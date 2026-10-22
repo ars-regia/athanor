@@ -3,10 +3,11 @@
 
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, Node, NodeId, Orientation, Rect, Role, Toggled, TreeId,
-    TreeInfo, TreeUpdate,
+    Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role, Toggled,
+    TreeId, TreeInfo, TreeUpdate,
 };
 
+/// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id as u64)
 }
@@ -51,6 +52,31 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        Kind::Menu => Node::new(Role::Menu),
+        Kind::MenuItem(label) => {
+            let mut node = Node::new(Role::MenuItem);
+            node.set_label(label.as_str());
+            node.add_action(Action::Click);
+            node
+        }
+        // AccessKit's splitter is AT-SPI's separator.
+        Kind::Separator => Node::new(Role::Splitter),
+        // An image without a description only decorates: its node is hidden, so assistive
+        // technologies skip it.
+        Kind::Image { description, .. } => {
+            let mut node = Node::new(Role::Image);
+            if description.is_empty() {
+                node.set_hidden();
+            } else {
+                node.set_label(description.as_str());
+            }
+            node
+        }
+        Kind::Tooltip(text) => {
+            let mut node = Node::new(Role::Tooltip);
+            node.set_label(text.as_str());
+            node
+        }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
         // active, as GTK's ToggleButton.
         Kind::Toggle { label, active } => {
@@ -64,6 +90,36 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // A check box or a switch with a toggled state, named by its label.
+        Kind::Check { label, active } | Kind::Switch { label, active } => {
+            let role = if matches!(widget.kind, Kind::Switch { .. }) {
+                Role::Switch
+            } else {
+                Role::CheckBox
+            };
+            let mut node = Node::new(role);
+            node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        Kind::Slider(slider) => {
+            let mut node = Node::new(Role::Slider);
+            node.set_label(slider.name.as_str());
+            node.set_numeric_value(slider.value);
+            node.set_min_numeric_value(slider.min);
+            node.set_max_numeric_value(slider.max);
+            node.set_numeric_value_step(slider.step);
+            node.set_orientation(Orientation::Horizontal);
+            for action in [Action::Increment, Action::Decrement, Action::SetValue] {
+                node.add_action(action);
+            }
+            node
+        }
         Kind::Field(field) => {
             let mut node = Node::new(Role::TextInput);
             node.set_label(field.name.as_str());
@@ -71,12 +127,45 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::SetValue);
             node
         }
+        // How far the content is scrolled, in logical pixels, as GTK's ScrolledWindow.
+        Kind::Scroll { height, offset } => {
+            let mut node = Node::new(Role::ScrollView);
+            // A hit test finds nothing of the content outside the viewport.
+            node.set_clips_children();
+            node.set_scroll_y(f64::from(*offset));
+            node.set_scroll_y_min(0.0);
+            node.set_scroll_y_max(f64::from((ui.content_height(id) - height).max(0.0)));
+            node
+        }
+        Kind::List { name, .. } => {
+            let mut node = Node::new(Role::ListBox);
+            node.set_label(name.as_str());
+            node
+        }
+        Kind::ListRow(text) => {
+            let mut node = Node::new(Role::ListBoxOption);
+            node.set_label(text.as_str());
+            // As GTK's rows, selected or not once the list has a selection, and neither before.
+            if let Some(selected) = widget.parent.and_then(|list| ui.selected(list)) {
+                node.set_selected(selected == id);
+            }
+            node.add_action(Action::Click);
+            node
+        }
     };
     if widget.is_focusable() {
         node.add_action(Action::Focus);
     }
+    if let Some(expanded) = widget.expanded {
+        node.set_has_popup(HasPopup::Menu);
+        node.set_expanded(expanded);
+    }
+    if let Some(description) = ui.description(id) {
+        node.set_description(description);
+    }
     node.set_bounds(bounds(ui, id, scale));
-    let mut children: Vec<NodeId> = widget.children.iter().map(|&c| node_id(c)).collect();
+    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
     if matches!(widget.kind, Kind::Field(_)) {
         children.push(text_run_id(id));
     }
@@ -107,15 +196,16 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
-/// The whole tree, as the adapter's first update and after every change.
+/// The whole tree of the visible widgets, as the adapter's first update and after every change.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
     tree.toolkit_name = Some("athanor-toolkit".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
+    let shown = || (0..ui.len()).filter(|&id| ui.is_visible(id));
     TreeUpdate {
-        nodes: (0..ui.len())
+        nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
-            .chain((0..ui.len()).filter_map(|id| text_run(ui, id, scale)))
+            .chain(shown().filter_map(|id| text_run(ui, id, scale)))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -123,10 +213,11 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     }
 }
 
-/// The widgets that `update` leaves without a usable node: missing, of an unknown role, or
-/// focusable without a name.
+/// The visible widgets that `update` leaves without a usable node: missing, of an unknown role,
+/// or focusable without a name.
 pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
     (0..ui.len())
+        .filter(|&id| ui.is_visible(id))
         .filter(|&id| {
             let Some((_, node)) = update.nodes.iter().find(|(n, _)| *n == node_id(id)) else {
                 return true;
@@ -141,13 +232,16 @@ impl Ui {
     pub fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
         let id = usize::try_from(request.target_node.0)
             .ok()
-            .filter(|&id| id < self.len())?;
+            .filter(|&id| id < self.len() && self.is_visible(id))?;
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             (Action::Focus, _) => {
                 self.set_focus(Some(id));
                 None
             }
+            (Action::Increment, _) => self.step_value(id, 1),
+            (Action::Decrement, _) => self.step_value(id, -1),
+            (Action::SetValue, Some(ActionData::NumericValue(value))) => self.set_value(id, *value),
             (Action::SetValue, Some(ActionData::Value(value))) => self.set_field_text(id, value),
             _ => None,
         }
@@ -178,9 +272,14 @@ mod tests {
         ui.add_title_bar();
         ui.layout();
 
+        let hidden = ui.add(group, Kind::Button("Hidden".into()));
+        ui.set_visible(hidden, false);
+        ui.layout();
         let mut update = tree_update(&ui, 1.0);
-        // Every widget, and the field's text run.
-        assert_eq!(update.nodes.len(), ui.len() + 1);
+        // Every visible widget, and the field's text run.
+        let visible = (0..ui.len()).filter(|&id| ui.is_visible(id)).count();
+        assert_eq!(update.nodes.len(), visible + 1);
+        assert!(update.nodes.iter().all(|(n, _)| *n != node_id(hidden)));
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
 
         // The check notices a widget whose node is gone or nameless.
@@ -246,6 +345,44 @@ mod tests {
             );
         }
         assert_eq!(missing(ui, &update), Vec::<WidgetId>::new());
+    }
+
+    #[test]
+    fn a_check_and_a_switch_read_as_gtks() {
+        let mut ui = Ui::new("Choices", Theme::default(), false);
+        let choice = |switch, label: &str, active| {
+            let label = label.into();
+            if switch {
+                Kind::Switch { label, active }
+            } else {
+                Kind::Check { label, active }
+            }
+        };
+        let check = ui.add(Ui::ROOT, choice(false, "Check", true));
+        let switch = ui.add(Ui::ROOT, choice(true, "Switch", false));
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let read = |id: WidgetId| {
+            let n = &update.nodes[id].1;
+            (
+                n.role(),
+                n.label().map(str::to_owned),
+                n.toggled(),
+                n.supports_action(Action::Click),
+            )
+        };
+        let (checked, off) = (Some(Toggled::True), Some(Toggled::False));
+        assert_eq!(read(check), (Role::CheckBox, Some("Check".into()), checked, true));
+        assert_eq!(read(switch), (Role::Switch, Some("Switch".into()), off, true));
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(switch),
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), Some(Event::Toggled(switch)));
+        assert!(ui.is_active(switch));
     }
 
     #[test]
@@ -340,6 +477,179 @@ mod tests {
             .find(|(n, _)| *n == text_run_id(field))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
+    }
+
+    #[test]
+    fn a_menu_its_button_and_a_tooltip_read_as_gtks() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Dock", Theme::default(), false);
+        let app = ui.add(Ui::ROOT, Kind::Button("Files".into()));
+        ui.set_has_popup(app, true);
+        ui.set_tooltip(app, Some("Files"));
+        ui.set_description(app, Some("Running"));
+        ui.layout();
+        let read = |ui: &Ui, id: WidgetId| node(ui, id, 1.0);
+        let button = read(&ui, app);
+        assert_eq!(button.has_popup(), Some(HasPopup::Menu));
+        assert_eq!(button.is_expanded(), Some(false));
+        assert_eq!(button.description(), Some("Running"));
+        ui.set_expanded(app, true);
+        assert_eq!(read(&ui, app).is_expanded(), Some(true));
+
+        let mut menu = Ui::new("Files", Theme::default(), false);
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        let item = menu.add(list, Kind::MenuItem("New Window".into()));
+        let line = menu.add(list, Kind::Separator);
+        menu.layout();
+        assert_eq!(read(&menu, list).role(), Role::Menu);
+        let item = read(&menu, item);
+        assert_eq!(
+            (item.role(), item.label()),
+            (Role::MenuItem, Some("New Window"))
+        );
+        assert!(item.supports_action(Action::Click) && item.supports_action(Action::Focus));
+        // AccessKit's splitter is AT-SPI's separator.
+        assert_eq!(read(&menu, line).role(), Role::Splitter);
+        assert_eq!(
+            missing(&menu, &tree_update(&menu, 1.0)),
+            Vec::<WidgetId>::new()
+        );
+
+        let mut tip = Ui::new("Files", Theme::default(), false);
+        let text = tip.add(Ui::ROOT, Kind::Tooltip("Files".into()));
+        tip.layout();
+        let text = read(&tip, text);
+        assert_eq!((text.role(), text.label()), (Role::Tooltip, Some("Files")));
+    }
+
+    #[test]
+    fn a_slider_reads_as_gtks_and_obeys_assistive_technologies() {
+        let mut ui = Ui::new("Values", Theme::default(), false);
+        let id = ui
+            .slider(Ui::ROOT, "Level", 0.0, 10.0, 3.0, 9.0)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let n = &update.nodes[id].1;
+        assert_eq!((n.role(), n.label()), (Role::Slider, Some("Level")));
+        assert_eq!(n.orientation(), Some(Orientation::Horizontal));
+        assert_eq!(
+            (
+                n.numeric_value(),
+                n.min_numeric_value(),
+                n.max_numeric_value(),
+                n.numeric_value_step()
+            ),
+            (Some(9.0), Some(0.0), Some(10.0), Some(3.0))
+        );
+        for action in [
+            Action::Increment,
+            Action::Decrement,
+            Action::SetValue,
+            Action::Focus,
+        ] {
+            assert!(n.supports_action(action), "{action:?}");
+        }
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+
+        let request = |action, data| ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(id),
+            data,
+        };
+        let changed = Some(Event::Changed(id));
+        assert_eq!(ui.do_action(&request(Action::Increment, None)), changed);
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.do_action(&request(Action::Increment, None)), None);
+        assert_eq!(ui.do_action(&request(Action::Decrement, None)), changed);
+        assert_eq!(ui.value(id), Some(9.0));
+        let set = |v| request(Action::SetValue, Some(ActionData::NumericValue(v)));
+        assert_eq!(ui.do_action(&set(1.4)), changed);
+        assert_eq!(ui.value(id), Some(0.0));
+        assert_eq!(ui.do_action(&set(99.0)), changed);
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.do_action(&set(f64::NAN)), None);
+        assert_eq!(ui.value(id), Some(10.0));
+        // The text form of SetValue is for a field.
+        let text = request(Action::SetValue, Some(ActionData::Value("3".into())));
+        assert_eq!(ui.do_action(&text), None);
+        assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_list_in_a_scroll_reads_as_gtks() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 100.0);
+        let list = ui.list(scroll, "Fruit");
+        let rows: Vec<WidgetId> = ["Apple", "Pear", "Plum", "Fig", "Lime", "Kiwi"]
+            .iter()
+            .map(|name| ui.list_row(list, name))
+            .collect();
+        ui.layout();
+        let unselected = tree_update(&ui, 1.0);
+        assert_eq!(unselected.nodes[rows[0]].1.is_selected(), None);
+        assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
+        ui.key(crate::Key::End);
+        let update = tree_update(&ui, 1.0);
+        let n = |id: WidgetId| &update.nodes[id].1;
+        assert_eq!(
+            (n(list).role(), n(list).label()),
+            (Role::ListBox, Some("Fruit"))
+        );
+        assert_eq!(
+            n(list).children(),
+            rows.iter().map(|&r| node_id(r)).collect::<Vec<_>>()
+        );
+        let read = |id: WidgetId| (n(id).role(), n(id).label(), n(id).is_selected());
+        assert_eq!(
+            read(rows[0]),
+            (Role::ListBoxOption, Some("Apple"), Some(false))
+        );
+        assert_eq!(
+            read(rows[5]),
+            (Role::ListBoxOption, Some("Kiwi"), Some(true))
+        );
+        assert!(
+            n(rows[0]).supports_action(Action::Click) && n(rows[0]).supports_action(Action::Focus)
+        );
+        assert_eq!(
+            update.focus,
+            node_id(rows[5]),
+            "the focus is the selected row"
+        );
+
+        // The scroll says how far it is scrolled; the rows above its viewport stay in the tree.
+        let content: f32 = rows.iter().map(|&r| ui.widget(r).rect.h).sum();
+        let offset = f64::from(content - 100.0);
+        assert_eq!(n(scroll).role(), Role::ScrollView);
+        assert!(n(scroll).clips_children(), "a hit test finds no row out of view");
+        let scrolled = (
+            n(scroll).scroll_y(),
+            n(scroll).scroll_y_min(),
+            n(scroll).scroll_y_max(),
+        );
+        assert_eq!(scrolled, (Some(offset), Some(0.0), Some(offset)));
+        assert!(ui.widget(rows[0]).rect.bottom() < ui.widget(scroll).rect.y);
+        assert!(update.nodes.iter().any(|(id, _)| *id == node_id(rows[0])));
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
+
+        let request = |target: WidgetId, action| ActionRequest {
+            action,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(target),
+            data: None,
+        };
+        assert_eq!(
+            ui.do_action(&request(rows[0], Action::Click)),
+            Some(Event::Selected(rows[0]))
+        );
+        assert_eq!(ui.selected(list), Some(rows[0]));
+        assert_eq!(ui.do_action(&request(rows[3], Action::Focus)), None);
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[3]), Some(rows[0]))
+        );
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {
