@@ -41,7 +41,8 @@ change the order or the release points of the releases before 1.0.
 ## Decision
 
 1. **Row 7 and key 2 ship in 1.0, together, in a single rotation from key 1 to the key
-   hierarchy.** This amends item 2 of ADR-0123, which placed them in 0.10. No release signed
+   hierarchy.** This amends item 2 of ADR-0123, which placed them in 0.10, and item 4 for row 7:
+   row 7 no longer waits for the Fedora 44 decision point to move. No release signed
    with key 2 exists before the hierarchy does, as D25 says. "Before 1.0" in ADR-0103 D5 and in
    `doc_update_trust.md` UT2 is read as: the hierarchy exists before 1.0 is signed.
    - Option A, chosen: **in 1.0.** The amendment of UT2, the code and the ceremony get the time
@@ -55,9 +56,12 @@ change the order or the release points of the releases before 1.0.
 3. **Release 0.10 "base" is signed with key 1.** It drops row 7 and changes nothing else.
 4. **A transitional release follows 0.10: 0.11 "anchor", the last 0.x release before 1.0.** It
    is signed with key 1 and carries the new trust anchor in its policy: the public half of the
-   hierarchy's root, as Task B1 of the row 7 plan defines it. A Fedora rebase needed before 1.0
-   ships as a release 0.x of its own before 0.11. Its scope is that and nothing else assigned; fixes that
-   land meanwhile ship in it as usual. It is a new 0.x row of section 4.1 of `release-1.0.md`.
+   hierarchy's root, which machines pin (`doc_update_trust.md` UT2), when Task B1 of the row 7
+   plan names a root other than key 2, whose public half every image already trusts. Its scope
+   is that and nothing else assigned; fixes that land meanwhile ship in it as usual. It is a new
+   0.x row of section 4.1 of `release-1.0.md`. "0.11" names its place, not a fixed number: a
+   Fedora rebase needed before 1.0 ships as a release 0.x of its own before it, and the
+   transitional release takes the next free number.
 5. **1.0 is the first release signed under the hierarchy.** Key 1 is retired, and PB5b closes,
    at the first release after 1.0. This amends the close ADR-0123 item 2 gave PB5b.
 6. **The online key lives 180 days and is renewed at 90.**
@@ -68,7 +72,8 @@ change the order or the release points of the releases before 1.0.
 
 ## Consequences
 
-- Amended: ADR-0123 items 2 and 4, item 4 for row 7 only, which it no longer names. The rest of
+- Amended: ADR-0123 items 2 and 4; item 4 no longer applies to row 7 and still applies to
+  row 25. The rest of
   ADR-0123 holds. Its status line, and its row in the index, name this record; its text keeps its words.
 - `docs/operations/release-1.0.md` becomes revision 5: the status line, the counts and lists of
   the releases before 1.0 (sections 1, 4, 4.2 and 5), rows 4 and 7 of section 2, the sentence on

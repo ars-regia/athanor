@@ -22,8 +22,10 @@ The date of the Fedora rebase is set outside the project. Fedora 43 reaches its 
 2026-12-02. Fedora 45 final is due on 2026-10-20; if its image is not green by mid-November 2026,
 the base moves to Fedora 44 instead ([ADR-0078](../decisions/0078-fedora-release-target.md)). Release 0.9 ships on Fedora 43; the rebase ships as
 release 0.10 "base" before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)). The Fedora 43 line gets no feature
-release after 0.9. Release 0.11 "anchor" follows 0.10 and is not a rebase ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). 0.11 is the last 0.x release before 1.0: a Fedora rebase needed
-before 1.0 ships as a release 0.x of its own before 0.11 (`doc_own_stack.md` section 8).
+release after 0.9. Release 0.11 "anchor" follows 0.10 and is not a rebase ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). The transitional release is the last 0.x release before 1.0, and
+"0.11" names that place, not a fixed number: a Fedora rebase needed before 1.0 ships as a
+release 0.x of its own before it, and the transitional release takes the next free number
+(`doc_own_stack.md` section 8).
 
 ## 2. In 1.0
 
@@ -38,7 +40,7 @@ pull request that builds the row adds it, under that name or a better one.
 | One human approval per promotion to `:stable`, in the environment `release`, and `:latest` signed with no approval from step 3 of the image key rotation, the switch of Task B4b of `docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md`, merged after 0.11 and before 1.0 is signed ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)); agents open, push and merge pull requests as a GitHub App (D2, D25, ADR-0104) | ADR-0103 D2, D25; ADR-0104; `doc_pipeline.md` PL5, PL56, PL60 | `python3 scripts/github-settings/ghsettings.py diff`; `release` in `.github/settings/environments.json`; `.github/workflows/promote-stable.yml` runs `system/promote.sh` only in its job `promote`, in `release` |
 | Signed evidence bundle copied off GitHub at promotion (D23) | `doc_pipeline.md` PL42 | `system/evidence-bundle.sh verify`, run by both jobs of `.github/workflows/promote-stable.yml`; `system/tests/test_evidence_bundle.py` |
 | Resolved Fedora package set recorded for every build (D16) | `doc_update_delivery.md` UD28 | `system/package-set.sh`, artifact `package-sets`; `system/promote.sh` refuses a promoted image without its set (`test_promote.py` `test_a_promoted_image_without_its_package_set_is_refused`); the set is in the evidence bundle |
-| Key hierarchy for the image key; MOK interim key set with not-after and revocation (D5; in 1.0, [ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends item 2 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)) | `doc_update_trust.md` UT2, [ADR-0084](../decisions/0084-key-custody-model.md) | `scripts/devvm/acceptance/run.sh` (stages `rotate`, `recover`); to add: `cargo test -p athanor-update` cases for an expired and a revoked key |
+| Key hierarchy for the image key; MOK interim key set with not-after and revocation (D5; in 1.0, [ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends items 2 and 4 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), item 4 for row 7 only) | `doc_update_trust.md` UT2, [ADR-0084](../decisions/0084-key-custody-model.md) | `scripts/devvm/acceptance/run.sh` (stages `rotate`, `recover`); to add: `cargo test -p athanor-update` cases for an expired and a revoked key |
 | Installer path from the ISO to the first session: Anaconda Users and Timezone pages, MOK import in `%post` with a shown one-time password, x86-64-v3 and UEFI check at ISO start (D17) | `doc_platform_experience.md`, `doc_kernel_profile.md` D3, D14 | `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR` (the install, MokManager answered with the shown password, the first session and Settings; `SECURE_BOOT=1` on Secure Boot firmware); `.github/workflows/accept.yml`; `python3 scripts/verify.py installer`; `system/tests/test_installer_scripts.py`; to add: the `SECURE_BOOT=1` case in `accept.yml` (#252) |
 | Greeter: user list, "Other user", PAM conversation by message type (D7) | `doc_lock_and_prompts.md` LP19 for 0.9, LP18 step 4 for 1.1 | `doc_lock_and_prompts.md` section 5, items 18 to 24: `cargo test -p athanor-greeter-ui` (items 18 to 22, the lockout and expiry against a fake greetd among them); `scripts/devvm/greeter-acceptance.sh` (items 23 and 24, on the dev VM) |
 | Recovery and rollback: text console, GoBack, greenboot | `doc_recovery.md` R1 to R7 | `cargo test -p athanor-update`; `scripts/devvm/acceptance/run.sh` (stage `goback`); `scripts/devvm/switch-acceptance.sh rollback`; `scripts/devvm/acceptance/run.sh` (stages `console` and `greenboot`: acceptance 1 and 7 of `doc_recovery.md`) |
@@ -128,11 +130,12 @@ rows narrowed below.
 ### 4.2 Rows split or narrowed
 
 - **Row 7, key hierarchy.** It leaves 0.9 for 1.0, with the PB5b rotation, its key ceremony
-  and key 2 ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends item 2 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), where it was in 0.10).
+  and key 2 ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends items 2 and 4 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), item 4 for row 7 only; it was in 0.10).
   0.10 is signed with key 1 and changes nothing of the keys: its policy already trusts the
   public half of key 2, committed by `secrets.md` section 4.1 step 1, as every image since. Release 0.11 "anchor" is signed with key 1 and
-  carries the new trust anchor in its policy, the public half of the hierarchy's root as Task B1
-  of the row 7 plan defines it; key 2 arrives with the hierarchy in 1.0, the
+  carries the new trust anchor in its policy: the public half of the hierarchy's root, which
+  machines pin (`doc_update_trust.md` UT2), when Task B1 of the row 7 plan names a root other
+  than key 2; key 2 arrives with the hierarchy in 1.0, the
   first release signed under it. Key 1 is retired, and PB5b closes, at the first release
   after 1.0. [ADR-0103](../decisions/0103-audit-5-decisions.md) D25 stands: no release is
   signed with key 2 before the hierarchy exists. `doc_update_trust.md` UT2 already says
