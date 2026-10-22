@@ -1,7 +1,7 @@
 # Spike C1: results of the own compositor, before the console sessions
 
 Task 10 of `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md`, written on
-2026-10-22 against `origin/iso-v0` at `f12b0cc7` (tasks 1 to 8 merged). Task 9, the maintainer's
+2026-10-22 against `origin/iso-v0` at `071feaa8` (tasks 1 to 8 merged; #684, the console commands of task 9, also merged). The crate's `src/` and `data/` are unchanged since `f12b0cc7`, the base of the first version of this document, so the counts below were taken at that commit and hold at this one (`git diff --stat f12b0cc7 071feaa8 -- forge/specs/athanor-compositor` shows `README.md` only). Task 9, the maintainer's
 console sessions on the laptop and on the NVIDIA desktop, has not run: its section below is empty
 and marked pending. Every figure names its source; a figure with no source was not measured, and
 the text says so. The crate is `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`; "README"
@@ -43,7 +43,7 @@ file, which counts every line, blank and comment lines included. Run on 2026-10-
 | **Total `src/`** | **8297** | sum of the rows |
 | of which outside `fixture.rs` | 5641 | 8297 minus 2656 |
 | `data/privileged-clients` | 6 | the shipped allow-list |
-| `README.md` | 259 | |
+| `README.md` | 447 | grew by 188 lines with the console sessions section of #684 |
 
 Test counts by file come from `rg -c '#\[test\]'`: 28 in `fixture.rs`, 12 in `identity.rs`, 4 in
 `udev.rs`, 3 in `main.rs`, 2 each in `state.rs` and `input.rs`, 1 each in `handlers.rs`,
@@ -64,6 +64,7 @@ rig compares them pixel by pixel, with `rig.sh surface <surface>`.
 | `chooser` | 12 files | the GTK4 layout chooser | cosmic-comp | not run under the own compositor; on cosmic-comp unchanged, 12 goldens, 0 pixels | #577 |
 | `bar`, `bar-network`, `bar-bluetooth` | light and dark; 1.0 and 1.5; en, de, rtl (12 files for `bar`) | the GTK4 bar and its popups | cosmic-comp | before task 5: differs in every case; eight causes, none a layer-shell defect (below). At the head: not rerun | #591 |
 | `dock` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 dock | cosmic-comp | before task 5: differs in every case; same eight causes. At the head the dock's top-layer surface is closed (no allow-list line) | #591 |
+| `toolkit-dock` (in `dock/`) | light and dark; 1.0 and 1.5; en, de, rtl (12 files, `toolkit-dock-*.png`) | the dock drawn with `athanor-toolkit`, beside the GTK dock | the rig, with `ATHANOR_DOCK_BIN` set to the toolkit dock; not the own compositor | not run under `athanor-compositor`; held to 16 differing pixels against the GTK dock's 64 | #691 |
 | `launcher` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 launcher | cosmic-comp | before task 5: draws correctly; differences are the background outside the surface and the caret only. At the head the launcher (Overlay layer, `surface.rs:97`) is closed (no allow-list line) | #609 |
 
 Task 3 asked that every difference be explained one by one. #591 gives these eight causes for the
@@ -206,7 +207,16 @@ No figure here comes from a monitor: all hardware figures are pending task 9 (se
 
 Nothing in this section was run. The commands and the maintainer's sessions are task 9; this
 section gets the tables below once it has run. The commands are in the "Console sessions"
-section of the crate's README, which PR #684 (branch `c1/t9-console`) adds and this base lacks. Until then every cell is empty on purpose.
+section of the crate's README (#684, merged). Until the sessions run every cell is empty on purpose.
+
+Task 9 will add, from the maintainer's archive `~/c1/c1-task9-<host>.tar.gz` (the compositor log
+with the report every 10 s, the journal, `dmesg` lines of the GPU and the maintainer's notes):
+frame times on a monitor for the laptop and for the NVIDIA desktop (three outputs), which are
+the first on the DRM backend on real hardware; the outcome of one suspend and resume and one
+output unplugged and plugged on the laptop; the first view of the bar, dock and a terminal drawn
+under the own compositor on a console; whether explicit sync is negotiated on NVIDIA's DRM node
+(section 8); and every defect met, with its log lines, in 7.3. The README's step 7 says this
+document does not exist yet; that sentence is stale once this one merges.
 
 **7.1 Frame times on a console**
 
@@ -237,7 +247,7 @@ bus (#604). The desktop gets one hour of three-output use only.
 ## 8. NVIDIA defects
 
 Recorded on NVIDIA so far, with the sources. The compositor has not drawn on NVIDIA's DRM
-backend: only headless (task 2), nested (task 6) and the VM (task 8) have run.
+backend (that is task 9): only headless (task 2), nested (task 6) and the VM (task 8) have run.
 
 | Defect | Where | Status | Source |
 | --- | --- | --- | --- |
@@ -249,7 +259,7 @@ backend: only headless (task 2), nested (task 6) and the VM (task 8) have run.
 
 ## 9. Known limits marked `ponytail:` in the code
 
-`rg -n 'ponytail:' forge/specs/athanor-compositor/athanor-compositor-1.0.0/src` at `f12b0cc7`
+`rg -n 'ponytail:' forge/specs/athanor-compositor/athanor-compositor-1.0.0/src` at `f12b0cc7` (unchanged at `071feaa8`)
 finds 16 markers (and the README's mention of the `udev.rs` ones).
 
 | File and line | Limit | Upgrade path stated |
