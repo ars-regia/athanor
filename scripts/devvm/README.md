@@ -197,8 +197,8 @@ scripts/devvm/reset.sh             # back to the freshly installed system
 
 ### Resources
 
-The self-hosted runner guest takes 12 vCPUs and 16 GB (`scripts/runner/runner.env`), this
-VM 4 vCPUs and 8 GB: both together leave the desktop about 7 GB on a 31 GB host.
+The self-hosted runner guest takes 8 vCPUs and 12 GB (`scripts/runner/runner.env`), this
+VM 4 vCPUs and 8 GB: both together leave the desktop about 11 GB on a 31 GB host.
 
 ### What the VM can and cannot show
 
