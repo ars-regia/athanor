@@ -360,10 +360,11 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     if status.staged.as_ref().is_some_and(|staged| staged.download_only && staged.digest == candidate.digest) {
         return if security { settled_security(settle_security(ctx, status, lineage, automatic), None) } else { (UpdateState::Downloaded, None) };
     }
-    // UT13: a security digest that waits, unlocked or postponed, is not replaced by a feature
+    // UT13: a security digest that waits, unlocked or postponed (`local` is `downloaded`; a held or
+    // older one is no candidate for an unlock), is not replaced by a feature
     // digest. The state stays the one the staged digest has (a failed unlock is retried); the
     // feature digest is offered at the first check after the security digest is applied.
-    if !security && status.staged.as_ref().is_some_and(|staged| matches!(stored_class(ctx, policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })) {
+    if local == UpdateState::Downloaded && !security && status.staged.as_ref().is_some_and(|staged| matches!(stored_class(ctx, policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })) {
         return settled_security(settle_security(ctx, status, lineage, automatic), None);
     }
     // UT12 holds a feature update on a metered connection; a security update downloads, unless
@@ -1481,6 +1482,27 @@ pub(crate) mod tests {
             assert_eq!((state.update, state.last_error, state.downloaded.as_ref().map(|d| d.digest.clone())), (before.update, ErrorCode::None, Some(attested())), "{name}");
             assert_eq!(state.postpone, before.postpone, "{name}");
             assert_eq!(machine.store.lineage().expect("stored"), lineage, "{name}: the lineage does not move");
+        }
+    }
+
+    #[test]
+    fn a_held_or_older_staged_security_digest_is_not_unlocked_by_a_feature_candidate() {
+        for name in ["held", "older"] {
+            let (machine, tools) = offered_attested(&format!("no-unlock-{name}"), Some(security()));
+            stage(&tools);
+            store_attestation(&machine, &tools);
+            let newest = if name == "held" {
+                machine.store.set_held(&attested()).expect("GoBack()");
+                3000
+            } else {
+                tools.status.borrow_mut().booted.build_time = 5000;
+                6000
+            };
+            let tools = tools.offering(&digest(5), newest);
+            let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+            assert!(!tools.called("apply_downloaded"), "{name}: {:?}", tools.calls.borrow());
+            assert_ne!(state.update, UpdateState::WillApplyAtNextShutdown, "{name}");
+            assert_eq!(state.update, UpdateState::Downloaded, "{name}: the feature digest is published as usual");
         }
     }
 
