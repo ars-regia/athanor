@@ -1534,6 +1534,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         );
         assert_eq!(focus(&run.state), window, "and does not take the keyboard");
     }
+    // The escape does not decay when the identity's last connection goes: it ends only by a click.
     run.until("the second connection is gone", |state| {
         state.escaped.len() == 1
     });
@@ -1780,6 +1781,65 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
         run.state.space.element_location(&window),
         placed,
         "centred on the first output"
+    );
+    run.stop();
+}
+
+/// An output that takes another size (C1 task 8): the outputs side by side again leave no window
+/// outside them and no pointer outside them.
+#[test]
+fn task8_an_output_that_shrinks_strands_no_window_and_no_pointer() {
+    let mut run = Running::start(None);
+    let window = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let inside = area.loc + Point::from((area.size.w - 20, area.size.h - 20));
+    run.state.space.relocate_element(&window, inside);
+    run.state
+        .pointer_to(inside.to_f64(), smithay::backend::input::InputTime::now());
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let shown = |area: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|output| output.overlaps(area))
+    };
+    let moved = run
+        .state
+        .space
+        .element_geometry(&window)
+        .expect("the window is mapped");
+    assert!(shown(moved), "the window is on an output");
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert!(
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|output| output.to_f64().contains(at)),
+        "the pointer is on an output"
     );
     run.stop();
 }

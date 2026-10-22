@@ -88,7 +88,7 @@ impl State {
     }
 
     /// Moves the pointer to `location` and gives it to the surface under it.
-    fn pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+    pub(crate) fn pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -217,7 +217,7 @@ fn kept(modifiers: &ModifiersState, sym: Keysym, locked: bool) -> Option<Kept> {
 /// Where a relative motion from `from` to `to` leaves the pointer: at `to` when an output of
 /// `outputs` shows it, else at the edge of the output it is on (the first one when on none),
 /// so that it neither leaves the outputs nor enters a gap between two of different sizes.
-fn confine(
+pub(crate) fn confine(
     outputs: &[Rectangle<i32, Logical>],
     from: Point<f64, Logical>,
     to: Point<f64, Logical>,

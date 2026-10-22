@@ -180,7 +180,8 @@ seconds); the lock client reacts to logind's `Lock` signal (LP4). A lock the use
 never refused. The escape holds for the identity the grant went to (executable and unit), not for
 the connection: none of its exclusive surfaces, on any connection, mapped again or new, takes the
 keyboard until the user clicks on one of its layer surfaces that takes the keyboard (not on its
-windows, nor on a surface that takes none), or its last connection is gone. A lock taken by
+windows, nor on a surface that takes none). It does not end when the identity's connections
+go, so a client that exits and restarts does not take the keyboard again. A lock taken by
 anyone else (idle, before sleep, an administrator's) escapes nobody. Locked, the key is the lock
 surface's like any other. The release of a kept key is kept too, and a pause of the session
 forgets the keys kept before it.

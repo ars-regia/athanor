@@ -334,6 +334,8 @@ impl State {
             head.queued = false;
         }
         self.kept_keys.clear();
+        // A failure may have been the switch's: the monitors that failed are tried again.
+        drm.failed.clear();
         let device_id = drm.node.dev_id();
         self.scan(device_id);
         let crtcs: Vec<crtc::Handle> = match &self.backend {
@@ -479,7 +481,7 @@ impl State {
     }
 
     /// The outputs side by side again, in the order they were, after one changed size.
-    fn arrange_outputs(&mut self) {
+    pub(crate) fn arrange_outputs(&mut self) {
         let mut outputs: Vec<(i32, Output)> = self
             .space
             .outputs()
@@ -500,7 +502,7 @@ impl State {
                 .output_geometry(&output)
                 .map_or(0, |area| area.size.w);
         }
-        self.space.refresh();
+        self.fit_to_outputs();
     }
 
     /// A monitor plugged in on `connector`, driven by `crtc`: an output in its preferred mode,
@@ -615,7 +617,8 @@ impl State {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
-        drm.failed.remove(&connector.handle());
+        // Bandwidth or a CRTC may be free now: the monitors that failed are tried again.
+        drm.failed.clear();
         let Some(head) = drm.outputs.remove(&crtc) else {
             return;
         };

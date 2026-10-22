@@ -204,14 +204,6 @@ impl State {
         self.focus_top();
     }
 
-    /// An identity no connection is left of is no longer escaped.
-    pub fn forget_gone_identities(&mut self) {
-        let Ok(live) = self.live_identities.lock() else {
-            return;
-        };
-        self.escaped.retain(|escaped| live.contains(escaped));
-    }
-
     /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
     /// keyboard leaves them.
     // ponytail: closed, not moved to another output; a shell maps them again where it wants.

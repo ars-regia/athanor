@@ -10,6 +10,7 @@ use crate::winit::Nested;
 use crate::workspace::Group;
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
@@ -71,7 +72,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
@@ -136,8 +137,6 @@ pub struct State {
     pub next_held: u64,
     /// Given to each client's `ClientState`, which sends its id on disconnection.
     pub client_gone: channel::Sender<ClientId>,
-    /// The identity of each connection that lives, once per connection (`forget_gone_identities`).
-    pub live_identities: Arc<Mutex<Vec<Identity>>>,
 
     pub foreign_toplevel_state: ForeignToplevelListState,
     pub toplevel_capture_state: ToplevelCaptureSourceState,
@@ -271,7 +270,6 @@ impl State {
             held: Vec::new(),
             next_held: 0,
             client_gone,
-            live_identities: Arc::default(),
             foreign_toplevel_state,
             toplevel_capture_state,
             image_copy_capture_state,
@@ -318,11 +316,7 @@ impl State {
                 }
             },
         };
-        if let (Some(identity), Ok(mut live)) = (&identity, self.live_identities.lock()) {
-            live.push(identity.clone());
-        }
         Arc::new(ClientState {
-            live: self.live_identities.clone(),
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             security_context: context,
@@ -348,6 +342,13 @@ impl State {
     pub fn remove_output(&mut self, output: &Output) {
         self.close_layers(output);
         self.space.unmap_output(output);
+        self.fit_to_outputs();
+    }
+
+    /// After the outputs changed (one went, or took another size): the windows no output shows
+    /// are centred on the first one, the pointer is brought back onto the outputs and the lock
+    /// surfaces take the size of their output.
+    pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
             .outputs()
@@ -370,6 +371,15 @@ impl State {
             }
         }
         self.space.refresh();
+        if let Some(pointer) = self.seat.get_pointer() {
+            let at = pointer.current_location();
+            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+                self.pointer_to(to, InputTime::now());
+            }
+        }
+        if let Some(lock) = &self.lock {
+            lock.resize(&self.space);
+        }
     }
 
     /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
@@ -759,7 +769,6 @@ fn release_held_on_disconnection(
         .insert_source(gone, |event, _, state| {
             if let channel::Event::Msg(client) = event {
                 state.release_held(&client);
-                state.forget_gone_identities();
             }
         })
         .map_err(|e| e.error)?;
@@ -785,7 +794,6 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     gone: channel::Sender<ClientId>,
-    live: Arc<Mutex<Vec<Identity>>>,
     /// The security context the client connected through, if any (a sandboxed application).
     pub security_context: Option<SecurityContext>,
     /// The privileged globals granted when it connected.
@@ -823,11 +831,6 @@ impl ClientData for ClientState {
             tracing::info!(?client_id, %error, "a client was disconnected");
         }
         // The receiver lives as long as the event loop: an error means the compositor is ending.
-        if let (Some(identity), Ok(mut live)) = (&self.identity, self.live.lock()) {
-            if let Some(at) = live.iter().position(|live| live == identity) {
-                live.swap_remove(at);
-            }
-        }
         if let Err(error) = self.gone.send(client_id) {
             tracing::warn!(%error, "a client's disconnection reached no event loop");
         }

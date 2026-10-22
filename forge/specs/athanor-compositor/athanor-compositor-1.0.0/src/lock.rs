@@ -13,8 +13,8 @@ use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 /// A locked session: the client's lock, its confirmation until the outputs have been drawn
 /// locked, and the lock surface of each output.
@@ -31,6 +31,20 @@ impl Lock {
             .iter()
             .find(|(on, surface)| on == output && surface.alive())
             .map(|(_, surface)| surface.wl_surface())
+    }
+}
+
+impl Lock {
+    /// Each lock surface takes the size of its output, after the outputs were laid out again.
+    pub fn resize(&self, space: &smithay::desktop::Space<smithay::desktop::Window>) {
+        for (output, surface) in &self.surfaces {
+            let Some(area) = space.output_geometry(output) else {
+                continue;
+            };
+            let size = (area.size.w.max(1) as u32, area.size.h.max(1) as u32);
+            surface.with_pending_state(|state| state.size = Some(size.into()));
+            surface.send_configure();
+        }
     }
 }
 
@@ -141,8 +155,28 @@ impl State {
     }
 }
 
-/// A request to logind is in flight: a press meanwhile escapes locally and asks no more.
-static REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+/// When the request to logind in flight started: a press meanwhile escapes locally and asks no
+/// more. The method timeout bounds the call but not the connection or its handshake, so a
+/// request older than twice `LOCK_TIMEOUT` counts as gone.
+static REQUEST_STARTED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Marks a request as started at `now`, unless one is in flight; whether it was.
+fn begin_request(slot: &Mutex<Option<Instant>>, now: Instant) -> bool {
+    let mut started = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if started.is_some_and(|at| now.duration_since(at) < LOCK_TIMEOUT * 2) {
+        return false;
+    }
+    *started = Some(now);
+    true
+}
+
+/// Ends the request started at `now`, unless a newer one replaced it.
+fn end_request(slot: &Mutex<Option<Instant>>, now: Instant) {
+    let mut started = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if *started == Some(now) {
+        *started = None;
+    }
+}
 
 /// How long logind has to answer `Lock`.
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -162,21 +196,22 @@ impl State {
             tracing::info!("a lock was asked for; only a console session has a logind to ask");
             return;
         }
-        if REQUEST_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        let now = Instant::now();
+        if !begin_request(&REQUEST_STARTED, now) {
             tracing::debug!("a lock request is in flight; not asked again");
             return;
         }
         // On its own thread: the call waits for logind, and the loop draws meanwhile.
         let spawned = std::thread::Builder::new()
             .name("lock-request".into())
-            .spawn(|| {
+            .spawn(move || {
                 if let Err(error) = lock_session() {
                     tracing::error!(%error, "logind did not lock the session");
                 }
-                REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+                end_request(&REQUEST_STARTED, now);
             });
         if let Err(error) = spawned {
-            REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
+            end_request(&REQUEST_STARTED, now);
             tracing::error!(%error, "the lock request could not be started");
         }
     }
@@ -196,4 +231,26 @@ fn lock_session() -> Result<(), zbus::Error> {
             &(),
         )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_that_never_ends_is_given_up_after_twice_the_timeout() {
+        let slot = Mutex::new(None);
+        let t0 = Instant::now();
+        assert!(begin_request(&slot, t0));
+        assert!(!begin_request(&slot, t0 + LOCK_TIMEOUT));
+        let later = t0 + LOCK_TIMEOUT * 2;
+        assert!(begin_request(&slot, later));
+        end_request(&slot, t0);
+        assert!(
+            !begin_request(&slot, later),
+            "the old request does not end the new one"
+        );
+        end_request(&slot, later);
+        assert!(begin_request(&slot, later));
+    }
 }
