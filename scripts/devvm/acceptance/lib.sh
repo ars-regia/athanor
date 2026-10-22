@@ -371,7 +371,14 @@ remove_other() {
 # The wrapper of second-count.sh over bootc, if it is still mounted.
 unmount_wrapper() {
   # shellcheck disable=SC2016 # expanded by the guest's shell
-  guest_ssh 'for m in /usr/bin/bootc /run/acc-bootc-real; do if findmnt -n "$m" > /dev/null; then sudo umount "$m" || exit 1; fi; done'
+  # The mount can be busy for a moment after the process that used it ends: 20 s of retries, then a failure that says so.
+  guest_ssh 'for m in /usr/bin/bootc /run/acc-bootc-real; do
+    if findmnt -n "$m" > /dev/null; then
+      ok=""
+      for _ in $(seq 40); do sudo umount "$m" && { ok=1; break; }; sleep 0.5; done
+      [[ -n $ok ]] || { echo "FAIL  $m is still mounted after 20 s of umount" >&2; exit 1; }
+    fi
+  done'
 }
 # A second login of the user of the graphical session, over SSH; ended by end_ssh_session.
 ssh_session() {

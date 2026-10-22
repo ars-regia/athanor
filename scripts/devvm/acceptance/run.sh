@@ -507,9 +507,11 @@ clock_restore() {
   [[ -n $ACC_CLOCK_MOVED ]] || return 0
   now=$(date +%s)
   guest_ssh "sudo date -s @$now" > /dev/null || return 1
-  guest_ssh "sudo touch -c -d @$now /var/lib/systemd/timesync/clock" || return 1
+  if guest_ssh test -e /var/lib/systemd/timesync/clock; then
+    guest_ssh "sudo touch -d @$now /var/lib/systemd/timesync/clock" || return 1
+    [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
+  fi
   if [[ $ACC_CLOCK_NTP == yes ]]; then guest_ssh sudo timedatectl set-ntp true || return 1; fi
-  [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
   ACC_CLOCK_MOVED=''
 }
 
@@ -542,6 +544,18 @@ expect_reply() { # expect_reply DESCRIPTION OUTPUT
   [[ $2 == "method return"* && $(grep -c . <<< "$2") -eq 1 ]] || die "FAIL  $1: the reply is not empty: $2"
   pass "$1"
 }
+# A call as root with the streams apart: the reply is stdout, and what sudo or dbus-send wrote to
+# stderr is printed to the run's stderr as evidence, never dropped. A failed call returns its stderr
+# as the reply, so that expect_reply names it.
+call_root_reply() { # call_root_reply METHOD [ARG...]
+  local err out status=0
+  err=$(mktemp)
+  out=$(guest_ssh sudo dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" "${@:2}" 2> "$err") || status=$?
+  if [[ -s $err ]]; then echo "EVIDENCE  stderr of $1: $(tr '\n' ';' < "$err")" >&2; fi
+  if ((status != 0)); then out+=" (exit $status) $(< "$err")"; fi
+  rm -f "$err"
+  printf '%s\n' "$out"
+}
 # The postpone's length (POSTPONE_SECS of athanor-trust-state): the expiry is first_notice_at plus it.
 POSTPONE_SECS=$((7 * 86400))
 
@@ -555,6 +569,15 @@ expect_applied() { # expect_applied DESCRIPTION DIGEST
   done
   [[ $(lineage_anchor) == "$2" ]] || die "FAIL  $1: the lineage's anchor is '$(lineage_anchor)', expected $2"
   expect "$1: and no lineage is open" .postpone null
+}
+
+# greenboot-success.target active on this boot, waited for as long as expect_applied waits.
+wait_boot_healthy() {
+  for _ in $(seq 12); do
+    guest_ssh systemctl is-active --quiet greenboot-success.target && return 0
+    sleep 10
+  done
+  die "FAIL  greenboot-success.target is not active two minutes after the boot"
 }
 
 stage_security() { # items 16 and 17; doc_shell.md section 7, item 4
@@ -619,6 +642,10 @@ stage_security() { # items 16 and 17; doc_shell.md section 7, item 4
   reboot_guest
   [[ $(marker) == vsec1 ]] || die "FAIL  17: the guest did not boot vsec1: it boots $(marker)"
   quiesce_checks
+  # A boot counts as applied only when greenboot's required checks passed (`boot_healthy`): the
+  # anchor would stay put on an unhealthy boot whatever the build times say. The control that it does
+  # move for a healthy boot of a digest built later is vsec2's `expect_applied` above.
+  wait_boot_healthy
   for n in 1 2; do
     check_now
     [[ $(lineage_anchor) == "$digest2" ]] || die "FAIL  17: booting the earlier vsec1 moved the anchor to '$(lineage_anchor)', expected $digest2"
@@ -684,7 +711,7 @@ stage_optout() { # item 17
   quiesce_checks
   expect_error "17: SetAutomaticSecurityUpdates(false) from an SSH session asks for an administrator" "$(call_ssh SetAutomaticSecurityUpdates boolean:false)" os.athanor.Update1.Error.NotAuthorized
   expect "17: and nothing changed" .automatic_security_updates true
-  expect_reply "17: an administrator turns it off" "$(call_root SetAutomaticSecurityUpdates boolean:false)"
+  expect_reply "17: an administrator turns it off" "$(call_root_reply SetAutomaticSecurityUpdates boolean:false)"
   expect "17: the state publishes the opt-out" .automatic_security_updates false
   [[ $(guest_ssh sudo cat /var/lib/athanor-update/automatic-security-updates) == off ]] || die "FAIL  17: the opt-out file does not read off"
   notify_watch
@@ -707,7 +734,7 @@ stage_optout() { # item 17
   notice=$(wait_notice "17: with the opt-out on the notice still arrives" apply)
   jq -e '.ids | (index("later") != null) and (index("postpone") == null)' <<< "$notice" > /dev/null || die "FAIL  17: the notice of an opted-out machine is not the one of UT11: $notice"
   pass "17: the notice still arrives"
-  expect_reply "17: an administrator turns it back on" "$(call_root SetAutomaticSecurityUpdates boolean:true)"
+  expect_reply "17: an administrator turns it back on" "$(call_root_reply SetAutomaticSecurityUpdates boolean:true)"
   expect "17: the waiting digest is unlocked" .update will-apply-at-next-shutdown
   deployment_unlocked || die "FAIL  17: turning the switch on did not unlock the digest"
   expect "17: and the lineage clock starts" .postpone.postponed false
@@ -804,8 +831,12 @@ WRAPPER
 unlock_works() {
   guest_ssh sudo rm -f /run/acc-unlock-fail
 }
+# The flag goes first: a mount that cannot be undone then lets bootc through.
 unlock_wrapper_gone() {
-  unmount_wrapper && guest_ssh sudo rm -f /run/acc-unlock-fail /run/acc-bootc-wrapper /run/acc-bootc-real && guest_ssh sudo systemctl stop athanor-update.service
+  guest_ssh sudo rm -f /run/acc-unlock-fail || return 1
+  unmount_wrapper || return 1
+  guest_ssh sudo rm -f /run/acc-bootc-wrapper /run/acc-bootc-real || return 1
+  guest_ssh sudo systemctl stop athanor-update.service
 }
 featurehold_cleanup() {
   local failed=()
@@ -846,7 +877,7 @@ stage_featurehold() { # item 20
   done
   # Held by the opt-out: turning it off relocks the unlocked digest (set_automatic), and the check
   # leaves it downloaded and locked (`settle_security` with `automatic` false).
-  expect_reply "20: an administrator turns the opt-out on" "$(call_root SetAutomaticSecurityUpdates boolean:false)"
+  expect_reply "20: an administrator turns the opt-out on" "$(call_root_reply SetAutomaticSecurityUpdates boolean:false)"
   expect "20: the security digest is held by the opt-out" .update downloaded
   deployment_locked || die "FAIL  20: the opt-out did not lock the security digest"
   check_now
@@ -858,7 +889,7 @@ stage_featurehold() { # item 20
   # failed unlock leaves the digest downloaded and locked, with the error published, and each check
   # tries again (`settled_security`), still without taking the feature digest.
   unlock_fails
-  expect_reply "20: an administrator turns the opt-out off while the unlock fails" "$(call_root SetAutomaticSecurityUpdates boolean:true)"
+  expect_reply "20: an administrator turns the opt-out off while the unlock fails" "$(call_root_reply SetAutomaticSecurityUpdates boolean:true)"
   for n in 1 2; do
     check_now
     expect "20: unlock failing, check $n leaves the security digest downloaded" .update downloaded
