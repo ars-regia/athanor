@@ -38,6 +38,8 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/bin/athanor-compositor
 /usr/bin/athanor-compositor-session
 /usr/lib/systemd/user/athanor-compositor.service
+%dir /usr/share/athanor
+%dir /usr/share/athanor/compositor
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog

@@ -69,7 +69,10 @@ fi
 # properties of org.freedesktop.locale1 that localectl sets; empty, n/a or (unset) is unset.
 systemctl --user set-environment ATHANOR_PREVIEW_SESSION=1
 keyboard() {
-    value=$(busctl get-property org.freedesktop.locale1 /org/freedesktop/locale1 org.freedesktop.locale1 "$1")
+    if ! value=$(busctl get-property org.freedesktop.locale1 /org/freedesktop/locale1 org.freedesktop.locale1 "$1"); then
+        echo "athanor-compositor-session: cannot read $1 from locale1" >&2
+        exit 1
+    fi
     value=${value#s \"}
     value=${value%\"}
     case $value in
