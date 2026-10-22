@@ -783,6 +783,7 @@ class SignImages(unittest.TestCase):
             self.assertEqual(args[0], "attest")
             self.assertEqual(args[args.index("--type") + 1], release_attestation.PREDICATE_TYPE)
             self.assertIn("--tlog-upload=false", args)
+            self.assertIn("--use-signing-config=false", args)  # cosign 3 refuses the line above without it (#705)
             self.assertIn("--new-bundle-format=false", args)
             self.assertTrue(pathlib.Path(args[args.index("--key") + 1]).is_relative_to(self.dir / "runtime"))
             self.assertIn("--predicate", args)
