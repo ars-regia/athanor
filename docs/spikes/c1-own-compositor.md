@@ -48,7 +48,7 @@ file, which counts every line, blank and comment lines included. Run on 2026-10-
 Test counts by file come from `rg -c '#\[test\]'`: 28 in `fixture.rs`, 12 in `identity.rs`, 4 in
 `udev.rs`, 3 in `main.rs`, 2 each in `state.rs` and `input.rs`, 1 each in `handlers.rs`,
 `lock.rs` and `headless.rs`: 54 attributes, of which the task 8 pull request reports 52 passed
-and 2 ignored (#679; the two ignored need a render node). The count of a `wc -l` is an upper
+and 2 ignored (#679; one needs a render node, `headless_on_a_render_node` at `fixture.rs:890`; the helper at `identity.rs:521` is run as a subprocess by `read_a_peer_that_exits` and is not a test of its own). The count of a `wc -l` is an upper
 bound on code: a re-count with `tokei` (code, comments, blanks apart) is left to a machine that
 has it.
 
@@ -62,9 +62,9 @@ rig compares them pixel by pixel, with `rig.sh surface <surface>`.
 | --- | --- | --- | --- | --- | --- |
 | `toolkit-chooser` | light; 1.0 and 1.5; en, de, rtl (6 files) | the layout chooser of `athanor-toolkit`, the compositor's first client | the compositor itself, nested in the rig's sway; re-recorded in #594 on Calmo's dark `bg1` clear colour (six light cases, a few bytes each) | 0 differing pixels in every case | #577 (4 cases at that time), #594 |
 | `chooser` | 12 files | the GTK4 layout chooser | cosmic-comp | not run under the own compositor; on cosmic-comp unchanged, 12 goldens, 0 pixels | #577 |
-| `bar` (and `bar-network`, `bar-bluetooth` and the other `bar-*` scenes) | light and dark; 1.0 and 1.5; en, de, rtl (12 files for `bar`) | the GTK4 bar and its popups | cosmic-comp | differs in every case; eight causes, none a layer-shell defect (below) | #591 |
-| `dock` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 dock | cosmic-comp | differs in every case; same eight causes | #591 |
-| `launcher` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 launcher | cosmic-comp | draws correctly; differences are the background outside the surface and the caret only | #609 |
+| `bar`, `bar-network`, `bar-bluetooth` | light and dark; 1.0 and 1.5; en, de, rtl (12 files for `bar`) | the GTK4 bar and its popups | cosmic-comp | before task 5: differs in every case; eight causes, none a layer-shell defect (below). At the head: not rerun | #591 |
+| `dock` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 dock | cosmic-comp | before task 5: differs in every case; same eight causes. At the head the dock's top-layer surface is closed (no allow-list line) | #591 |
+| `launcher` | light and dark; 1.0 and 1.5; en, de, rtl (12 files) | the GTK4 launcher | cosmic-comp | before task 5: draws correctly; differences are the background outside the surface and the caret only. At the head the launcher (Overlay layer, `surface.rs:97`) is closed (no allow-list line) | #609 |
 
 Task 3 asked that every difference be explained one by one. #591 gives these eight causes for the
 bar, dock, network and Bluetooth goldens, as a list; it does not say which cause applies to which
@@ -79,9 +79,10 @@ case, and no per-case table was written. That is a gap in the record, not a find
 7. the logical size at scale 1.5;
 8. popup resampling at 1.5.
 
-Not measured: no golden of the bar, dock or launcher was re-recorded under the own compositor, and
-the dock's goldens were not compared since the dock is closed by the allow-list (section 8, item
-1). The `launcher` result is a statement in #609, with no per-case pixel count.
+The bar, dock and launcher results date from before task 5 (#591 and #609; #643 then closed the
+top and overlay layers to clients with no allow-list line). Not measured: no golden of the bar,
+dock or launcher was re-recorded under the own compositor, and none was compared at the head,
+under the allow-list (section 10, item 1). The `launcher` result is a statement in #609, with no per-case pixel count.
 
 ## 4. Protocols (task 4)
 
@@ -102,7 +103,8 @@ ones (#643).
 | `ext_foreign_toplevel_list_v1` | privileged: the allow-list, by its own line | `src/capture.rs` |
 | `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1` | privileged: the allow-list, by its own line | `src/capture.rs` |
 | `ext_session_lock_manager_v1` | privileged: the allow-list; no line grants it today | `src/lock.rs` |
-| `ext_workspace_manager_v1` | every client outside a security context (not privileged; item 5 of section 5) | `src/workspace.rs` |
+| `ext_workspace_manager_v1` | every client outside a security context (not privileged; item 5 of section 5) | `src/workspace.rs`, `src/state.rs:230` |
+| `wl_data_device_manager` | every client, unfiltered (GDK needs it to copy and paste); the handler cancels every drag and drop | `src/state.rs:214-215`, `src/handlers.rs:534-540` |
 | `wp_security_context_manager_v1` | every client outside a security context | README, task 4 |
 | `ext_idle_notifier_v1` | every client, including those in a security context (Smithay has no per-client filter for it) | `src/state.rs` |
 
@@ -113,12 +115,10 @@ A client that connects through a security context's listener is granted nothing 
 `ext_image_copy_capture_manager_v1`. The fixture grants its clients every privileged global as
 the bar (`FIXTURE_ALLOW_LIST`).
 
-Not offered, per README and `c1-protocols.md` section 4: input method, virtual keyboard and
-pointer, data control, the private interface, `zwp_idle_inhibit`, `wp_single_pixel_buffer`,
-server-side decoration, `wl_data_device_manager`, primary selection, `zwp_text_input_v3`,
-`zwlr_output_power_manager_v1` and an output-management protocol. Whether the drag-and-drop and
-selection globals are offered at the head was not re-read for this document; the `ponytail:` in
-`src/handlers.rs:540` says the default cancels every drag and drop.
+Not offered at the head (confirmed with `rg` for each name in `src/`, which finds none): input
+method, virtual keyboard and pointer, data control, the private interface, `zwp_idle_inhibit`,
+`wp_single_pixel_buffer`, server-side decoration, primary selection, `zwp_text_input_v3`,
+`zwlr_output_power_manager_v1` and an output-management protocol.
 
 The COSMIC protocols in use and the replacement each needs (OS5), from `c1-protocols.md`
 section 3 (a proposal, not decided there):
@@ -168,8 +168,10 @@ Limits, all from the README; each is for revision 2 to decide:
 4. **No systemd in the rig.** The grant is exercised in the fixture with the executable and cgroup
    faked and the pidfd real, and in the rig's systemd-mode container (`bar_session.py --unit`,
    #656). A real image has not run it: the image ships no allow-list and no compositor.
-5. **`ext-workspace-v1` is not among OS4's privileged protocols**: every unconfined client may
-   switch workspaces. The bottom and background layers stay offered inside a security context.
+5. **`ext-workspace-v1` is not among OS4's privileged protocols**: if workspace switching is added,
+   every unconfined client could switch workspaces: a design risk, not a present one, since no
+   workspace capability is offered today (`workspace.rs:94-95, 119, 138`) and no request changes
+   state. The bottom and background layers stay offered inside a security context.
 6. **Not offered yet**: input method, virtual keyboard and pointer, data control and the private
    interface; each joins the allow-list's interfaces when it is.
 7. **A kernel without `SO_PEERPIDFD`** answers `ENOPROTOOPT` and nothing is granted; that answer is
@@ -179,7 +181,9 @@ Limits, all from the README; each is for revision 2 to decide:
    a new connection until it restarts.
 9. **No locker is granted `ext_session_lock_manager_v1`**: no client can lock the session through
    the protocol until a line is added. The escape (Super+Escape) asks logind instead.
-10. **The dock has no line** (issue #683; section 8, item 1).
+10. **The dock, launcher, control center and greeter UI have no line**: the dock sets the Top
+    layer, the launcher (`surface.rs:97`), control center (`surface.rs:100`) and greeter UI
+    (`ui.rs:536`) the Overlay layer (issue #683 and its widening comment; section 10, item 1).
 
 ## 6. Frame times per machine
 
@@ -192,7 +196,7 @@ per output, mean and longest draw, and per client surface the commit intervals.
 | NVIDIA desktop, nested in cosmic-comp on NVIDIA's EGL, cores 0-3, with a GTK4 animation drawing and `athanor-shelld`, the bar, the dock and `ptyxis` idle | `compositor_soak.sh --idle`, 3600 s | exit 0, 360 reports. Draw time: mean 0.17 ms median, 0.18 ms 95th percentile, 0.20 ms maximum; longest draw 2.00, 2.14 and 6.91 ms (median, 95th percentile, maximum); drawing client at a 16.69 ms median commit interval | #646 |
 | the same, after the idle-pacing fix | 60 s trial | exit 0, 598 to 600 draws per report | #646 |
 | Development VM (virtio-gpu with virgl, KMS), DRM backend, over SSH | manual checks of task 8 | 0 draws per 10 s with no client, and again after the client ended; about 725 draws per 10 s before the backend drew only on request; 322 to 548 draws per 10 s with `gtk_animation.py` committing about 46 frames a second | README, task 8 (#679) |
-| Reference laptop | none | not measured; the laptop's runs were builds, tests and the rig (#577, #656, #679), not frame-time reports | |
+| Reference laptop | none | not measured; the laptop's runs were builds, tests and the rig (#577, #656; #679 does not name its machine), not frame-time reports | |
 
 Note on the nested figures: the draw time is the draw alone, not the submit, which waits on the
 parent compositor (README, task 6). A nested draw time is therefore not a frame time on a display.
@@ -201,7 +205,8 @@ No figure here comes from a monitor: all hardware figures are pending task 9 (se
 ## 7. Hardware sessions: pending task 9
 
 Nothing in this section was run. The commands and the maintainer's sessions are task 9; this
-section gets the tables below once it has run. Until then every cell is empty on purpose.
+section gets the tables below once it has run. The commands are in the "Console sessions"
+section of the crate's README, which PR #684 (branch `c1/t9-console`) adds and this base lacks. Until then every cell is empty on purpose.
 
 **7.1 Frame times on a console**
 
@@ -233,7 +238,7 @@ backend: only headless (task 2), nested (task 6) and the VM (task 8) have run.
 | Defect | Where | Status | Source |
 | --- | --- | --- | --- |
 | Idle redraw loop: a nested redraw that drew nothing asked for the next one at once and kept a core busy, 1,350,007 draws per 10 s | nested on NVIDIA's EGL | fixed in #646 (a frame-period timer, one pending at a time); after the fix, 598 to 600 draws per report | #646 |
-| One report stalled for a second, the compositor and the client together, at 18:34:58 in the one-hour soak | nested in cosmic-comp | cause inferred, not traced: cosmic-comp's throttle of a covered surface. The README of the soak says a covered client gets 1 Hz callbacks | #646 |
+| One report stalled for a second, the compositor and the client together, at 18:34:58 in the one-hour soak | nested in cosmic-comp | cause inferred, not traced: cosmic-comp's throttle of a covered surface. No repository source states the throttling: it is an inference from the stall alone (README line on this compositor's own 1 Hz callbacks for an unshown surface concerns the DRM backend, not cosmic-comp) | #646 |
 | Headless on NVIDIA's render node, with `linux-drm-syncobj-v1` and a Vulkan client (`vkcube --wsi wayland`), ten minutes | task 2 check | not recorded: #586 reports the 600 s soak on the desktop on Pixman and llvmpipe, and `headless_on_a_render_node` is `#[ignore]`d; no run on NVIDIA's node with explicit sync is in the merged pull requests | #586, `src/fixture.rs:888` |
 | Explicit sync on NVIDIA | review focus 4 of the plan | negotiated state not recorded; the log is meant to name the syncobj path or its absence, and no NVIDIA log is in the pull requests | plan, Review Focus |
 | The bar's and dock's top-layer surfaces were closed during the one-hour run, so no shell surface was drawn on NVIDIA | nested | by design (no allow-list in the rig); drawing them is task 9 | #646 |
@@ -255,7 +260,7 @@ finds 16 markers (and the README's mention of the `udev.rs` ones).
 | `udev.rs:81` | the seat's primary GPU only; a second GPU and its monitors are not used | none stated |
 | `udev.rs:272` | a change redraws every output, not only those it shows on | per-output damage if it shows |
 | `workspace.rs:4` | one fixed workspace per output | groups and workspaces follow the outputs and the compositor's model |
-| `workspace.rs:29` | the comment says task 5 grants `ext_workspace_manager_v1` by identity, to the bar (OS4) | the README says it is offered to every client outside a security context; one of the two is stale, and the README matches the behaviour it describes |
+| `workspace.rs:29` | the comment says task 5 grants `ext_workspace_manager_v1` by identity, to the bar (OS4) | the comment is stale; the README is right: `can_view` is true for any unconfined client (`workspace.rs:55-57`, `state.rs:230`) |
 | `layer.rs:166` | layers are placed on the outputs in order, not on the one the user is on | per output with several |
 | `layer.rs:209` | the layers of a removed output are closed, not moved | a shell maps them again where it wants |
 | `handlers.rs:540` | the default cancels every drag and drop | a DnD grab with its icon when a client needs it |
@@ -266,12 +271,14 @@ finds 16 markers (and the README's mention of the `udev.rs` ones).
 
 Each item names the finding that makes it necessary.
 
-1. **The dock's allow-list line (issue #683).** Finding: `data/privileged-clients` has a line for
-   the bar and none for the dock, so the dock's top-layer surface is closed and it cannot list
-   windows (section 4; #646: the bar's and the dock's top-layer surfaces were closed). Add
-   `/usr/bin/athanor-dock athanor-dock.service` with `zwlr_layer_shell_v1` and
-   `ext_foreign_toplevel_list_v1`, and a test that every shell client the session starts has a line
-   in the shipped list with the interfaces it binds (issue #683, for task 9a).
+1. **The allow-list lines of the shell's clients (issue #683, widened by a comment).** Finding:
+   `data/privileged-clients` has a line for the bar and none for the dock, launcher, control
+   center or greeter UI, so their Top and Overlay surfaces are closed and the dock cannot list
+   windows (section 5, item 10; #646: the bar's and the dock's top-layer surfaces were closed).
+   Add the dock's line, `/usr/bin/athanor-dock athanor-dock.service` with `zwlr_layer_shell_v1`
+   and `ext_foreign_toplevel_list_v1`, and one for each other client in the interfaces it binds,
+   and a test over every shipped crate that sets a Top or Overlay layer or binds a privileged
+   interface, failing when the shipped list has no line for it (for task 9a).
 2. **Identity at each bind, or an accepted gap.** Finding: section 5, item 1. Decide whether the
    connect-time identity suffices for programs under `/usr`, or check at each bind through the
    kept pidfd.
@@ -289,7 +296,8 @@ Each item names the finding that makes it necessary.
    100 for the virtual keyboard (estimates; #656 rounds the total to 600). Whether the image's
    session bus returns `ProcessFD` is unverified (`doc_accessibility.md` AX4, open doubt 9).
 7. **Workspaces as a privilege decision.** Finding: section 5, item 5, and `workspace.rs:29`
-   disagreeing with the README. Decide whether `ext_workspace_manager_v1` is privileged.
+   being stale against the README. Decide whether `ext_workspace_manager_v1` is privileged before
+   any request that changes workspace state exists.
 8. **The golden record.** Finding: section 3; the eight causes of #591 are not tied to cases and
    the bar, dock and launcher goldens still come from cosmic-comp. Record goldens under the own
    compositor, with the clear colour, shadows and focus outline decided, so the comparison is a
@@ -302,10 +310,10 @@ Each item names the finding that makes it necessary.
     surface and a themed cursor (task 9 draws cursors, so this item closes with it).
 11. **Capture.** Findings: `capture.rs:70`, `capture.rs:132`. The portal needs dmabuf capture and
     damage tracking before screen casting; the output capture source is not offered.
-12. **Protocols not offered.** Finding: section 4 "Not offered": input method, virtual input, data
-    control, idle inhibit, single-pixel buffer, server decorations, clipboard globals, output power
-    and output management. Each belongs to a consumer named in `c1-protocols.md` section 4 and
-    needs a decision on its privilege.
+12. **Protocols not offered.** Finding: section 4, "Not offered at the head": input method,
+    virtual input, data control, primary selection, `zwp_text_input_v3`, idle inhibit,
+    single-pixel buffer, server decorations, output power and output management. Each belongs to
+    a consumer named in `c1-protocols.md` section 4 and needs a decision on its privilege.
 13. **Supervision.** Finding: README, task 8: nothing supervises the compositor; under greetd its
     exit ends the session and brings the greeter back. Revision 2 states that as the design or
     adds a supervisor.
@@ -327,3 +335,6 @@ Each item names the finding that makes it necessary.
 - A per-case account of the golden differences (section 3).
 - The cause of the one-second stall in the one-hour nested run (section 8).
 - The `stat` stall of a FUSE server (section 5, item 2).
+- Results at the head, under the allow-list, for the bar, dock, launcher and greeter surfaces.
+- The other `bar-*` scenes and the greeter surface under the own compositor: #591 names only the
+  bar, dock, network and Bluetooth.
