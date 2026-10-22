@@ -55,7 +55,7 @@ host itself.
   contributor.
 
 Pins and sizing are in `runner.env`: Fedora Cloud Base and actions/runner by SHA-256,
-12 vCPUs and up to 16 GB (at least 6 GB, keeping 3 GB available on the host), CPU and
+8 vCPUs and up to 12 GB (at least 6 GB, keeping 3 GB available on the host), CPU and
 I/O weights that leave the desktop responsive.
 
 ## Install
