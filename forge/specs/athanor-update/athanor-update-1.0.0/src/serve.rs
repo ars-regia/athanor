@@ -1,5 +1,6 @@
-//! `athanor-update serve`: the D-Bus service `os.athanor.Update1` (UT6). Two acting methods
-//! and one read method, no arguments, no property. The subject polkit judges is the bus
+//! `athanor-update serve`: the D-Bus service `os.athanor.Update1` (UT6, UT13). Four acting
+//! methods and one read method, no property; only `SetAutomaticSecurityUpdates` takes an
+//! argument. The subject polkit judges is the bus
 //! sender, never a PID; the caller's session, for the count of other sessions, comes from the
 //! bus daemon's credentials for that sender, never from the caller. `State` asks no polkit: the state is not secret, and a reader in a
 //! user namespace cannot check the file's owner itself, so the service checks it.
@@ -21,6 +22,10 @@ pub const OBJECT_PATH: &str = "/os/athanor/Update1";
 const ACTION_ROLLBACK: &str = "os.athanor.update.rollback";
 /// The service is D-Bus activated: it leaves after this long without a request.
 const IDLE: Duration = Duration::from_secs(60);
+/// The journal's `MESSAGE_ID` of a change of the opt-out (ADR-0127 point 15). The ADR names
+/// it `automatic-changed` in the `os.athanor.update` namespace; it is no polkit action.
+const AUTOMATIC_CHANGED: &str = "d479a5966dcf495db2fa18bf983a72ae";
+const JOURNAL_SOCKET: &str = "/run/systemd/journal/socket";
 
 #[derive(Debug, zbus::DBusError)]
 #[zbus(prefix = "os.athanor.Update1.Error")]
@@ -33,6 +38,8 @@ pub enum Error {
     NoPreviousVersion(String),
     Blocked(String),
     Failed(String),
+    AlreadyPostponed(String),
+    NotSecurityClass(String),
     /// `State`: no state is published yet.
     NoState(String),
     /// `State`: the file is not a root-owned regular file others cannot write.
@@ -50,6 +57,8 @@ impl From<Refusal> for Error {
             Refusal::NoPreviousVersion => Self::NoPreviousVersion("there is no previous version to go back to".into()),
             Refusal::Blocked => Self::Blocked("a restart is blocked by an inhibitor".into()),
             Refusal::Failed => Self::Failed("the request failed; the journal of athanor-update.service has the detail".into()),
+            Refusal::AlreadyPostponed => Self::AlreadyPostponed("this security update was postponed once already, or can no longer be".into()),
+            Refusal::NotSecurityClass => Self::NotSecurityClass("the downloaded update is not a security update".into()),
         }
     }
 }
@@ -246,6 +255,23 @@ async fn uid_of(conn: &Connection, sender: &str) -> Option<u32> {
     zbus::fdo::DBusProxy::new(conn).await.ok()?.get_connection_unix_user(name).await.ok()
 }
 
+/// The journal entry of a change of the opt-out, in the journal's native protocol: notice
+/// priority, the fixed `MESSAGE_ID`, the caller's uid and the new value.
+fn automatic_changed_entry(uid: Option<u32>, enabled: bool) -> String {
+    let (uid, value) = (uid.map_or_else(|| "unknown".to_owned(), |uid| uid.to_string()), if enabled { "on" } else { "off" });
+    format!("PRIORITY=5\nSYSLOG_IDENTIFIER=athanor-update\nMESSAGE_ID={AUTOMATIC_CHANGED}\nMESSAGE=automatic security updates turned {value} by uid {uid}\nCALLER_UID={uid}\nAUTOMATIC_SECURITY_UPDATES={value}\n")
+}
+
+/// Logs a change of the opt-out to the journal with its `MESSAGE_ID`, which stderr cannot
+/// carry. Without the journal the line goes to stderr, without the field.
+fn log_automatic_changed(uid: Option<u32>, enabled: bool) {
+    let entry = automatic_changed_entry(uid, enabled);
+    let sent = std::os::unix::net::UnixDatagram::unbound().and_then(|socket| socket.send_to(entry.as_bytes(), JOURNAL_SOCKET));
+    if let Err(err) = sent {
+        tracing::warn!(%err, ?uid, enabled, message_id = AUTOMATIC_CHANGED, "automatic security updates changed; the journal did not take the entry");
+    }
+}
+
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| i64::try_from(since.as_secs()).unwrap_or(i64::MAX))
 }
@@ -294,6 +320,37 @@ impl Update1 {
         Ok(requests::go_back(&ctx, &Logind(conn)).await?)
     }
 
+    /// Postpones the security update that would apply at the next shutdown, once per lineage
+    /// (UT13).
+    async fn postpone(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+        let _in_flight = self.activity.enter();
+        let sender = sender_of(&header)?;
+        polkit(conn, &sender, requests::ACTION_POSTPONE).await?;
+        // UT6: the caller's uid at notice, read while the caller is still on the bus.
+        let uid = uid_of(conn, &sender).await;
+        let (tools, store) = (System, crate::store::Store::system());
+        // Made after the prompt: the budget is judged at the time of the answer.
+        let ctx = Context::system(&tools, &store, now());
+        let until = requests::postpone(&ctx)?;
+        tracing::info!(?uid, until, "the security update was postponed");
+        Ok(())
+    }
+
+    /// The opt-out of UT13. polkit asks for an administrator every time.
+    async fn set_automatic_security_updates(&self, enabled: bool, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+        let _in_flight = self.activity.enter();
+        let sender = sender_of(&header)?;
+        polkit(conn, &sender, requests::ACTION_SET_AUTOMATIC).await?;
+        let uid = uid_of(conn, &sender).await;
+        let (tools, store) = (System, crate::store::Store::system());
+        let ctx = Context::system(&tools, &store, now());
+        let (changed, result) = requests::set_automatic(&ctx, enabled);
+        if changed {
+            log_automatic_changed(uid, enabled);
+        }
+        Ok(result?)
+    }
+
     /// The published trust state (UT7) as JSON, for readers that cannot check its owner.
     async fn state(&self) -> Result<String, Error> {
         self.state_at(Path::new(athanor_trust_state::STATE_PATH), 0)
@@ -339,6 +396,23 @@ mod tests {
         let state: athanor_trust_state::State = serde_json::from_str(include_str!("../tests/state-verified.json")).expect("fixture");
         store.publish(&state).expect("publish");
         state
+    }
+
+    #[test]
+    fn a_change_of_the_opt_out_is_a_journal_entry_with_its_message_id() {
+        let entry = automatic_changed_entry(Some(1000), false);
+        for field in ["PRIORITY=5", "MESSAGE_ID=d479a5966dcf495db2fa18bf983a72ae", "CALLER_UID=1000", "AUTOMATIC_SECURITY_UPDATES=off"] {
+            assert!(entry.lines().any(|line| line == field), "{field} in {entry}");
+        }
+        assert!(automatic_changed_entry(None, true).lines().any(|line| line == "CALLER_UID=unknown"));
+        assert!(entry.lines().all(|line| line.contains('=')), "one field per line, no multi-line value");
+    }
+
+    #[test]
+    fn the_refusals_of_postpone_have_their_error_names() {
+        use zbus::DBusError;
+        assert_eq!(Error::from(Refusal::AlreadyPostponed).name().as_str(), "os.athanor.Update1.Error.AlreadyPostponed");
+        assert_eq!(Error::from(Refusal::NotSecurityClass).name().as_str(), "os.athanor.Update1.Error.NotSecurityClass");
     }
 
     #[test]
@@ -601,6 +675,46 @@ mod tests {
             assert_eq!(caller.authorize(requests::ACTION_APPLY).await, Err(Refusal::NotAuthorized), "{name}");
             drop(service);
         }
+    }
+
+    /// polkit recording each action and its flags, and answering every check with a "no".
+    #[derive(Clone, Default)]
+    struct RecordingPolkit(Arc<Mutex<Vec<(String, u32)>>>);
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl RecordingPolkit {
+        fn check_authorization(
+            &self,
+            _subject: (String, std::collections::HashMap<String, OwnedValue>),
+            action: String,
+            _details: std::collections::HashMap<String, String>,
+            flags: u32,
+            _cancellation: String,
+        ) -> (bool, bool, std::collections::HashMap<String, String>) {
+            self.0.lock().expect("lock").push((action, flags));
+            (false, false, std::collections::HashMap::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn each_request_asks_polkit_for_its_own_action_with_a_prompt() {
+        let bus = crate::goback::tests::Bus::start("polkit-actions");
+        let polkit = RecordingPolkit::default();
+        let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", polkit.clone()).expect("serve").build().await.expect("polkit");
+        let service = bus.builder().serve_at(OBJECT_PATH, Update1 { activity: Arc::new(Activity::default()) }).expect("serve").build().await.expect("service");
+        let client = bus.builder().build().await.expect("client");
+        let destination = service.unique_name().expect("unique name").to_owned();
+        let not_authorized = |reply: zbus::Result<zbus::Message>| matches!(reply, Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "os.athanor.Update1.Error.NotAuthorized");
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "Postpone", &()).await));
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "SetAutomaticSecurityUpdates", &(true,)).await));
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "GoBack", &()).await));
+        // 1 is AllowUserInteraction: the user is asked, not refused outright.
+        let asked = polkit.0.lock().expect("lock").clone();
+        assert_eq!(asked, [(requests::ACTION_POSTPONE.to_owned(), 1), (requests::ACTION_SET_AUTOMATIC.to_owned(), 1), (ACTION_ROLLBACK.to_owned(), 1)]);
+        assert_eq!(
+            [requests::ACTION_POSTPONE, requests::ACTION_SET_AUTOMATIC, ACTION_ROLLBACK],
+            ["os.athanor.update.postpone", "os.athanor.update.set-automatic", "os.athanor.update.rollback"]
+        );
     }
 
     #[test]
