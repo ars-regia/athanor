@@ -207,8 +207,8 @@ pub struct Dock {
     queue: Queue,
     debounce: Slot,
     menu: Option<Menu>,
-    /// A drag of a pinned entry is under way.
-    dragging: bool,
+    /// The surface where a drag of a pinned entry is under way.
+    dragging: Option<SurfaceId>,
     /// The windows or the favourites changed while a menu or a drag held the rows.
     stale: bool,
     ready: bool,
@@ -272,7 +272,7 @@ impl Dock {
             queue,
             debounce: Slot::default(),
             menu: None,
-            dragging: false,
+            dragging: None,
             stale: false,
             ready: false,
             _watches: watches,
@@ -456,6 +456,7 @@ impl Dock {
     /// Draws every surface again: the look or the placements changed.
     fn rebuild_all(&mut self, shell: &mut Shell) {
         self.close_menu(shell);
+        self.drop_drag(shell);
         let states = self.states();
         let ids: Vec<SurfaceId> = self.outs.keys().copied().collect();
         for id in ids {
@@ -743,6 +744,15 @@ impl Dock {
         }
     }
 
+    /// Ends a drag: at its end, or when a rebuild or a closed surface takes away the
+    /// press that would have ended it, which would otherwise hold the row and auto-hide.
+    fn drop_drag(&mut self, shell: &mut Shell) {
+        if self.dragging.take().is_some() {
+            self.hold(shell, false);
+            self.stale = true;
+        }
+    }
+
     fn close_menu(&mut self, shell: &mut Shell) {
         if self.menu.take().is_some() {
             shell.close_popup();
@@ -819,6 +829,9 @@ impl Application for Dock {
         {
             self.close_menu(shell);
         }
+        if self.dragging == Some(surface) {
+            self.drop_drag(shell);
+        }
         let states = self.states();
         self.build(shell, surface, &states, false);
     }
@@ -852,15 +865,13 @@ impl Application for Dock {
                 }
             }
             Event::DragStarted(button) => {
-                if self.pinned(surface, button).is_some() && !self.dragging {
-                    self.dragging = true;
+                if self.pinned(surface, button).is_some() && self.dragging.is_none() {
+                    self.dragging = Some(surface);
                     self.hold(shell, true);
                 }
             }
             Event::DragEnded { from, to } => {
-                if std::mem::take(&mut self.dragging) {
-                    self.hold(shell, false);
-                }
+                self.drop_drag(shell);
                 let dragged = self.pinned(surface, from);
                 let onto = to.and_then(|to| self.pinned(surface, to));
                 if let (Some(dragged), Some(onto)) = (dragged, onto) {
@@ -896,6 +907,9 @@ impl Application for Dock {
             return;
         }
         self.outs.retain(|id, _| shell.ui(*id).is_some());
+        if self.dragging.is_some_and(|id| !self.outs.contains_key(&id)) {
+            self.drop_drag(shell);
+        }
         // A menu closed by Escape, a press outside it or the compositor.
         if self
             .menu
@@ -934,7 +948,7 @@ impl Application for Dock {
                 }
             }
         }
-        if self.stale && self.menu.is_none() && !self.dragging {
+        if self.stale && self.menu.is_none() && self.dragging.is_none() {
             self.refresh(shell);
         }
         self.limit_input(shell);
