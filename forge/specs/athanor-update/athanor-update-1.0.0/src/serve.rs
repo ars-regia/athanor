@@ -344,10 +344,11 @@ impl Update1 {
         let uid = uid_of(conn, &sender).await;
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
-        if requests::set_automatic(&ctx, enabled)? {
+        let (changed, result) = requests::set_automatic(&ctx, enabled);
+        if changed {
             log_automatic_changed(uid, enabled);
         }
-        Ok(())
+        Ok(result?)
     }
 
     /// The published trust state (UT7) as JSON, for readers that cannot check its owner.
@@ -674,6 +675,46 @@ mod tests {
             assert_eq!(caller.authorize(requests::ACTION_APPLY).await, Err(Refusal::NotAuthorized), "{name}");
             drop(service);
         }
+    }
+
+    /// polkit recording each action and its flags, and answering every check with a "no".
+    #[derive(Clone, Default)]
+    struct RecordingPolkit(Arc<Mutex<Vec<(String, u32)>>>);
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl RecordingPolkit {
+        fn check_authorization(
+            &self,
+            _subject: (String, std::collections::HashMap<String, OwnedValue>),
+            action: String,
+            _details: std::collections::HashMap<String, String>,
+            flags: u32,
+            _cancellation: String,
+        ) -> (bool, bool, std::collections::HashMap<String, String>) {
+            self.0.lock().expect("lock").push((action, flags));
+            (false, false, std::collections::HashMap::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn each_request_asks_polkit_for_its_own_action_with_a_prompt() {
+        let bus = crate::goback::tests::Bus::start("polkit-actions");
+        let polkit = RecordingPolkit::default();
+        let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", polkit.clone()).expect("serve").build().await.expect("polkit");
+        let service = bus.builder().serve_at(OBJECT_PATH, Update1 { activity: Arc::new(Activity::default()) }).expect("serve").build().await.expect("service");
+        let client = bus.builder().build().await.expect("client");
+        let destination = service.unique_name().expect("unique name").to_owned();
+        let not_authorized = |reply: zbus::Result<zbus::Message>| matches!(reply, Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "os.athanor.Update1.Error.NotAuthorized");
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "Postpone", &()).await));
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "SetAutomaticSecurityUpdates", &(true,)).await));
+        assert!(not_authorized(client.call_method(Some(&destination), OBJECT_PATH, Some(BUS_NAME), "GoBack", &()).await));
+        // 1 is AllowUserInteraction: the user is asked, not refused outright.
+        let asked = polkit.0.lock().expect("lock").clone();
+        assert_eq!(asked, [(requests::ACTION_POSTPONE.to_owned(), 1), (requests::ACTION_SET_AUTOMATIC.to_owned(), 1), (ACTION_ROLLBACK.to_owned(), 1)]);
+        assert_eq!(
+            [requests::ACTION_POSTPONE, requests::ACTION_SET_AUTOMATIC, ACTION_ROLLBACK],
+            ["os.athanor.update.postpone", "os.athanor.update.set-automatic", "os.athanor.update.rollback"]
+        );
     }
 
     #[test]

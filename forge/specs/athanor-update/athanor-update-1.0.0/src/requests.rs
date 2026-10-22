@@ -216,32 +216,43 @@ pub fn postpone<T: Tools>(ctx: &Context<'_, T>) -> Result<i64, Refusal> {
 /// `SetAutomaticSecurityUpdates(enabled)`: writes the opt-out of UT13 in any state, an
 /// unreadable one included. Turned off, it first locks an unlocked security digest again;
 /// turned on, the run after the request unlocks a waiting one and opens its lineage (ADR-0127
-/// point 8). Returns whether the value changed. polkit has asked for [`ACTION_SET_AUTOMATIC`]
-/// before `ctx` is made, as for [`postpone`].
+/// point 8). Returns whether the value changed, with the result: a write can fail after the
+/// value changed, and the change is logged either way. polkit has asked for
+/// [`ACTION_SET_AUTOMATIC`] before `ctx` is made, as for [`postpone`].
 ///
 /// # Errors
 /// See [`Refusal`]. When the relock fails nothing is written.
-pub fn set_automatic<T: Tools>(ctx: &Context<'_, T>, enabled: bool) -> Result<bool, Refusal> {
-    let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
+pub fn set_automatic<T: Tools>(ctx: &Context<'_, T>, enabled: bool) -> (bool, Result<(), Refusal>) {
+    let Ok(_lock) = ctx.store.try_lock() else {
+        return (false, Err(Refusal::Busy));
+    };
     let previous = ctx.store.automatic_security_updates().ok();
     if !enabled {
         // Locked first, as in `postpone`: an opt-out written over a deployment that still
         // applies at the next shutdown would be false.
-        let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
+        let Ok(status) = ctx.tools.status() else {
+            return (false, Err(Refusal::Failed));
+        };
         let unlocked = status.staged.as_ref().filter(|staged| !staged.download_only && !status.rollback_queued);
         if unlocked.is_some_and(|staged| staged_security(ctx, &status, staged)) && ctx.tools.relock().is_err() {
             tracing::error!("the security update could not be locked again; the opt-out is unchanged");
-            return Err(Refusal::Failed);
+            return (false, Err(Refusal::Failed));
         }
     }
-    if let Err(err) = ctx.store.set_automatic_security_updates(enabled) {
-        tracing::error!(%err, "cannot write the opt-out of automatic security updates");
-        // The opt-out still reads as before, so the run unlocks again what was just locked.
-        republish(ctx);
-        return Err(Refusal::Failed);
-    }
+    let written = ctx.store.set_automatic_security_updates(enabled);
+    // After a failed write too: the run reads the opt-out as it is on disk, and unlocks again
+    // what was just locked when it still reads on.
     republish(ctx);
-    Ok(previous != Some(enabled))
+    match written {
+        Ok(()) => (previous != Some(enabled), Ok(())),
+        Err(err) => {
+            tracing::error!(%err, "cannot write the opt-out of automatic security updates");
+            // The write fails after its rename when the directory cannot be synced: the value
+            // read back says whether it changed.
+            let changed = previous != Some(enabled) && ctx.store.automatic_security_updates().ok() == Some(enabled);
+            (changed, Err(Refusal::Failed))
+        }
+    }
 }
 
 /// `GoBack()`: the immediately previous deployment, the digest left recorded as held, a reboot.
@@ -703,14 +714,14 @@ mod tests {
     #[test]
     fn turning_automatic_off_relocks_an_unlocked_security_digest() {
         let (machine, tools) = will_apply("automatic-off", security(), &open_lineage(NOW, false));
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
         assert_eq!(*tools.calls.borrow(), ["relock"]);
         let state = state(&machine);
         assert_eq!((state.update, state.automatic_security_updates), (UpdateState::Downloaded, false));
         assert!(!machine.store.automatic_security_updates().expect("read"));
         // A feature digest unlocked by Apply() is the user's restart: it stays unlocked.
         let (machine, tools) = will_apply("automatic-off-feature", Class::Feature, &Lineage::default());
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
         assert!(tools.calls.borrow().is_empty() && !locked(&tools));
     }
 
@@ -718,7 +729,7 @@ mod tests {
     fn turning_it_on_unlocks_a_waiting_one_and_starts_the_clock() {
         let (machine, tools) = staged_for_shutdown("automatic-on", security(), &Lineage::default());
         machine.store.set_automatic_security_updates(false).expect("write");
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), Ok(true));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (true, Ok(())));
         assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
         let state = state(&machine);
         assert_eq!((state.update, state.automatic_security_updates), (UpdateState::WillApplyAtNextShutdown, true));
@@ -729,12 +740,12 @@ mod tests {
     #[test]
     fn set_automatic_reports_only_a_change() {
         let (machine, tools) = staged_for_shutdown("automatic-change", security(), &Lineage::default());
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), Ok(false), "on by default");
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(false));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (false, Ok(())), "on by default");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (false, Ok(())));
         // An unreadable opt-out is rewritten, and the write is a change.
         std::fs::write(machine.store.var.join("automatic-security-updates"), b"").expect("write");
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
         assert!(!machine.store.automatic_security_updates().expect("read"));
     }
 
@@ -742,9 +753,21 @@ mod tests {
     fn turning_automatic_off_writes_nothing_when_the_relock_fails() {
         let (machine, mut tools) = will_apply("automatic-off-relock-fails", security(), &open_lineage(NOW, false));
         tools.relock = Err(Failure { code: ErrorCode::Internal, host: None });
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Err(Refusal::Failed));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (false, Err(Refusal::Failed)));
         assert!(machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
         assert_eq!(*tools.calls.borrow(), ["relock"]);
+    }
+
+    #[test]
+    fn a_failed_write_of_the_opt_out_is_no_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let (machine, tools) = staged_for_shutdown("automatic-write-fails", security(), &Lineage::default());
+        machine.store.set_automatic_security_updates(false).expect("write");
+        std::fs::set_permissions(&machine.store.var, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+        let result = set_automatic(&machine.ctx(&tools, NOW), true);
+        std::fs::set_permissions(&machine.store.var, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert_eq!(result, (false, Err(Refusal::Failed)));
+        assert!(!machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
     }
 
     #[tokio::test]
