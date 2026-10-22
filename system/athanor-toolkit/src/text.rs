@@ -249,10 +249,22 @@ impl TextField {
         });
         let range = target.and_then(|t| ranges.get(t));
         let empty = self.empty_line(range);
+        // The target line's newline, which the caret stays before: from the leading side of a
+        // right-to-left newline Parley puts it after, on the line below.
+        let text = self.editor.raw_text();
+        let ends_in_newline =
+            |r: &&std::ops::Range<usize>| text.get((*r).clone()).is_some_and(|t| t.ends_with('\n'));
+        let newline = range.filter(ends_in_newline).map(|r| r.end - 1);
         let mut driver = self.driver(cx);
         match (middle, range) {
             (Some(_), Some(r)) if empty => driver.move_to_byte(r.start),
-            (Some(y), _) => driver.move_to_point(x, y),
+            (Some(y), _) => {
+                driver.move_to_point(x, y);
+                let at = driver.editor.raw_selection().focus().index();
+                if let Some(newline) = newline.filter(|&n| at > n) {
+                    driver.move_to_byte(newline);
+                }
+            }
             // Past the last line, to its end; before the first, to its start.
             (None, _) if down => driver.move_to_text_end(),
             (None, _) => driver.move_to_text_start(),
@@ -441,6 +453,25 @@ mod tests {
         assert_eq!(caret_at(&mut cx, &mut area).1, 1);
         area.down(&mut cx);
         assert_eq!(caret_at(&mut cx, &mut area).1, 2);
+    }
+
+    #[test]
+    fn down_onto_a_shorter_right_to_left_line_ends_before_its_newline() {
+        let mut cx = TextContext::default();
+        let (long, short) = ("אבגדהוזח", "אב");
+        let text = format!("{long}\n{short}\n{long}");
+        let mut area = TextField::area("Notes", &text, (15.0, true), 300.0, 3);
+        let column6 = long.char_indices().nth(6).map(|(i, _)| i).unwrap();
+        area.editor
+            .driver(&mut cx.fonts, &mut cx.layouts)
+            .move_to_byte(column6);
+        // At the end of the short line, as in GTK, not past its newline on the line below.
+        area.down(&mut cx);
+        let end = long.len() + 1 + short.len();
+        assert_eq!(caret_at(&mut cx, &mut area).0, end);
+        assert_eq!(caret_at(&mut cx, &mut area).1, 1);
+        area.down(&mut cx);
+        assert_eq!(caret_at(&mut cx, &mut area).0, end + 1 + column6);
     }
 
     #[test]
