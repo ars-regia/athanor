@@ -20,9 +20,11 @@ depmod "$KVER"
 # joined by nss-altfiles. dracut already carries /usr/lib/group and libnss_altfiles, but
 # it copies /etc/nsswitch.conf only in host-only mode; without it glibc in the initrd
 # reads /etc/group alone, and udev and tmpfiles report the system groups as unknown.
+# systemd-pcrextend is dracut's name, since dracut-ng 110, for the module that installs
+# systemd-pcrphase-initrd.service; the old name is no longer accepted.
 dracut --no-hostonly --kver "$KVER" --reproducible --compress "zstd -T0 -15" -v \
     --strip --omit-drivers "nouveau" \
-    --add ostree --add fido2 --add tpm2-tss --add systemd-pcrphase \
+    --add ostree --add fido2 --add tpm2-tss --add systemd-pcrextend \
     --install "/etc/group" --install "/etc/passwd" --install "/etc/nsswitch.conf" \
     -f "/usr/lib/modules/$KVER/initramfs.img"
 chmod 0644 "/usr/lib/modules/$KVER/initramfs.img"
