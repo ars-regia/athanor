@@ -28,6 +28,7 @@ from bar_e2e import (  # noqa: E402
     failures,
     labelled,
     press,
+    showing,
     wait_for,
 )
 from bar_session import STATE_ERROR_FILE, SYSTEM_BUS  # noqa: E402
@@ -125,6 +126,49 @@ def labels(app, Atspi):
         ]
     except GLib.Error:
         return None
+
+
+def switch_node(app, Atspi):
+    """The showing switch called "Automatic security updates", found afresh, or None."""
+    found = []
+
+    def visit(accessible):
+        try:
+            if (
+                accessible.get_role_name() in ("switch", "toggle button")
+                and accessible.get_name() == "Automatic security updates"
+                and showing(accessible, Atspi)
+            ):
+                found.append(accessible)
+            children = [
+                accessible.get_child_at_index(index)
+                for index in range(accessible.get_child_count())
+            ]
+        except GLib.Error:
+            return
+        for child in children:
+            if child:
+                visit(child)
+
+    visit(app)
+    return found[0] if found else None
+
+
+def switch_on(app, Atspi):
+    node = switch_node(app, Atspi)
+    if node is None:
+        return None
+    states = node.get_state_set()
+    return states.contains(Atspi.StateType.CHECKED)
+
+
+def press_switch(app, Atspi):
+    node = switch_node(app, Atspi)
+    return node is not None and node.do_action(0)
+
+
+def shows_label(app, Atspi, prefix):
+    return any(text.startswith(prefix) for text in labels(app, Atspi) or ())
 
 
 def main():
@@ -380,6 +424,58 @@ def main():
     check(
         "the host is text, not markup",
         bool(labelled(app, Atspi, "label", "Host: <b>registry</b>.example")),
+    )
+    toggle_sheet(app, Atspi, False)
+
+    # Postpone (UT13): offered while a security digest waits for the next shutdown, once.
+    trust_state.write("security")
+    check("the sheet opens for Postpone", toggle_sheet(app, Atspi, True))
+    check(
+        "a security digest waiting for the shutdown offers Postpone",
+        wait_for(lambda: bool(buttons(app, Atspi, "Postpone")), 3),
+    )
+    check("pressing Postpone", press(app, Atspi, "Postpone"))
+    check("calls Postpone", wait_for(lambda: logged("Postpone"), 3))
+    toggle_sheet(app, Atspi, False)
+    trust_state.write("postponed")
+    check("the sheet opens once postponed", toggle_sheet(app, Atspi, True))
+    check(
+        "the postponed lineage says until when",
+        wait_for(
+            lambda: any(
+                text.startswith("The security update is postponed, at most until ")
+                for text in labels(app, Atspi) or ()
+            ),
+            3,
+        ),
+    )
+    check("and offers no second Postpone", not buttons(app, Atspi, "Postpone"))
+    toggle_sheet(app, Atspi, False)
+
+    # The switch: turning it off asks first and calls only on confirmation.
+    trust_state.write("verified")
+    check("the sheet opens for the switch", toggle_sheet(app, Atspi, True))
+    check(
+        "the switch is on and named",
+        wait_for(lambda: switch_on(app, Atspi) is True, 3),
+    )
+    check("turning it off asks first", press_switch(app, Atspi))
+    check(
+        "the warning says who it applies to",
+        wait_for(
+            lambda: shows_label(app, Atspi, "Turn off automatic security updates?"), 3
+        ),
+    )
+    check("Cancel backs out", press(app, Atspi, "Cancel"))
+    check(
+        "and calls nothing",
+        never(lambda: logged("SetAutomaticSecurityUpdates False"), 2),
+    )
+    check("turning it off again asks again", press_switch(app, Atspi))
+    check("confirming Turn Off", confirm(app, Atspi, "Turn Off"))
+    check(
+        "calls SetAutomaticSecurityUpdates(false)",
+        wait_for(lambda: logged("SetAutomaticSecurityUpdates False"), 3),
     )
     toggle_sheet(app, Atspi, False)
 

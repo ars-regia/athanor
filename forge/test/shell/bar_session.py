@@ -10,8 +10,9 @@ except the method named by --hang, which it never answers. Every call that acts 
 to /out/$RIG_TAG-logind.log as "<Method> <arguments>", e.g. "Suspend True". The log is
 created empty before the bar starts: a missing log means the fake logind never ran.
 
-Beside logind, a fake os.athanor.Update1 answers Apply and GoBack and logs them the same way,
-as "Apply" and "GoBack". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
+Beside logind, a fake os.athanor.Update1 answers Apply, GoBack, Postpone and
+SetAutomaticSecurityUpdates and logs them the same way, as "Apply", "GoBack", "Postpone" and
+"SetAutomaticSecurityUpdates <bool>". While /tmp/athanor-update-refuse names an os.athanor.Update1 error
 (e.g. "Blocked"), it refuses with that error instead, after the seconds a second word names
 (e.g. "NotAuthorized 3", as a polkit agent would take them). It answers State, unlogged, with the
 state file's text, or NoState when there is none; while /tmp/athanor-update-state-error names
@@ -105,6 +106,8 @@ NODE = Gio.DBusNodeInfo.new_for_xml("""
   <interface name="os.athanor.Update1">
     <method name="Apply"/>
     <method name="GoBack"/>
+    <method name="Postpone"/>
+    <method name="SetAutomaticSecurityUpdates"><arg type="b" direction="in"/></method>
     <method name="State"><arg type="s" direction="out"/></method>
   </interface>
   <interface name="org.freedesktop.login1.Session">
