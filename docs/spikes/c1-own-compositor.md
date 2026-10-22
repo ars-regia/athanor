@@ -1,9 +1,9 @@
 # Spike C1: results of the own compositor, before the console sessions
 
 Task 10 of `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md`, written on
-2026-10-22 against `origin/iso-v0` at `071feaa8` (tasks 1 to 8 merged; #684, the console commands of task 9, also merged). The crate's `src/` and `data/` are unchanged since `f12b0cc7`, the base of the first version of this document, so the counts below were taken at that commit and hold at this one (`git diff --stat f12b0cc7 071feaa8 -- forge/specs/athanor-compositor` shows `README.md` only). Task 9, the maintainer's
-console sessions on the laptop and on the NVIDIA desktop, has not run: its section below is empty
-and marked pending. Every figure names its source; a figure with no source was not measured, and
+2026-10-22 against `origin/iso-v0` at `071feaa8` (tasks 1 to 8 merged; #684, the console commands of task 9, also merged). The crate's `src/` and `data/` are unchanged since `f12b0cc7`, the base of the first version of this document, so the counts below were taken at that commit and hold at this one (`git diff --stat f12b0cc7 071feaa8 -- forge/specs/athanor-compositor` shows `README.md` only). Task 9, the console
+sessions, has run on the laptop only (2026-10-22, section 7); the NVIDIA desktop's session has not
+run, and its rows stay empty. Every figure names its source; a figure with no source was not measured, and
 the text says so. The crate is `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`; "README"
 below means its `README.md`.
 
@@ -201,13 +201,31 @@ per output, mean and longest draw, and per client surface the commit intervals.
 
 Note on the nested figures: the draw time is the draw alone, not the submit, which waits on the
 parent compositor (README, task 6). A nested draw time is therefore not a frame time on a display.
-No figure here comes from a monitor: all hardware figures are pending task 9 (section 7).
+No figure here comes from a monitor: the figures on a monitor are in section 7.
 
-## 7. Hardware sessions: pending task 9
+## 7. Hardware sessions (task 9)
 
-Nothing in this section was run. The commands and the maintainer's sessions are task 9; this
-section gets the tables below once it has run. The commands are in the "Console sessions"
-section of the crate's README (#684, merged). Until the sessions run every cell is empty on purpose.
+The laptop's session ran on 2026-10-22, from 21:54 to 22:56 CEST. The NVIDIA desktop's has not
+run, and its cells stay empty on purpose.
+
+**How the laptop's session ran.** It followed the steps of the README's "Console sessions"
+section (#684), driven over SSH by a script rather than by the maintainer at the console:
+
+- **Machine.** athanor-ref, Intel UHD Graphics 620 (`i915`) driving the 1920x1080 panel `eDP-1`;
+  the GeForce MX150 was unused. Kernel `7.2.9-100.azoth.fc43`, Mesa 25.3.6.
+- **Binary.** Built by `rig.sh build-compositor` from `071feaa8` (52 tests passed), SHA-256
+  `118c3a7df459829ce79033033700bd66f2c11ddfcb06bd6c522ae60c94866551`.
+- **Session.** A system unit with `PAMName=login` on `/dev/tty3` gave logind session 449 on `seat0`,
+  and the compositor ran there with `--drm`. The bar, the dock and `ptyxis` ran as user units
+  matched by the allow-list; the bar and the dock used `GSK_RENDERER=cairo`.
+- **The hour of use.** It was a scripted soak: a second terminal window opened and closed every
+  two minutes, and the units were checked every minute. Then came one suspend and resume, and
+  one output unplugged and plugged back.
+- **Not run.** Nothing that needs someone at the console: the switch to a text console, Super+Escape,
+  and a look at the cursor. The captures planned every ten minutes failed, because the compositor
+  offers no capture of a whole output (7.3).
+- **Archive.** `~/c1/c1-task9-athanor.tar.gz` on the laptop holds the compositor's log, the journal,
+  the GPU lines of `dmesg` and the script's events.
 
 Task 9 will add, from the maintainer's archive `~/c1/c1-task9-<host>.tar.gz` (the compositor log
 with the report every 10 s, the journal, `dmesg` lines of the GPU and the maintainer's notes):
@@ -222,17 +240,18 @@ document does not exist yet; that sentence is stale once this one merges.
 
 | Machine | Outputs | Duration | Draws per 10 s (mean, min, max) | Mean and longest draw | Client commit interval (median) | Source (log path) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Laptop | | 1 h | | | | |
+| Laptop (`i915`, `eDP-1` 1920x1080) | 1 | 1 h 2 min, 365 reports | 6.6, 0, 68 (2422 draws) | 0.97 ms mean (weighted by draws); longest 4.20 ms, and 2.31 ms at the 95th percentile of each report's longest | none: no client animates; the bar, the dock and the terminals redraw only on change | `log/compositor-2026-10-22-2154.log` |
 | NVIDIA desktop, three outputs | 3 | 1 h | | | | |
 
 **7.2 Events**
 
 | Machine | Event | Outcome | Log lines |
 | --- | --- | --- | --- |
-| Laptop | one suspend and resume | | |
-| Laptop | one output unplugged and plugged | | |
-| Laptop | switch to a text console and back | | |
-| Both | Super+Escape with the bar, dock and a terminal | | |
+| Laptop | one suspend and resume (`rtcwake -m mem -s 60`, 22:54:17 to 22:55:19 CEST) | passed: the compositor's, the bar's and the dock's units were still active 20 s after the resume, and the output drew again from the first report (11 draws, longest 2.56 ms). The compositor logged no warning or error. | `log/compositor-2026-10-22-2154.log` at 20:55:24Z; `log/events.txt` |
+| Laptop | one output unplugged and plugged | passed. The panel cannot be unplugged, so `card1-eDP-1/status` was forced `off` for 10 s and back to `detect`, which sends the same hot-plug event. The compositor logged "a monitor was unplugged" and "a monitor was plugged in" at 1920x1080, then drew again (5 draws, longest 2.85 ms); the units stayed active. | `log/compositor-2026-10-22-2154.log` at 20:55:40Z and 20:55:50Z |
+| Laptop | switch to a text console and back | not run: it needs someone at the console | |
+| Both | Super+Escape with the bar, dock and a terminal | not run on the laptop, for the same reason; the desktop has not run | |
+| Laptop | explicit sync on `i915` | negotiated: "explicit sync: linux-drm-syncobj-v1 on the GPU" at start. 62 of the 303 client reports came from a client committing dmabufs with a syncobj timeline. | `log/compositor-2026-10-22-2154.log` at 19:54:03Z |
 
 Suspend and resume and output unplugging are not run on the NVIDIA desktop: the maintainer decided on
 2026-10-22 that they run on the laptop only, because on the desktop they make the GPU fall off the
@@ -242,7 +261,16 @@ bus (#604). The desktop gets one hour of three-output use only.
 
 | Id | Machine | Defect | Log lines | Revision 2 item |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| T9-1 | Laptop | `grim` 1.5.0 cannot capture an output: "compositor doesn't support the screen capture protocol". The compositor offers capture of windows only (section 4) and no output capture source, so the session has no screenshot and a screenshot tool cannot work under it. | journal, `c1-grim-start.service` at 21:54:15 CEST | an output capture source, behind an allow-list line of its own |
+
+Two warnings were met that are not defects of this compositor:
+
+- **"Failed to destroy old mode property blob".** smithay logs it at each modeset (19:54:04Z and
+  20:55:50Z). cosmic-comp logged the same line on the same machine when the session went back to
+  tty1 at 22:56:02. Drawing went on both times.
+- **"Unable to become drm master, assuming unprivileged mode".** smithay logs it once at start. The
+  compositor then set the mode and drew through KMS for the whole hour, so the device it was given
+  was usable.
 
 ## 8. NVIDIA defects
 
