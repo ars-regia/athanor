@@ -21,8 +21,8 @@ from pathlib import Path
 # The same goes for a single-line field: AccessKit's Role::TextInput reaches AT-SPI as an entry
 # and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
 # as an entry's. Only the line of a field of the gallery (the `field` and `notes` keys of its
-# strings.tsv) is rewritten: Orca 51 ends no utterance with a full stop, so nothing else tells a
-# field's line from a label's, and a label such as "Sample text" is matched as it is said.
+# strings.tsv) is rewritten: Orca 51 ends a role's line without a full stop, so nothing else tells
+# a field's line from a label's, and a label such as "Sample text" is matched as it is said.
 #
 # A multi-line field too: GTK's GtkTextView reaches AT-SPI as a text, AccessKit's
 # Role::MultilineTextInput as a multi-line entry, and Orca says the line of the caret after a
