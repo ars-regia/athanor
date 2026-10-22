@@ -1,43 +1,44 @@
 Screen reader on.
 Gallery
-Buttons toggle button pressed.
-Choices toggle button not pressed.
-Values toggle button not pressed.
-Lists toggle button not pressed.
-Text toggle button not pressed.
-A button button.
-One toggle button pressed.
-Two toggle button not pressed.
-Three toggle button not pressed.
-Name text.
+Buttons toggle button pressed
+Choices toggle button not pressed
+Values toggle button not pressed
+Lists toggle button not pressed
+Text toggle button not pressed
+A button button
+One toggle button pressed
+Two toggle button not pressed
+Three toggle button not pressed
+Name text
+opens popup
 Screen reader off.
 Screen reader on.
 Gallery
-Choices toggle button pressed.
-Values toggle button not pressed.
-Lists toggle button not pressed.
-Text toggle button not pressed.
-Option one check box checked.
-Option two check box not checked.
-A switch check box checked.
+Choices toggle button pressed
+Values toggle button not pressed
+Lists toggle button not pressed
+Text toggle button not pressed
+Option one check box checked
+Option two check box not checked
+A switch on switch
 Screen reader off.
 Screen reader on.
 Gallery
-Values toggle button pressed.
-Lists toggle button not pressed.
-Text toggle button not pressed.
+Values toggle button pressed
+Lists toggle button not pressed
+Text toggle button not pressed
 A slider horizontal slider 50 50 percent.
 Screen reader off.
 Screen reader on.
 Gallery
-Lists toggle button pressed.
-Text toggle button not pressed.
+Lists toggle button pressed
+Text toggle button not pressed
 A list List with 50 items
-Row 1.
+Row 1
 Screen reader off.
 Screen reader on.
 Gallery
-Text toggle button pressed.
-Notes text.
+Text toggle button pressed
+Notes text
 The caret starts here.
 Screen reader off.
