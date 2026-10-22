@@ -5,7 +5,7 @@
 # RIG_BASE: the image the fixtures' layer goes on. rig.sh passes the published rig, pinned by
 # digest, so the pixels of every golden stay; with no published rig it is the base below.
 ARG RIG_BASE=rig-fresh
-FROM registry.fedoraproject.org/fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809 AS rig-fresh
+FROM registry.fedoraproject.org/fedora:45@sha256:01f161e3776a4032437618baff61192baf51c00a34d17577f9789fed59fc0fdc AS rig-fresh
 
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       cosmic-comp cosmic-panel cosmic-applets cosmic-settings cosmic-settings-daemon \
