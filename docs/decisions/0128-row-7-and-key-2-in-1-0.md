@@ -55,13 +55,11 @@ change the order or the release points of the releases before 1.0.
    release is signed with key 2 before the hierarchy exists.
 3. **Release 0.10 "base" is signed with key 1.** It drops row 7 and changes nothing else.
 4. **A transitional release follows 0.10: 0.11 "anchor", the last 0.x release before 1.0.** It
-   is signed with key 1 and carries the new trust anchor in its policy: the public half of the
-   hierarchy's root, which machines pin (`doc_update_trust.md` UT2), when Task B1 of the row 7
-   plan names a root other than key 2, whose public half every image already trusts. Its scope
-   is that and nothing else assigned; fixes that land meanwhile ship in it as usual. It is a new
-   0.x row of section 4.1 of `release-1.0.md`. "0.11" names its place, not a fixed number: a
-   Fedora rebase needed before 1.0 ships as a release 0.x of its own before it, and the
-   transitional release takes the next free number.
+   is signed with key 1 and carries the new trust anchor in its policy: the hierarchy's root,
+   which machines pin (`doc_update_trust.md` UT2), in the form the amendment of UT2 defines. Its
+   scope is that and nothing else assigned; fixes that land meanwhile ship in it as usual. It is
+   a new 0.x row of section 4.1 of `release-1.0.md`. A further Fedora rebase before 1.0 changes
+   the release points, and a decision record places it.
 5. **1.0 is the first release signed under the hierarchy.** Key 1 is retired, and PB5b closes,
    at the first release after 1.0. This amends the close ADR-0123 item 2 gave PB5b.
 6. **The online key lives 180 days and is renewed at 90.**
