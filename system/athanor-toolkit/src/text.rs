@@ -421,6 +421,29 @@ mod tests {
     }
 
     #[test]
+    fn down_onto_a_shorter_wrapped_line_stays_on_it() {
+        let mut cx = TextContext::default();
+        let word = "mmmmmm";
+        let width = cx.layout(word, 15.0, false).width() + 2.0;
+        let text = format!("{word} i {word}");
+        let mut area = TextField::area("Notes", &text, (15.0, false), width, 3);
+        let ranges: Vec<_> = area
+            .layout(&mut cx)
+            .lines()
+            .map(|l| l.text_range())
+            .collect();
+        assert_eq!(ranges, [0..7, 7..9, 9..15], "the wraps the test needs");
+        area.editor
+            .driver(&mut cx.fonts, &mut cx.layouts)
+            .move_to_byte(6);
+        // Past the end of "i ": at the wrap, drawn at the end of the second line.
+        area.down(&mut cx);
+        assert_eq!(caret_at(&mut cx, &mut area).1, 1);
+        area.down(&mut cx);
+        assert_eq!(caret_at(&mut cx, &mut area).1, 2);
+    }
+
+    #[test]
     fn the_field_edits_and_composes() {
         let mut cx = TextContext::default();
         let mut field = TextField::new("Name", "", 15.0, false);
