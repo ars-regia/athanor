@@ -1,9 +1,11 @@
 # athanor-compositor
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
-(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). It is a spike in the
-workspace: no package ships it, and cosmic-comp stays the image's compositor until revision 2
-of the specification accepts this one.
+(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). The package
+`athanor-compositor` ships it as the greeter's preview session (`docs/architecture/doc_session.md`,
+SN15): `data/athanor-compositor-session` starts `data/athanor-compositor.service`, which starts
+the desktop once the display is ready. cosmic-comp stays the default session until revision 2
+of `doc_own_stack.md` accepts this one.
 
 ## Smithay
 

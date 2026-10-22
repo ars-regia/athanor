@@ -1,0 +1,90 @@
+#!/usr/bin/sh
+# athanor-compositor-session - the preview session on Athanor's own compositor
+# (doc_session.md, SN15), started by greetd as the user once the greeter's session menu
+# chose "Athanor on the new compositor (preview)".
+#
+# The compositor is a user unit, athanor-compositor.service, which starts the desktop
+# through athanor-session.target once it is ready. This script waits on that unit: the
+# session ends when the compositor ends, whatever the cause, and every way out of the
+# script -- a start that failed, the compositor's end, a logout, a signal from greetd --
+# stops what it started and leaves the user manager clean. There is no fallback to
+# cosmic-comp: a preview that fails returns to the greeter, and the cause is in the
+# journal under this script's name and the compositor's unit.
+set -eu
+
+# Output to the journal under this script's name. systemd-cat execs the script again with
+# its output connected, keeping the PID greetd waits on.
+if [ -z "${ATHANOR_COMPOSITOR_SESSION_JOURNAL:-}" ]; then
+    ATHANOR_COMPOSITOR_SESSION_JOURNAL=1 exec systemd-cat -t athanor-compositor-session "$0" "$@"
+fi
+
+# SN2's import list, today's form (athanor-desktop); it moves to the file of SN13 step 1.
+# The compositor sets WAYLAND_DISPLAY and nothing sets DISPLAY without X11 (SN16, gap 6),
+# so the script imports the rest and removes all but XDG_CURRENT_DESKTOP at the end.
+IMPORTED="XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS"
+REMOVED="WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS"
+PREVIEW="ATHANOR_PREVIEW_SESSION XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS"
+
+# 1. What a previous session left: units still active, units failed, and the variables of
+# a preview killed before its handler ran.
+systemctl --user stop athanor-session.target athanor-compositor.service
+systemctl --user reset-failed
+# shellcheck disable=SC2086 # word splitting of the lists is intended
+systemctl --user unset-environment $PREVIEW
+
+# 2. Every way out ends the session. The stop returns once both units are inactive, so the
+# greeter never starts on a GPU the compositor still holds. A failure here is logged and
+# the rest of the cleanup still runs.
+end_session() {
+    set +e
+    if ! systemctl --user stop athanor-session.target athanor-compositor.service; then
+        echo "athanor-compositor-session: the session's units did not stop" >&2
+    fi
+    # shellcheck disable=SC2086 # word splitting of the lists is intended
+    if ! systemctl --user unset-environment $REMOVED $PREVIEW; then
+        echo "athanor-compositor-session: the session's variables were not removed" >&2
+    fi
+}
+trap end_session EXIT
+trap 'exit 129' HUP
+trap 'exit 143' TERM
+
+# 3. What athanor-session exports, but XDG_DATA_DIRS, which only cosmic-comp takes from
+# there; the user manager has the same values from /usr/lib/environment.d.
+export XDG_CURRENT_DESKTOP=Athanor:COSMIC
+export XDG_SESSION_TYPE=wayland
+export GTK_IM_MODULE=simple
+# localsearch's unit starts only with XDG_SESSION_CLASS=user, and greetd hands the session
+# no class: read it from logind, as athanor-desktop does.
+if [ -n "${XDG_SESSION_ID:-}" ] && class=$(loginctl show-session "$XDG_SESSION_ID" --property=Class --value); then
+    export XDG_SESSION_CLASS="$class"
+else
+    echo "athanor-compositor-session: cannot read the session class from logind; file search stays off" >&2
+fi
+# The USB policy is relaxed for an unlocked session, and the preview never locks (SN16, gap 1).
+/usr/bin/athanor-usbguard-hook unlock
+
+# 4. The discriminator the three COSMIC-only units test (ConditionEnvironment=), and the
+# system's keyboard setting, which the compositor's keymap reads from XKB_DEFAULT_*. The
+# properties of org.freedesktop.locale1 that localectl sets; empty, n/a or (unset) is unset.
+systemctl --user set-environment ATHANOR_PREVIEW_SESSION=1
+keyboard() {
+    value=$(busctl get-property org.freedesktop.locale1 /org/freedesktop/locale1 org.freedesktop.locale1 "$1")
+    value=${value#s \"}
+    value=${value%\"}
+    case $value in
+        '' | n/a | '(unset)') ;;
+        *) systemctl --user set-environment "$2=$value" ;;
+    esac
+}
+keyboard X11Layout XKB_DEFAULT_LAYOUT
+keyboard X11Variant XKB_DEFAULT_VARIANT
+keyboard X11Options XKB_DEFAULT_OPTIONS
+# shellcheck disable=SC2086 # word splitting of the list is intended
+systemctl --user import-environment $IMPORTED
+
+# 5. The only start of the compositor, and of the session through its ExecStartPost=. The
+# command returns once the unit is inactive again; it runs in the background so that a
+# trapped HUP or TERM from greetd ends `wait` at once and the handler runs.
+systemctl --user start --wait athanor-compositor.service &
+wait $!

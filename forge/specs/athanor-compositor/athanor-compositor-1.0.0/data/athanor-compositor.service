@@ -1,0 +1,25 @@
+[Unit]
+Description=Athanor compositor (preview session)
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_session.md
+# doc_session.md, SN15: only /usr/bin/athanor-compositor-session starts this unit, and waits
+# on it; there is no [Install], so the default session never does. The logout stops
+# athanor-session.target, graphical-session.target stops once unneeded, and this unit with it.
+PartOf=graphical-session.target
+
+[Service]
+# The compositor sets WAYLAND_DISPLAY in this manager once its socket listens, then sends
+# READY=1; only then does ExecStartPost= start the session, whose readiness gate probes the
+# display. A failed session start fails this unit, and the compositor is stopped.
+Type=notify
+ExecStart=/usr/bin/athanor-compositor --drm
+ExecStartPost=/usr/bin/systemctl --user start athanor-session.target
+# systemd arms the start timeout anew for ExecStart= and for ExecStartPost=: 60 s to READY=1,
+# then 60 s for the session's start, whose longest bounded chain is 35 s (SN15). A compositor
+# that hangs before READY=1 is stopped, not kept on a black screen.
+TimeoutStartSec=60s
+TimeoutStopSec=5s
+# No Restart= (SN6, exception): Wayland clients do not survive their compositor, so a restart
+# would bring back a session with every window gone. Its end ends the session, through the
+# script that waits on it.
+Slice=session.slice
+NoNewPrivileges=yes
