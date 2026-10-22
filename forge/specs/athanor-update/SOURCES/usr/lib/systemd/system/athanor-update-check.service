@@ -1,9 +1,9 @@
 [Unit]
 Description=Check for, verify and download an Athanor system image update
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-# The check counts a booted security digest as applied only while boot-complete.target is
+# The check counts a booted security digest as applied only while greenboot-success.target is
 # active, which it reads itself (UT13): the ordering below holds within one transaction only.
-After=network-online.target athanor-update-migrate.service boot-complete.target
+After=network-online.target athanor-update-migrate.service greenboot-success.target
 Wants=network-online.target
 
 [Service]
