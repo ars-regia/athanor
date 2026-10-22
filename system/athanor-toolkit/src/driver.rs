@@ -979,13 +979,9 @@ struct Pending {
     commit: Option<String>,
 }
 
-/// Text from the input method without control characters: the field holds one line.
-fn printable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
-/// The preedit as [`printable`] keeps it, with its cursor's byte offsets moved to match. A
-/// cursor that is not on a character boundary of the preedit is dropped.
+/// The preedit without what a single-line field drops from it, the newline included, with its
+/// cursor's byte offsets moved to match: a preedit is shown on one line. A cursor that is not
+/// on a character boundary of the preedit is dropped.
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
@@ -994,14 +990,14 @@ fn printable_preedit(
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
                 .chars()
-                .filter(|c| c.is_control())
+                .filter(|&c| !crate::text::keeps(c, false))
                 .map(char::len_utf8)
                 .sum();
             at - dropped
         })
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
-    (printable(text), cursor)
+    (crate::text::printable(text, false), cursor)
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1344,7 +1340,8 @@ impl App {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        let event = commit.and_then(|text| surface.ui.commit(&printable(&text)));
+        // The field keeps what it takes of the text: a text area its newlines.
+        let event = commit.and_then(|text| surface.ui.commit(&text));
         let (preedit, cursor) = preedit.unwrap_or_default();
         let (preedit, cursor) = printable_preedit(&preedit, cursor);
         surface.ui.compose(&preedit, cursor);
@@ -1355,15 +1352,18 @@ impl App {
         }
     }
 
-    /// A key held down: as pressed again, except Enter, and Space outside a field, which
-    /// activate once.
+    /// A key held down: as pressed again, except Enter outside a text area, and Space outside
+    /// a field, which activate once.
     fn repeat(&mut self, event: KeyEvent) {
-        let in_field = self
+        let focused = self
             .keyboard_focus
             .and_then(|id| self.shell.ui(id))
-            .is_some_and(|ui| ui.focus().is_some_and(|id| ui.field_text(id).is_some()));
+            .and_then(|ui| Some((ui, ui.focus()?)));
+        let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
+        let in_area =
+            focused.is_some_and(|(ui, id)| matches!(ui.widget(id).kind, Kind::TextArea(_)));
         let activates = match event.keysym {
-            Keysym::Return | Keysym::KP_Enter => true,
+            Keysym::Return | Keysym::KP_Enter => !in_area,
             Keysym::space => !in_field,
             _ => false,
         };

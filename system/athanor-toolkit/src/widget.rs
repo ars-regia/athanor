@@ -2,7 +2,7 @@
 //! right-to-left.
 
 use crate::focus;
-use crate::text::{Brush, TextContext, TextField};
+use crate::text::{keeps, printable, Brush, TextContext, TextField};
 use crate::theme::Theme;
 use parley::Layout;
 
@@ -94,6 +94,11 @@ pub enum Kind {
     Slider(Slider),
     /// A single-line text field.
     Field(Box<TextField>),
+    /// A text field of several lines, as GTK's `TextView` in a `ScrolledWindow`: as wide as a
+    /// field, its text wrapped at that width, a number of lines tall, and scrolled to keep the
+    /// caret in view and under the wheel. Enter breaks the line, Up and Down move between lines,
+    /// and Tab leaves it. Add it with [`Ui::text_area`].
+    TextArea(Box<TextField>),
     /// A viewport `height` logical pixels high onto its child, which it fills the width with and
     /// scrolls under the wheel and the touchpad, and to keep the keyboard focus in view, as GTK's
     /// `ScrolledWindow`. What lies outside the viewport is not drawn and takes no pointer input;
@@ -262,6 +267,7 @@ impl Widget {
                 | Kind::Switch { .. }
                 | Kind::Slider(_)
                 | Kind::Field(_)
+                | Kind::TextArea(_)
                 | Kind::WindowButton(_)
                 | Kind::MenuItem(_)
                 | Kind::ListRow(_)
@@ -416,6 +422,18 @@ impl Ui {
     pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
         let field = TextField::new(name, text, self.theme.font_size, self.rtl);
         self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Adds a text area named `name` for assistive technologies, holding `text`: `lines` lines
+    /// tall and as wide as the theme's field, its text wrapped at that width. See
+    /// [`Kind::TextArea`].
+    pub fn text_area(&mut self, parent: WidgetId, name: &str, text: &str, lines: usize) -> WidgetId {
+        let t = &self.theme;
+        let width = t.field_width - 2.0 * t.padding;
+        let mut area = TextField::area(name, text, (t.font_size, self.rtl), width, lines);
+        // The caret follows the text, as gtk_text_buffer_set_text leaves a text view's.
+        area.move_to_end(&mut self.text);
+        self.add(parent, Kind::TextArea(Box::new(area)))
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
@@ -586,6 +604,9 @@ impl Ui {
     /// Scrolls the scroll `id` by `dy` logical pixels, down when positive, within its content,
     /// and places its content again; returns whether it moved.
     fn scroll_by(&mut self, id: WidgetId, dy: f32) -> bool {
+        if let Kind::TextArea(area) = &mut self.widgets[id].kind {
+            return area.scroll_by(&mut self.text, dy);
+        }
         let most = self.content_height(id);
         let Kind::Scroll { height, offset } = &mut self.widgets[id].kind else {
             return false;
@@ -641,7 +662,7 @@ impl Ui {
             return false;
         }
         let under = (0..self.widgets.len()).filter(|&id| {
-            matches!(self.widgets[id].kind, Kind::Scroll { .. })
+            matches!(self.widgets[id].kind, Kind::Scroll { .. } | Kind::TextArea(_))
                 && self.widgets[id].rect.contains(x, y)
                 && self.clip(id).is_none_or(|c| c.contains(x, y))
                 && self.is_visible(id)
@@ -663,7 +684,7 @@ impl Ui {
     /// The text of the field `id`, or `None` if it is not a field.
     pub fn field_text(&self, id: WidgetId) -> Option<String> {
         match &self.widgets[id].kind {
-            Kind::Field(field) => Some(field.text()),
+            Kind::Field(field) | Kind::TextArea(field) => Some(field.text()),
             _ => None,
         }
     }
@@ -885,6 +906,7 @@ impl Ui {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
             }
+            Kind::TextArea(area) => (field_width, area.view_height(&mut self.text) + pad),
         };
         widget.rect.w = w;
         widget.rect.h = h;
@@ -1129,27 +1151,52 @@ impl Ui {
     /// activates. A focused slider takes the arrows (Right moves the knob right, which lowers the
     /// value when mirrored; Up and Down are not mirrored), Page Up and Page Down (ten steps) and
     /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
-    /// Up, Page Down (a viewport), Home and End, which choose a row of its list.
+    /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
+    /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
+    /// and never leave it, as GTK's `TextView`.
     pub fn key(&mut self, key: Key) -> Option<Event> {
         let focused = self.focus;
         if let Some(id) = focused {
-            if let Kind::Field(field) = &mut self.widgets[id].kind {
+            let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+            if let Kind::Field(field) | Kind::TextArea(field) = &mut self.widgets[id].kind {
                 let cx = &mut self.text;
-                match &key {
-                    Key::Text(s) => field.insert(cx, s),
-                    Key::Backspace => field.backspace(cx),
-                    Key::Delete => field.delete(cx),
+                let edited = match &key {
+                    Key::Text(s) => {
+                        field.insert(cx, s);
+                        true
+                    }
+                    Key::Enter if multiline => {
+                        field.insert(cx, "\n");
+                        true
+                    }
+                    Key::Backspace => {
+                        field.backspace(cx);
+                        true
+                    }
+                    Key::Delete => {
+                        field.delete(cx);
+                        true
+                    }
                     Key::Left => {
                         field.left(cx);
-                        return None;
+                        false
                     }
                     Key::Right => {
                         field.right(cx);
-                        return None;
+                        false
+                    }
+                    Key::Up if multiline => {
+                        field.up(cx);
+                        false
+                    }
+                    Key::Down if multiline => {
+                        field.down(cx);
+                        false
                     }
                     _ => return self.navigate(key),
-                }
-                return Some(Event::Edited(id));
+                };
+                field.scroll_to_caret(cx);
+                return edited.then_some(Event::Edited(id));
             }
         }
         if let Some(id) = focused {
@@ -1249,32 +1296,45 @@ impl Ui {
 
     /// Shows the input method's preedit in the focused field.
     pub fn compose(&mut self, preedit: &str, cursor: Option<(usize, usize)>) {
-        if let Some(Kind::Field(field)) = self.focus.map(|id| &mut self.widgets[id].kind) {
+        if let Some(Kind::Field(field) | Kind::TextArea(field)) =
+            self.focus.map(|id| &mut self.widgets[id].kind)
+        {
             field.compose(&mut self.text, preedit, cursor);
         }
     }
 
-    /// Commits the input method's text into the focused field.
+    /// Commits the input method's text into the focused field, without the control
+    /// characters but a text area's newlines, as typing them would.
     pub fn commit(&mut self, text: &str) -> Option<Event> {
         let id = self.focus?;
-        let Kind::Field(field) = &mut self.widgets[id].kind else {
+        let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
-        field.commit(&mut self.text, text);
+        field.commit(&mut self.text, &printable(text, multiline));
+        field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
     }
 
-    /// Replaces a field's text, as an assistive technology's SetValue does.
+    /// Replaces a field's text, as an assistive technology's SetValue does: without the control
+    /// characters but a text area's newlines, and without the bidirectional formats, which
+    /// would change how the text reads without being seen.
     pub fn set_field_text(&mut self, id: WidgetId, text: &str) -> Option<Event> {
-        let Kind::Field(field) = &mut self.widgets[id].kind else {
+        let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
         let text: String = text
             .chars()
-            .filter(|&c| !c.is_control() && !is_invisible_format(c))
+            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
             .take(Self::FIELD_MAX_CHARS)
             .collect();
         field.set_text(&text);
+        if multiline {
+            // As a GTK text view's, where a single-line field's caret stays at its start.
+            field.move_to_end(&mut self.text);
+        }
+        field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
     }
 }
@@ -2246,5 +2306,112 @@ mod tests {
             let margin = ui.theme.margin;
             assert_eq!((view.x, view.w), (margin, ui.size().0 - 2.0 * margin));
         }
+    }
+
+    /// Whether the caret of the text area `id` lies inside the part of its text it shows, and
+    /// the line the caret is on, counted from 0.
+    fn caret_line(ui: &mut Ui, id: WidgetId) -> (bool, i32) {
+        let Kind::TextArea(area) = &mut ui.widgets[id].kind else {
+            return (false, -1);
+        };
+        let (view, line) = (area.view_height(&mut ui.text), area.line_height(&mut ui.text));
+        let offset = area.offset;
+        let Some(c) = area.caret(&mut ui.text, 1.5) else {
+            return (false, -1);
+        };
+        let (top, bottom) = (c.y0 as f32 - offset, c.y1 as f32 - offset);
+        let shown = top >= -0.5 && bottom <= view + 0.5;
+        (shown, (c.y0 as f32 / line).round() as i32)
+    }
+
+    #[test]
+    fn a_text_area_keeps_its_newlines_only() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 4);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        let text = |ui: &Ui, id| ui.field_text(id).unwrap_or_default();
+
+        // SetValue drops the controls but the newline, and the bidirectional formats.
+        ui.set_field_text(area, "a\nb\u{202E}c\u{7}");
+        assert_eq!(text(&ui, area), "a\nbc");
+        ui.set_field_text(field, "a\nb\u{202E}c\u{7}");
+        assert_eq!(text(&ui, field), "abc");
+
+        // The input method's text keeps the newline, and the RLM as a typed one is kept;
+        // Parley's other line breaks and the other controls go.
+        ui.set_field_text(area, "");
+        ui.set_focus(Some(area));
+        assert_eq!(ui.commit("x\ny"), Some(Event::Edited(area)));
+        ui.commit("\u{200F}x");
+        ui.commit("a\u{2028}b\u{2029}c\t");
+        assert_eq!(text(&ui, area), "x\ny\u{200F}xabc");
+        ui.set_focus(Some(field));
+        ui.set_field_text(field, "");
+        ui.commit("x\ny\u{2028}z");
+        assert_eq!(text(&ui, field), "xyz");
+    }
+
+    #[test]
+    fn a_text_area_scrolls_to_its_caret() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Text", Theme::default(), rtl);
+            let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+            let after = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(area));
+            assert_eq!(caret_line(&mut ui, area), (true, 0), "rtl {rtl}");
+
+            // Enter breaks the line; the field follows the caret past its third line.
+            for line in 1..=5 {
+                assert_eq!(ui.key(Key::Enter), Some(Event::Edited(area)));
+                assert_eq!(caret_line(&mut ui, area), (true, line), "rtl {rtl}");
+            }
+            assert_eq!(ui.field_text(area).as_deref(), Some("\n\n\n\n\n"));
+
+            // Up and Down move a line at a time, and do not leave the field at its ends.
+            for line in (0..5).rev() {
+                assert_eq!(ui.key(Key::Up), None);
+                assert_eq!(caret_line(&mut ui, area), (true, line), "rtl {rtl}");
+            }
+            assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(area)));
+            assert_eq!(ui.key(Key::Down), None);
+            assert_eq!(caret_line(&mut ui, area), (true, 1), "rtl {rtl}");
+
+            // The wheel scrolls the text under the pointer, within it.
+            let r = ui.widget(area).rect;
+            assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, 1e6), "rtl {rtl}");
+            assert!(!ui.pointer_axis(r.x + 1.0, r.y + 1.0, 1.0), "rtl {rtl}");
+            assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, -1e6), "rtl {rtl}");
+
+            // Text wraps at the field's width, and the field keeps its size.
+            ui.set_field_text(area, &"word ".repeat(40));
+            ui.layout();
+            assert_eq!(ui.widget(area).rect, r, "rtl {rtl}");
+
+            // Tab leaves, as a GTK TextView that does not take Tab.
+            assert_eq!(ui.key(Key::Tab), None);
+            assert_eq!(ui.focus(), Some(after), "rtl {rtl}");
+        }
+    }
+
+    #[test]
+    fn a_text_area_starts_at_the_end_of_its_text() {
+        // As a GTK text view after gtk_text_buffer_set_text: the caret follows the text, where a
+        // single-line field's stays at its start.
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "a\nb", 4);
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.layout();
+        let text = |ui: &Ui, id| ui.field_text(id).unwrap_or_default();
+        ui.set_focus(Some(area));
+        ui.commit("c");
+        assert_eq!(text(&ui, area), "a\nbc");
+        ui.set_field_text(area, "x");
+        ui.commit("y");
+        assert_eq!(text(&ui, area), "xy");
+        ui.set_focus(Some(field));
+        ui.commit("b");
+        assert_eq!(text(&ui, field), "ba");
     }
 }
