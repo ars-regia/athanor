@@ -214,8 +214,8 @@ Under the allow-list only the bar keeps its top layer; the dock and the launcher
 - Produces: `verify.py allow-list`, which works per binary target:
   - a binary target counts when its package's spec installs it to `/usr/bin` (`install ... target/release/<bin> %{buildroot}/usr/bin/<bin>`), so `athanor-dock-toolkit`, which the dock's spec does not install, is skipped;
   - a target's sources are the files under its `path`'s directory, minus those under the directory of another `[[bin]]` of the same crate (the dock's `src/toolkit/` belongs to `athanor-dock-toolkit`), minus `#[cfg(test)]` modules and `tests/`;
-  - a target's sources include those of the workspace crates it depends on by `path =` in its crate's `[dependencies]`, followed transitively, so the dock's `ext_foreign_toplevel_list_v1`, bound in `system/athanor-compositor-client`, counts for the dock;
-  - the check fails when a counted target's sources call `set_layer(Layer::Top)` or `set_layer(Layer::Overlay)`, or set `layer: Layer::Top` or `Layer::Overlay`, and `/usr/bin/<bin>` has no line naming `zwlr_layer_shell_v1`; when they name a `privileged` row of `data/globals` without a line naming it; and when a line names an executable no spec installs;
+  - a target's sources include those of the workspace crates it depends on by `path =` in its crate's `[dependencies]`, followed transitively, so the dock's `ext_foreign_toplevel_list_v1`, bound in `system/athanor-compositor-client`, counts for the dock; an `optional = true` dependency is followed only when the feature set the package's spec builds with enables it, so the dock's optional `athanor-toolkit` is not followed and `athanor-dock-toolkit` stays out;
+  - the check fails only when a counted target asks for the top or overlay layer (`set_layer(Layer::Top)`, `set_layer(Layer::Overlay)`, `layer: Layer::Top` or `Layer::Overlay`) or names a `privileged` row of `data/globals`, and `/usr/bin/<bin>` has no line at all; and when a line names an executable no spec installs. It never proposes or derives a line's interfaces: every interface in a line is a privilege grant, which comes from the maintainer's review (C1 results, section 10 item 1);
   - a named constant `PENDING_OPEN_QUESTION_3` lists the greeter's binary, `athanor-greeter-ui`, with a comment citing open question 3: its missing line is reported as a note, not a failure. When the maintainer answers open question 3 the constant is emptied and the line added.
 
 - [ ] **Step 1: Write the failing tests**
@@ -228,6 +228,8 @@ def test_files_of_another_bin_target_are_not_counted(self): ...        # src/too
 def test_a_line_for_an_executable_nothing_installs_fails(self): ...
 def test_a_test_module_asking_for_the_top_layer_is_ignored(self): ...  # #[cfg(test)] and tests/
 def test_a_bind_in_a_path_dependency_counts(self): ...                 # athanor-compositor-client
+def test_a_disabled_optional_dependency_is_not_followed(self): ...     # the dock's athanor-toolkit
+def test_a_target_with_a_line_passes_whatever_its_interfaces(self): ...
 def test_a_pending_binary_is_a_note_not_a_failure(self): ...
 def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
     # PENDING_OPEN_QUESTION_3 is a subset of the greeter, the lock screen and the polkit agent.
@@ -239,7 +241,7 @@ def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
 
 - [ ] **Step 4: Run it on the tree**: `python3 scripts/verify.py allow-list`. Expected at the head: it names `athanor-dock` (`src/ui/surface.rs`), `athanor-launcher`, `athanor-control-center` and `athanor-greeter-ui` (`src/ui.rs`, `Layer::Overlay`), and nothing under `src/toolkit/`.
 
-- [ ] **Step 5: Add the lines that are not on the login path**: the dock's as C1 results, section 10 item 1, gives it, `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`; then `/usr/bin/athanor-launcher athanor-launcher.service` and `/usr/bin/athanor-control-center athanor-control-center.service`, each with the interfaces the check finds in its target and its path dependencies. Read the unit names from the packages' unit files, never from memory.
+- [ ] **Step 5: Stop and ask the maintainer for the new lines.** Each interface in a line is a privilege grant. Paste the check's findings and the proposed lines: the dock's as C1 results, section 10 item 1, gives it, `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`; the launcher's and the control center's, `/usr/bin/athanor-launcher athanor-launcher.service` and `/usr/bin/athanor-control-center athanor-control-center.service`, with the candidate sets of open question 14. Read the unit names from the packages' unit files, never from memory. Add each line only with the maintainer's answer; until then the task's pull request stays a draft.
 
 - [ ] **Step 6: Stop and ask the maintainer for the greeter's line** (login path, open question 3). Paste the check's finding and a proposed line; add no line, shipped or rig-only, without the answer. Until then the greeter stays in `PENDING_OPEN_QUESTION_3`; `scripts/ci/known-red.txt` only shrinks and is not used.
 
@@ -573,3 +575,8 @@ git commit -am "test(devvm): run the acceptances under the own compositor's sess
 11. **The CI jobs of task 10**: should they become required checks of `iso-v0` once they are green?
 12. **A virtual keyboard while locked**: may a granted virtual keyboard type into the lock surface? OS4 and register row 8 say what happens to the input method's grab, not to a virtual keyboard. Task 6 writes no test and no special case until the answer.
 13. **The class of `zwp_text_input_manager_v3`** (C1 results, section 10 item 12): offered to every client, or only outside a security context? Task 7 writes its row in `data/globals` from the answer.
+14. **The allow-list lines of the launcher and the control center** (task 4 step 5). Candidates, each to be confirmed against the binary's actual binds:
+    - both: `zwlr_layer_shell_v1`, since each draws on the overlay layer (`surface.rs`, `Layer::Overlay`);
+    - the launcher: `ext_foreign_toplevel_list_v1`, if it lists open windows through `athanor-compositor-client`; and `ext_foreign_toplevel_image_capture_source_manager_v1` with `ext_image_copy_capture_manager_v1`, if its window previews (`athanor-preview`, the `launcher-window-preview` case) capture windows;
+    - the control center: `ext_foreign_toplevel_list_v1`, only if it reads the window list through `athanor-compositor-client`; nothing else is known to need a grant.
+    Which of these does each line carry?
