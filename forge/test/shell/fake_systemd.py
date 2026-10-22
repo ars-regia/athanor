@@ -87,7 +87,8 @@ class Manager:
                 argv,
                 [f"{k}={v}" for k, v in environment.items()],
                 directory,
-                GLib.SpawnFlags.DO_NOT_REAP_CHILD | GLib.SpawnFlags.STDOUT_TO_DEV_NULL,
+                # STDOUT_TO_DEV_NULL trips a GLib assertion in PyGObject's spawn_async on Fedora 45; the child's output goes to the log.
+                GLib.SpawnFlags.DO_NOT_REAP_CHILD,
             )
         except GLib.Error as err:
             for fd in fds:
