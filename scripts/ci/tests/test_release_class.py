@@ -11,6 +11,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import release_class as rc  # noqa: E402
+import schema  # noqa: E402
 
 REPO = "ghcr.io/owner/athanor-system"
 OLD, NEW = "sha256:" + "1" * 64, "sha256:" + "2" * 64
@@ -33,8 +34,9 @@ def updateinfo(*updates):
 
 
 class Fake(rc.Sources):
-    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False):
+    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45"):
         self.repo_root = root
+        self.ids = {f"{REPO}@{OLD}": was, f"{REPO}@{NEW}": now}
         self.pkgs = {
             f"{REPO}@{OLD}": {"openssl": f"0:{old}"},
             f"{REPO}@{NEW}": {"openssl": f"0:{new}"},
@@ -43,6 +45,9 @@ class Fake(rc.Sources):
 
     def packages(self, ref):
         return self.pkgs[ref]
+
+    def version(self, ref):
+        return self.ids[ref]
 
     def updateinfo(self, ref):
         if self.fail:
@@ -125,6 +130,23 @@ class Derive(unittest.TestCase):
             with self.subTest(fixed=rel):
                 got = self.derive("", head, info=updateinfo(("FEDORA-2026-aaaa", "security", rel)))
                 self.assertEqual(got["advisories"], ids)
+
+    def test_a_change_of_fedora_release_counts_no_fedora_advisory(self):
+        info = updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
+        got = self.derive("", self.commit(), info=info, was="43", now="45")
+        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("feature", [], "unlabelled-baseline,base-change:43->45"))
+        self.assertIsNone(got["updateinfo_timestamp"])
+
+    def test_a_change_of_fedora_release_keeps_the_git_half(self):
+        base = self.commit()
+        head = self.commit("2026-10-21-x", SECURITY)
+        got = self.derive(base, head, was="43", now="45")
+        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("security", ["CVE-2026-0001"], "base-change:43->45"))
+
+    def test_the_same_fedora_release_still_counts_its_advisories(self):
+        info = updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45"))
+        got = self.derive("", self.commit(), info=info)
+        self.assertEqual((got["class"], got["advisories"], got["class_reason"]), ("security", ["FEDORA-2026-aaaa"], "unlabelled-baseline"))
 
     def test_only_security_advisories_count(self):
         got = self.derive("", self.commit(), info=updateinfo(("FEDORA-2026-bbbb", "bugfix", "2.fc45")))
@@ -333,6 +355,21 @@ class Malformed(Derive):
     def test_an_advisory_id_outside_the_schema_pattern_fails(self):
         with self.assertRaisesRegex(rc.ClassError, REPO):
             self.derive("", self.commit(), info=updateinfo(("FEDORA 2026", "security", "2.fc45")))
+
+
+
+class ClassReasonSchema(unittest.TestCase):
+    PATTERN = schema.load("release-candidate")["properties"]["classes"]["items"]["properties"]["class_reason"]
+
+    def test_every_reason_derive_writes_is_valid(self):
+        for value in ("", "no-baseline", "unlabelled-baseline", "base-change:43->45", "unlabelled-baseline,base-change:43->45"):
+            with self.subTest(value=value):
+                schema.validate(value, self.PATTERN)
+
+    def test_a_malformed_reason_is_rejected(self):
+        for value in ("unlabelled-baseline,", "no-baseline,base-change:43->45", "base-change:43->", "base-change:f43->45"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                schema.validate(value, self.PATTERN)
 
 
 class Compare(unittest.TestCase):

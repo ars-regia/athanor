@@ -705,13 +705,25 @@ bootstrap cases remain, and nowhere else does `candidate` fall back:
   against the `:latest` image, its baseline in every case. If it finds advisories, the class
   is `security` with those advisories; otherwise it is `feature` with none.
 
-In both, `class_reason` records the case. The fallback to `feature` extends the rule of
+A change of the Fedora release is no fallback but a third case that `class_reason` records:
+when `VERSION_ID` differs between the baseline and the candidate, every build of the new
+release compares later than the old one's, so the Fedora half counts no advisory and does not
+fetch the updateinfo (`updateinfo_timestamp` is `null`); the release is classified from the git
+half alone, and `class_reason` reads `base-change:<from>-><to>` (for example
+`base-change:43->45`), after `unlabelled-baseline,` when the baseline is unlabelled
+(maintainer decision of 2026-10-22, #681). A Fedora security fix that arrives with the change
+of release is therefore not labelled `security`: across a base change only a `security`
+`release-class.toml` in the git half yields `security`, and the release otherwise reads as
+`feature`, the side that asks the user to confirm (ADR-0094 item 5).
+
+In the two bootstrap cases, `class_reason` records the case. The fallback to `feature` extends the rule of
 ADR-0094 item 5, that an unknown class reads as feature, the side that asks the user to
 confirm, to a signed record that carries `class_reason`, as part of this proposal. It is
 not silent: `class_reason` goes in the run summary and in the job summary the maintainer
 approves for the promotion to `:stable` (PL60). Each repository's first marked release
-ends its fallback, so the step needs no switch. At bootstrap the maintainer does
-nothing on a `class_reason`; anywhere else it is a defect to report. With a labelled
+ends its fallback, so the step needs no switch. At bootstrap, and on a
+`base-change:*` reason, the maintainer does nothing on a `class_reason`; anywhere else it is
+a defect to report. With a labelled
 baseline, a missing or unavailable updateinfo source, or an unreadable image, fails
 `candidate`, because the answer would otherwise be wrong.
 
@@ -726,7 +738,7 @@ PB13 builds `release_candidate.py` with the request check of this item, the orde
 PL58 and the `superseded` list. PB4b adds the class derivation and the release attestation. Row 25 of `release-1.0.md` (UT13) takes those two first; the markers, `mark-current`, the janitor's marker rule and the re-run rule stay with the rest of PB4b (ADR-0120), and until markers exist an unlabelled `:latest` is `unlabelled-baseline` (ADR-0127). `candidate` writes the checked request, the order verdict,
 `superseded` and, from PB4b, one entry per repository with `repository`,
 `baseline_digest`, `candidate_digest`, `class`, `advisories`, `class_reason` (empty unless
-it fell back) and `updateinfo_timestamp`, into `release-candidate.json` under
+it fell back or the Fedora release changed) and `updateinfo_timestamp`, into `release-candidate.json` under
 `$RUNNER_TEMP/out/`.
 It uploads that file with `image-digests.txt`, `kernel-digests.txt` and
 `kernel-unsigned.txt` as the artifact `release-candidate`, validated against
