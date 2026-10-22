@@ -1,26 +1,26 @@
 Lettore schermo attivo.
-Avvio applicazioni button
-Spazi di lavoro button
-Impostazioni di COSMIC contratto button
+Avvio applicazioni pulsante
+Spazi di lavoro pulsante
+Impostazioni di COSMIC contratto pulsante
 apre un popup
-CC Window: cc-window-1 contratto button
+CC Window: cc-window-1 contratto pulsante
 In esecuzione
 apre un popup
-org.athanor.CcWindow2: cc-window-2 contratto button
+org.athanor.CcWindow2: cc-window-2 contratto pulsante
 In esecuzione
 apre un popup
-Applicazioni button
-Avvio applicazioni button
-Spazi di lavoro button
-Impostazioni di COSMIC contratto button
+Applicazioni pulsante
+Avvio applicazioni pulsante
+Spazi di lavoro pulsante
+Impostazioni di COSMIC contratto pulsante
 apre un popup
-CC Window: cc-window-1 contratto button
+CC Window: cc-window-1 contratto pulsante
 In esecuzione
 apre un popup
-cc-window-1 button
-Nuova finestra button
-Aggiungi al dock button
-CC Window: cc-window-1 contratto button
+cc-window-1 pulsante
+Nuova finestra pulsante
+Aggiungi al dock pulsante
+CC Window: cc-window-1 contratto pulsante
 In esecuzione
 apre un popup
 Lettore schermo disattivato.

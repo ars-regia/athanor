@@ -1,34 +1,34 @@
 Lettore schermo attivo.
 Galleria
-Pulsanti toggle button premuto
-Scelte toggle button non premuto
-Valori toggle button non premuto
-Elenchi toggle button non premuto
-Un pulsante button
-Uno toggle button premuto
-Due toggle button non premuto
-Tre toggle button non premuto
-Nome text
+Pulsanti pulsante di commutazione premuto
+Scelte pulsante di commutazione non premuto
+Valori pulsante di commutazione non premuto
+Elenchi pulsante di commutazione non premuto
+Un pulsante pulsante
+Uno pulsante di commutazione premuto
+Due pulsante di commutazione non premuto
+Tre pulsante di commutazione non premuto
+Nome testo
 apre un popup
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Scelte toggle button premuto
-Valori toggle button non premuto
-Elenchi toggle button non premuto
-Opzione uno check box spuntata
-Opzione due check box non spuntata
+Scelte pulsante di commutazione premuto
+Valori pulsante di commutazione non premuto
+Elenchi pulsante di commutazione non premuto
+Opzione uno casella di spunta spuntata
+Opzione due casella di spunta non spuntata
 Un interruttore attivo selettore
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Valori toggle button premuto
-Elenchi toggle button non premuto
+Valori pulsante di commutazione premuto
+Elenchi pulsante di commutazione non premuto
 Un cursore controllo scorrevole orizzontale 50 50 percento.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Elenchi toggle button premuto
+Elenchi pulsante di commutazione premuto
 Un elenco Elenco con 50 voci
 Riga 1
 Lettore schermo disattivato.
