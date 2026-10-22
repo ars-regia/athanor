@@ -23,9 +23,11 @@ root in the container, so the bar's check that root answered holds; it owns the 
 ALLOW_REPLACEMENT, so shield_e2e.py can put an impostor of another user in its place, and
 the private bus admits every user for that.
 
---client names the binary under /out/bin that runs as the client, athanor-bar by default;
-the dock's rig session runs athanor-dock through it, with every other flag unchanged, and the
-greeter's captures run athanor-greeter-ui, whose seal asks the fake os.athanor.Update1 State.
+--client names the binary under /out/bin that runs as the client, athanor-bar by default, or
+an absolute path, whose file name stands for <client> below; the dock's rig session runs
+athanor-dock, or the dock ATHANOR_DOCK_BIN names, through it, with every other flag
+unchanged, and the greeter's captures run athanor-greeter-ui, whose seal asks the fake
+os.athanor.Update1 State.
 
 --notifications starts fake_notifications.py (athanor-shelld's private interface, faked:
 the real daemon admits only athanor-bar.service). --tray starts the real athanor-shelld as
@@ -270,27 +272,30 @@ def rig_log(name):
     return open(f"/out/{os.environ.get('RIG_TAG', 'bar')}-{name}.log", "a", encoding="utf-8")
 
 
-def as_unit(client):
-    """The command that starts /usr/bin/<client> inside the cgroup of --unit.
+def as_unit(binary):
+    """The command that starts a copy of `binary` at /usr/bin/<its name> inside the cgroup of --unit.
 
     A shell joins the cgroup and execs the client, so the pid stays the client's and nothing
     runs in the forked child of this threaded process; a failed write ends the shell with an
     error, and the session with it. The copy lands under a temporary name and is renamed over
     the old one, so a respawn never writes a file a dying client still executes (ETXTBSY).
     """
-    executable = Path("/usr/bin") / client
-    staged = executable.with_name(f".{client}.new")
-    shutil.copy2(BIN / client, staged)
+    executable = Path("/usr/bin") / binary.name
+    staged = executable.with_name(f".{binary.name}.new")
+    shutil.copy2(binary, staged)
     staged.replace(executable)
-    cgroup = CGROUP_ROOT / f"{client}.service"
+    cgroup = CGROUP_ROOT / f"{binary.name}.service"
     cgroup.mkdir(exist_ok=True)
     join = 'echo $$ > "$1/cgroup.procs" && exec "$2"'
     return ["sh", "-c", join, "sh", str(cgroup), str(executable)]
 
 
 def start_bar(client, env, log, unit):
-    command = as_unit(client) if unit else [BIN / client]
-    bar = subprocess.Popen(command, env=env, stderr=rig_log(client) if log else None)
+    # An absolute --client stays as it is: BIN / "/out/x/y" is "/out/x/y". Its log and its
+    # unit take the file name.
+    binary = BIN / client
+    command = as_unit(binary) if unit else [binary]
+    bar = subprocess.Popen(command, env=env, stderr=rig_log(binary.name) if log else None)
     PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
     return bar
 

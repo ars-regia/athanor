@@ -2,6 +2,7 @@
 //! into a premultiplied RGBA pixmap; `gpu.rs` hands the same scene to vello_gpu.
 
 use crate::text::Brush;
+use crate::driver::Side;
 use crate::theme::Rgba;
 use crate::widget::{
     knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui,
@@ -150,6 +151,8 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 
 /// How much of its text colour a hovered control's fill takes.
 const HOVER: f32 = 0.05;
+/// The width of an icon button's indicator, as the GTK dock's inset shadow.
+const INDICATOR: f64 = 2.0;
 
 fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     let o = f64::from(outset);
@@ -260,10 +263,53 @@ pub fn paint<C: Canvas>(
         if let Some(c) = clip {
             ctx.push_clip_path(&rounded(c, 0.0, t.radius));
         }
+        let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
             Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
+            Kind::Island { .. } => {
+                if let Some(fill) = island {
+                    ctx.set_paint(color(t.island));
+                    ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
+                }
+            }
+            // Flat, filled only under the pointer, with its image in the middle and the line of
+            // a focused application along its indicator's side.
+            Kind::IconButton {
+                image,
+                size,
+                indicator,
+                ..
+            } => {
+                if hover == Some(id) {
+                    ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
+                let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                let side = f64::from(*size);
+                let fit = (side / w).min(side / h);
+                let (w, h) = (w * fit, h * fit);
+                let x = f64::from(r.center_x()) - w / 2.0;
+                let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+                ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+                if let Some(side) = indicator {
+                    let (x0, y0, x1, y1) = (
+                        f64::from(r.x),
+                        f64::from(r.y),
+                        f64::from(r.x + r.w),
+                        f64::from(r.bottom()),
+                    );
+                    let line = match side {
+                        Side::Top => Rect::new(x0, y0, x1, y0 + INDICATOR),
+                        Side::Bottom => Rect::new(x0, y1 - INDICATOR, x1, y1),
+                        Side::Left => Rect::new(x0, y0, x0 + INDICATOR, y1),
+                        Side::Right => Rect::new(x1 - INDICATOR, y0, x1, y1),
+                    };
+                    ctx.set_paint(color(t.accent));
+                    ctx.fill_rect(&line);
+                }
+            }
             // A white sheet under its rows, as GTK's list.
             Kind::List { .. } => {
                 ctx.set_paint(color(t.on_accent));
@@ -377,6 +423,22 @@ pub fn paint<C: Canvas>(
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
                     draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
+                }
+            }
+            // A button a menu holds reads as one of its rows.
+            Kind::Button(_) if flat => {
+                if hover == Some(id) {
+                    ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
+                if let Some(layout) = &widget.text {
+                    let x = if ui.rtl {
+                        r.x + r.w - t.padding - layout.width()
+                    } else {
+                        r.x + t.padding
+                    };
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
                 }
             }
             Kind::Button(_) | Kind::Toggle { .. } => {

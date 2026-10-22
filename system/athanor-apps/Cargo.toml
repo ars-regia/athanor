@@ -9,14 +9,15 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [features]
 default = ["gtk"]
 # The row, its menus, the openers, the timing lines and `Host`, all GTK widgets. Without it
-# the model, the favourites and the translations remain.
-gtk = ["dep:athanor-unit", "dep:gtk4", "dep:gtk4-layer-shell", "athanor-compositor-client/gtk"]
+# the model, the entries, the favourites and the translations remain.
+gtk = ["dep:gtk4", "dep:gtk4-layer-shell", "athanor-compositor-client/gtk"]
 
 [dependencies]
 athanor-compositor-client = { path = "../athanor-compositor-client", default-features = false }
 athanor-i18n = { path = "../athanor-i18n" }
 athanor-layout = { path = "../athanor-layout" }
-athanor-unit = { path = "../athanor-unit", optional = true }
+athanor-unit = { path = "../athanor-unit" }
+gio = { workspace = true }
 gio-unix = { workspace = true }
 gtk4 = { workspace = true, optional = true }
 gtk4-layer-shell = { workspace = true, optional = true }
