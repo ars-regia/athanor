@@ -18,7 +18,16 @@ from pathlib import Path
 FROZEN = 1789725600  # 2026-09-18 10:00 UTC, scene.sh's faketime
 PATH = Path("/run/athanor-update/state.json")
 DAY = 86400
-NAMES = ("verified", "downloaded", "attention", "refused", "hostile", "missing")
+NAMES = (
+    "verified",
+    "downloaded",
+    "security",
+    "postponed",
+    "attention",
+    "refused",
+    "hostile",
+    "missing",
+)
 IMAGE = "registry.example/owner/athanor-system:stable"
 HOSTILE_VERSION = "43.\u202eevil\u0007" + "9" * 300
 HOSTILE_HOST = "<b>registry</b>\u200f.example"
@@ -67,6 +76,20 @@ def state(name, now):
             **base,
             "downloaded": deployment("2", "43.20260917.1", now - DAY),
             "update": "downloaded",
+        }
+    if name in ("security", "postponed"):
+        # A security digest unlocked for the next shutdown, with the lineage's postpone
+        # unused ("security") or used ("postponed"); UT13.
+        return {
+            **base,
+            "downloaded": deployment("2", "43.20260917.1", now - DAY),
+            "update": "will-apply-at-next-shutdown",
+            "postpone": {
+                "anchor": None,
+                "first_notice_at": now - DAY,
+                "boots_remaining": 5 if name == "postponed" else 7,
+                "postponed": name == "postponed",
+            },
         }
     if name == "attention":
         return {

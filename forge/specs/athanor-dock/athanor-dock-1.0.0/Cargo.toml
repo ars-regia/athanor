@@ -17,6 +17,15 @@ gtk = [
   "athanor-compositor-client/gtk",
   "athanor-style/gtk",
 ]
+# The dock drawn with Athanor's own toolkit (the dock plan, task 6), beside the GTK one until
+# the switch: no GTK crate in its tree. GLib's main context runs in the toolkit's loop.
+toolkit = [
+  "dep:athanor-toolkit",
+  "dep:gio",
+  "dep:gio-unix",
+  "dep:wayland-client",
+  "athanor-compositor-client/calloop",
+]
 
 [dependencies]
 athanor-apps = { path = "../../../../system/athanor-apps", default-features = false }
@@ -24,13 +33,22 @@ athanor-compositor-client = { path = "../../../../system/athanor-compositor-clie
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-style = { path = "../../../../system/athanor-style", default-features = false }
+athanor-toolkit = { path = "../../../../system/athanor-toolkit", optional = true }
 athanor-unit = { path = "../../../../system/athanor-unit" }
+gio = { workspace = true, optional = true }
+gio-unix = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 gtk4 = { workspace = true, optional = true }
 gtk4-layer-shell = { workspace = true, optional = true }
 tracing = { workspace = true }
+wayland-client = { workspace = true, optional = true }
 
 [[bin]]
 name = "athanor-dock"
 path = "src/main.rs"
 required-features = ["gtk"]
+
+[[bin]]
+name = "athanor-dock-toolkit"
+path = "src/toolkit/main.rs"
+required-features = ["toolkit"]

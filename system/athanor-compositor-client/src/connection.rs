@@ -133,7 +133,8 @@ pub(crate) struct Inner {
     last_outputs: RefCell<Vec<Output>>,
     /// A failure met while looking at the queue outside `pump`, reported by the next `pump`.
     failure: RefCell<Option<Error>>,
-    /// Set for good when the display closes: every later call returns [`Error::Closed`].
+    /// Set for good when the display closes or reading from the compositor fails: every
+    /// later call returns [`Error::Closed`].
     closed: Cell<bool>,
     source: glib::Source,
 }
@@ -415,6 +416,13 @@ impl Client {
     /// a full socket is not a failure.
     pub(crate) fn pump(&self) -> Result<(), Error> {
         self.inner.pump()
+    }
+
+    /// Whether the client stopped for good: the display closed, or reading from the
+    /// compositor failed, after which no event comes. An application on its own
+    /// connection (`connect_wayland`) has no other sign of it.
+    pub fn is_closed(&self) -> bool {
+        self.inner.closed.get()
     }
 
     /// [`Error::Closed`] once the display closed.
@@ -746,6 +754,7 @@ mod queue_source {
             Ok(()) => G_SOURCE_CONTINUE,
             Err(err) => {
                 tracing::error!("reading from the compositor failed, no further events: {err}");
+                inner.closed.set(true);
                 G_SOURCE_REMOVE
             }
         }
