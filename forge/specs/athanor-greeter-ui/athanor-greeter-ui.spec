@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+- A "Session" menu beside the password field, shown only where
+  /usr/bin/athanor-compositor-session is installed, offers "Athanor" (checked at every
+  start, never remembered) and "Athanor on the new compositor (preview)", with what the
+  preview lacks; StartSession runs the checked entry's command (doc_session.md, SN14).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
 - The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
   surface, and a red accent's fill carries white text at 4.5:1 (#571).

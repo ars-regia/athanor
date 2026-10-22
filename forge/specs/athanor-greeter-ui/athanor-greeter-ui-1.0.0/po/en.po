@@ -13,27 +13,27 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "The sign-in service sent a reply of {size} bytes, too large to read"
 
-#: src/auth.rs:263
+#: src/auth.rs:305
 msgid "Checking your credentials…"
 msgstr "Checking your credentials…"
 
-#: src/auth.rs:297
+#: src/auth.rs:339
 msgid "The login service gave an unexpected answer."
 msgstr "The login service gave an unexpected answer."
 
-#: src/auth.rs:307
+#: src/auth.rs:349
 msgid "Too many authentication steps."
 msgstr "Too many authentication steps."
 
-#: src/auth.rs:317
+#: src/auth.rs:359
 msgid "Wrong password"
 msgstr "Wrong password"
 
-#: src/auth.rs:319
+#: src/auth.rs:361
 msgid "The login service refused the sign-in."
 msgstr "The login service refused the sign-in."
 
-#: src/auth.rs:333
+#: src/auth.rs:375
 msgid "The login service cannot be reached."
 msgstr "The login service cannot be reached."
 
@@ -121,77 +121,93 @@ msgstr "No check for updates has succeeded for 14 days"
 msgid "Signed with a key of the policy in force"
 msgstr "Signed with a key of the policy in force"
 
-#: src/ui.rs:187 src/ui.rs:783 src/ui.rs:825
+#: src/ui.rs:190 src/ui.rs:890 src/ui.rs:932
 msgid "Other user"
 msgstr "Other user"
 
-#: src/ui.rs:253
+#: src/ui.rs:256
 #, rust-format
 msgid "Keyboard layout: {layout}"
 msgstr "Keyboard layout: {layout}"
 
-#: src/ui.rs:572
+#: src/ui.rs:310
+msgid "Session"
+msgstr "Session"
+
+#: src/ui.rs:322
+msgid "Athanor"
+msgstr "Athanor"
+
+#: src/ui.rs:325
+msgid "Athanor on the new compositor (preview)"
+msgstr "Athanor on the new compositor (preview)"
+
+#: src/ui.rs:327
+msgid "No screen lock, no password prompts, no screen reader commands, no shortcuts yet"
+msgstr "No screen lock, no password prompts, no screen reader commands, no shortcuts yet"
+
+#: src/ui.rs:670
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:606
+#: src/ui.rs:704
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:615 src/ui.rs:620 src/ui.rs:621
+#: src/ui.rs:713 src/ui.rs:718 src/ui.rs:719
 msgid "User name"
 msgstr "User name"
 
-#: src/ui.rs:634 src/ui.rs:637
+#: src/ui.rs:732 src/ui.rs:735
 msgid "Back to the list"
 msgstr "Back to the list"
 
-#: src/ui.rs:643
+#: src/ui.rs:741
 msgid "Sign in"
 msgstr "Sign in"
 
-#: src/ui.rs:646 src/ui.rs:650
+#: src/ui.rs:744 src/ui.rs:748
 msgid "Cancel"
 msgstr "Cancel"
 
-#: src/ui.rs:777
+#: src/ui.rs:884
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password for {name}"
 
-#: src/ui.rs:801
+#: src/ui.rs:908
 msgid "Accounts"
 msgstr "Accounts"
 
-#: src/ui.rs:961
+#: src/ui.rs:1068
 msgid "Enter a user name of at most 256 bytes, without control characters."
 msgstr "Enter a user name of at most 256 bytes, without control characters."
 
-#: src/ui.rs:977
+#: src/ui.rs:1084
 msgid "Signing in…"
 msgstr "Signing in…"
 
-#: src/ui.rs:992
+#: src/ui.rs:1099
 msgid "Sign-in was cancelled."
 msgstr "Sign-in was cancelled."
 
-#: src/ui.rs:1000
+#: src/ui.rs:1107
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Sign-in failed: {reason}"
 
-#: src/ui.rs:1036 src/ui.rs:1037
+#: src/ui.rs:1143 src/ui.rs:1144
 msgid "High contrast"
 msgstr "High contrast"
 
-#: src/ui.rs:1057
+#: src/ui.rs:1164
 msgid "Suspend"
 msgstr "Suspend"
 
-#: src/ui.rs:1063
+#: src/ui.rs:1170
 msgid "Restart"
 msgstr "Restart"
 
-#: src/ui.rs:1069
+#: src/ui.rs:1176
 msgid "Shut down"
 msgstr "Shut down"
