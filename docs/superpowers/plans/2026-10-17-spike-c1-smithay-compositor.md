@@ -82,7 +82,7 @@ The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout
 The compositor runs on a console only once the keyboard escape of task 8 is in.
 
 - [ ] Write the commands: switch to a text console, start the compositor with the bar, the dock and a terminal, and switch back; the log path to send back.
-- [ ] Laptop: one hour of use. NVIDIA desktop, three outputs: one hour of use, one suspend and resume, one output unplugged and plugged.
+- [ ] Laptop: one hour of use, one suspend and resume, one output unplugged and plugged. NVIDIA desktop, three outputs: one hour of use and nothing else; by the maintainer's decision of 2026-10-22, a suspend or an unplugged output makes its GPU fall off the bus whatever compositor runs (issue #604), so they are not tests there.
 - [ ] Every defect with its log lines goes into the results.
 
 ### Task 9a: the optional session (`doc_own_stack.md` decision 10)
