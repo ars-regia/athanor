@@ -255,6 +255,5 @@ What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
 - 8-bit colour formats only; a monitor that needs deep colour gets 8 bits.
 - The pointer is a solid square, not the cursor surface a client sets: task 9 draws cursors.
 - The primary GPU only; a second GPU, and its monitors, are not used.
-- A monitor whose modes change keeps the mode it has.
 - A change redraws every output, not only those it shows on: a second monitor draws empty frames
   while the first animates.
