@@ -46,6 +46,26 @@ if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
         gsettings set "$schema" "$key" "$value"
     done < "$RIG_CONFIG_SEED.gsettings"
 fi
+# GTK 4.24 no longer reads GSettings itself: it takes these from the settings portal, which the
+# rig does not run, and falls back to "Sans 10", no hinting and the default decoration layout
+# (GTK 4.20 read them from the schemas above). A session has the portal serve them; the rig hands
+# GTK the same values through settings.ini, from the store the clients would have been given.
+gset() { gsettings get "$1" "$2" | tr -d "'"; }
+mkdir -p "$XDG_CONFIG_HOME/gtk-4.0"
+{
+    echo "[Settings]"
+    echo "gtk-font-name=$(gset org.gnome.desktop.interface font-name)"
+    echo "gtk-cursor-theme-name=$(gset org.gnome.desktop.interface cursor-theme)"
+    echo "gtk-cursor-theme-size=$(gset org.gnome.desktop.interface cursor-size)"
+    echo "gtk-enable-animations=$(gset org.gnome.desktop.interface enable-animations)"
+    echo "gtk-decoration-layout=$(gset org.gnome.desktop.wm.preferences button-layout)"
+    echo "gtk-xft-antialias=1"
+    echo "gtk-xft-hinting=1"
+    echo "gtk-xft-hintstyle=hint$(gset org.gnome.desktop.interface font-hinting)"
+    echo "gtk-xft-rgba=none"
+    awk -v f="$(gset org.gnome.desktop.interface text-scaling-factor)" 'BEGIN { printf "gtk-xft-dpi=%d\n", 96 * 1024 * f }'
+} > "$XDG_CONFIG_HOME/gtk-4.0/settings.ini"
+
 export XDG_CURRENT_DESKTOP=COSMIC XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=COSMIC
 export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
 export TZ=UTC LC_ALL=${RIG_LOCALE:-C.UTF-8} LANG=${RIG_LOCALE:-C.UTF-8}
