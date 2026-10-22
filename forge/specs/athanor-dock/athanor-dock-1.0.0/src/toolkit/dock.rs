@@ -888,6 +888,13 @@ impl Application for Dock {
     }
 
     fn turn(&mut self, shell: &mut Shell) {
+        // The client reads its own connection: once it stops, the window list freezes and
+        // no launch can go through the security context. End as the GTK dock does when
+        // its one connection closes, so that systemd sees the failure and restarts it.
+        if self.client.as_ref().is_some_and(|client| client.is_closed()) {
+            shell.fail("the compositor client's connection closed".into());
+            return;
+        }
         self.outs.retain(|id, _| shell.ui(*id).is_some());
         // A menu closed by Escape, a press outside it or the compositor.
         if self

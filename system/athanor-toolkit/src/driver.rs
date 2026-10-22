@@ -268,6 +268,7 @@ fn run_on(
         seat: None,
         grab: GrabSerial::default(),
         exit: false,
+        failure: None,
     };
     let mut app = App {
         application: Box::new(application),
@@ -304,7 +305,7 @@ fn run_on(
             app.fail(error);
         }
         app.sync_window_focus();
-        if let Some(error) = app.error.take() {
+        if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
             return Err(error);
         }
     }
@@ -388,6 +389,8 @@ pub struct Shell {
     grab: GrabSerial,
     /// A window was closed: [`run`] returns.
     exit: bool,
+    /// Why the application stopped the run: [`run`] returns it.
+    failure: Option<Error>,
 }
 
 impl Shell {
@@ -497,6 +500,12 @@ impl Shell {
         side: Side,
     ) -> Result<SurfaceId, Error> {
         self.show_popup(parent, anchor, ui, side, true)
+    }
+
+    /// Ends the run with `error`, which [`run`] returns once the turn is over.
+    pub fn fail(&mut self, error: Error) {
+        self.failure.get_or_insert(error);
+        self.exit = true;
     }
 
     /// Closes the popup open, a menu or a tooltip, if any.
