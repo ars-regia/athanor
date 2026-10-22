@@ -213,8 +213,8 @@ the client's. At the press, whatever follows, the keyboard leaves the exclusive 
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
 its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what `loginctl
-lock-session` calls, on its own thread, one request in flight at a time, with a timeout of five
-seconds); the lock client reacts to logind's `Lock` signal (LP4). A lock the user asks for is
+lock-session` calls, on its own thread, one request in flight at a time (a request older than ten seconds counts as gone), with a
+method timeout of five seconds); the lock client reacts to logind's `Lock` signal (LP4). A lock the user asks for is
 never refused. The escape holds for the identity the grant went to (executable and unit), not for
 the connection: none of its exclusive surfaces, on any connection, mapped again or new, takes the
 keyboard until the user clicks on one of its layer surfaces that takes the keyboard (not on its
