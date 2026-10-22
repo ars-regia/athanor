@@ -401,6 +401,12 @@ impl Shell {
         self.surfaces.iter().find(|s| s.id == id).map(|s| &s.ui)
     }
 
+    /// Whether `id` committed a frame since its first configure: what GTK's `map` signal
+    /// tells, and a dock's Type=notify waits for. `false` once it is closed.
+    pub fn drawn(&self, id: SurfaceId) -> bool {
+        self.surfaces.iter().any(|s| s.id == id && s.drawn)
+    }
+
     /// The widgets of `id`, which the driver draws again after the event.
     pub fn ui_mut(&mut self, id: SurfaceId) -> Option<&mut Ui> {
         let surface = self.get_mut(id)?;
@@ -721,6 +727,7 @@ impl Shell {
             size,
             stretch,
             configured: false,
+            drawn: false,
             frame_pending: false,
             redraw: false,
             dirty: false,
@@ -834,6 +841,8 @@ struct Surface {
     /// asks 0 along that axis and takes the size the compositor configures.
     stretch: (bool, bool),
     configured: bool,
+    /// A frame was committed since the first configure.
+    drawn: bool,
     /// A frame is committed and its callback has not come: the next one waits for it, so that
     /// drawing never runs ahead of the compositor, which throttles a covered surface.
     frame_pending: bool,
@@ -888,6 +897,7 @@ impl Surface {
             // without this commit the frame callback would never come, and the surface would
             // never draw again. After a present that did commit, this one is empty.
             surface.commit();
+            self.drawn = true;
             self.publish_tree();
             return Ok(());
         }
@@ -907,6 +917,7 @@ impl Surface {
         surface.damage_buffer(0, 0, w, h);
         buffer.attach_to(&surface)?;
         surface.commit();
+        self.drawn = true;
         self.publish_tree();
         Ok(())
     }

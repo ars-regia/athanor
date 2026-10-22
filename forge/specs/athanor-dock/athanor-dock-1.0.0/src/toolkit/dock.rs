@@ -593,8 +593,9 @@ impl Dock {
         }
     }
 
-    /// READY=1 once (Type=notify): at the first surface laid out with its island, or at
-    /// once when no output gets one (no client, the knob off, the `bar` preset).
+    /// READY=1 once (Type=notify): at the first frame a surface with the island committed,
+    /// as the GTK dock at its window's `map`, or at once when no output gets one (no
+    /// client, the knob off, the `bar` preset).
     fn notify_ready(&mut self, shell: &Shell) {
         if self.ready {
             return;
@@ -606,10 +607,10 @@ impl Dock {
                     .outputs()
                     .iter()
                     .all(|output| placement::place(self.layout, output, self.rtl).is_none())
-                    || self.outs.iter().any(|(id, out)| {
-                        out.placement.is_some()
-                            && shell.ui(*id).is_some_and(|ui| ui.size() != (0.0, 0.0))
-                    })
+                    || self
+                        .outs
+                        .iter()
+                        .any(|(id, out)| out.placement.is_some() && shell.drawn(*id))
             }
         };
         if !ready {
