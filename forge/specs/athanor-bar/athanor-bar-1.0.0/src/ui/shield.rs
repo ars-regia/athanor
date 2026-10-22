@@ -626,9 +626,10 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     switch_row.append(&switch);
     let syncing = Rc::new(Cell::new(false));
     let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    // BR6's order: the switch (6), Postpone (7), then Restart to update and Go back (8).
     row.append(&switch_row);
-    row.append(&restart);
     row.append(&postpone);
+    row.append(&restart);
     row.append(&go_back);
 
     // The confirmation page, as in the power menu: Cancel focused, so a stray Enter backs out.
