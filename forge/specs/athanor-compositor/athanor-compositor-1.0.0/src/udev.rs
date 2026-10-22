@@ -19,7 +19,8 @@ use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
     DrmNode, NodeType,
 };
-use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
+use smithay::backend::input::InputEvent;
+use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis};
 use smithay::backend::renderer::damage::Error as DamageError;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::element::surface::{
@@ -43,7 +44,10 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
 use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
 use smithay::reexports::drm::Device as _;
-use smithay::reexports::input::Libinput;
+use smithay::reexports::input::event::{
+    DeviceEvent, EventTrait, KeyboardEvent, PointerEvent, SwitchEvent,
+};
+use smithay::reexports::input::{Event as LibinputEvent, Libinput};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::Display;
@@ -114,6 +118,37 @@ struct Head {
     /// The earliest next draw: six tenths of a period after a VBlank, a period after a draw
     /// that had nothing new to show.
     not_before: Option<Instant>,
+}
+
+/// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
+/// devices, the switches and the kinds that handler acts on; `None` for the rest, which it takes
+/// only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
+fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend>> {
+    Some(match event {
+        LibinputEvent::Device(DeviceEvent::Added(added)) => InputEvent::DeviceAdded {
+            device: added.device(),
+        },
+        LibinputEvent::Device(DeviceEvent::Removed(removed)) => InputEvent::DeviceRemoved {
+            device: removed.device(),
+        },
+        LibinputEvent::Switch(SwitchEvent::Toggle(event)) => InputEvent::SwitchToggle { event },
+        LibinputEvent::Keyboard(KeyboardEvent::Key(event)) => InputEvent::Keyboard { event },
+        LibinputEvent::Pointer(PointerEvent::Motion(event)) => InputEvent::PointerMotion { event },
+        LibinputEvent::Pointer(PointerEvent::MotionAbsolute(event)) => {
+            InputEvent::PointerMotionAbsolute { event }
+        }
+        LibinputEvent::Pointer(PointerEvent::Button(event)) => InputEvent::PointerButton { event },
+        LibinputEvent::Pointer(PointerEvent::ScrollWheel(event)) => InputEvent::PointerAxis {
+            event: PointerScrollAxis::Wheel(event),
+        },
+        LibinputEvent::Pointer(PointerEvent::ScrollFinger(event)) => InputEvent::PointerAxis {
+            event: PointerScrollAxis::Finger(event),
+        },
+        LibinputEvent::Pointer(PointerEvent::ScrollContinuous(event)) => InputEvent::PointerAxis {
+            event: PointerScrollAxis::Continuous(event),
+        },
+        _ => return None,
+    })
 }
 
 /// Starts the DRM backend in a new session of the seat, on the seat's primary GPU.
@@ -207,6 +242,7 @@ pub fn start(
             state.process_input_event(event)
         })
         .map_err(|e| e.error)?;
+    state.take_queued_input()?;
     handle
         .insert_source(notifier, |event, _, state| match event {
             SessionEvent::PauseSession => state.pause(),
@@ -295,15 +331,51 @@ impl State {
     /// The session is paused, on a switch to another virtual terminal: the GPU and the input
     /// devices are given up until it resumes.
     pub(crate) fn pause(&mut self) {
+        if let Backend::Drm(drm) = &mut self.backend {
+            tracing::info!("the session is paused");
+            drm.libinput.suspend();
+            drm.heads.pause();
+            // Before the record of kept keys goes: suspending releases the keys still held, and
+            // the release of a key the record kept, such as the F1 of Ctrl+Alt+F1, is swallowed
+            // instead of reaching a client that never saw it pressed.
+            if let Err(error) = self.take_queued_input() {
+                self.fail(format!("libinput could not be read: {error}"));
+            }
+        }
         // A key kept before the switch is released on the other terminal, if at all: the record
         // would swallow the next release of that key (`key_input`).
         self.kept_keys.clear();
-        let Backend::Drm(drm) = &mut self.backend else {
-            return;
+    }
+
+    /// Hands `process_input_event` what libinput queued without its file descriptor turning
+    /// readable: the devices it opened on taking the seat or on a resume, those it closed on a
+    /// pause, and the initial state of their switches, such as a closed lid. The backend reads
+    /// libinput only when that descriptor is readable, so these waited for the next key, a
+    /// hot-plug or a resume: in the laptop's console hour the log showed no input device for an
+    /// hour, though every device was open (C1 task 9, T9-2). Reading libinput also takes what
+    /// the devices have sent meanwhile, which goes the same way.
+    fn take_queued_input(&mut self) -> std::io::Result<()> {
+        let Backend::Drm(drm) = &self.backend else {
+            return Ok(());
         };
-        tracing::info!("the session is paused");
-        drm.libinput.suspend();
-        drm.heads.pause();
+        let mut libinput = drm.libinput.clone();
+        libinput.dispatch()?;
+        for event in &mut libinput {
+            match &event {
+                LibinputEvent::Device(DeviceEvent::Added(added)) => {
+                    tracing::info!(device = added.device().sysname(), "input device added");
+                }
+                LibinputEvent::Device(DeviceEvent::Removed(removed)) => {
+                    tracing::info!(device = removed.device().sysname(), "input device removed");
+                }
+                _ => {}
+            }
+            match backend_event(event) {
+                Some(event) => self.process_input_event(event),
+                None => tracing::debug!("a queued input event the compositor does not act on"),
+            }
+        }
+        Ok(())
     }
 
     /// The session resumes: the input devices and the GPU are taken back, the monitors scanned
@@ -344,6 +416,9 @@ impl State {
         };
         for crtc in crtcs {
             self.schedule(crtc, Duration::ZERO);
+        }
+        if let Err(error) = self.take_queued_input() {
+            self.fail(format!("libinput could not be read: {error}"));
         }
     }
 
