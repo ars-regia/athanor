@@ -3,6 +3,7 @@
 //! `check` by the timer, `check --offline` at boot, `serve` by D-Bus activation, `migrate`
 //! once per machine. `recover-key` is the administrator's command of UT2, and `go-back` the
 //! administrator's way to `GoBack()` from a console.
+mod attestation;
 mod check;
 mod goback;
 mod lineage;

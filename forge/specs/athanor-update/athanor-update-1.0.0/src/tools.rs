@@ -261,6 +261,23 @@ const RPM_OSTREE: &str = "/usr/bin/rpm-ostree";
 const BUSCTL: &str = "/usr/bin/busctl";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
+/// Copies `<repository>:sha256-<hex>.<suffix>` into `dest` under the attachments policy.
+fn fetch_attachment(repository: &str, digest: &str, suffix: &str, dest: &Path) -> Result<(), Failure> {
+    let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
+    let source = format!("docker://{repository}:sha256-{hex}.{suffix}");
+    let dest = format!("dir:{}", dest.display());
+    run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
+}
+
+impl System {
+    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
+    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
+    #[cfg_attr(not(test), allow(dead_code))] // called by the check from UT13's classification on
+    pub fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
+        fetch_attachment(repository, digest, "att", dest)
+    }
+}
+
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
     run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
 }
@@ -335,10 +352,7 @@ impl Tools for System {
     }
 
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
-        let source = format!("docker://{repository}:sha256-{hex}.sig");
-        let dest = format!("dir:{}", dest.display());
-        run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
+        fetch_attachment(repository, digest, "sig", dest)
     }
 
     fn metered(&self) -> bool {
@@ -475,6 +489,12 @@ mod tests {
         assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
         assert!(!access_denied("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
         assert!(access_denied("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
+    }
+
+    #[test]
+    fn an_attestation_is_fetched_only_for_a_sha256_digest() {
+        let refused = System.fetch_attestation("registry.example/o/a", "sha256:../../etc", Path::new("/nonexistent"));
+        assert_eq!(refused, Err(Failure { code: ErrorCode::Internal, host: None }));
     }
 
     #[test]

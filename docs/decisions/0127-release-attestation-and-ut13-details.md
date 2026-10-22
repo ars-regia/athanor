@@ -47,10 +47,12 @@ predicate type of point 1 as written below:
 1. **Predicate type.** The release attestation has the predicate type
    `https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b`,
    a URL the project controls that leads to its specification.
-2. **Envelope and transport.** An in-toto Statement v1 in a DSSE envelope, attached by
+2. **Envelope and transport.** An in-toto Statement in a DSSE envelope, attached by
    `cosign attest --key … --type <predicate type> --tlog-upload=false --new-bundle-format=false`
    as `<repo>:sha256-<hex>.att`, with the layer media type
    `application/vnd.dsse.envelope.v1+json`. Retention already keeps `.att` tags (UT10).
+   *Amended on 2026-10-21 by the maintainer:* the statement is v0.1, as cosign 3.0.6 writes
+   it, or v1, and the client accepts exactly these two `_type` values.
 3. **Fields.** The subject is `[{name: <repository>, digest: {sha256: <hex>}}]`. The predicate
    holds `class` (`security` or `feature`), `advisories` (sorted, unique ids), `class_reason`,
    `build_time` (RFC 3339), `revision` (the 40-hex commit), `build_run_id` (a decimal string)
