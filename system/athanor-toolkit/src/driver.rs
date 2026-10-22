@@ -959,6 +959,13 @@ impl Ime {
         (std::mem::take(&mut self.pending), serial == self.commits)
     }
 
+    /// The compositor's `leave`, or the close of the surface it entered: what the input method
+    /// sent and no `done` applied goes too. Returns the surface it had entered.
+    fn leave(&mut self) -> Option<SurfaceId> {
+        self.pending = Pending::default();
+        self.entered.take()
+    }
+
     /// Whether the text input is to be enabled for another focused field, or disabled for none:
     /// text-input-v3 asks for `enable` at every change of the focused field, on the same surface
     /// too. Counts the `commit` that sends it.
@@ -1046,10 +1053,7 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 app.ime.entered = app.shell.find(&surface).map(|s| s.id);
                 app.sync_text_input();
             }
-            Event::Leave { .. } => {
-                app.ime.entered = None;
-                app.sync_text_input();
-            }
+            Event::Leave { .. } => app.leave_text_input(),
             Event::PreeditString {
                 text,
                 cursor_begin,
@@ -1196,13 +1200,27 @@ impl App {
         text_input.commit();
     }
 
+    /// Text input leaves the surface it entered: the focused field there ends its composition,
+    /// as the input method sends no more for it, and the text input is disabled.
+    fn leave_text_input(&mut self) {
+        if let Some(id) = self.ime.leave() {
+            let ended = self
+                .shell
+                .get_mut(id)
+                .is_some_and(|surface| surface.ui.end_composition());
+            if ended {
+                self.update(id, None);
+            }
+        }
+        self.sync_text_input();
+    }
+
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again.
     fn close(&mut self, id: SurfaceId) {
         self.shell.close(id);
         if self.ime.entered == Some(id) {
-            self.ime.entered = None;
-            self.sync_text_input();
+            self.leave_text_input();
         }
     }
 
@@ -2037,6 +2055,37 @@ mod tests {
         // Another field of the same hint, on the same surface.
         assert!(ime.change(Some((a, 2, ContentHint::None))));
         assert!(!ime.change(Some((a, 2, ContentHint::None))));
+    }
+
+    #[test]
+    fn a_leave_drops_what_no_done_applied() {
+        let a = SurfaceId(1);
+        let mut ime = Ime {
+            entered: Some(a),
+            ..Ime::default()
+        };
+        ime.pending.preedit = Some(("ni".into(), None));
+        assert_eq!(ime.leave(), Some(a));
+        assert_eq!(ime.entered, None);
+        // The first done after the next enter applies nothing from before the leave.
+        ime.entered = Some(a);
+        assert!(ime.done(ime.commits).0.preedit.is_none());
+    }
+
+    #[test]
+    fn a_leave_ends_the_focused_fields_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("ni", Some((2, 2)));
+        assert!(ui.end_composition());
+        let Kind::Field(field) = &ui.widget(name).kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
+        assert_eq!(field.shown(), "ab");
+        assert!(!ui.end_composition(), "a second end changed the field");
     }
 
     #[test]

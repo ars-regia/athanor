@@ -769,14 +769,23 @@ impl Ui {
         if to == self.focus {
             return;
         }
-        if let Some(Kind::Field(field) | Kind::TextArea(field)) =
-            self.focus.map(|id| &mut self.widgets[id].kind)
-        {
-            if field.is_composing() {
-                field.compose(&mut self.text, "", None);
-            }
-        }
+        self.end_composition();
         self.focus = to;
+    }
+
+    /// Ends the input method's composition in the focused field, without its text, as when the
+    /// field loses the focus or its window the text input. Whether there was one.
+    pub(crate) fn end_composition(&mut self) -> bool {
+        let Some(Kind::Field(field) | Kind::TextArea(field)) =
+            self.focus.map(|id| &mut self.widgets[id].kind)
+        else {
+            return false;
+        };
+        if !field.is_composing() {
+            return false;
+        }
+        field.compose(&mut self.text, "", None);
+        true
     }
 
     /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
