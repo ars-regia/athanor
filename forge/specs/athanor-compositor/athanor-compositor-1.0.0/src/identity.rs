@@ -556,4 +556,125 @@ mod tests {
         let cgroup = std::fs::read_to_string("/proc/self/cgroup").expect("cgroup");
         assert_eq!(identity.unit.as_deref(), unit(&cgroup));
     }
+
+    /// The shell clients the shipped allow-list grants, by crate under `forge/specs`, with the
+    /// interfaces each uses (doc_session.md, SN12; #683, widened). `Client::connect` binds every
+    /// privileged global the compositor offers it; a client is granted only the ones it uses:
+    /// the dock lists windows, the launcher lists and captures them, the control center only
+    /// draws on the overlay layer.
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 4] = [
+        (
+            "athanor-bar",
+            "athanor-bar.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_foreign_toplevel_image_capture_source_manager_v1",
+                "ext_image_copy_capture_manager_v1",
+            ],
+        ),
+        (
+            "athanor-dock",
+            "athanor-dock.service",
+            &["zwlr_layer_shell_v1", "ext_foreign_toplevel_list_v1"],
+        ),
+        (
+            "athanor-control-center",
+            "athanor-control-center.service",
+            &["zwlr_layer_shell_v1"],
+        ),
+        (
+            "athanor-launcher",
+            "athanor-launcher.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_foreign_toplevel_image_capture_source_manager_v1",
+                "ext_image_copy_capture_manager_v1",
+            ],
+        ),
+    ];
+
+    /// Crates that draw on the top or overlay layer without a line: the compositor itself, and
+    /// the greeter, which runs on cosmic-comp in greetd's session until it moves
+    /// (doc_own_stack.md, section 6, step 5).
+    const OUTSIDE_THE_LIST: [&str; 2] = ["athanor-compositor", "athanor-greeter-ui"];
+
+    /// Every `.rs` file under `dir`.
+    fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                sources(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                found.push(path);
+            }
+        }
+    }
+
+    /// The crates under `forge/specs` whose sources contain one of `needles`.
+    fn crates_with(needles: &[&str]) -> Vec<String> {
+        let specs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut crates = Vec::new();
+        for package in std::fs::read_dir(&specs).expect("forge/specs") {
+            let package = package.expect("entry").path();
+            let name = package
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned();
+            let src = package.join(format!("{name}-1.0.0/src"));
+            if !src.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            sources(&src, &mut files);
+            let uses = files.iter().any(|file| {
+                let text = std::fs::read_to_string(file).expect("source");
+                needles.iter().any(|needle| text.contains(needle))
+            });
+            if uses {
+                crates.push(name);
+            }
+        }
+        crates.sort();
+        crates
+    }
+
+    #[test]
+    fn every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line() {
+        let found = crates_with(&["Layer::Top", "Layer::Overlay", "Client::connect"]);
+        // The scan must see the clients it is about, or it proves nothing.
+        assert!(found.iter().any(|name| name == "athanor-bar"), "{found:?}");
+        for name in found {
+            assert!(
+                OUTSIDE_THE_LIST.contains(&name.as_str())
+                    || SHELL_CLIENTS.iter().any(|(client, _, _)| *client == name),
+                "{name} draws on the top or overlay layer or connects to the compositor's \
+                 privileged globals, and has no line in data/privileged-clients"
+            );
+        }
+
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        let expected: Vec<_> = SHELL_CLIENTS
+            .iter()
+            .map(|(name, unit, interfaces)| {
+                let privileges = interfaces
+                    .iter()
+                    .map(|interface| Privilege::named(interface).expect("privileged"))
+                    .collect::<Vec<_>>();
+                (
+                    PathBuf::from(format!("/usr/bin/{name}")),
+                    unit.to_string(),
+                    privileges,
+                )
+            })
+            .collect();
+        assert_eq!(shipped.0, expected);
+        assert!(shipped
+            .0
+            .iter()
+            .all(|(_, _, privileges)| !privileges.contains(&Privilege::SessionLock)));
+    }
 }

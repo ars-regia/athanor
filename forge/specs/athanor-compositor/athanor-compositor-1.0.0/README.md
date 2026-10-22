@@ -99,8 +99,11 @@ security context's listener is granted nothing, whatever its identity.
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `ext_workspace_manager_v1`, `wp_security_context_manager_v1` | every client outside a security context |
 
-The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
-the bar what the plan names, and the fixture grants its clients every privileged global as the
+`data/privileged-clients` grants the bar, the dock, the control center and the launcher the
+interfaces each uses (`doc_session.md`, SN12); the test
+`every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line` fails when
+a crate under `forge/specs` draws on the top or overlay layer, or connects to the compositor's
+globals, without a line. The greeter is outside the list while it runs on cosmic-comp. The fixture grants its clients every privileged global as the
 bar (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
 can lock the session until one is added.
 
@@ -306,9 +309,9 @@ sudo install -D -m 0644 /dev/stdin /usr/share/athanor/compositor/privileged-clie
 LIST
 ```
 
-The shipped `data/privileged-clients` has no line for the dock, so the dock's top layer and its
-window list are refused in any image: a gap to close in task 9a (#683). The dock line above is only for
-this run.
+The shipped `data/privileged-clients` grants the bar and the dock under their own units,
+`athanor-bar.service` and `athanor-dock.service` (task 9a, #683). The `c1-*` lines above are only
+for this run.
 
 ### 2. Start
 
