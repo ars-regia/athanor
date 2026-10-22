@@ -22,8 +22,8 @@ The date of the Fedora rebase is set outside the project. Fedora 43 reaches its 
 2026-12-02. Fedora 45 final is due on 2026-10-20; if its image is not green by mid-November 2026,
 the base moves to Fedora 44 instead ([ADR-0078](../decisions/0078-fedora-release-target.md)). Release 0.9 ships on Fedora 43; the rebase ships as
 release 0.10 "base" before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)). The Fedora 43 line gets no feature
-release after 0.9. Release 0.11 "anchor" follows 0.10 and is not a rebase ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). Until 1.0, each later Fedora rebase ships as a release 0.x of its own
-(`doc_own_stack.md` section 8).
+release after 0.9. Release 0.11 "anchor" follows 0.10 and is not a rebase ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). 0.11 is the last 0.x release before 1.0: a Fedora rebase needed
+before 1.0 ships as a release 0.x of its own before 0.11 (`doc_own_stack.md` section 8).
 
 ## 2. In 1.0
 
@@ -129,12 +129,14 @@ rows narrowed below.
 
 - **Row 7, key hierarchy.** It leaves 0.9 for 1.0, with the PB5b rotation, its key ceremony
   and key 2 ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends item 2 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), where it was in 0.10).
-  0.10 stays on key 1 and carries none of it. Release 0.11 "anchor" is signed with key 1 and
-  carries the new trust anchor in its policy; key 2 arrives with the hierarchy in 1.0, the
+  0.10 is signed with key 1 and changes nothing of the keys: its policy already trusts the
+  public half of key 2, committed by `secrets.md` section 4.1 step 1, as every image since. Release 0.11 "anchor" is signed with key 1 and
+  carries the new trust anchor in its policy, the public half of the hierarchy's root as Task B1
+  of the row 7 plan defines it; key 2 arrives with the hierarchy in 1.0, the
   first release signed under it. Key 1 is retired, and PB5b closes, at the first release
   after 1.0. [ADR-0103](../decisions/0103-audit-5-decisions.md) D25 stands: no release is
   signed with key 2 before the hierarchy exists. `doc_update_trust.md` UT2 already says
-  "before 1.0"; the mechanism is not written, and the approved text defers it to the revision
+  "before 1.0", read as: the hierarchy exists before 1.0 is signed; the mechanism is not written, and the approved text defers it to the revision
   that builds it. The next step is an amendment of UT2 that defines the mechanism, for approval.
 - **Row 9, greeter.** For 0.9, D7's acceptance is met on the greeter's own conversation code.
   LP18 step 4, moving it into `athanor-auth`, waits for Athanor's lock and moves to 1.1 with

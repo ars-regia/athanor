@@ -31,7 +31,8 @@ ready for 0.10:
   expected to fit before that decision point, confirmed for 2026-11-16 (Fedora 45 rebase plan,
   M5).
 - The LUKS2 backup of the keys (ADR-0103 D5, `secrets.md` KC2) is not made yet. It precedes any
-  ceremony and any rotation.
+  ceremony and any rotation. `secrets.md` section 4.1 step 1 says key 2 was generated into that
+  backup; Task A2 of the row 7 plan makes the backup and settles the discrepancy.
 
 [ADR-0103](0103-audit-5-decisions.md) D25 says that no transitional release signed with key 2 is
 cut before the key hierarchy of D5 exists. `release-1.0.md` section 5 lets only a decision record
@@ -41,7 +42,8 @@ change the order or the release points of the releases before 1.0.
 
 1. **Row 7 and key 2 ship in 1.0, together, in a single rotation from key 1 to the key
    hierarchy.** This amends item 2 of ADR-0123, which placed them in 0.10. No release signed
-   with key 2 exists before the hierarchy does, as D25 says.
+   with key 2 exists before the hierarchy does, as D25 says. "Before 1.0" in ADR-0103 D5 and in
+   `doc_update_trust.md` UT2 is read as: the hierarchy exists before 1.0 is signed.
    - Option A, chosen: **in 1.0.** The amendment of UT2, the code and the ceremony get the time
      they need, and the rotation happens once.
    - Option B, the one ADR-0123 had: **key 2 and row 7 in 0.10.** Rejected: it needs the UT2
@@ -51,8 +53,10 @@ change the order or the release points of the releases before 1.0.
 2. **ADR-0103 D25 is kept.** The signing job still does not hold the run, and no transitional
    release is signed with key 2 before the hierarchy exists.
 3. **Release 0.10 "base" is signed with key 1.** It drops row 7 and changes nothing else.
-4. **A transitional release follows 0.10: 0.11 "anchor".** It is signed with key 1 and carries
-   the new trust anchor in its policy. Its scope is that and nothing else assigned; fixes that
+4. **A transitional release follows 0.10: 0.11 "anchor", the last 0.x release before 1.0.** It
+   is signed with key 1 and carries the new trust anchor in its policy: the public half of the
+   hierarchy's root, as Task B1 of the row 7 plan defines it. A Fedora rebase needed before 1.0
+   ships as a release 0.x of its own before 0.11. Its scope is that and nothing else assigned; fixes that
    land meanwhile ship in it as usual. It is a new 0.x row of section 4.1 of `release-1.0.md`.
 5. **1.0 is the first release signed under the hierarchy.** Key 1 is retired, and PB5b closes,
    at the first release after 1.0. This amends the close ADR-0123 item 2 gave PB5b.
@@ -64,8 +68,8 @@ change the order or the release points of the releases before 1.0.
 
 ## Consequences
 
-- Amended: ADR-0123 item 2 only. The rest of ADR-0123 holds, and its item 4 no longer applies to
-  row 7. Its status line, and its row in the index, name this record; its text keeps its words.
+- Amended: ADR-0123 items 2 and 4, item 4 for row 7 only, which it no longer names. The rest of
+  ADR-0123 holds. Its status line, and its row in the index, name this record; its text keeps its words.
 - `docs/operations/release-1.0.md` becomes revision 5: the status line, the counts and lists of
   the releases before 1.0 (sections 1, 4, 4.2 and 5), rows 4 and 7 of section 2, the sentence on
   the LUKS2 backup in section 4, the rows of 0.10, of the new 0.11 and of 1.0 in section 4.1, and
