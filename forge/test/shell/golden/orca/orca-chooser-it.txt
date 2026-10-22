@@ -1,20 +1,20 @@
 Lettore schermo attivo.
 Disposizione
-Stile raggruppamento
-Isola pulsante di commutazione premuto.
-Barra pulsante di commutazione non premuto.
-Essenziale pulsante di commutazione non premuto.
-Pannello raggruppamento
-In alto pulsante di commutazione premuto.
-In basso pulsante di commutazione non premuto.
-Dock raggruppamento
-Visibile pulsante di commutazione premuto.
-Nascondi automaticamente pulsante di commutazione non premuto.
-Nessuno pulsante di commutazione non premuto.
-Stile raggruppamento
-Isola pulsante di commutazione premuto.
-Barra pulsante di commutazione non premuto.
-Essenziale pulsante di commutazione non premuto.
-Pannello raggruppamento
-In alto pulsante di commutazione premuto.
+Stile grouping
+Isola toggle button premuto
+Barra toggle button non premuto
+Essenziale toggle button non premuto
+Pannello grouping
+In alto toggle button premuto
+In basso toggle button non premuto
+Dock grouping
+Visibile toggle button premuto
+Nascondi automaticamente toggle button non premuto
+Nessuno toggle button non premuto
+Stile grouping
+Isola toggle button premuto
+Barra toggle button non premuto
+Essenziale toggle button non premuto
+Pannello grouping
+In alto toggle button premuto
 Lettore schermo disattivato.

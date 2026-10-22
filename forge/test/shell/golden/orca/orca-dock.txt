@@ -1,26 +1,26 @@
 Screen reader on.
-Launcher button.
-Workspaces button.
-COSMIC Settings collapsed button.
+Launcher button
+Workspaces button
+COSMIC Settings collapsed button
 opens popup
-collapsed
-CC Window: cc-window-1 collapsed button.
-Running.
+CC Window: cc-window-1 collapsed button
+Running
 opens popup
-collapsed
-org.athanor.CcWindow2: cc-window-2 collapsed button.
-Running.
+org.athanor.CcWindow2: cc-window-2 collapsed button
+Running
 opens popup
-collapsed
-Applications button.
-Launcher button.
-Workspaces button.
-COSMIC Settings collapsed button.
+Applications button
+Launcher button
+Workspaces button
+COSMIC Settings collapsed button
 opens popup
-CC Window: cc-window-1 collapsed button.
-Running.
+CC Window: cc-window-1 collapsed button
+Running
 opens popup
-cc-window-1 button.
-New Window button.
-Pin to Dock button.
+cc-window-1 button
+New Window button
+Pin to Dock button
+CC Window: cc-window-1 collapsed button
+Running
+opens popup
 Screen reader off.
