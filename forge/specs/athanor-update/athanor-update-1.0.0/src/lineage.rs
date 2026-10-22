@@ -15,10 +15,12 @@ pub struct Lineage {
     /// at least: an absent one is no lineage the service wrote.
     #[serde(deserialize_with = "Option::deserialize")]
     pub anchor: Option<String>,
-    /// The build time of the anchor, 0 before the first. A booted security digest counts as
-    /// applied only when it was built after it, so going back to an earlier one never resets
-    /// the budget (ADR-0127 point 10, as amended on 2026-10-22).
-    pub anchor_build_time: i64,
+    /// The build time of the anchor, in seconds since the epoch; `null` with the anchor, before
+    /// the first. A booted security digest counts as applied only when it was built after it,
+    /// so going back to an earlier one never resets the budget (ADR-0127 point 10, as amended
+    /// on 2026-10-22).
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub anchor_build_time: Option<i64>,
     /// `None` until a security digest reaches `will-apply-at-next-shutdown` after the anchor.
     #[serde(deserialize_with = "Option::deserialize")]
     pub open: Option<Open>,
@@ -69,7 +71,7 @@ impl Lineage {
     /// anchor moves to it and the next security digest opens a new lineage with a new budget.
     pub fn applied(&mut self, digest: &str, build_time: i64) {
         self.anchor = Some(digest.to_owned());
-        self.anchor_build_time = build_time;
+        self.anchor_build_time = Some(build_time);
         self.open = None;
     }
 
@@ -185,7 +187,7 @@ mod tests {
         let mut lineage = opened();
         assert!(lineage.postpone(FIRST).is_ok());
         lineage.applied("sha256:aa", 5);
-        assert_eq!(lineage, Lineage { anchor: Some("sha256:aa".into()), anchor_build_time: 5, open: None });
+        assert_eq!(lineage, Lineage { anchor: Some("sha256:aa".into()), anchor_build_time: Some(5), open: None });
         assert_eq!(lineage.published(), None);
         lineage.notice(FIRST + 30 * 86_400, "boot-9");
         let published = lineage.published().expect("a new lineage");
