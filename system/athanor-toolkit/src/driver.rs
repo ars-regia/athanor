@@ -169,6 +169,12 @@ pub trait Application {
     /// Runs after each turn of the event loop, once its events are handled: where the
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
+
+    /// The first frame of `surface` was committed: called in the turn of the event loop that
+    /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
+    /// compositor may withhold from a surface it does not show. Where a `Type=notify`
+    /// service tells systemd it is ready.
+    fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -269,6 +275,7 @@ fn run_on(
         grab: GrabSerial::default(),
         exit: false,
         failure: None,
+        first_frames: Vec::new(),
     };
     let mut app = App {
         application: Box::new(application),
@@ -303,6 +310,9 @@ fn run_on(
         app.application.turn(&mut app.shell);
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
+        }
+        for surface in std::mem::take(&mut app.shell.first_frames) {
+            app.application.drawn(&mut app.shell, surface);
         }
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
@@ -391,6 +401,8 @@ pub struct Shell {
     exit: bool,
     /// Why the application stopped the run: [`run`] returns it.
     failure: Option<Error>,
+    /// The surfaces whose first frame was committed since [`Application::drawn`] last ran.
+    first_frames: Vec<SurfaceId>,
 }
 
 impl Shell {
@@ -768,7 +780,11 @@ impl Shell {
     fn draw_dirty(&mut self) -> Result<(), Error> {
         for surface in &mut self.surfaces {
             if surface.dirty {
+                let first = !surface.drawn;
                 surface.draw(&mut self.pool, &self.qh)?;
+                if first && surface.drawn {
+                    self.first_frames.push(surface.id);
+                }
             }
         }
         Ok(())

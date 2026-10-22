@@ -594,9 +594,9 @@ impl Dock {
         }
     }
 
-    /// READY=1 once (Type=notify): at the first frame a surface with the island committed,
-    /// as the GTK dock at its window's `map`, or at once when no output gets one (no
-    /// client, the knob off, the `bar` preset).
+    /// READY=1 once (Type=notify): at the first frame a surface with the island committed
+    /// (`Application::drawn`, in the turn that drew it), as the GTK dock at its window's
+    /// `map`, or at once when no output gets one (no client, the knob off, the `bar` preset).
     fn notify_ready(&mut self, shell: &Shell) {
         if self.ready {
             return;
@@ -899,6 +899,10 @@ impl Application for Dock {
                 Hide::PointerOut
             },
         );
+    }
+
+    fn drawn(&mut self, shell: &mut Shell, _surface: SurfaceId) {
+        self.notify_ready(shell);
     }
 
     fn turn(&mut self, shell: &mut Shell) {
