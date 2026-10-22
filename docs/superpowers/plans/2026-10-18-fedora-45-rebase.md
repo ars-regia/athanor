@@ -269,6 +269,9 @@ Green, all on the branch and before the merge (ADR-0078; the definition M5 confi
   - If the run stops at a job that needs a signing environment, see Q6.
 - [ ] **Laptop ISO test.** `SECURE_BOOT=1 MEMORY_MIB=4096 VCPUS=4 forge/test/iso/run_iso_test.sh <branch ISO> /var/tmp/f45-iso`, with the verdict case `secure-boot` and `greeter.txt` reporting the greeter. The 4 GiB guest is for a 7 GB host *(estimated sufficient)*; if it is not, the test moves to the desktop after S1.
 - [ ] **Desktop S1.** The spike's items pass on the branch image (task 8).
+- [ ] **Regressions found by task 11.**
+  - #699: the bar's Screen reader row is back on Fedora 45 (at-spi2-core 2.62 no longer serves `ScreenReaderEnabled`), and still works on Fedora 43.
+  - #700: task 8 records that a GTK 4.24 client reads the appearance keys through the Settings portal, on the session and on the greeter; a surface without the portal is fixed on the branch.
 - [ ] **Console, by the maintainer.**
   - On the branch image: bar, dock, launcher and greeter on GTK 4.24 and libadwaita 1.10.
   - Dead keys with `us(intl)` (`GTK_IM_MODULE=simple`, #332).
