@@ -36,7 +36,7 @@
           "candidate_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
           "class": {"enum": ["security", "feature"]},
           "advisories": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"}},
-          "class_reason": {"enum": ["", "no-baseline", "unlabelled-baseline"]},
+          "class_reason": {"type": "string", "pattern": "^(no-baseline|(unlabelled-baseline,?)?(base-change:[0-9]+->[0-9]+)?)$"},
           "updateinfo_timestamp": {"type": ["integer", "null"], "minimum": 0}
         }
       }

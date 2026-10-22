@@ -63,6 +63,10 @@ class Sources:
     def packages(self, ref):
         raise NotImplementedError
 
+    def version(self, ref):
+        """The VERSION_ID of the image, as a string of digits."""
+        raise NotImplementedError
+
     def updateinfo(self, ref):
         """(the timestamp of the updateinfo entry of repomd.xml or None, updateinfo.xml)"""
         raise NotImplementedError
@@ -335,6 +339,9 @@ class PodmanSources(Sources):
     def packages(self, ref):
         return self._read(ref)[0]
 
+    def version(self, ref):
+        return self._read(ref)[1]
+
     def _fetch(self, url):
         return run(
             "curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https", "--retry", "3",
@@ -427,12 +434,19 @@ def derive(repository, baseline, candidate, commit, sources):
             ids.update(git_half(baseline.revision, commit, sources.repo_root, repository) or [])
         else:
             record["class_reason"] = "unlabelled-baseline"
-        stamp, xml = sources.updateinfo(candidate.ref)
-        ids.update(
-            fedora_half(
-                sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
+        stamp = None
+        before, after = sources.version(baseline.ref), sources.version(candidate.ref)
+        if before != after:
+            # Every build of the new Fedora release compares later than the old one's, so the
+            # advisories of its updates repository say nothing about this change (#681).
+            record["class_reason"] = ",".join(filter(None, [record["class_reason"], f"base-change:{before}->{after}"]))
+        else:
+            stamp, xml = sources.updateinfo(candidate.ref)
+            ids.update(
+                fedora_half(
+                    sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
+                )
             )
-        )
         bad = sorted(i for i in ids if not ADVISORY_ID.fullmatch(i))
         if bad:
             raise ClassError(f"advisory ids {bad} are not of the form [A-Za-z0-9._-]+")
