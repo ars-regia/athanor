@@ -173,9 +173,9 @@ fn staged_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, staged: &Dep
 ///
 /// # Errors
 /// See [`Refusal`]. A refusal changes nothing; an unreadable opt-out or lineage is
-/// [`Refusal::Failed`], never read as the default.
-pub async fn postpone<T: Tools, C: Caller>(ctx: &Context<'_, T>, caller: &C) -> Result<i64, Refusal> {
-    caller.authorize(ACTION_POSTPONE).await?;
+/// [`Refusal::Failed`], never read as the default. polkit has asked for [`ACTION_POSTPONE`]
+/// before `ctx` is made, so `ctx.now` is the time of the answer, however long the prompt took.
+pub fn postpone<T: Tools>(ctx: &Context<'_, T>) -> Result<i64, Refusal> {
     let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
     let automatic = ctx.store.automatic_security_updates().map_err(|err| {
         tracing::error!(%err, "cannot read the opt-out of automatic security updates; Postpone() refuses");
@@ -213,34 +213,35 @@ pub async fn postpone<T: Tools, C: Caller>(ctx: &Context<'_, T>, caller: &C) -> 
     Ok(until)
 }
 
-/// `SetAutomaticSecurityUpdates(enabled)`: writes the opt-out of UT13 in any state. Turned
-/// off, it locks an unlocked security digest again; turned on, the run after the request
-/// unlocks a waiting one and opens its lineage (ADR-0127 point 8).
+/// `SetAutomaticSecurityUpdates(enabled)`: writes the opt-out of UT13 in any state, an
+/// unreadable one included. Turned off, it first locks an unlocked security digest again;
+/// turned on, the run after the request unlocks a waiting one and opens its lineage (ADR-0127
+/// point 8). Returns whether the value changed. polkit has asked for [`ACTION_SET_AUTOMATIC`]
+/// before `ctx` is made, as for [`postpone`].
 ///
 /// # Errors
-/// See [`Refusal`].
-pub async fn set_automatic<T: Tools, C: Caller>(ctx: &Context<'_, T>, caller: &C, enabled: bool) -> Result<(), Refusal> {
-    caller.authorize(ACTION_SET_AUTOMATIC).await?;
+/// See [`Refusal`]. When the relock fails nothing is written.
+pub fn set_automatic<T: Tools>(ctx: &Context<'_, T>, enabled: bool) -> Result<bool, Refusal> {
     let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
-    ctx.store.set_automatic_security_updates(enabled).map_err(|err| {
-        tracing::error!(%err, "cannot write the opt-out of automatic security updates");
-        Refusal::Failed
-    })?;
+    let previous = ctx.store.automatic_security_updates().ok();
     if !enabled {
-        let Ok(status) = ctx.tools.status() else {
-            tracing::error!("bootc gave no status: an unlocked security update was not locked again");
-            republish(ctx);
-            return Err(Refusal::Failed);
-        };
+        // Locked first, as in `postpone`: an opt-out written over a deployment that still
+        // applies at the next shutdown would be false.
+        let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
         let unlocked = status.staged.as_ref().filter(|staged| !staged.download_only && !status.rollback_queued);
         if unlocked.is_some_and(|staged| staged_security(ctx, &status, staged)) && ctx.tools.relock().is_err() {
-            tracing::error!("the security update could not be locked again: it applies at the next shutdown");
-            republish(ctx);
+            tracing::error!("the security update could not be locked again; the opt-out is unchanged");
             return Err(Refusal::Failed);
         }
     }
+    if let Err(err) = ctx.store.set_automatic_security_updates(enabled) {
+        tracing::error!(%err, "cannot write the opt-out of automatic security updates");
+        // The opt-out still reads as before, so the run unlocks again what was just locked.
+        republish(ctx);
+        return Err(Refusal::Failed);
+    }
     republish(ctx);
-    Ok(())
+    Ok(previous != Some(enabled))
 }
 
 /// `GoBack()`: the immediately previous deployment, the digest left recorded as held, a reboot.
@@ -272,8 +273,8 @@ mod tests {
     use super::*;
     use crate::check::tests::{attested, deployed, digest, in_att_repo, locked, offered_attested, open_lineage, security, stage, staged_for_shutdown, store_attestation, Fake, Machine, NOW};
     use crate::lineage::Lineage;
-    use crate::tools::Deployed;
-    use athanor_trust_state::{State, UpdateState};
+    use crate::tools::{Deployed, Failure};
+    use athanor_trust_state::{ErrorCode, State, UpdateState};
     use std::cell::{Cell, RefCell};
 
     struct FakePower {
@@ -591,11 +592,6 @@ mod tests {
         (machine, tools)
     }
 
-    /// polkit grants the two actions of UT13; no session is counted.
-    fn granting(tools: &Fake) -> FakeCaller<'_> {
-        FakeCaller::new(tools, &[], &[ACTION_POSTPONE, ACTION_SET_AUTOMATIC])
-    }
-
     fn lineage_file(machine: &Machine) -> Vec<u8> {
         std::fs::read(machine.store.var.join("lineage.json")).expect("lineage.json")
     }
@@ -605,136 +601,124 @@ mod tests {
     }
 
     /// `postpone` refuses with `refusal`, calls no tool and leaves the lineage file as it was.
-    async fn refused_untouched(machine: &Machine, tools: &Fake, now: i64, refusal: Refusal) {
+    fn refused_untouched(machine: &Machine, tools: &Fake, now: i64, refusal: Refusal) {
         let before = lineage_file(machine);
-        assert_eq!(postpone(&machine.ctx(tools, now), &granting(tools)).await, Err(refusal));
+        assert_eq!(postpone(&machine.ctx(tools, now)), Err(refusal));
         assert!(tools.calls.borrow().is_empty(), "{:?}", tools.calls.borrow());
         assert_eq!(lineage_file(machine), before, "the lineage is untouched");
     }
 
-    #[tokio::test]
-    async fn postpone_relocks_and_records() {
+    #[test]
+    fn postpone_relocks_and_records() {
         let (machine, tools) = will_apply("postpone", security(), &open_lineage(NOW, false));
-        let caller = granting(&tools);
-        assert_eq!(postpone(&machine.ctx(&tools, NOW + 60), &caller).await, Ok(NOW + 604_800));
-        assert_eq!(caller.asked(), [ACTION_POSTPONE]);
+        assert_eq!(postpone(&machine.ctx(&tools, NOW + 60)), Ok(NOW + 604_800));
         assert_eq!(*tools.calls.borrow(), ["relock"]);
         let state = state(&machine);
         assert_eq!(state.update, UpdateState::Downloaded);
         assert!(state.postpone.expect("open").postponed);
     }
 
-    #[tokio::test]
-    async fn postpone_opens_the_lineage_of_a_digest_apply_unlocked() {
+    #[test]
+    fn postpone_opens_the_lineage_of_a_digest_apply_unlocked() {
         let (machine, tools) = will_apply("postpone-no-lineage", security(), &Lineage::default());
-        assert_eq!(postpone(&machine.ctx(&tools, NOW), &granting(&tools)).await, Ok(NOW + 604_800));
+        assert_eq!(postpone(&machine.ctx(&tools, NOW)), Ok(NOW + 604_800));
         assert_eq!(first_notice_at(&machine), Some(NOW));
         assert!(locked(&tools));
     }
 
-    #[tokio::test]
-    async fn a_second_postpone_is_already_postponed() {
+    #[test]
+    fn a_second_postpone_is_already_postponed() {
         let (machine, tools) = will_apply("postpone-twice", security(), &open_lineage(NOW, false));
-        assert_eq!(postpone(&machine.ctx(&tools, NOW), &granting(&tools)).await, Ok(NOW + 604_800));
+        assert_eq!(postpone(&machine.ctx(&tools, NOW)), Ok(NOW + 604_800));
         tools.calls.borrow_mut().clear();
-        refused_untouched(&machine, &tools, NOW + 60, Refusal::AlreadyPostponed).await;
+        refused_untouched(&machine, &tools, NOW + 60, Refusal::AlreadyPostponed);
         assert_eq!(first_notice_at(&machine), Some(NOW));
     }
 
-    #[tokio::test]
-    async fn a_newer_digest_of_the_lineage_is_already_postponed() {
+    #[test]
+    fn a_newer_digest_of_the_lineage_is_already_postponed() {
         // The lineage's postpone is spent and the check left a newer security digest locked.
         let (machine, tools) = staged_for_shutdown("postpone-newer", security(), &open_lineage(NOW - 86_400, true));
-        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
         assert_eq!(first_notice_at(&machine), Some(NOW - 86_400));
     }
 
-    #[tokio::test]
-    async fn an_expired_budget_is_already_postponed() {
+    #[test]
+    fn an_expired_budget_is_already_postponed() {
         let (machine, tools) = will_apply("postpone-expired", security(), &open_lineage(NOW, false));
-        refused_untouched(&machine, &tools, NOW + 604_800, Refusal::AlreadyPostponed).await;
+        refused_untouched(&machine, &tools, NOW + 604_800, Refusal::AlreadyPostponed);
         let mut booted_out = open_lineage(NOW, false);
         booted_out.open.as_mut().expect("open").boots_remaining = 0;
         let (machine, tools) = will_apply("postpone-booted-out", security(), &booted_out);
-        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
     }
 
-    #[tokio::test]
-    async fn a_feature_digest_is_not_security_class() {
+    #[test]
+    fn a_feature_digest_is_not_security_class() {
         let (machine, tools) = will_apply("postpone-feature", Class::Feature, &open_lineage(NOW, false));
-        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass);
     }
 
-    #[tokio::test]
-    async fn postpone_with_nothing_staged_is_nothing_downloaded() {
+    #[test]
+    fn postpone_with_nothing_staged_is_nothing_downloaded() {
         let (machine, tools) = offered_attested("postpone-nothing", Some(security()));
         store_attestation(&machine, &tools);
         machine.store.set_lineage(&open_lineage(NOW, false)).expect("write");
         tools.calls.borrow_mut().clear();
-        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
         // Staged and locked with nothing postponed: an unlock that failed applies nothing.
         stage(&tools);
-        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
         // A queued rollback: the return, not the staged digest, is the next boot.
         let (machine, tools) = will_apply("postpone-queued", security(), &open_lineage(NOW, false));
         tools.status.borrow_mut().rollback_queued = true;
-        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
     }
 
-    #[tokio::test]
-    async fn postpone_with_the_opt_out_on_is_nothing_downloaded() {
+    #[test]
+    fn postpone_with_the_opt_out_on_is_nothing_downloaded() {
         let (machine, tools) = will_apply("postpone-opt-out", security(), &open_lineage(NOW, false));
         machine.store.set_automatic_security_updates(false).expect("write");
-        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
     }
 
-    #[tokio::test]
-    async fn postpone_of_a_signed_copy_is_not_security_class() {
+    #[test]
+    fn postpone_of_a_signed_copy_is_not_security_class() {
         // The staged digest is the booted build under another digest, however it is attested.
         let (machine, tools) = will_apply("postpone-signed-copy", security(), &open_lineage(NOW, false));
         tools.status.borrow_mut().booted = in_att_repo(deployed(&digest(1), 2000));
-        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass);
     }
 
-    #[tokio::test]
-    async fn postpone_refused_by_polkit_changes_nothing() {
-        let (machine, tools) = will_apply("postpone-polkit", security(), &open_lineage(NOW, false));
-        let before = lineage_file(&machine);
-        let caller = FakeCaller::new(&tools, &[], &[ACTION_SET_AUTOMATIC]);
-        assert_eq!(postpone(&machine.ctx(&tools, NOW), &caller).await, Err(Refusal::NotAuthorized));
-        assert!(tools.calls.borrow().is_empty() && !locked(&tools));
-        assert_eq!(lineage_file(&machine), before);
-    }
-
-    #[tokio::test]
-    async fn postpone_with_an_unreadable_lineage_is_failed() {
+    #[test]
+    fn postpone_with_an_unreadable_lineage_is_failed() {
         let (machine, tools) = will_apply("postpone-unreadable", security(), &open_lineage(NOW, false));
         std::fs::write(machine.store.var.join("lineage.json"), b"").expect("write");
-        refused_untouched(&machine, &tools, NOW, Refusal::Failed).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::Failed);
         let (machine, tools) = will_apply("postpone-unreadable-opt-out", security(), &open_lineage(NOW, false));
         std::fs::write(machine.store.var.join("automatic-security-updates"), b"").expect("write");
-        refused_untouched(&machine, &tools, NOW, Refusal::Failed).await;
+        refused_untouched(&machine, &tools, NOW, Refusal::Failed);
     }
 
-    #[tokio::test]
-    async fn turning_automatic_off_relocks_an_unlocked_security_digest() {
+    #[test]
+    fn turning_automatic_off_relocks_an_unlocked_security_digest() {
         let (machine, tools) = will_apply("automatic-off", security(), &open_lineage(NOW, false));
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &granting(&tools), false).await, Ok(()));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
         assert_eq!(*tools.calls.borrow(), ["relock"]);
         let state = state(&machine);
         assert_eq!((state.update, state.automatic_security_updates), (UpdateState::Downloaded, false));
         assert!(!machine.store.automatic_security_updates().expect("read"));
         // A feature digest unlocked by Apply() is the user's restart: it stays unlocked.
         let (machine, tools) = will_apply("automatic-off-feature", Class::Feature, &Lineage::default());
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &granting(&tools), false).await, Ok(()));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
         assert!(tools.calls.borrow().is_empty() && !locked(&tools));
     }
 
-    #[tokio::test]
-    async fn turning_it_on_unlocks_a_waiting_one_and_starts_the_clock() {
+    #[test]
+    fn turning_it_on_unlocks_a_waiting_one_and_starts_the_clock() {
         let (machine, tools) = staged_for_shutdown("automatic-on", security(), &Lineage::default());
         machine.store.set_automatic_security_updates(false).expect("write");
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &granting(&tools), true).await, Ok(()));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), Ok(true));
         assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
         let state = state(&machine);
         assert_eq!((state.update, state.automatic_security_updates), (UpdateState::WillApplyAtNextShutdown, true));
@@ -742,16 +726,25 @@ mod tests {
         assert_eq!(attested(), tools.status.borrow().staged.as_ref().expect("staged").digest);
     }
 
-    #[tokio::test]
-    async fn set_automatic_asks_its_action_every_time() {
-        let (machine, tools) = staged_for_shutdown("automatic-asks", security(), &Lineage::default());
-        let caller = granting(&tools);
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &caller, false).await, Ok(()));
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &caller, false).await, Ok(()));
-        assert_eq!(caller.asked(), [ACTION_SET_AUTOMATIC, ACTION_SET_AUTOMATIC]);
-        let refusing = FakeCaller::new(&tools, &[], &[ACTION_POSTPONE]);
-        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), &refusing, true).await, Err(Refusal::NotAuthorized));
-        assert!(!machine.store.automatic_security_updates().expect("read"), "a refusal writes nothing");
+    #[test]
+    fn set_automatic_reports_only_a_change() {
+        let (machine, tools) = staged_for_shutdown("automatic-change", security(), &Lineage::default());
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), Ok(false), "on by default");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(false));
+        // An unreadable opt-out is rewritten, and the write is a change.
+        std::fs::write(machine.store.var.join("automatic-security-updates"), b"").expect("write");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Ok(true));
+        assert!(!machine.store.automatic_security_updates().expect("read"));
+    }
+
+    #[test]
+    fn turning_automatic_off_writes_nothing_when_the_relock_fails() {
+        let (machine, mut tools) = will_apply("automatic-off-relock-fails", security(), &open_lineage(NOW, false));
+        tools.relock = Err(Failure { code: ErrorCode::Internal, host: None });
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), Err(Refusal::Failed));
+        assert!(machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
+        assert_eq!(*tools.calls.borrow(), ["relock"]);
     }
 
     #[tokio::test]

@@ -325,11 +325,13 @@ impl Update1 {
     async fn postpone(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
         let sender = sender_of(&header)?;
-        let caller = Sender::new(conn, sender.clone()).await;
-        let (tools, store) = (System, crate::store::Store::system());
-        let ctx = Context::system(&tools, &store, now());
-        let until = requests::postpone(&ctx, &caller).await?;
+        polkit(conn, &sender, requests::ACTION_POSTPONE).await?;
+        // UT6: the caller's uid at notice, read while the caller is still on the bus.
         let uid = uid_of(conn, &sender).await;
+        let (tools, store) = (System, crate::store::Store::system());
+        // Made after the prompt: the budget is judged at the time of the answer.
+        let ctx = Context::system(&tools, &store, now());
+        let until = requests::postpone(&ctx)?;
         tracing::info!(?uid, until, "the security update was postponed");
         Ok(())
     }
@@ -338,15 +340,14 @@ impl Update1 {
     async fn set_automatic_security_updates(&self, enabled: bool, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
         let sender = sender_of(&header)?;
-        let caller = Sender::new(conn, sender.clone()).await;
+        polkit(conn, &sender, requests::ACTION_SET_AUTOMATIC).await?;
+        let uid = uid_of(conn, &sender).await;
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
-        // Logged whenever the value was written, even when what follows the write failed.
-        let result = requests::set_automatic(&ctx, &caller, enabled).await;
-        if !matches!(result, Err(Refusal::NotAuthorized | Refusal::Busy)) && store.automatic_security_updates().ok() == Some(enabled) {
-            log_automatic_changed(uid_of(conn, &sender).await, enabled);
+        if requests::set_automatic(&ctx, enabled)? {
+            log_automatic_changed(uid, enabled);
         }
-        Ok(result?)
+        Ok(())
     }
 
     /// The published trust state (UT7) as JSON, for readers that cannot check its owner.
