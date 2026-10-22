@@ -944,8 +944,8 @@ impl Dispatch2<WpViewport, App> for Scaling {
 struct Ime {
     /// The surface the compositor sent `enter` for, and no `leave` since.
     entered: Option<SurfaceId>,
-    /// We sent `enable` and no `disable` since.
-    enabled: bool,
+    /// The content hint of the field we sent `enable` for, and no `disable` since.
+    enabled: Option<ContentHint>,
     /// The `commit` requests sent so far, which a `done` that answers the latest state names.
     commits: u32,
     pending: Pending,
@@ -959,9 +959,11 @@ impl Ime {
         (std::mem::take(&mut self.pending), serial == self.commits)
     }
 
-    /// Whether a focused field wants `enable` (`Some(true)`) or `disable` (`Some(false)`), or
-    /// nothing changes; counts the `commit` that sends it.
-    fn change(&mut self, field: bool) -> Option<bool> {
+    /// Whether the focused field, by its content hint, wants `enable` with that hint
+    /// (`Some(Some(hint))`), no field wants `disable` (`Some(None)`), or nothing changes; counts
+    /// the `commit` that sends it. A field of another hint is enabled again, as text-input-v3
+    /// asks at every change of the focused field.
+    fn change(&mut self, field: Option<ContentHint>) -> Option<Option<ContentHint>> {
         if field == self.enabled {
             return None;
         }
@@ -1169,14 +1171,19 @@ impl App {
             .and_then(|id| self.shell.ui(id))
             .and_then(|ui| {
                 let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
-                Some(ui.widget(id).rect)
+                let widget = ui.widget(id);
+                let hint = match widget.kind {
+                    Kind::TextArea(_) => ContentHint::Multiline,
+                    _ => ContentHint::None,
+                };
+                Some((widget.rect, hint))
             });
-        if self.ime.change(field.is_some()).is_none() {
+        let Some(change) = self.ime.change(field.map(|(_, hint)| hint)) else {
             return;
-        }
-        if let Some(r) = field {
+        };
+        if let (Some(hint), Some((r, _))) = (change, field) {
             text_input.enable();
-            text_input.set_content_type(ContentHint::None, ContentPurpose::Normal);
+            text_input.set_content_type(hint, ContentPurpose::Normal);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -2006,14 +2013,26 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert_eq!(ime.change(true), Some(true));
+        let field = Some(ContentHint::None);
+        assert_eq!(ime.change(field), Some(field));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
-        assert_eq!(ime.change(false), Some(false));
+        assert_eq!(ime.change(None), Some(None));
         ime.entered = Some(b);
-        assert_eq!(ime.change(true), Some(true), "no enable for the new field");
+        assert_eq!(ime.change(field), Some(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
-        assert_eq!(ime.change(true), None);
+        assert_eq!(ime.change(field), None);
+    }
+
+    #[test]
+    fn a_text_area_asks_for_multiline_text() {
+        let mut ime = Ime::default();
+        let (field, area) = (Some(ContentHint::None), Some(ContentHint::Multiline));
+        assert_eq!(ime.change(field), Some(field));
+        // From a field to a text area: enabled again, with the multi-line hint.
+        assert_eq!(ime.change(area), Some(area));
+        assert_eq!(ime.change(area), None);
+        assert_eq!(ime.change(field), Some(field));
     }
 
     #[test]
