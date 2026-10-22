@@ -76,7 +76,7 @@ rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail 
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
 
 build() { # build TAG CREATED KEY...
-  local tag=$1 created=$2 context break_greetd= version
+  local tag=$1 created=$2 context break_greetd='' version
   if [[ $tag == bad || $tag == vsec-gb ]]; then break_greetd=1; fi
   shift 2
   # A date builds at 10:00 UTC and reads 43.<date>.0; a date with a time (2026-09-15T11:00:00Z) builds

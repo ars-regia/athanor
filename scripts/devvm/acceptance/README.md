@@ -4,9 +4,9 @@ Runs section 6 of `docs/architecture/doc_update_trust.md` on the development VM 
 throwaway registry and throwaway keys. Nothing here touches the project registry or key.
 
     bash forge/scripts/build_rolling_local.sh update     # the RPM under test
-    scripts/devvm/acceptance/images.sh                   # registry, keys, twenty-three images and their attestations (about 40 min)
+    scripts/devvm/acceptance/images.sh                   # registry, keys, twenty-three images and their attestations (about 45 min, estimated)
     scripts/devvm/reset.sh && scripts/devvm/start.sh     # a freshly installed guest
-    scripts/devvm/acceptance/run.sh                      # about 70 minutes, a dozen reboots
+    scripts/devvm/acceptance/run.sh                      # about 100 minutes (estimated), some twenty reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
 
 The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together: on a
@@ -70,8 +70,8 @@ attestation (PB4b, ADR-0127) made with `cosign attest` (through `nix run`) and t
 signed with the key `other`, which the policy does not trust, and `vsec-noclass`'s has no class field. The
 notices are read from a `busctl monitor` of the guest's session bus, and the shield's rows through
 `shield_probe.py`. `security` waits ten minutes with nothing restarting; `postpone` moves the guest's clock seven days
-ahead for one power-off and restores it; `securitygreenboot` runs once per guest, as `greenboot` does. `featurehold` (item 20) publishes the feature image `v9` while `vsec6` waits, unlocked and then postponed, and shows it is not staged; a newer security image `vsec7` replaces `vsec6` and keeps the lineage's first notice, and once `vsec7` is applied (seven days ahead, as in `postpone`) the next check stages `v9`. It is not driven for a digest held by the opt-out or one waiting for a retried unlock. The soft
-restart of `security` is `systemctl soft-reboot` (UD37). Not driven: the shield's switch and its warning
+ahead for one power-off and restores it; `securitygreenboot` runs once per guest, as `greenboot` does. `featurehold` (item 20) publishes the feature image `v9` while `vsec6` waits and shows it is not staged in all four situations: unlocked (through the early return of `online_update`), held by the opt-out, waiting for a retried unlock (a `bootc` wrapper bind-mounted over `/usr/bin/bootc` fails `upgrade --from-downloaded` until the flag `/run/acc-unlock-fail` goes, as `second-count.sh` does; the stage removes it at the end and on failure) and postponed (the guard itself). A newer security image `vsec7` replaces `vsec6` and keeps the lineage's first notice, and once `vsec7` is applied (seven days ahead, as in `postpone`; the clock file of timesyncd is touched back) the next check stages `v9`. It starts inside the lineage `securitygreenboot` left open and reads its `first_notice_at`.
+`security` ends with the check of the 2026-10-22 amendment: after vsec2 is the anchor, the guest follows the tag `vsec1` for one boot and the anchor must stay vsec2's. A soft reboot is not driven: Update1 has no soft-reboot path (UD35 is not in the daemon) and a bare `systemctl soft-reboot` prepares no `/run/nextroot`, so it would not boot the new deployment; a power-off of the unlocked digest stands in for it. Not driven: the shield's switch and its warning
 (`shield-acceptance.sh` shows the rows; the switch is no push button for the probe) and the shield's Postpone button.
 
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after

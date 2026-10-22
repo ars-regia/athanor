@@ -436,7 +436,7 @@ expect_no_prompt() { # expect_no_prompt DESCRIPTION
   pass "$1"
 }
 
-# --- The security class of UT13 (doc_update_trust.md section 6, items 16 to 19) ---
+# --- The security class of UT13 (doc_update_trust.md section 6, items 16 to 20) ---
 # The timer's check runs two minutes after each boot and holds the store, so a request answers
 # Busy (#547): stop the timer and let a check it already started, or queued before the stop, end.
 quiesce_checks() {

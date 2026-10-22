@@ -500,10 +500,16 @@ clock_ahead() {
   # shellcheck disable=SC2016 # the guest's shell expands the date
   guest_ssh 'sudo date -s @$(( $(date +%s) + 7 * 86400 ))' > /dev/null
 }
+# timesyncd saves its clock file when it stops, with the time of the moved clock: touched to the
+# restored time, so that no later boot starts seven days ahead.
 clock_restore() {
+  local now
   [[ -n $ACC_CLOCK_MOVED ]] || return 0
-  guest_ssh "sudo date -s @$(date +%s)" > /dev/null || return 1
+  now=$(date +%s)
+  guest_ssh "sudo date -s @$now" > /dev/null || return 1
+  guest_ssh "sudo touch -c -d @$now /var/lib/systemd/timesync/clock" || return 1
   if [[ $ACC_CLOCK_NTP == yes ]]; then guest_ssh sudo timedatectl set-ntp true || return 1; fi
+  [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
   ACC_CLOCK_MOVED=''
 }
 
@@ -520,14 +526,24 @@ session_probe() { # session_probe showing|hidden|press NAME
   guest_ssh "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus; python3 - $1 athanor-bar $(printf '%q' "$2")" < "$ACC_HERE/../shield_probe.py"
 }
 sheet_shows() { session_probe showing "$2" || die "FAIL  $1: the sheet does not show '$2'"; }
-sheet_hides() { session_probe hidden "$2" || die "FAIL  $1: the sheet shows '$2'"; }
+# `hidden` passes on a sheet that is not drawn yet: the switch's label, which the sheet always has, is
+# waited for first.
+sheet_hides() {
+  session_probe showing "Automatic security updates" || die "FAIL  $1: the sheet is not populated (no 'Automatic security updates')"
+  session_probe hidden "$2" || die "FAIL  $1: the sheet shows '$2'"
+}
 
 # A request the check or the user manager must have refused or accepted: dbus-send prints no
 # "Error" for a reply.
+# Postpone() and SetAutomaticSecurityUpdates() return nothing: the reply is dbus-send's single
+# "method return" line, with no value after it.
 expect_reply() { # expect_reply DESCRIPTION OUTPUT
   [[ $2 != *Error* ]] || die "FAIL  $1: $2"
+  [[ $2 == "method return"* && $(grep -c . <<< "$2") -eq 1 ]] || die "FAIL  $1: the reply is not empty: $2"
   pass "$1"
 }
+# The postpone's length (POSTPONE_SECS of athanor-trust-state): the expiry is first_notice_at plus it.
+POSTPONE_SECS=$((7 * 86400))
 
 # Waits for the next boot of the digest DIGEST to be counted as applied at an online check: the
 # lineage's anchor (lineage.json) moves to it and no lineage is open.
@@ -541,8 +557,8 @@ expect_applied() { # expect_applied DESCRIPTION DIGEST
   expect "$1: and no lineage is open" .postpone null
 }
 
-stage_security() { # items 16 and 17; doc_shell.md section 7, item 4; UD37
-  local boot digest1 digest2 notice m
+stage_security() { # items 16 and 17; doc_shell.md section 7, item 4
+  local boot digest1 digest2 notice
   [[ $(marker) == v2 ]] || die "stage security starts on v2, where apply leaves the guest: it boots $(marker)"
   digest1=$(image_digest vsec1)
   digest2=$(image_digest vsec2)
@@ -583,28 +599,42 @@ stage_security() { # items 16 and 17; doc_shell.md section 7, item 4; UD37
   expect "16: the digest left is held" .update held
   [[ $(lineage_anchor) == "$digest1" ]] || die "FAIL  17: GoBack() moved the lineage's anchor"
   pass "17: and GoBack() does not reset the budget"
-  # The soft reboot of UD37: the guest keeps its boot id, and the new deployment is what runs after.
+  # Item 16, a shutdown the user starts, not through the postpone's expiry: the unlocked digest is
+  # applied by a power-off. A soft reboot is not driven: Update1 has no soft-reboot path (UD35 is not
+  # in the daemon), and a bare `systemctl soft-reboot` prepares no /run/nextroot, so it would not
+  # boot the new deployment.
   point_stable vsec2
   check_now
   expect "16: a newer security digest is unlocked" .update will-apply-at-next-shutdown
-  boot=$(boot_id)
-  guest_ssh sudo systemd-run --quiet --on-active=2 systemctl soft-reboot
-  for _ in $(seq 120); do
-    m=''
-    if m=$(guest_ssh -q cat /usr/share/athanor-acceptance-marker) && [[ $m == vsec2 ]]; then break; fi
-    sleep 5
-  done
-  [[ $m == vsec2 ]] || die "FAIL  16: a soft reboot did not boot vsec2 in 10 minutes (marker '$m')"
-  tunnel
-  echo "EVIDENCE  soft reboot: boot id before $boot, after $(boot_id)"
-  pass "16: a soft reboot the user starts applies it as well (UD37)"
+  power_cycle
+  [[ $(marker) == vsec2 ]] || die "FAIL  16: a power-off the user starts booted $(marker), expected vsec2"
+  pass "16: a shutdown the user starts applies the unlocked digest"
   quiesce_checks
   expect "16: and the booted digest is the one attested" .booted.digest "$digest2"
+  expect_applied "17: vsec2 is applied and is the lineage's anchor" "$digest2"
+  # 2026-10-22 amendment: a security digest built before the anchor never counts as applied, so a
+  # return to vsec1 (built an hour before vsec2) leaves the anchor where it is. The guest follows the
+  # tag vsec1 for that one boot, and :stable again afterwards.
+  guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:vsec1"
+  reboot_guest
+  [[ $(marker) == vsec1 ]] || die "FAIL  17: the guest did not boot vsec1: it boots $(marker)"
+  quiesce_checks
+  for n in 1 2; do
+    check_now
+    [[ $(lineage_anchor) == "$digest2" ]] || die "FAIL  17: booting the earlier vsec1 moved the anchor to '$(lineage_anchor)', expected $digest2"
+  done
+  expect "17: vsec1 is the booted digest" .booted.digest "$digest1"
+  pass "17: an earlier security digest does not reset the budget"
+  point_stable vsec2
+  guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
+  reboot_guest
+  [[ $(marker) == vsec2 ]] || die "FAIL  the guest did not return to vsec2: it boots $(marker)"
+  quiesce_checks
   notify_unwatch
 }
 
 stage_postpone() { # item 17
-  local first expiry out digest4
+  local first expiry digest4
   [[ $(marker) == vsec2 ]] || die "stage postpone follows security: the guest boots $(marker), expected vsec2"
   digest4=$(image_digest vsec4)
   quiesce_checks
@@ -612,17 +642,13 @@ stage_postpone() { # item 17
   check_now
   expect "17: a security digest is unlocked" .update will-apply-at-next-shutdown
   first=$(state .postpone.first_notice_at)
-  out=$(call_active Postpone)
-  expect_reply "17: Postpone() as the active user asks for no password" "$out"
-  # The reply may carry the expiry; when it does, it is first_notice_at plus seven days.
-  expiry=$(grep -oE '(u?int64|u?x) [0-9]+' <<< "$out" | awk '{ print $2 }')
-  [[ -z $expiry || $expiry == $((first + 604800)) ]] || die "FAIL  17: Postpone() answered $expiry, expected first_notice_at + 7 days = $((first + 604800))"
+  expect_reply "17: Postpone() as the active user asks for no password and returns nothing" "$(call_active Postpone)"
   expect "17: the digest is downloaded again" .update downloaded
   expect "17: the lineage is postponed" .postpone.postponed true
   expect "17: and first_notice_at did not move" .postpone.first_notice_at "$first"
   deployment_locked || die "FAIL  17: the deployment was not locked again"
   # Plan Task 10: the sheet carries the expiry in place of the button.
-  expiry=$(guest_ssh "LC_ALL=en_US.UTF-8 date -d @$((first + 604800)) +'%-d %B, %H:%M'")
+  expiry=$(guest_ssh "LC_ALL=en_US.UTF-8 date -d @$((first + POSTPONE_SECS)) +'%-d %B, %H:%M'")
   shield_sheet
   sheet_shows "17: postponed" "The security update is postponed, at most until $expiry; then it installs at the next shutdown or restart."
   sheet_hides "17: postponed" Postpone
@@ -758,31 +784,101 @@ stage_securitygreenboot() { # item 19
   [[ $(marker) == v2 ]] || die "FAIL  the guest did not return to v2 after the security stages: it boots $(marker)"
 }
 
+# A bootc that fails `upgrade --from-downloaded`, the unlock of a security digest, while
+# /run/acc-unlock-fail exists, as second-count.sh wraps it: the real one is bind-mounted aside, and the
+# update service, which builds its mount namespace when it starts, is stopped so that it reads the
+# mounts afresh. unmount_wrapper takes both mounts away.
+unlock_fails() {
+  guest_ssh sudo tee /run/acc-bootc-wrapper > /dev/null << 'WRAPPER'
+#!/bin/bash
+if [[ ${1:-} == upgrade && ${2:-} == --from-downloaded && -e /run/acc-unlock-fail ]]; then
+  echo "acc wrapper: the unlock fails" >&2
+  exit 1
+fi
+exec /run/acc-bootc-real "$@"
+WRAPPER
+  guest_ssh 'sudo chmod 0755 /run/acc-bootc-wrapper && sudo chcon --reference=/usr/bin/bootc /run/acc-bootc-wrapper && sudo touch /run/acc-bootc-real &&
+    sudo mount --bind /usr/bin/bootc /run/acc-bootc-real && sudo mount --make-private /run/acc-bootc-real &&
+    sudo mount --bind /run/acc-bootc-wrapper /usr/bin/bootc && sudo touch /run/acc-unlock-fail && sudo systemctl stop athanor-update.service'
+}
+unlock_works() {
+  guest_ssh sudo rm -f /run/acc-unlock-fail
+}
+unlock_wrapper_gone() {
+  unmount_wrapper && guest_ssh sudo rm -f /run/acc-unlock-fail /run/acc-bootc-wrapper /run/acc-bootc-real && guest_ssh sudo systemctl stop athanor-update.service
+}
+featurehold_cleanup() {
+  local failed=()
+  clock_restore || failed+=(clock_restore)
+  unlock_wrapper_gone || failed+=(unlock_wrapper_gone)
+  ((${#failed[@]} == 0)) || { echo "FAIL  the cleanup of the featurehold stage failed at: ${failed[*]}" >&2; return 1; }
+}
+
+# The one check that matters: a feature digest is published while a security digest waits, and
+# the staged digest, the state and the lock stay as they were. The situations of item 20, in order:
+# unlocked, held by the opt-out, waiting for a retried unlock, postponed.
+# The stage starts inside the lineage that `securitygreenboot` left open (vsec-gb was unlocked and
+# returned from, and no security digest was applied since vsec5): the stage reads its first_notice_at
+# and asserts nothing about its boots, which is the one inherited state it depends on.
 stage_featurehold() { # item 20
-  local d6 d7 d9 first
+  local d6 d7 d9 first n
   [[ $(marker) == v2 ]] || die "stage featurehold follows securitygreenboot: the guest boots $(marker), expected v2"
   d6=$(image_digest vsec6)
   d7=$(image_digest vsec7)
   d9=$(image_digest v9)
   quiesce_checks
+  trap 'featurehold_cleanup' EXIT
   point_stable vsec6
   check_now
   expect "20: a security digest is unlocked" .update will-apply-at-next-shutdown
   [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: vsec6 is not the staged digest"
-  # Unlocked: a newer feature digest is not downloaded over it.
+  expect "20: in a lineage that is open and not postponed" .postpone.postponed false
+  first=$(state .postpone.first_notice_at)
+  # Unlocked. An unlocked deployment returns at the top of `online_update` (the early return on
+  # `local == WillApplyAtNextShutdown`), before the guard this item added: these checks cover the
+  # unlocked situation through that existing path; the situations below exercise the guard itself.
   point_stable v9
   for n in 1 2; do
     check_now
-    expect "20: check $n with a newer feature digest published leaves the unlocked security digest" .update will-apply-at-next-shutdown
+    expect "20: unlocked, check $n with a newer feature digest published (through the existing early return)" .update will-apply-at-next-shutdown
     [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the unlocked security digest: staged $(staged_digest)"
     deployment_unlocked || die "FAIL  20: the unlocked security digest was locked again"
   done
-  # Postponed: the state the guard of `online_update` reads as `downloaded`.
-  first=$(state .postpone.first_notice_at)
+  # Held by the opt-out: turning it off relocks the unlocked digest (set_automatic), and the check
+  # leaves it downloaded and locked (`settle_security` with `automatic` false).
+  expect_reply "20: an administrator turns the opt-out on" "$(call_root SetAutomaticSecurityUpdates boolean:false)"
+  expect "20: the security digest is held by the opt-out" .update downloaded
+  deployment_locked || die "FAIL  20: the opt-out did not lock the security digest"
+  check_now
+  expect "20: held by the opt-out, a newer feature digest published leaves it downloaded" .update downloaded
+  expect "20: with no error" .last_error none
+  [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the security digest the opt-out holds: staged $(staged_digest)"
+  deployment_locked || die "FAIL  20: the opt-out's digest was unlocked by the check"
+  # Waiting for a retried unlock: the opt-out is turned off again while the unlock fails. The
+  # failed unlock leaves the digest downloaded and locked, with the error published, and each check
+  # tries again (`settled_security`), still without taking the feature digest.
+  unlock_fails
+  expect_reply "20: an administrator turns the opt-out off while the unlock fails" "$(call_root SetAutomaticSecurityUpdates boolean:true)"
+  for n in 1 2; do
+    check_now
+    expect "20: unlock failing, check $n leaves the security digest downloaded" .update downloaded
+    [[ $(state .last_error) != none ]] || die "FAIL  20: the failed unlock is published with no error"
+    [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the security digest waiting for its unlock: staged $(staged_digest)"
+    deployment_locked || die "FAIL  20: the digest was unlocked in spite of the failure"
+  done
+  unlock_works
+  check_now
+  expect "20: the retried unlock succeeds at the next check" .update will-apply-at-next-shutdown
+  expect "20: with no error" .last_error none
+  [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the retry staged $(staged_digest), expected the security digest $d6"
+  deployment_unlocked || die "FAIL  20: the retried unlock left the deployment locked"
+  unlock_wrapper_gone || die "FAIL  20: the bootc wrapper could not be removed"
+  # Postponed: the state in which the guard of `online_update` reads `downloaded`.
   expect_reply "20: Postpone() as the active user" "$(call_active Postpone)"
   expect "20: the security digest is postponed" .postpone.postponed true
+  expect "20: and first_notice_at did not move" .postpone.first_notice_at "$first"
   check_now
-  expect "20: a postponed security digest stays the state with a newer feature digest published" .update downloaded
+  expect "20: postponed, a newer feature digest published leaves the state downloaded" .update downloaded
   expect "20: with no error" .last_error none
   [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the postponed security digest: staged $(staged_digest)"
   deployment_locked || die "FAIL  20: the postponed deployment was unlocked"
@@ -799,7 +895,6 @@ stage_featurehold() { # item 20
   [[ $(staged_digest) == "$d7" ]] || die "FAIL  20: the feature digest replaced the newer security digest: staged $(staged_digest)"
   pass "20: the feature digest is not staged while a security digest waits"
   # The seven days pass, as in stage postpone; vsec7 is applied.
-  trap 'clock_restore' EXIT
   clock_ahead
   power_cycle
   clock_restore
