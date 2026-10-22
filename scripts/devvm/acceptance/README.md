@@ -4,7 +4,7 @@ Runs section 6 of `docs/architecture/doc_update_trust.md` on the development VM 
 throwaway registry and throwaway keys. Nothing here touches the project registry or key.
 
     bash forge/scripts/build_rolling_local.sh update     # the RPM under test
-    scripts/devvm/acceptance/images.sh                   # registry, keys, eleven images (about 20 min)
+    scripts/devvm/acceptance/images.sh                   # registry, keys, twenty images and their attestations (about 40 min)
     scripts/devvm/reset.sh && scripts/devvm/start.sh     # a freshly installed guest
     scripts/devvm/acceptance/run.sh                      # about 70 minutes, a dozen reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
@@ -61,6 +61,18 @@ naming the digest and the version the state file reports as booted (`doc_shell.m
 item 5); two more polls must not repeat it. The stage then stops the check timer and waits for a check it
 already started: the check holds the store, and Apply would answer `Busy` instead of
 `NothingDownloaded` (#547).
+
+The stages `security`, `postpone`, `optout`, `class` and `securitygreenboot` (UT13, acceptance items 16 to 19;
+`doc_shell.md` section 7, item 4) follow `apply` and end on v2 again. Their images are `vsec1` to `vsec5`,
+`v8`, `vsec-bad`, `vsec-noclass` and `vsec-gb` of `images.sh`, all built on 2026-09-15 between 11:00 and 19:00 so
+that no later stage finds its images older than the newest build the guest booted. Each carries a release
+attestation (PB4b, ADR-0127) made with `cosign attest` (through `nix run`) and the throwaway key `acc-1`; `vsec-bad`'s is
+signed with the key `other`, which the policy does not trust, and `vsec-noclass`'s has no class field. The
+notices are read from a `busctl monitor` of the guest's session bus, and the shield's rows through
+`shield_probe.py`. `security` waits ten minutes with nothing restarting; `postpone` moves the guest's clock seven days
+ahead for one power-off and restores it; `securitygreenboot` runs once per guest, as `greenboot` does. The soft
+restart of `security` is `systemctl soft-reboot` (UD37). Not driven: the shield's switch and its warning
+(`shield-acceptance.sh` shows the rows; the switch is no push button for the probe) and the shield's Postpone button.
 
 Looked at by hand, with `scripts/devvm/screenshot.sh`: the "update ready" notification after
 the `download` stage, the "now running" notification's text after `apply`, and the administrator

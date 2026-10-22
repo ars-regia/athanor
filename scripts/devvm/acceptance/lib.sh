@@ -172,9 +172,10 @@ call_active() { # call_active METHOD: the reply, or the error, of the call
   return 1
 }
 # A call from this SSH session (inactive, no polkit agent).
-call_ssh() { guest_ssh -T dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" 2>&1; }
+# call_ssh METHOD [ARG...]: ARG is a dbus-send argument, such as boolean:false.
+call_ssh() { guest_ssh -T dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" "${@:2}" 2>&1; }
 # A call as root, which polkit always authorizes: drives a scenario past a password prompt.
-call_root() { guest_ssh sudo dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" 2>&1; }
+call_root() { guest_ssh sudo dbus-send --system --print-reply --dest="${UPDATE1[0]}" "${UPDATE1[1]}" "${UPDATE1[2]}.$1" "${@:2}" 2>&1; }
 expect_error() { # expect_error DESCRIPTION OUTPUT ERROR-NAME
   [[ $2 == *"$3"* ]] || die "FAIL  $1: expected $3, got: $2"
   pass "$1"
@@ -433,4 +434,54 @@ expect_no_prompt() { # expect_no_prompt DESCRIPTION
   deployment_locked || die "FAIL  $1: the deployment was unlocked"
   echo "EVIDENCE  $1: no polkit-agent-helper@ instance and no polkitd grant since @$since; the call ended at os.athanor.Update1.Error.Blocked"
   pass "$1"
+}
+
+# --- The security class of UT13 (doc_update_trust.md section 6, items 16 to 19) ---
+# The timer's check runs two minutes after each boot and holds the store, so a request answers
+# Busy (#547): stop the timer and let a check it already started, or queued before the stop, end.
+quiesce_checks() {
+  local check
+  guest_ssh sudo systemctl stop athanor-update-check.timer
+  for _ in $(seq 60); do
+    check=$(guest_ssh 'systemctl show -p ActiveState --value athanor-update-check.service && systemctl list-jobs --no-legend athanor-update-check.service') ||
+      die "FAIL  cannot read the check's state"
+    [[ $check == activating* || $check == *athanor-update-check* ]] || break
+    sleep 5
+  done
+  [[ $check != activating* && $check != *athanor-update-check* ]] || die "FAIL  the check the timer started still runs after five minutes"
+}
+# A staged deployment bootc has unlocked for the next shutdown (downloadOnly false), and the
+# lineage's anchor, the digest of the last security update applied (lineage.json, UT13).
+deployment_unlocked() { [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged.downloadOnly) == false ]]; }
+lineage_anchor() { guest_ssh sudo cat /var/lib/athanor-update/lineage.json | jq -r .anchor; }
+image_digest() { skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:$1"; }
+
+# The notifications the session's notifier sent: a busctl monitor of the session bus, in a user
+# unit of the guest user, writes one JSON line per message. Notify() is (app_name, replaces_id,
+# icon, summary, body, actions, hints, timeout) and actions alternate id and label.
+ACC_NOTIFY_OUT=/var/tmp/acc-notify.json
+ACC_NOTIFY_UNIT=acc-notify-watch
+notify_unwatch() { # a unit that never loaded is not stopped; an SSH failure is not hidden
+  local state
+  state=$(guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" show -p LoadState --value "$ACC_NOTIFY_UNIT.service") || return 1
+  if [[ $state == loaded ]]; then guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" stop "$ACC_NOTIFY_UNIT.service"; fi
+}
+notify_watch() {
+  notify_unwatch || die "FAIL  the notification watch of an earlier run could not be stopped"
+  guest_ssh "sudo rm -f $ACC_NOTIFY_OUT && sudo systemd-run --quiet --user --machine=$GUEST_USER@.host --collect --unit=$ACC_NOTIFY_UNIT -p StandardOutput=file:$ACC_NOTIFY_OUT busctl --user --json=short monitor org.freedesktop.Notifications"
+}
+# One compact object per Notify() so far: {"summary": ..., "ids": [...]}.
+notices() {
+  guest_ssh cat "$ACC_NOTIFY_OUT" |
+    jq -c 'select(.member == "Notify") | {summary: .payload.data[3], ids: [.payload.data[5] | to_entries[] | select(.key % 2 == 0) | .value]}'
+}
+# Waits for a Notify() whose ids hold WANT; prints the notice. The notifier polls every 30 s.
+wait_notice() { # wait_notice DESCRIPTION WANT-ID
+  local found
+  for _ in $(seq 36); do
+    found=$(notices | jq -c --arg want "$2" 'select(.ids | index($want))' | head -n 1)
+    [[ -n $found ]] && { echo "$found"; return 0; }
+    sleep 5
+  done
+  die "FAIL  $1: no notification with the action '$2' in three minutes (sent: $(notices | tr '\n' ' '))"
 }
