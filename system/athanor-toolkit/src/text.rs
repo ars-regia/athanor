@@ -122,10 +122,23 @@ impl TextField {
         moved
     }
 
-    /// Scrolls the least that brings the caret's line into view, and no further than the text.
+    /// Scrolls the least that brings the caret's line into view, and no further than the text;
+    /// while the input method hides the caret, the line of its preedit's end.
     pub(crate) fn scroll_to_caret(&mut self, cx: &mut TextContext) {
         let view = self.view_height(cx);
-        if let Some(c) = self.caret(cx, 1.5) {
+        let caret = match self.caret(cx, 1.5) {
+            Some(c) => Some(c),
+            None => self.editor.raw_compose().clone().map(|preedit| {
+                let layout = self.layout(cx);
+                let end = parley::Cursor::from_byte_index(
+                    layout,
+                    preedit.end,
+                    parley::Affinity::Upstream,
+                );
+                end.geometry(layout, 1.5)
+            }),
+        };
+        if let Some(c) = caret {
             let (top, bottom) = (c.y0 as f32, c.y1 as f32);
             if top < self.offset {
                 self.offset = top;

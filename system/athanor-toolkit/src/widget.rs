@@ -2337,6 +2337,21 @@ mod tests {
     }
 
     #[test]
+    fn composing_with_a_hidden_caret_scrolls_to_the_preedit_end() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "1\n2\n3\n4\n5\n6", 3);
+        ui.layout();
+        ui.set_focus(Some(area));
+        ui.compose(&"word ".repeat(40), None);
+        let Kind::TextArea(field) = &mut ui.widgets[area].kind else {
+            panic!("not a text area");
+        };
+        let most = field.layout(&mut ui.text).height() - field.view_height(&mut ui.text);
+        let offset = field.offset;
+        assert!(most > 0.0 && (offset - most).abs() < 0.5, "offset {offset} of {most}");
+    }
+
+    #[test]
     fn a_text_area_keeps_its_newlines_only() {
         let mut ui = Ui::new("Text", Theme::default(), false);
         let area = ui.text_area(Ui::ROOT, "Notes", "", 4);
