@@ -257,3 +257,136 @@ What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
 - The primary GPU only; a second GPU, and its monitors, are not used.
 - A change redraws every output, not only those it shows on: a second monitor draws empty frames
   while the first animates.
+
+## Console sessions (C1 task 9, run by the maintainer)
+
+Two machines, each from a text console, with the bar, the dock and a terminal:
+
+| Machine | Run |
+| --- | --- |
+| Laptop (the reference laptop, Intel or AMD integrated graphics) | one hour of use, one suspend and resume, one output unplugged and plugged |
+| NVIDIA desktop, three outputs | **one hour of use and nothing else** |
+
+On the desktop, do not suspend and do not unplug an output. Maintainer decision of 2026-10-22:
+there those two actions make the GPU fall off the bus (Xid 79) and hard-reset the machine
+whatever compositor runs (issue #604, a known limit of the machine, not a defect of this
+compositor), so they are not tests. Plug nothing in or out for the hour either.
+
+The compositor ships in no image yet (task 9a does that), so it comes from a build and lives in
+the home directory, not under `/usr`. The bar and the dock are the image's.
+
+### 1. The binary, and the grants
+
+On the laptop, build it (`rig.sh` needs podman; nothing else building beside it):
+
+```
+forge/test/shell/rig.sh build-compositor
+mkdir -p ~/c1 && install -m 0755 .scratch/shell-rig/bin/athanor-compositor ~/c1/
+```
+
+On the desktop, copy it from the laptop (`<desktop>` is its SSH name):
+
+```
+ssh <desktop> mkdir -p c1 && scp .scratch/shell-rig/bin/athanor-compositor <desktop>:c1/
+```
+
+The compositor grants the top layer only to the clients on its allow-list, by executable and
+systemd unit (`/usr/share/athanor/compositor/privileged-clients`, OS4). The image ships no list,
+and its bar and dock run as `athanor-bar.service` and `athanor-dock.service`, which need the
+COSMIC session. So this run starts them in units of their own and writes a list for those
+names. `/usr` is read-only: `bootc usr-overlay` makes it writable until the next reboot, which
+removes the list again.
+
+```
+[ "$(findmnt -no FSTYPE /usr)" = overlay ] || sudo bootc usr-overlay
+sudo install -D -m 0644 /dev/stdin /usr/share/athanor/compositor/privileged-clients <<'LIST'
+/usr/bin/athanor-bar c1-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
+/usr/bin/athanor-dock c1-dock.service zwlr_layer_shell_v1
+LIST
+```
+
+### 2. Start
+
+Ctrl+Alt+F3 switches to a text console (logind starts the gettys of VTs 1 to 6); log in as the
+usual user. The commands below run there. The compositor logs to stdout and stderr (`tracing`
+at `info`; it reads no `RUST_LOG`), which goes to a file:
+
+```
+mkdir -p ~/c1/log && cd ~/c1/log
+~/c1/athanor-compositor --drm &> compositor-$(date +%F-%H%M).log &
+sleep 3
+log=$(ls -t compositor-*.log | head -n 1); echo "$log"   # the log path to send back
+sock=$(sed -n 's/.*listening.*"\(wayland-[0-9]*\)".*/\1/p' "$log" | head -n 1)
+echo "$sock"                                              # empty: it did not start, read the log
+```
+
+`--drm` takes no other option (`src/main.rs`). Then the clients, the bar and the dock as user
+units, so that the allow-list's unit names hold (the COSMIC session's own bar and dock, still
+running on VT 1, are untouched):
+
+```
+systemd-run --user --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo /usr/bin/athanor-bar
+systemd-run --user --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo /usr/bin/athanor-dock
+WAYLAND_DISPLAY="$sock" ptyxis &> terminal.log &
+```
+
+The bar and the dock must be drawn. If a monitor shows none, run `grep "was closed" "$log"`: the
+line "a surface on the top layers of a client not granted them was closed" means the allow-list
+did not match (wrong unit name, or the file is missing: redo step 1).
+
+Ctrl+Alt+F1 returns to the graphical session; Ctrl+Alt+F3 comes back to the compositor.
+
+### 3. If the screen stays black
+
+In this order, stopping at the first that works:
+
+1. Super+Escape: takes the keyboard back from an exclusive surface and asks logind to lock the
+   session. It frees a stuck keyboard, not a black output.
+2. Ctrl+Alt+F1 (or F2): the compositor reserves Ctrl+Alt+F1 to F12 for the virtual terminals.
+3. From another machine over SSH, as the same user:
+   ```
+   systemctl --user stop c1-bar c1-dock
+   pkill -TERM -x athanor-compositor
+   sudo chvt 1
+   ```
+   The compositor ends with an error and logs it when the session or the GPU is lost; that
+   last line is the first thing to send back.
+4. A frozen machine is a defect to report with the time it froze; restart it with the power
+   button and keep the journal of the previous boot (`journalctl -b -1`).
+
+### 4. The hour, and the laptop's extra checks
+
+Use it as usual for an hour: open and close windows in the terminal, move the pointer over every
+output, use the bar's menus and the dock. Note the time of anything odd.
+
+Laptop only, after the hour, each noted with its time:
+
+- Suspend: from the compositor's terminal, `systemctl suspend`; wake it with the power button.
+  The outputs must draw again and the clients answer.
+- Unplug an output (its cable), wait ten seconds, plug it in again. The windows that were on it
+  move to the first output; plugging gives the output back.
+
+### 5. What to send back
+
+On the same machine, `since` being the local time you started:
+
+```
+since="2026-10-22 18:00"
+journalctl -b --since "$since" --no-pager > ~/c1/log/journal.txt
+sudo dmesg --ctime | grep -iE 'drm|nvidia|NVRM|amdgpu|i915|xe |Xid' > ~/c1/log/dmesg-gpu.txt
+tar -C ~/c1 -czf ~/c1/c1-task9-$(hostname).tar.gz log
+```
+
+Send `~/c1/c1-task9-<host>.tar.gz`: the compositor log (`~/c1/log/compositor-*.log`, which holds
+the frame-time report every 10 seconds), `journal.txt` (the bar's and the dock's lines are under
+`c1-bar.service` and `c1-dock.service`), `dmesg-gpu.txt`, and a few lines in your own words: the
+machine, the times, what you saw.
+
+### 6. How defects are recorded
+
+The plan (task 9) puts every defect with its log lines into the results. The results document
+of the spike, `docs/spikes/c1-own-compositor.md`, does not exist yet: task 10 writes it, with a
+section for every NVIDIA defect and the frame times of each machine. Until then each defect is
+an issue or goes into the pull request that fixes it, as machine, time, what was seen, and the
+verbatim lines of the compositor log, the journal and `dmesg`; task 10 gathers them. A suspend
+or an unplug that resets the desktop is not a defect of this work: it is #604.
