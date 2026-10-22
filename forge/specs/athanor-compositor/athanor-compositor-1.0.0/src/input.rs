@@ -1,9 +1,8 @@
 //! Input from the backend to the seat: keys to the focused surface, the pointer to the surface
 //! under it, a click focuses the window it lands on, or the layer surface that asks for the
 //! keyboard on demand. The compositor keeps two kinds of key for itself, which no client sees:
-//! the escape key, Super+Escape, takes the keyboard back from an exclusive layer surface while
-//! one holds it (C1 task 8), and Ctrl+Alt+F1 to F12 switch to another virtual terminal on a
-//! console.
+//! Super+Escape locks the session (C1 task 8, doc_lock_and_prompts.md LP5), and Ctrl+Alt+F1 to
+//! F12 switch to another virtual terminal on a console.
 
 use crate::state::{State, Under};
 use smithay::backend::input::{
@@ -19,7 +18,7 @@ use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
     /// asks for the keyboard on demand. A click on a layer surface that takes the keyboard, of a
-    /// client the escape key took the keyboard from, gives its exclusive surfaces the keyboard
+    /// client the lock took the keyboard from, gives its exclusive surfaces the keyboard
     /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
         let under = self.under(location);
@@ -53,17 +52,15 @@ impl State {
             serial,
             time,
             |state, modifiers, handle| match key_state {
-                KeyState::Pressed => match kept(
-                    modifiers,
-                    handle.modified_sym(),
-                    state.lock.is_none() && state.exclusive_layer().is_some(),
-                ) {
-                    Some(kept) => {
-                        state.kept_keys.push(code);
-                        FilterResult::Intercept(Some(kept))
+                KeyState::Pressed => {
+                    match kept(modifiers, handle.modified_sym(), state.lock.is_some()) {
+                        Some(kept) => {
+                            state.kept_keys.push(code);
+                            FilterResult::Intercept(Some(kept))
+                        }
+                        None => FilterResult::Forward,
                     }
-                    None => FilterResult::Forward,
-                },
+                }
                 // The release of a kept press is kept: the client never saw the key go down.
                 KeyState::Released => match state.kept_keys.iter().position(|k| *k == code) {
                     Some(at) => {
@@ -84,7 +81,7 @@ impl State {
                     KeyState::Released => self.grab_serials.key_release = sent,
                 }
             }
-            Some(Some(Kept::Escape)) => self.escape_exclusive(),
+            Some(Some(Kept::Lock)) => self.request_lock(),
             Some(Some(Kept::Vt(vt))) => self.switch_vt(vt),
             Some(None) => {}
         }
@@ -196,18 +193,19 @@ impl State {
 /// A key the compositor keeps for itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Kept {
-    /// Super+Escape: the keyboard back from an exclusive layer surface.
-    Escape,
+    /// Super+Escape, alone: lock the session.
+    Lock,
     /// Ctrl+Alt+F1 to F12, which the keymap turns into XF86Switch_VT_1 to 12.
     Vt(i32),
 }
 
-/// Whether the compositor keeps `sym`, pressed with `modifiers`. The escape key only while
-/// `escapable`, while an exclusive surface holds the keyboard and the session is not locked:
-/// otherwise Super+Escape is the client's.
-fn kept(modifiers: &ModifiersState, sym: Keysym, escapable: bool) -> Option<Kept> {
+/// Whether the compositor keeps `sym`, pressed with `modifiers`. Escape only with Super alone,
+/// and not while `locked`: the lock surface takes it as any key. Super+Alt+Escape (terminate)
+/// and Super+Shift+Escape are the client's.
+fn kept(modifiers: &ModifiersState, sym: Keysym, locked: bool) -> Option<Kept> {
     if sym == Keysym::Escape {
-        return (escapable && modifiers.logo).then_some(Kept::Escape);
+        let alone = modifiers.logo && !(modifiers.ctrl || modifiers.alt || modifiers.shift);
+        return (alone && !locked).then_some(Kept::Lock);
     }
     if !(modifiers.ctrl && modifiers.alt) {
         return None;
@@ -255,28 +253,44 @@ mod tests {
             alt: true,
             ..ModifiersState::default()
         };
-        assert_eq!(kept(&logo, Keysym::Escape, true), Some(Kept::Escape));
+        assert_eq!(kept(&logo, Keysym::Escape, false), Some(Kept::Lock));
         assert_eq!(
-            kept(&logo, Keysym::Escape, false),
+            kept(&logo, Keysym::Escape, true),
             None,
-            "with no exclusive surface holding the keyboard, or locked, it is the client's"
-        );
-        assert_eq!(kept(&ModifiersState::default(), Keysym::Escape, true), None);
-        assert_eq!(
-            kept(&ctrl_alt, Keysym::Escape, true),
-            None,
-            "Ctrl+Alt+Escape is the client's"
+            "locked, it is the lock surface's"
         );
         assert_eq!(
-            kept(&ctrl_alt, Keysym::XF86_Switch_VT_1, true),
+            kept(&ModifiersState::default(), Keysym::Escape, false),
+            None
+        );
+        for (other, what) in [
+            (ModifiersState { alt: true, ..logo }, "Super+Alt+Escape"),
+            (
+                ModifiersState {
+                    shift: true,
+                    ..logo
+                },
+                "Super+Shift+Escape",
+            ),
+            (ModifiersState { ctrl: true, ..logo }, "Super+Ctrl+Escape"),
+            (ctrl_alt, "Ctrl+Alt+Escape"),
+        ] {
+            assert_eq!(
+                kept(&other, Keysym::Escape, false),
+                None,
+                "{what} is the client's"
+            );
+        }
+        assert_eq!(
+            kept(&ctrl_alt, Keysym::XF86_Switch_VT_1, false),
             Some(Kept::Vt(1))
         );
         assert_eq!(
-            kept(&ctrl_alt, Keysym::XF86_Switch_VT_12, false),
+            kept(&ctrl_alt, Keysym::XF86_Switch_VT_12, true),
             Some(Kept::Vt(12))
         );
         assert_eq!(
-            kept(&ModifiersState::default(), Keysym::XF86_Switch_VT_1, true),
+            kept(&ModifiersState::default(), Keysym::XF86_Switch_VT_1, false),
             None,
             "a switch the keymap sends without Ctrl+Alt switches nothing"
         );
@@ -284,11 +298,11 @@ mod tests {
             kept(
                 &ctrl_alt,
                 Keysym::from(Keysym::XF86_Switch_VT_12.raw() + 1),
-                true
+                false
             ),
             None
         );
-        assert_eq!(kept(&ctrl_alt, Keysym::a, true), None);
+        assert_eq!(kept(&ctrl_alt, Keysym::a, false), None);
     }
 
     #[test]

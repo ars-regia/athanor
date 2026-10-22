@@ -3,8 +3,8 @@
 //! placed in what the zones leave (`State::window_area`). The keyboard follows each surface's
 //! `keyboard_interactivity`, as register row 1 of CO3 asks: an exclusive surface on the top or
 //! overlay layer holds the keyboard while it is mapped, an on-demand one takes it when clicked,
-//! and one with none never has it. The escape key takes the keyboard back from an exclusive
-//! surface (`escape_exclusive`), and the layers of an output that goes are closed
+//! and one with none never has it. A lock takes the keyboard from an exclusive
+//! surface (`escape_exclusive_holder`), and the layers of an output that goes are closed
 //! (`close_layers`).
 
 use crate::identity::Privilege;
@@ -178,29 +178,24 @@ impl State {
         })
     }
 
-    /// The escape key: the keyboard back from the surface that holds it exclusively, and from
-    /// its popup's grab, to the next exclusive surface or the top window. A client granted the
-    /// top layers can map a transparent exclusive surface that never ends; the user still gets
-    /// the keyboard back. The escape holds for the client, not the surface: no exclusive surface
-    /// of it, remapped or new, takes the keyboard until the user clicks on one of the client's
-    /// layer surfaces that takes the keyboard (`click_focus`) or the client disconnects. The lock keeps the keyboard.
-    pub fn escape_exclusive(&mut self) {
-        if self.lock.is_some() {
-            return;
-        }
-        let Some(surface) = self.exclusive_layer() else {
+    /// The session locks: the client whose exclusive top or overlay surface holds the keyboard is
+    /// marked as escaped, since the lock takes the keyboard from it. The escape holds for the
+    /// client, not the surface: no exclusive surface of it, remapped or new, takes the keyboard
+    /// after the unlock until the user clicks on one of the client's layer surfaces that takes
+    /// the keyboard (`click_focus`) or the client disconnects. A transparent exclusive surface
+    /// that never ends cannot keep the keyboard from the user for longer than the lock.
+    pub fn escape_exclusive_holder(&mut self) {
+        let Some(client) = self
+            .exclusive_layer()
+            .and_then(|surface| surface.client())
+            .map(|client| client.id())
+        else {
             return;
         };
-        tracing::info!("the escape key took the keyboard back from an exclusive surface");
-        if let Some(client) = surface.client() {
-            self.escaped.push(client.id());
+        if !self.escaped.contains(&client) {
+            tracing::info!("the lock took the keyboard from an exclusive surface");
+            self.escaped.push(client);
         }
-        if let Some(keyboard) = self.seat.get_keyboard() {
-            if keyboard.is_grabbed() {
-                keyboard.unset_grab(self);
-            }
-        }
-        self.focus_top();
     }
 
     /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
@@ -217,7 +212,7 @@ impl State {
         }
     }
 
-    /// Whether the escape key took the keyboard from the client of `surface`.
+    /// Whether the lock took the keyboard from the client of `surface`.
     pub fn escaped(&self, surface: &WlSurface) -> bool {
         surface
             .client()

@@ -130,7 +130,10 @@ fn run() -> Result<(), Error> {
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
     event_loop.run(None, &mut state, |_| {})?;
-    Ok(())
+    match state.fatal.take() {
+        Some(reason) => Err(reason.into()),
+        None => Ok(()),
+    }
 }
 
 fn main() -> ExitCode {

@@ -2,7 +2,7 @@
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
 //! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
 
-use crate::state::State;
+use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
@@ -47,6 +47,7 @@ impl SessionLockHandler for State {
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();
+        self.escape_exclusive_holder();
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.unset_grab(self);
         }
@@ -60,6 +61,7 @@ impl SessionLockHandler for State {
         });
         self.set_keyboard_focus(None);
         self.refresh_pointer();
+        self.lock_taken();
     }
 
     fn unlock(&mut self) {
@@ -136,4 +138,44 @@ impl State {
             locker.lock();
         }
     }
+}
+
+impl State {
+    /// Super+Escape: the user asks to lock the session. On a console the compositor asks logind
+    /// to lock its session, as `loginctl lock-session` does, and the session's lock client
+    /// reacts to logind's `Lock` signal and nothing else (doc_lock_and_prompts.md LP4); the lock
+    /// itself reaches `SessionLockHandler::lock`. Nested or headless there is no logind session
+    /// of the compositor's own, and the request is only counted. A lock the user asks for is
+    /// never refused.
+    pub fn request_lock(&mut self) {
+        self.lock_requests += 1;
+        if !matches!(self.backend, Backend::Drm(_)) {
+            tracing::info!("a lock was asked for; only a console session has a logind to ask");
+            return;
+        }
+        // On its own thread: the call waits for logind, and the loop draws meanwhile.
+        let spawned = std::thread::Builder::new()
+            .name("lock-request".into())
+            .spawn(|| {
+                if let Err(error) = lock_session() {
+                    tracing::error!(%error, "logind did not lock the session");
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::error!(%error, "the lock request could not be started");
+        }
+    }
+}
+
+/// `org.freedesktop.login1.Session.Lock` on the compositor's own session (`session/auto` is the
+/// session of the caller), which is what `loginctl lock-session` calls.
+fn lock_session() -> Result<(), zbus::Error> {
+    zbus::blocking::Connection::system()?.call_method(
+        Some("org.freedesktop.login1"),
+        "/org/freedesktop/login1/session/auto",
+        Some("org.freedesktop.login1.Session"),
+        "Lock",
+        &(),
+    )?;
+    Ok(())
 }

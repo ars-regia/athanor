@@ -1443,15 +1443,16 @@ fn shell_keys(run: &mut Running, steps: &mpsc::Sender<Step>) -> Vec<u32> {
     got.into_inner().expect("the keys")
 }
 
-/// The key the compositor keeps for itself (C1 task 8): Super+Escape takes the keyboard back
-/// from a granted client's exclusive surface, and from its popup's grab, and gives it to the top
-/// window; the client never sees the Escape. The escape holds for the client: its surface
-/// committing again, as a bar does each frame, mapped again, or a new one, does not take the
-/// keyboard back, and Super+Escape is then the window's. A click on a layer surface of the client
-/// that takes the keyboard gives it back; one on its window, or on its bar, which takes none,
-/// does not. While the session is locked, the key does nothing.
+/// The key the compositor keeps for itself (C1 task 8): Super+Escape asks for the lock, and the
+/// client never sees the Escape. The lock takes the keyboard from a granted client's exclusive
+/// surface, and ends its popup's grab; the client is then escaped: its surface committing again,
+/// as a bar does each frame, mapped again, or a new one, does not take the keyboard back after
+/// the unlock. A click on a layer surface of the client that takes the keyboard gives it back;
+/// one on its window, or on its bar, which takes none, does not. With no exclusive surface the
+/// key asks for the lock all the same and is not the window's; while the session is locked it
+/// is the lock surface's, and asks for nothing. Super+Shift+Escape is the window's.
 #[test]
-fn task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface() {
+fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_surface() {
     let mut run = Running::start(None);
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     run.until("the window has the keyboard", |state| {
@@ -1492,8 +1493,27 @@ fn task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface() {
     });
     let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
     chord(&mut run.state, &ESCAPE_CHORD);
-    assert_eq!(focus(&run.state), window, "the key takes the keyboard back");
-    assert!(!keyboard.is_grabbed(), "the popup's grab is over");
+    assert_eq!(run.state.lock_requests, 1, "Super+Escape asks for the lock");
+    assert!(
+        shell_has_it(&run.state),
+        "the request alone takes nothing: the lock does"
+    );
+    let mut local = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
+    let lock = locks.lock(&local.queue.handle(), ());
+    local.pump(&mut run, "the session is locked", |client, _| client.locked);
+    assert!(!keyboard.is_grabbed(), "the lock ends the popup's grab");
+    assert_eq!(
+        run.state.escaped,
+        std::slice::from_ref(&shell_id),
+        "the client whose surface held the keyboard is escaped"
+    );
+    lock.unlock_and_destroy();
+    local.pump(
+        &mut run,
+        "the unlock gives the window the keyboard",
+        |_, state| focus(state) == window,
+    );
     assert!(
         run.state.kept_keys.is_empty(),
         "each key the compositor kept is released"
@@ -1527,22 +1547,42 @@ fn task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface() {
     shell_keys(&mut run, &steps);
     assert_eq!(focus(&run.state), window, "a new surface does not either");
 
-    // No exclusive surface holds the keyboard: Super+Escape is the window's.
+    // No exclusive surface holds the keyboard: Super+Escape asks for the lock all the same, and
+    // is not the window's; Super+Shift+Escape is.
     use smithay::backend::input::{InputTime, KeyState};
     use smithay::input::keyboard::Keycode;
     let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
     let now = InputTime::now;
+    let requests = run.state.lock_requests;
     run.state.key_input(logo, KeyState::Pressed, now());
     let logo_sent = run.state.grab_serials.key_press.clone();
     run.state.key_input(escape, KeyState::Pressed, now());
     let escape_sent = run.state.grab_serials.key_press.clone();
     run.state.key_input(escape, KeyState::Released, now());
     run.state.key_input(logo, KeyState::Released, now());
-    assert_ne!(escape_sent, logo_sent, "the Escape is sent on");
+    assert_eq!(escape_sent, logo_sent, "the Escape is not sent on");
+    assert_eq!(
+        run.state.lock_requests,
+        requests + 1,
+        "it asks for the lock"
+    );
+    let shift = Keycode::from(42u32 + 8);
+    run.state.key_input(logo, KeyState::Pressed, now());
+    run.state.key_input(shift, KeyState::Pressed, now());
+    run.state.key_input(escape, KeyState::Pressed, now());
+    let escape_sent = run.state.grab_serials.key_press.clone();
+    for key in [escape, shift, logo] {
+        run.state.key_input(key, KeyState::Released, now());
+    }
     assert_eq!(
         escape_sent.map(|(_, to)| to),
         window_client,
-        "to the window"
+        "Super+Shift+Escape is the window's"
+    );
+    assert_eq!(
+        run.state.lock_requests,
+        requests + 1,
+        "and asks for nothing"
     );
 
     // A click on a window of the client, or on its surface that takes no keyboard, does not
@@ -1604,21 +1644,28 @@ fn task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface() {
         "a click gives it back"
     );
 
-    // Locked, the key does nothing: the exclusive surface has the keyboard at the unlock.
+    // Locked, the key is the lock surface's and asks for nothing. The exclusive surface held the
+    // keyboard when the lock was taken, so the client is escaped again at the unlock.
     let mut local = Local::connect(&mut run, None);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
     let lock = locks.lock(&local.queue.handle(), ());
     local.pump(&mut run, "the session is locked", |client, _| client.locked);
+    let requests = run.state.lock_requests;
     chord(&mut run.state, &ESCAPE_CHORD);
-    assert!(
-        run.state.escaped.is_empty(),
-        "the key does nothing while locked"
+    assert_eq!(
+        run.state.lock_requests, requests,
+        "the key asks for nothing while locked"
+    );
+    assert_eq!(
+        run.state.escaped,
+        std::slice::from_ref(&shell_id),
+        "the lock took the keyboard from the exclusive surface"
     );
     lock.unlock_and_destroy();
     local.pump(
         &mut run,
-        "the unlock gives the exclusive surface the keyboard",
-        |_, state| shell_has_it(state),
+        "the unlock gives a window the keyboard",
+        |_, state| focus(state).is_some() && state.exclusive_layer().is_none(),
     );
     assert!(
         !shell_keys(&mut run, &steps).contains(&ESCAPE_CHORD[1]),
@@ -1631,6 +1678,41 @@ fn task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface() {
         .join()
         .expect("the shell's client thread")
         .expect("the shell's client");
+    run.stop();
+}
+
+/// A virtual-terminal switch kept a key press, and the release comes on the other terminal: the
+/// session pausing forgets the record, so the next release of that key reaches the client.
+#[test]
+fn task8_a_pause_forgets_the_keys_the_compositor_kept() {
+    use smithay::backend::input::{InputTime, KeyState};
+    use smithay::input::keyboard::Keycode;
+    let mut run = Running::start(None);
+    let [ctrl, alt, f1] = [29u32, 56, 59].map(|code| Keycode::from(code + 8));
+    let now = InputTime::now;
+    for key in [ctrl, alt, f1] {
+        run.state.key_input(key, KeyState::Pressed, now());
+    }
+    assert_eq!(run.state.kept_keys, [f1], "Ctrl+Alt+F1 is kept");
+    run.state.pause();
+    assert!(run.state.kept_keys.is_empty(), "the pause forgets it");
+    run.state.grab_serials.key_release = None;
+    run.state.key_input(f1, KeyState::Released, now());
+    assert!(
+        run.state.grab_serials.key_release.is_some(),
+        "a later release of F1 reaches the client"
+    );
+    run.stop();
+}
+
+/// A failure the backend cannot go on after ends the loop with the reason, which `main` turns
+/// into the exit status.
+#[test]
+fn task8_a_fatal_failure_is_kept_for_main() {
+    let mut run = Running::start(None);
+    run.state.fail("the GPU was removed".into());
+    run.state.fail("a second reason".into());
+    assert_eq!(run.state.fatal.as_deref(), Some("the GPU was removed"));
     run.stop();
 }
 

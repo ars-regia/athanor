@@ -104,6 +104,8 @@ struct Head {
     lock: LockFrames,
     /// The next draw, when one is scheduled.
     timer: Option<RegistrationToken>,
+    /// Whether its draws keep failing, so that the log says so once (`FailureLog`).
+    failing: FailureLog,
     /// Something may have changed since the last draw (`request_redraw`).
     wanted: bool,
     /// The earliest next draw: six tenths of a period after a VBlank, a period after a draw
@@ -213,9 +215,7 @@ pub fn start(
             UdevEvent::Added { device_id, path } => {
                 tracing::info!(device_id, path = %path.display(), "a GPU was added; only the primary one is used")
             }
-            UdevEvent::Removed { device_id } => {
-                tracing::warn!(device_id, "a GPU was removed")
-            }
+            UdevEvent::Removed { device_id } => state.gpu_removed(device_id),
         })
         .map_err(|e| e.error)?;
 
@@ -290,7 +290,10 @@ impl State {
 
     /// The session is paused, on a switch to another virtual terminal: the GPU and the input
     /// devices are given up until it resumes.
-    fn pause(&mut self) {
+    pub(crate) fn pause(&mut self) {
+        // A key kept before the switch is released on the other terminal, if at all: the record
+        // would swallow the next release of that key (`key_input`).
+        self.kept_keys.clear();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -306,17 +309,27 @@ impl State {
             return;
         };
         tracing::info!("the session resumes");
+        // A session with no input, or with a GPU it cannot use, is dead and shows nothing wrong:
+        // the compositor ends with an error and its supervisor starts it again.
         if drm.libinput.resume().is_err() {
-            tracing::warn!("libinput could not take the input devices back");
+            self.fail("libinput could not take the input devices back".into());
+            return;
         }
         // Not reset: the frames that follow find out whether another master left the
         // device in a state they cannot use, and reset it then (`draw`).
-        if let Err(error) = drm.heads.lock().activate(false) {
-            tracing::warn!(%error, "the GPU could not be taken back");
+        let activated = drm
+            .heads
+            .lock()
+            .activate(false)
+            .map_err(|error| error.to_string());
+        if let Err(error) = activated {
+            self.fail(format!("the GPU could not be taken back: {error}"));
+            return;
         }
         for head in drm.outputs.values_mut() {
             head.queued = false;
         }
+        self.kept_keys.clear();
         let device_id = drm.node.dev_id();
         self.scan(device_id);
         let crtcs: Vec<crtc::Handle> = match &self.backend {
@@ -325,6 +338,26 @@ impl State {
         };
         for crtc in crtcs {
             self.schedule(crtc, Duration::ZERO);
+        }
+    }
+
+    /// Ends the loop; `main` then exits with `reason` as the error.
+    pub(crate) fn fail(&mut self, reason: String) {
+        tracing::error!("{reason}");
+        self.fatal.get_or_insert(reason);
+        self.loop_signal.stop();
+    }
+
+    /// A GPU went: the compositor draws on one only, so when it is that one nothing can be shown
+    /// and the compositor ends with an error. Any other GPU is not used.
+    fn gpu_removed(&mut self, device_id: u64) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        if device_id == drm.node.dev_id() {
+            self.fail("the GPU the compositor draws on was removed".into());
+        } else {
+            tracing::warn!(device_id, "a GPU was removed; only the primary one is used");
         }
     }
 
@@ -354,16 +387,70 @@ impl State {
                     connector,
                     crtc: Some(crtc),
                 } => self.disconnected(&connector, crtc),
-                DrmScanEvent::Connected {
+                // The modes changed while it stayed plugged in: a monitor that could not be set
+                // up with the modes it first reported is set up now, and one whose preferred
+                // mode is another is set up again in it.
+                DrmScanEvent::Changed {
                     connector,
-                    crtc: None,
-                } => tracing::warn!(
-                    connector = ?connector.handle(),
-                    "a monitor was plugged in with no CRTC left to drive it"
-                ),
-                // ponytail: a monitor whose modes change keeps the mode it has; anvil does the same.
-                DrmScanEvent::Disconnected { .. } | DrmScanEvent::Changed { .. } => {}
+                    crtc: Some(crtc),
+                } => self.changed(&connector, crtc),
+                DrmScanEvent::Connected { crtc: None, .. }
+                | DrmScanEvent::Disconnected { crtc: None, .. }
+                | DrmScanEvent::Changed { crtc: None, .. } => {}
             }
+        }
+        self.retry_dark_monitors();
+    }
+
+    /// The monitors the scanner holds plugged in that no output shows: one that had no CRTC to
+    /// drive it when it was plugged in, a CRTC another monitor's unplugging freed since, or one
+    /// that could not be set up. Each is tried again at every scan.
+    fn retry_dark_monitors(&mut self) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        let dark: Vec<(connector::Info, crtc::Handle)> = drm
+            .scanner
+            .crtcs()
+            .filter(|(info, crtc)| {
+                info.state() == connector::State::Connected && !drm.outputs.contains_key(crtc)
+            })
+            .map(|(info, crtc)| (info.clone(), crtc))
+            .collect();
+        let unassigned: Vec<connector::Info> = drm
+            .scanner
+            .connectors()
+            .values()
+            .filter(|info| {
+                info.state() == connector::State::Connected
+                    && drm.scanner.crtc_for_connector(&info.handle()).is_none()
+            })
+            .cloned()
+            .collect();
+        for info in unassigned {
+            tracing::warn!(
+                connector = ?info.handle(),
+                "a monitor is plugged in with no CRTC left to drive it"
+            );
+        }
+        for (info, crtc) in dark {
+            self.connected(&info, crtc);
+        }
+    }
+
+    /// The modes of the monitor on `connector`, driven by `crtc`, changed: set up again in its
+    /// preferred mode when its output shows another, set up when it has no output.
+    fn changed(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        let Some(head) = drm.outputs.get(&crtc) else {
+            return self.connected(connector, crtc);
+        };
+        let wanted = preferred_mode(connector).map(Mode::from);
+        if wanted.is_some() && wanted != head.output.current_mode() {
+            self.disconnected(connector, crtc);
+            self.connected(connector, crtc);
         }
     }
 
@@ -378,13 +465,7 @@ impl State {
             connector.interface().as_str(),
             connector.interface_id()
         );
-        let modes = connector.modes();
-        let Some(mode) = modes
-            .iter()
-            .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-            .or_else(|| modes.first())
-            .copied()
-        else {
+        let Some(mode) = preferred_mode(connector) else {
             tracing::warn!(output = name, "a monitor has no mode");
             return;
         };
@@ -428,8 +509,8 @@ impl State {
         let drm_output = match initialized {
             Ok(drm_output) => drm_output,
             Err(error) => {
-                // Tried again when it is plugged in again; at start, the compositor ends if no
-                // monitor could be set up (`start`).
+                // Tried again at the next scan (`retry_dark_monitors`); at start, the
+                // compositor ends if no monitor could be set up (`start`).
                 tracing::error!(%error, output = name, "a monitor could not be set up");
                 remove_global(&self.display_handle, &output);
                 return;
@@ -448,6 +529,7 @@ impl State {
                 drm_output,
                 queued: false,
                 lock: LockFrames::default(),
+                failing: FailureLog::default(),
                 timer: None,
                 wanted: true,
                 not_before: None,
@@ -487,6 +569,8 @@ impl State {
         );
         self.remove_output(&output);
         remove_global(&self.display_handle, &output);
+        // The monitor that was the only one not yet showing the lock, or the last one, is gone.
+        self.confirm_lock();
         self.request_redraw();
     }
 
@@ -574,6 +658,26 @@ impl State {
         if let Some(delay) = next {
             self.schedule(crtc, delay);
         }
+        // `locked` and the presentation feedback are sent here, and nothing else flushes an idle
+        // seat.
+        self.flush();
+    }
+
+    fn flush(&mut self) {
+        if let Err(error) = self.display_handle.flush_clients() {
+            tracing::warn!(%error, "the clients could not be flushed");
+        }
+    }
+
+    /// A lock was taken. A frame of before, queued or on screen, drew another lock or none, so
+    /// no output shows this one yet; with no output at all, there is nothing to wait for.
+    pub fn lock_taken(&mut self) {
+        if let Backend::Drm(drm) = &mut self.backend {
+            for head in drm.outputs.values_mut() {
+                head.lock = LockFrames::default();
+            }
+            self.confirm_lock();
+        }
     }
 
     /// A lock is confirmed only once every output presented a frame drawn locked.
@@ -646,6 +750,7 @@ impl State {
                         Ok(()) => {
                             head.queued = true;
                             head.lock.queued(locked);
+                            head.failing.recovered(&head.output);
                         }
                         Err(error) => {
                             self.draw_failed(crtc, SwapBuffersError::from(error), period);
@@ -661,6 +766,7 @@ impl State {
             if let Backend::Drm(drm) = &mut self.backend {
                 if let Some(head) = drm.outputs.get_mut(&crtc) {
                     head.not_before = Some(Instant::now() + period);
+                    head.failing.recovered(&head.output);
                     // Nothing new does not confirm a lock: only a frame drawn locked that
                     // reached the screen does, so the whole frame is drawn again.
                     if locked && !head.lock.shown {
@@ -678,9 +784,7 @@ impl State {
         self.serve_captures();
         self.space.refresh();
         self.popups.cleanup();
-        if let Err(error) = self.display_handle.flush_clients() {
-            tracing::warn!(%error, "the clients could not be flushed");
-        }
+        self.flush();
     }
 
     /// A frame that could not be drawn or queued. While the session is paused nothing is
@@ -721,9 +825,56 @@ impl State {
             }
             _ => {}
         }
-        tracing::warn!(%error, "a frame could not be drawn");
+        // A failure that persists is retried every period: logged at the first, not at each.
+        let first = match &mut self.backend {
+            Backend::Drm(drm) => drm
+                .outputs
+                .get_mut(&crtc)
+                .is_none_or(|head| head.failing.failed()),
+            _ => true,
+        };
+        if first {
+            tracing::warn!(%error, "a frame could not be drawn; tried again each refresh");
+        } else {
+            tracing::debug!(%error, "a frame could not be drawn");
+        }
         self.schedule(crtc, period);
     }
+}
+
+/// Whether the draws of a head keep failing, for the log: the first failure is logged, the
+/// repeats are not, and the recovery is.
+#[derive(Clone, Copy, Debug, Default)]
+struct FailureLog {
+    failing: bool,
+}
+
+impl FailureLog {
+    /// A draw failed; whether it is the first of a run, which is the one to log.
+    fn failed(&mut self) -> bool {
+        !std::mem::replace(&mut self.failing, true)
+    }
+
+    /// A draw worked; whether a run of failures ends, which is logged.
+    fn worked(&mut self) -> bool {
+        std::mem::replace(&mut self.failing, false)
+    }
+
+    fn recovered(&mut self, output: &Output) {
+        if self.worked() {
+            tracing::info!(output = output.name(), "frames are drawn again");
+        }
+    }
+}
+
+/// The mode a monitor is set up in: the one it prefers, else its first.
+fn preferred_mode(connector: &connector::Info) -> Option<smithay::reexports::drm::control::Mode> {
+    let modes = connector.modes();
+    modes
+        .iter()
+        .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .or_else(|| modes.first())
+        .copied()
 }
 
 /// What the frames of a head showed of the lock. Only a frame on screen counts: a frame queued
@@ -740,6 +891,11 @@ impl LockFrames {
     /// A frame was queued, drawn `locked` or not.
     fn queued(&mut self, locked: bool) {
         self.queued = locked;
+        // An unlocked frame on its way: the screen may show the space before the lock is
+        // asked for again, so what it showed before no longer confirms a lock.
+        if !locked {
+            self.shown = false;
+        }
     }
 
     /// The queued frame reached the screen.
@@ -862,7 +1018,7 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 
 #[cfg(test)]
 mod tests {
-    use super::{lock_shown, pacing, LockFrames};
+    use super::{lock_shown, pacing, FailureLog, LockFrames};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -912,13 +1068,33 @@ mod tests {
         assert!(lock_shown([&first, &second]), "both screens show the lock");
         second.queued(false);
         assert!(
-            lock_shown([&first, &second]),
-            "an unlocked frame only queued"
-        );
-        second.presented();
-        assert!(
             !lock_shown([&first, &second]),
-            "an unlocked frame on screen"
+            "an unlocked frame on its way: a lock asked for now is not shown by the old frame"
         );
+        second.queued(true);
+        assert!(!lock_shown([&first, &second]), "a locked frame only queued");
+        second.presented();
+        assert!(lock_shown([&first, &second]), "locked again on both");
+        // A lock taken forgets what an earlier one showed.
+        first = LockFrames::default();
+        assert!(!lock_shown([&first, &second]));
+    }
+
+    /// With no output there is nothing to wait for: a lock is confirmed at once.
+    #[test]
+    fn a_lock_with_no_output_is_shown() {
+        assert!(lock_shown([]));
+    }
+
+    #[test]
+    fn a_failure_that_persists_is_logged_once() {
+        let mut log = FailureLog::default();
+        assert!(!log.worked(), "nothing to recover from");
+        assert!(log.failed(), "the first failure is logged");
+        assert!(!log.failed(), "the repeats are not");
+        assert!(!log.failed());
+        assert!(log.worked(), "the recovery is logged");
+        assert!(!log.worked());
+        assert!(log.failed(), "a new run logs again");
     }
 }

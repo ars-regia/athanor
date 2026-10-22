@@ -105,10 +105,15 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
-    /// The clients the user took the keyboard back from with the escape key: their exclusive
-    /// layer surfaces hold it again only after a click on one of their surfaces
-    /// (`escape_exclusive`).
+    /// The clients whose exclusive layer surface held the keyboard when the session locked:
+    /// their exclusive layer surfaces hold it again only after a click on one of their
+    /// surfaces (`escape_exclusive_holder`).
     pub escaped: Vec<ClientId>,
+    /// The locks the user asked for with Super+Escape (`request_lock`).
+    pub lock_requests: u64,
+    /// Why the compositor must end with an error: set by `fail`, read by `main` once the loop
+    /// has stopped.
+    pub fatal: Option<String>,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -194,7 +199,7 @@ impl State {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
         // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
-        // exclusive surface of a granted client (`escape_exclusive`).
+        // exclusive surface of a granted client (`escape_exclusive_holder`).
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
@@ -246,6 +251,8 @@ impl State {
             last_input_serial: None,
             kept_keys: Vec::new(),
             escaped: Vec::new(),
+            lock_requests: 0,
+            fatal: None,
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
