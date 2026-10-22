@@ -266,6 +266,7 @@ pub fn paint<C: Canvas>(
         let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
+        let multiline = matches!(widget.kind, Kind::TextArea(_));
         match &mut widget.kind {
             Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
             Kind::Island { .. } => {
@@ -529,19 +530,26 @@ pub fn paint<C: Canvas>(
                 let edge = Circle::new(knob.center, knob.radius - 0.5);
                 ctx.stroke_path(&edge.to_path(0.1));
             }
-            Kind::Field(field) => {
+            Kind::Field(field) | Kind::TextArea(field) => {
                 ctx.set_paint(color(t.on_accent));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
                 ctx.set_paint(color(t.border));
                 ctx.set_stroke(Stroke::new(1.0));
                 ctx.stroke_path(&rounded(r, -0.5, t.radius));
+                let offset = field.offset;
                 let layout = field.layout(&mut ui.text);
-                let x = if ui.rtl {
+                // A text area's lines are laid out at its width, which aligns them to the start
+                // edge; it shows them from its scroll offset down.
+                let x = if ui.rtl && !multiline {
                     r.x + r.w - t.padding - layout.width()
                 } else {
                     r.x + t.padding
                 };
-                let y = r.y + (r.h - layout.height()) / 2.0;
+                let y = if multiline {
+                    r.y + t.padding / 2.0 - offset
+                } else {
+                    r.y + (r.h - layout.height()) / 2.0
+                };
                 let layout = layout.clone();
                 // Text longer than the field stays inside it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
@@ -624,12 +632,12 @@ mod tests {
         let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
         let field = ui.field(crate::Ui::ROOT, "Name", "");
         ui.set_focus(Some(field));
+        // The focus stays, as losing it ends the composition; both carets are at the text's end.
         if composed {
-            ui.compose("abc", None);
+            ui.compose("abc", Some((3, 3)));
         } else {
             ui.commit("abc");
         }
-        ui.set_focus(None);
         render(&mut ui, 1.0)
     }
 

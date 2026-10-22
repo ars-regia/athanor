@@ -1073,8 +1073,8 @@ impl Dispatch2<WpViewport, App> for Scaling {
 struct Ime {
     /// The surface the compositor sent `enter` for, and no `leave` since.
     entered: Option<SurfaceId>,
-    /// We sent `enable` and no `disable` since.
-    enabled: bool,
+    /// The field we sent `enable` for, and no `disable` since.
+    enabled: Option<ImeField>,
     /// The `commit` requests sent so far, which a `done` that answers the latest state names.
     commits: u32,
     pending: Pending,
@@ -1088,16 +1088,39 @@ impl Ime {
         (std::mem::take(&mut self.pending), serial == self.commits)
     }
 
-    /// Whether a focused field wants `enable` (`Some(true)`) or `disable` (`Some(false)`), or
-    /// nothing changes; counts the `commit` that sends it.
-    fn change(&mut self, field: bool) -> Option<bool> {
+    /// The compositor's `leave`, or the close of the surface it entered: what the input method
+    /// sent and no `done` applied goes too. Returns the surface it had entered.
+    fn leave(&mut self) -> Option<SurfaceId> {
+        self.pending = Pending::default();
+        self.entered.take()
+    }
+
+    /// Whether the text input is to be enabled for another focused field, or disabled for none:
+    /// text-input-v3 asks for `enable` at every change of the focused field, on the same surface
+    /// too. Counts the `commit` that sends it.
+    fn change(&mut self, field: Option<ImeField>) -> bool {
         if field == self.enabled {
-            return None;
+            return false;
         }
         self.enabled = field;
         self.commits = self.commits.wrapping_add(1);
-        Some(field)
+        true
     }
+}
+
+/// A focused field the input method writes to: its surface, its widget, and its content hint.
+type ImeField = (SurfaceId, WidgetId, ContentHint);
+
+/// The focused field of `ui` the input method writes to: its widget, its rectangle, and its
+/// content hint, multi-line for a text area.
+fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
+    let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
+    let widget = ui.widget(id);
+    let hint = match widget.kind {
+        Kind::TextArea(_) => ContentHint::Multiline,
+        _ => ContentHint::None,
+    };
+    Some((id, widget.rect, hint))
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -1108,13 +1131,9 @@ struct Pending {
     commit: Option<String>,
 }
 
-/// Text from the input method without control characters: the field holds one line.
-fn printable(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
-}
-
-/// The preedit as [`printable`] keeps it, with its cursor's byte offsets moved to match. A
-/// cursor that is not on a character boundary of the preedit is dropped.
+/// The preedit without what a single-line field drops from it, the newline included, with its
+/// cursor's byte offsets moved to match: a preedit is shown on one line. A cursor that is not
+/// on a character boundary of the preedit is dropped.
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
@@ -1123,14 +1142,14 @@ fn printable_preedit(
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
                 .chars()
-                .filter(|c| c.is_control())
+                .filter(|&c| !crate::text::keeps(c, false))
                 .map(char::len_utf8)
                 .sum();
             at - dropped
         })
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
-    (printable(text), cursor)
+    (crate::text::printable(text, false), cursor)
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1163,10 +1182,7 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 app.ime.entered = app.shell.find(&surface).map(|s| s.id);
                 app.sync_text_input();
             }
-            Event::Leave { .. } => {
-                app.ime.entered = None;
-                app.sync_text_input();
-            }
+            Event::Leave { .. } => app.leave_text_input(),
             Event::PreeditString {
                 text,
                 cursor_begin,
@@ -1300,17 +1316,13 @@ impl App {
         let field = self
             .ime
             .entered
-            .and_then(|id| self.shell.ui(id))
-            .and_then(|ui| {
-                let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
-                Some(ui.widget(id).rect)
-            });
-        if self.ime.change(field.is_some()).is_none() {
+            .and_then(|surface| Some((surface, ime_field(self.shell.ui(surface)?)?)));
+        if !self.ime.change(field.map(|(surface, (id, _, hint))| (surface, id, hint))) {
             return;
         }
-        if let Some(r) = field {
+        if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(ContentHint::None, ContentPurpose::Normal);
+            text_input.set_content_type(hint, ContentPurpose::Normal);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -1318,13 +1330,27 @@ impl App {
         text_input.commit();
     }
 
+    /// Text input leaves the surface it entered: the focused field there ends its composition,
+    /// as the input method sends no more for it, and the text input is disabled.
+    fn leave_text_input(&mut self) {
+        if let Some(id) = self.ime.leave() {
+            let ended = self
+                .shell
+                .get_mut(id)
+                .is_some_and(|surface| surface.ui.end_composition());
+            if ended {
+                self.update(id, None);
+            }
+        }
+        self.sync_text_input();
+    }
+
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again.
     fn close(&mut self, id: SurfaceId) {
         self.shell.close(id);
         if self.ime.entered == Some(id) {
-            self.ime.entered = None;
-            self.sync_text_input();
+            self.leave_text_input();
         }
     }
 
@@ -1474,7 +1500,8 @@ impl App {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        let event = commit.and_then(|text| surface.ui.commit(&printable(&text)));
+        // The field keeps what it takes of the text: a text area its newlines.
+        let event = commit.and_then(|text| surface.ui.commit(&text));
         let (preedit, cursor) = preedit.unwrap_or_default();
         let (preedit, cursor) = printable_preedit(&preedit, cursor);
         surface.ui.compose(&preedit, cursor);
@@ -1485,15 +1512,18 @@ impl App {
         }
     }
 
-    /// A key held down: as pressed again, except Enter, and Space outside a field, which
-    /// activate once.
+    /// A key held down: as pressed again, except Enter outside a text area, and Space outside
+    /// a field, which activate once.
     fn repeat(&mut self, event: KeyEvent) {
-        let in_field = self
+        let focused = self
             .keyboard_focus
             .and_then(|id| self.shell.ui(id))
-            .is_some_and(|ui| ui.focus().is_some_and(|id| ui.field_text(id).is_some()));
+            .and_then(|ui| Some((ui, ui.focus()?)));
+        let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
+        let in_area =
+            focused.is_some_and(|(ui, id)| matches!(ui.widget(id).kind, Kind::TextArea(_)));
         let activates = match event.keysym {
-            Keysym::Return | Keysym::KP_Enter => true,
+            Keysym::Return | Keysym::KP_Enter => !in_area,
             Keysym::space => !in_field,
             _ => false,
         };
@@ -2166,14 +2196,69 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert_eq!(ime.change(true), Some(true));
+        assert!(ime.change(Some((a, 1, ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
-        assert_eq!(ime.change(false), Some(false));
+        assert!(ime.change(None));
         ime.entered = Some(b);
-        assert_eq!(ime.change(true), Some(true), "no enable for the new field");
+        let field = Some((b, 1, ContentHint::None));
+        assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
-        assert_eq!(ime.change(true), None);
+        assert!(!ime.change(field));
+    }
+
+    #[test]
+    fn every_change_of_the_focused_field_enables_the_text_input_again() {
+        let a = SurfaceId(1);
+        let mut ime = Ime::default();
+        assert!(ime.change(Some((a, 1, ContentHint::None))));
+        // Another field of the same hint, on the same surface.
+        assert!(ime.change(Some((a, 2, ContentHint::None))));
+        assert!(!ime.change(Some((a, 2, ContentHint::None))));
+    }
+
+    #[test]
+    fn a_leave_drops_what_no_done_applied() {
+        let a = SurfaceId(1);
+        let mut ime = Ime {
+            entered: Some(a),
+            ..Ime::default()
+        };
+        ime.pending.preedit = Some(("ni".into(), None));
+        assert_eq!(ime.leave(), Some(a));
+        assert_eq!(ime.entered, None);
+        // The first done after the next enter applies nothing from before the leave.
+        ime.entered = Some(a);
+        assert!(ime.done(ime.commits).0.preedit.is_none());
+    }
+
+    #[test]
+    fn a_leave_ends_the_focused_fields_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("ni", Some((2, 2)));
+        assert!(ui.end_composition());
+        let Kind::Field(field) = &ui.widget(name).kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
+        assert_eq!(field.shown(), "ab");
+        assert!(!ui.end_composition(), "a second end changed the field");
+    }
+
+    #[test]
+    fn a_text_area_asks_for_multiline_text() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let notes = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        let hint = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, hint));
+        ui.set_focus(Some(name));
+        assert_eq!(hint(&ui), Some((name, ContentHint::None)));
+        ui.set_focus(Some(notes));
+        assert_eq!(hint(&ui), Some((notes, ContentHint::Multiline)));
     }
 
     #[test]
