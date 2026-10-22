@@ -401,6 +401,15 @@ fn note(text: &str) -> gtk4::Label {
     label
 }
 
+/// Sets the switch to what the state says. The programmatic change is not the person's: the
+/// handler lets it through.
+fn follow_state(switch: &gtk4::Switch, syncing: &Cell<bool>, on: bool) {
+    syncing.set(true);
+    switch.set_active(on);
+    switch.set_state(on);
+    syncing.set(false);
+}
+
 fn fill_sheet(content: &gtk4::Box, trust: &Trust, actions: &Actions) {
     while let Some(child) = content.first_child() {
         content.remove(&child);
@@ -424,11 +433,7 @@ fn fill_sheet(content: &gtk4::Box, trust: &Trust, actions: &Actions) {
             content.append(&note(&unreadable_words(why)));
         }
         Sheet::Read(rows) => {
-            // The programmatic change is not the person's: the handler lets it through.
-            actions.syncing.set(true);
-            actions.switch.set_active(rows.automatic_security_updates);
-            actions.switch.set_state(rows.automatic_security_updates);
-            actions.syncing.set(false);
+            follow_state(&actions.switch, &actions.syncing, rows.automatic_security_updates);
             actions.switch_row.set_visible(true);
             append_rows(content, &rows);
         }
@@ -634,7 +639,8 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             syncing.clone(),
         );
         let (bar, origin) = (Rc::downgrade(bar), popup.button.downgrade());
-        switch.connect_state_set(move |_, wanted| {
+        let syncing_in = syncing.clone();
+        switch.connect_state_set(move |switch, wanted| {
             if syncing.get() {
                 return glib::Propagation::Proceed;
             }
@@ -654,6 +660,16 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
                 stack.set_visible_child_name("confirm");
                 cancel.grab_focus();
             }
+            // The click moved `active` but the handler keeps `state`: put the switch back
+            // to what the state says, so Cancel, a refusal or a slow service leaves it true.
+            let (switch, syncing, bar) = (switch.clone(), syncing_in.clone(), bar.clone());
+            glib::idle_add_local_once(move || {
+                if let Some(bar) = bar.upgrade() {
+                    if let Sheet::Read(rows) = bar.trust().sheet() {
+                        follow_state(&switch, &syncing, rows.automatic_security_updates);
+                    }
+                }
+            });
             glib::Propagation::Stop
         });
     }
