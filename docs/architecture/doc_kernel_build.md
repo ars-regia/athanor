@@ -4,7 +4,9 @@ Stato: **approvata il 2026-09-03** (serie `stable` 7.x, `-O2` dal 2026-09-05, de
 come OCI separato con retention di due versioni; dal 2026-09-04 Rust acceso,
 ThinLTO e `RANDSTRUCT` spenti, sezione 13); **revisione 2 del 2026-10-14**, approvata con la
 pull request che la introduce: allinea le sezioni 7 e 10 ai job reali dei workflow dei moduli NVIDIA
-(#388, ADR-0110). Sostituisce il
+(#388, ADR-0110). Revision 3 of 2026-10-23, approved with the pull request that introduces it:
+a pull request whose kernel inputs equal its base's does not build the kernel (section 7,
+"Pull request skip"). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
 `prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
 comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
@@ -415,7 +417,9 @@ Ogni PR di bump e ogni cambio in `forge/specs/azoth/**` passa:
 
 **Il check unico.** Il job `gate` di `kernel-build.yml` (check `Kernel gate`)
 dipende da tutti gli altri ed è verde solo se `lint` (il lint condiviso,
-`call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso. È l'unico check del kernel richiesto
+`call-lint.yml`, che gira per primo), `inputs`, `boot` e `kmod` sono verdi e `build` è verde o saltato per riuso, oppure se su una
+pull request `lint` e `inputs` sono verdi e `build`, `boot` e `kmod` sono saltati per input invariati
+("Pull request skip", sotto). È l'unico check del kernel richiesto
 dalla protezione di `main`; su `iso-v0` Kernel Build non parte sulle PR: il
 controllo gira una volta sola in `pr.yml` (`call-kernel.yml`) e l'auto-merge del
 bot (sezione 8) aspetta `gate`.
@@ -468,6 +472,20 @@ digest. The weekly `repro` job stays the independent audit of promoted builds. A
 last 90 days, the maximum allowed; when the artifact is missing or expired, the push builds. With
 #368, the kernel verdict on `iso-v0` comes from `gate` of `pr.yml` and `Kernel gate` is no longer
 required there; `main` keeps it.
+
+**Pull request skip (revision 3, maintainer decision of 2026-10-22).** On a `pull_request` run
+whose `key` step finds no published kernel, `scripts/ci/kernel_unchanged.py` compares the
+checked-out merge commit with the pull request's base (a base that moved since only adds
+differences, so a build): the output of each commit's own `build-inputs.py`, and the git
+objects of what shapes the build or the `boot` and `kmod` jobs outside it (its `CHECKED` list:
+`nvr.sh`, the source keys, the boot, builder, signer and NVIDIA image directories, the NVIDIA
+pins, `cmdline`, `keys/`, the scripts and workflows those jobs run). When both are equal,
+`build`, `boot` and `kmod` are skipped and the verdict passes on a green `inputs` (`Kernel
+gate` also on a green `lint`), citing the push build of the base, which builds and publishes those inputs. Any error
+in the comparison means a build. Push, dispatch and schedule runs never skip this way. A test
+requires every directory with a package lock that `lock.sh check` verifies to be in `CHECKED`.
+The cost it removes: a documentation pull request (#702) built the kernel because the base's own
+push build had not yet published it.
 
 ## 8. Auto-manutenzione: il bot di bump
 

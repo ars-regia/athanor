@@ -162,7 +162,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Outputs:** `azoth`, `azoth-devel`, `azoth-debuginfo` images; artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`, `kernel-attestations`, and `kernel-promotion` (the decision `publish` attests) when the push promotes; check `Kernel gate`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none.
 - **Runner:** `build` self-hosted (`:125`), skipped for PRs from forks (`:124`); the rest hosted. **Concurrency:** `kernel-<ref>`, cancels in progress.
-- **Scripts:** `forge/specs/azoth/build.sh`, `boot.sh`, `microvm/boot.sh`, `nvr.sh`, `build-inputs.py`, `retention.sh`, `system/kernel-artifacts.sh`, `scripts/ci/build-builder.sh`, `scripts/ci/kernel_promotion.py`.
+- **Scripts:** `forge/specs/azoth/build.sh`, `boot.sh`, `microvm/boot.sh`, `nvr.sh`, `build-inputs.py`, `retention.sh`, `system/kernel-artifacts.sh`, `scripts/ci/build-builder.sh`, `scripts/ci/kernel_promotion.py`, `scripts/ci/kernel_unchanged.py`.
 - **Health:** `gh run list --workflow kernel-build.yml --branch iso-v0 --limit 5`.
 
 ### CI9 Kernel Bump
@@ -319,7 +319,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI28 Reusable Kernel Check
 
-- **File:** `call-kernel.yml`. **Purpose:** the check part of CI8 for CI27: inputs (reuse), build, boot matrix, NVIDIA modules (CI7), and a `Kernel verdict` job with the rule of `Kernel gate` without the lint. It publishes and signs nothing.
+- **File:** `call-kernel.yml`. **Purpose:** the check part of CI8 for CI27: inputs (reuse), build, boot matrix, NVIDIA modules (CI7), and a `Kernel verdict` job with the rule of `Kernel gate` without the lint. It publishes and signs nothing. A pull request whose kernel is not published, and whose kernel inputs (`build-inputs.py`) and boot and kmod inputs equal its base's, skips build, boot matrix and NVIDIA modules, and the verdict passes: the push build of the base builds and publishes that kernel (`scripts/ci/kernel_unchanged.py`; a failure to compare means build).
 - **Triggers:** `workflow_call` from CI27 job `kernel`. **Inputs:** `stage` (default `build`). **Outputs:** artifacts `kernel-<stage>`, `kernel-boot`, `kernel-devel`, `kernel-boot-logs`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** `build` self-hosted, skipped for PRs from forks; the rest hosted. **Concurrency:** caller's.
 - **Scripts:** as CI8, without `retention.sh`. Its jobs mirror CI8's until CI8 calls it (doc_pipeline.md block PB12).
