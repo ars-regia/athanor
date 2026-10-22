@@ -17,7 +17,7 @@
 - cosmic-comp stays the rig's and the image's default. Every change under `RIG_COMPOSITOR=athanor` leaves the cosmic-comp cases and their goldens unchanged. `RIG_OUTPUTS=2` keeps its present meaning: cosmic-comp on KMS and vkms in the KVM guest (`scene.sh`, `rig.sh` `in_rig`).
 - Not in this plan: C1 task 9 (the maintainer's console sessions) and task 9a (the optional session at the greeter, `origin/session/optional-own-compositor`, which also packages the compositor); the toolkit (stage 1 and the toolkit dock are paused; the existing test binary `athanor-toolkit-input-method` is reused as it is, and the bin target `athanor-dock-toolkit` is out of scope); OS9 items 4 and 5 (the toolkit's Unicode conformance and `vello_cpu` goldens).
 - Features whose checks come with the feature, not here: the KeyboardMonitor of AX4, the keyboard aids of AX11, the trusted-path border of LP13, xwayland-satellite, the AX5 reader gate and `athanor-a11y`. A step below that needs one of them says so and stops.
-- **Stop and ask** before editing anything on the login path, PAM, polkit or signing. Open question 3 is answered: the greeter UI's line and the lock screen's line land in task 4, each read from its unit file and confirmed against the binds, and no other file of the login path changes. No change to `system/athanor-bus-api/src/polkit.rs` is planned.
+- **Stop and ask** before editing anything on the login path, PAM, polkit or signing. Open question 3 is answered: the greeter UI's line and the lock screen's line land in task 4, each read from its unit file and confirmed against the binds, and no other file of the login path changes. The lock screen and the polkit agent have no binary at the head: the lock screen's line (task 4 step 6) and the rig cases of both (task 5) depend on the pull request that installs each binary, which lands before revision 2, and are part of that pull request, not of these tasks. No change to `system/athanor-bus-api/src/polkit.rs` is planned.
 - The compositor keeps `panic = "abort"`: no new `unwrap()`, `expect()` or `panic!` outside tests (`verify.py panics`). Every new privileged interface is granted only by the allow-list, never to a client behind a security context.
 - `scripts/verify.py`, `forge/config/packages.json` and Markdown under `docs/` change through an exact-match replacement script, then `git diff --numstat` shows only the intended lines.
 - A new `verify.py` check gets its test under `scripts/tests/`. A new or changed workflow is listed in `docs/architecture/doc_ci.md` and has its row in `doc_pipeline.md` section 3.5; its YAML only checks out and calls a script.
@@ -44,7 +44,7 @@ The fixture today asserts the privileged globals of C1 task 5 (`PRIVILEGED`, `fi
 **Files:**
 - Create: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals`
 - Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/fixture.rs` (replace `PRIVILEGED` and `TASK4_GLOBALS` with the file's rows; keep `Local::privileged` working on them)
-- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs` (the two privileges of step 3, and a `#[cfg(test)]` accessor), `src/state.rs` and `src/workspace.rs` (the workspace manager's filter)
+- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs` (the two privileges of step 3, and a `#[cfg(test)]` accessor), `src/state.rs` and `src/workspace.rs` (the workspace manager's filter), `Cargo.toml` (step 3)
 
 **Interfaces:**
 - Consumes: `Running::start`, `Local::connect(run, Option<SecurityContext>)`, `Local::sees(&str)`, `fixture_window`, the `Fake` process and `FIXTURE_ALLOW_LIST`.
@@ -61,7 +61,9 @@ The fixture today asserts the privileged globals of C1 task 5 (`PRIVILEGED`, `fi
 #[test]
 fn os9_every_global_is_classified() {
     // The set of interfaces each client lists equals, exactly, the rows for that client:
-    //   the bar (allow-listed for every privilege): every row;
+    //   the bar (FIXTURE_ALLOW_LIST's bar line: every privilege but zwlr_output_manager_v1): every row but that one;
+    //   the control center (a second line of FIXTURE_ALLOW_LIST, as the real one: zwlr_layer_shell_v1
+    //     and zwlr_output_manager_v1): standard, unconfined, layer-gated and zwlr_output_manager_v1;
     //   another unit (not allow-listed, outside a context): standard, unconfined, layer-gated;
     //   a client behind a security context: standard and layer-gated.
     // A listed interface missing from data/globals fails with its name.
@@ -81,8 +83,8 @@ fn os9_the_workspace_list_is_privileged() {
 
 #[test]
 fn os9_the_output_manager_is_granted_to_the_control_center_only() {
-    // Only a client whose line names zwlr_output_manager_v1 lists it; the bar, without it in its
-    // line, does not. The control center sets an output's scale through it and the output keeps
+    // Only the fixture control center, whose line names zwlr_output_manager_v1, lists it; the
+    // fixture bar, without it in its line, does not. The control center sets an output's scale through it and the output keeps
     // that scale in the next frame.
 }
 ```
@@ -94,7 +96,7 @@ The refusal of the top and overlay layers to a client not granted them stays pin
 Run: `CARGO_TARGET_DIR=/var/tmp/athanor-target taskset -c 0-3 cargo test -p athanor-compositor -j 4 os9_`
 Expected: FAIL to compile, `cannot find function classified`.
 
-- [ ] **Step 3: Write `data/globals`** from what `State::new` offers at the head, add `Class`, `classified()` and `names()`, and rewrite `Local::privileged` and `task4_standard_globals_are_offered` over `classified()`. Then add `Privilege::Workspaces` (`ext_workspace_manager_v1`), offered through `granted(c, Privilege::Workspaces)` in place of `state::unconfined`, and `Privilege::OutputManagement` (`zwlr_output_manager_v1`), with a row each in `data/globals`. For the output manager, check the pinned Smithay revision as task 2 step 1 does; when it has no server for it, serve the head and configuration requests that set a scale from the compositor's own dispatch over `wayland-protocols-wlr`, and stop and report if the protocol needs more than the scale to be usable.
+- [ ] **Step 3: Write `data/globals`** from what `State::new` offers at the head, add `Class`, `classified()` and `names()`, and rewrite `Local::privileged` and `task4_standard_globals_are_offered` over `classified()`. Then add `Privilege::Workspaces` (`ext_workspace_manager_v1`), offered through `granted(c, Privilege::Workspaces)` in place of `state::unconfined`, and `Privilege::OutputManagement` (`zwlr_output_manager_v1`), with a row each in `data/globals`, and give `FIXTURE_ALLOW_LIST` a second line for a control-center client (with its `Fake` process) beside the bar's, which omits `zwlr_output_manager_v1`. The pinned Smithay revision (`023b78b`) has no server for the output manager (`src/wayland/` has no output management): serve the head and configuration requests that set a scale from the compositor's own dispatch over `wayland_protocols_wlr::output_management::v1::server`, and stop and report if the protocol needs more than the scale to be usable. That module needs `wayland-protocols-wlr = { workspace = true, features = ["server"] }` under `[dependencies]` in the crate's `Cargo.toml` (it is only a dev-dependency now; Smithay's `wayland_frontend` already builds it with `server`, so `Cargo.lock` should not change, and joins the commit if it does).
 
 - [ ] **Step 4: Run the crate's tests**
 
@@ -104,7 +106,7 @@ Expected: every test passes, `0 failed`; `os9_every_global_is_classified` and `o
 - [ ] **Step 5: Commit**
 
 ```bash
-git add forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/fixture.rs forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs
+git add forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/fixture.rs forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/state.rs forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/workspace.rs forge/specs/athanor-compositor/athanor-compositor-1.0.0/Cargo.toml
 git commit -m "test(compositor): classify every global in one data file"
 ```
 
@@ -160,7 +162,7 @@ git commit -am "feat(compositor): capture an output, granted by the allow-list a
 OS6 asks for the rig to run the shell against the compositor's headless backend, so the two-output cases run on every pull request. Today `scene.sh` nests the compositor in sway and captures sway's `HEADLESS-1`, `RIG_STABLE` applies to cosmic-comp only, and two outputs need KVM and vkms (`RIG_OUTPUTS=2`).
 
 **Files:**
-- Modify: `forge/test/shell/session.sh`, `forge/test/shell/scene.sh`
+- Modify: `forge/test/shell/session.sh`, `forge/test/shell/scene.sh` (also exports `RIG_CAPTURE_OUTPUT`)
 - Modify: `forge/test/shell/rig.sh`: `in_rig` (forward `RIG_HEADLESS_OUTPUTS` when `RIG_COMPOSITOR` is set), `capture_layout` (under `RIG_COMPOSITOR=athanor`, set `RIG_HEADLESS_OUTPUTS` from `RIG_LAYOUT_OUTPUTS`), and the header comment
 - Create: `forge/test/shell/in-unit.sh`
 - Create: `forge/test/shell/rig-privileged-clients` (lines only the rig installs)
@@ -170,6 +172,7 @@ OS6 asks for the rig to run the shell against the compositor's headless backend,
 - Consumes: `athanor-compositor --headless --output <width>x<height>[@<scale>]` (`main.rs`); the output capture of task 2; `data/globals`.
 - Produces:
   - `RIG_HEADLESS_OUTPUTS=<n>` (default 1): under `RIG_COMPOSITOR=athanor`, `scene.sh` starts the compositor headless with `n` virtual outputs of the case's size and `RIG_SCALE`, named `headless-0`, `headless-1` in order, and captures each with `grim -o` through the compositor. `RIG_STABLE` applies to both compositors.
+  - `RIG_CAPTURE_OUTPUT`: `scene.sh` exports `headless-0` under `RIG_COMPOSITOR=athanor` and leaves it unset under cosmic-comp; task 7's `input_method_check.py` reads it.
   - `in-unit.sh <unit> <binary> [args...]`: the shell form of `bar_session.py`'s `as_unit`. It copies a binary that is not under `/usr` to `/usr/bin/<its name>` (staged and renamed, as `as_unit` does), creates `/sys/fs/cgroup/<unit>` with `mkdir -p` (`grim` runs again in the `RIG_STABLE` loop), writes its own pid to that cgroup's `cgroup.procs` and execs the binary from `/usr/bin`. The cgroup tree is writable only under `--systemd=always`, which `in_rig` sets only with `RIG_COMPOSITOR` (`rig.sh` `in_rig`), so every caller uses `in-unit.sh` only when `RIG_COMPOSITOR=athanor`, and under cosmic-comp runs the binary directly, as today. Tasks 7 and 8 use it from Python. Under the own compositor `scene.sh` captures with `in-unit.sh rig-grim.service /usr/bin/grim -o <output> <png>`.
   - The installed allow-list in the rig is `data/privileged-clients` followed by `rig-privileged-clients`. This task adds the line `/usr/bin/grim rig-grim.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1`.
 
@@ -254,9 +257,9 @@ def test_a_target_naming_the_session_lock_needs_its_line(self): ...             
 
 - [ ] **Step 4: Run it on the tree**: `python3 scripts/verify.py allow-list`. Expected at the head: it names `athanor-dock` (`src/ui/surface.rs`), `athanor-launcher`, `athanor-control-center` and `athanor-greeter-ui` (`src/ui.rs`, `Layer::Overlay`), and nothing under `src/toolkit/`.
 
-- [ ] **Step 5: Add the lines the maintainer gave.** The dock's as C1 results, section 10 item 1, gives it: `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`. The launcher's and the control center's from the answer to open question 14: `/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1` and `/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1` (the layer shell from question 14, the output manager from question 10: the control center sets an output's scale and no other client holds that grant). `ext_workspace_manager_v1` (open question 7) is added to the line of every binary that binds it through `athanor-compositor-client` (`connection.rs`), the bar's existing line included, by the confirmation below. Read the unit names from the packages' unit files, never from memory. Before each line lands, confirm it against what the binary actually binds: list the globals its crate and the path dependencies `verify.py allow-list` follows bind in source, and compare them with the line. A global the binary binds that its line lacks, or one the line grants that nothing binds, goes back to the maintainer with that list; the line is never widened or narrowed on one's own. With these lines in, step 6 adds the two of the login path.
+- [ ] **Step 5: Add the lines the maintainer gave.** The dock's as C1 results, section 10 item 1, gives it: `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`. The launcher's and the control center's from the answer to open question 14: `/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1` and `/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1` (the layer shell from question 14, the output manager from question 10: the control center sets an output's scale and no other client holds that grant). `ext_workspace_manager_v1` (open question 7) is added to the line of every binary that binds it through `athanor-compositor-client` (`connection.rs`), the bar's existing line included, by the confirmation below. Read the unit names from the packages' unit files, never from memory. Before each line lands, confirm it against what the binary actually binds: list the globals its crate and the path dependencies `verify.py allow-list` follows bind in source, and compare them with the line. A global the binary binds that its line lacks, or one the line grants that nothing binds, goes back to the maintainer with that list, except `zwlr_output_manager_v1` on the control center's line, which answer 10 grants before the control center binds it and which stays until it does; the line is never widened or narrowed on one's own. With these lines in, step 6 adds the greeter UI's line of the login path and names the lock screen's as a dependency.
 
-- [ ] **Step 6: Add the two lines of open question 3**, each read from its unit file and confirmed against the binds as in step 5. The greeter UI: `/usr/bin/athanor-greeter-ui <unit> zwlr_layer_shell_v1`, the binary installed by `athanor-greeter-ui.spec`; at the head `athanor-greeter-client` execs it inside greetd's sandbox (`greetd.toml`) and no unit file of its own names it, so read the unit whose cgroup holds the process, and when the greeter has none, report that to the maintainer instead of naming `greetd.service` unasked. The lock screen: `<executable> athanor-lock.service ext_session_lock_manager_v1`, the executable read from `ExecStart=` of the unit `doc_session.md` names; at the head the locker is cosmic-greeter, a cosmic component outside the check, and no `athanor-lock` is installed, so this line lands in the pull request that installs it and this task's pull request says so. A bind the confirmation finds that a line lacks goes back to the maintainer; a line is never widened on one's own. `scripts/ci/known-red.txt` only shrinks and is not used.
+- [ ] **Step 6: Add the greeter UI's line of open question 3**, read from its unit file and confirmed against the binds as in step 5, and name the lock screen's as a dependency. The greeter UI: `/usr/bin/athanor-greeter-ui <unit> zwlr_layer_shell_v1`, the binary installed by `athanor-greeter-ui.spec`; at the head `athanor-greeter-client` execs it inside greetd's sandbox (`greetd.toml`) and no unit file of its own names it, so read the unit whose cgroup holds the process, and when the greeter has none, report that to the maintainer instead of naming `greetd.service` unasked. The lock screen: `<executable> athanor-lock.service ext_session_lock_manager_v1`, the executable read from `ExecStart=` of the unit `doc_session.md` names. At the head the locker is cosmic-greeter, a cosmic component outside the check, and no `athanor-lock` is installed, so this line is a dependency: it lands, before revision 2, in the pull request that installs `athanor-lock`, and this task's pull request says so. A bind the confirmation finds that a line lacks goes back to the maintainer; a line is never widened on one's own. `scripts/ci/known-red.txt` only shrinks and is not used.
 
 - [ ] **Step 7: Run**: `python3 scripts/verify.py allow-list` passes with no note; `python3 -B -m unittest discover -s scripts/tests` passes; `git diff --numstat scripts/verify.py` shows only the added lines.
 
@@ -271,7 +274,6 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 
 **Files:**
 - Modify: `forge/test/shell/rig.sh` (`capture_bar`, `capture_dock`, `capture_launcher`, `capture_layout`, `capture_chooser` and the `atspi` cases; a new command `golden-report`)
-- Modify: `forge/test/shell/cases.py` (`SURFACES` gains `lock` and `polkit-agent`)
 - Modify: `forge/test/shell/bar_session.py` only if `as_unit` needs the unit name apart from the executable's
 - Create: `forge/test/shell/golden_report.py`, `forge/test/shell/golden/athanor-differences.toml`
 - Create: `forge/test/shell/tests/test_golden_report.py`
@@ -280,7 +282,7 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 - Consumes: `as_unit(binary)`; `compare.py` and its `TOLERANCE`; `cases.py` (`SURFACES`, `layout --outputs N`); the allow-list of task 4; the rig of task 3.
 - Produces:
   - Under `RIG_COMPOSITOR=athanor`, every capture case starts its client as its unit (`--unit` generalised), and the `atspi` cases fail when the compositor log says a surface was closed, as `atspi bar` does today.
-  - `rig.sh golden-report [surface...]` runs, under the own compositor, the cases of `cases.py` `SURFACES` except the toolkit's (`toolkit-chooser`; the galleries are not in `SURFACES`): 20 surfaces of 12 cases each, the greeter, the lock screen and the polkit agent among them, 240 cases, plus the 21 one-output and 6 two-output layout cases, 267 in all. No cosmic component has a case (open question 1: OS5 replaces them). It writes `out/golden-report.md`: per case, the pixel count against the cosmic-comp golden and the explanation, or `unexplained`. With surface names it runs only those.
+  - `rig.sh golden-report [surface...]` runs, under the own compositor, the cases of `cases.py` `SURFACES` except the toolkit's (`toolkit-chooser`; the galleries are not in `SURFACES`): the 18 surfaces that exist now, the greeter among them, of 12 cases each, 216 cases, plus the 21 one-output and 6 two-output layout cases, 243 in all. The lock screen and the polkit agent add 24 cases when their binaries are installed (see Global Constraints). No cosmic component has a case (open question 1: OS5 replaces them). It writes `out/golden-report.md`: per case, the pixel count against the cosmic-comp golden and the explanation, or `unexplained`. With surface names it runs only those.
   - `golden_report.report(results, explanations) -> tuple[str, list[str]]`, pure: the report's text and its problems.
   - `athanor-differences.toml` holds `[[difference]]` entries, `case = "..."`, `cause = "..."`, `issue = N`, one per case that differs.
 - Runtime: about 20 seconds a case (an estimate: container start, the 8 to 12 second settle, the capture), so about 77 minutes for the whole report on the laptop. Step 4 measures it.
@@ -291,13 +293,12 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 def test_a_difference_without_an_explanation_fails(self): ...
 def test_an_explanation_without_a_difference_fails(self): ...   # a stale entry
 def test_an_explanation_needs_a_cause_and_an_issue(self): ...
-def test_the_report_runs_every_surface_but_the_toolkit(self): ...  # 240 + 27
-def test_the_lock_screen_and_the_polkit_agent_have_cases(self): ...  # in SURFACES, no cosmic component
+def test_the_report_runs_every_surface_but_the_toolkit(self): ...  # 216 + 27, no cosmic component
 ```
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_golden_report.py'` fails, the module does not exist.
 
-- [ ] **Step 3: Implement `golden_report.py`** and the `rig.sh golden-report` command; generalise `--unit` to every client of the capture cases. `SURFACES` has no case for the lock screen or the polkit agent: add `lock` and `polkit-agent` (light and dark, scales 1.0 and 1.5, as the bar's) with a `capture_lock` and a `capture_polkit_agent` beside `capture_launcher`, each starting its client as its unit from task 4's lines, and record their goldens under cosmic-comp beside the others. When the binary of either does not exist at the branch head, stop and report: cosmic-greeter's locker and cosmic-osd's agent are cosmic components and get no case.
+- [ ] **Step 3: Implement `golden_report.py`** and the `rig.sh golden-report` command; generalise `--unit` to every client of the capture cases. `SURFACES` has no case for the lock screen or the polkit agent, and their binaries do not exist at the head (cosmic-greeter's locker and cosmic-osd's agent are cosmic components and get no case). The pull request that installs each adds `lock` or `polkit-agent` to `SURFACES` (light and dark, scales 1.0 and 1.5, as the bar's), a `capture_lock` or `capture_polkit_agent` beside `capture_launcher` that starts the client as its unit, its goldens recorded under cosmic-comp, and the report's test that the surface is in the report; the report's totals then become 240 and 267.
 
 - [ ] **Step 4: Run the report on the laptop**, one rig at a time: `forge/test/shell/rig.sh build-bar`, `rig.sh build-dock`, `rig.sh build-launcher`, `rig.sh build-layout` (the chooser cases) and `rig.sh build-compositor`, one invocation each, then `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh golden-report`, and record its wall time in the pull request. Write one entry per differing case with its cause from the eight of `c1-own-compositor.md` (#591) or a new one. Expected: exit 0, with every difference explained. A case without a cause fails the report; the task is not done until it is explained or fixed.
 
@@ -355,7 +356,7 @@ Two `privileged` rows go into `data/globals`. While the session is locked the co
 
 - [ ] **Step 2: Run them**: as task 1 step 2, FAIL, the globals are not offered.
 
-- [ ] **Step 3: Implement** with Smithay's `VirtualKeyboardManagerState` (filter `granted(c, Privilege::VirtualKeyboard)`) and a virtual pointer handler that calls `pointer_to` and the button path; the keymap a virtual keyboard uploads applies to its own keys only. In `lock.rs`, `State::key_input` takes the key's source and drops a virtual one while the session is locked; hardware keys are unaffected.
+- [ ] **Step 3: Implement** with Smithay's `VirtualKeyboardManagerState` (filter `granted(c, Privilege::VirtualKeyboard)`) and Smithay's `virtual_pointer` module (`smithay::wayland::virtual_pointer`, present at the pinned revision, so no `Cargo.toml` change) with a handler that calls `pointer_to` and the button path; the keymap a virtual keyboard uploads applies to its own keys only. In `lock.rs`, `State::key_input` takes the key's source and drops a virtual one while the session is locked; hardware keys are unaffected.
 
 - [ ] **Step 4: Run**: the crate's tests pass (task 1 step 4). The fixture tests are this task's proof: they run in-process against the compositor. `rig.sh toolkit-popup` is not one, since `toolkit_popup_check.py` starts its own sway and ignores `RIG_COMPOSITOR`. The rig proof of the virtual keyboard is task 8's Orca walk.
 
@@ -509,12 +510,14 @@ git commit -m "test(shell): the AX17 walk: extents, appearances, text scales, pa
 | Group | Work | Estimate |
 | --- | --- | --- |
 | `fixture-layout` | the crate's tests and the 27 layout cases | about 25 minutes |
-| `chooser-dock-launcher` | 36 cases | about 27 minutes |
+| `chooser-greeter-dock-launcher` | 48 cases | about 31 minutes |
 | `bar-1` | `bar`, `bar-power`, `bar-input`, `bar-network`: 48 cases | about 32 minutes |
 | `bar-2` | `bar-calendar`, `bar-accessibility`, `bar-tiling`, `bar-bluetooth`: 48 cases | about 34 minutes |
 | `bar-3` | `bar-popups`, `bar-notifications`, `bar-audio`: 36 cases | about 28 minutes |
 | `bar-4` | `bar-tray`, `bar-shield`, `bar-battery`: 36 cases | about 28 minutes |
 | `ax17` | the matrix of task 9 on the bar, the dock and the launcher, 36 runs | about 27 minutes |
+
+The groups cover the 243 cases of task 5 (27 + 48 + 48 + 48 + 36 + 36), the greeter in `chooser-greeter-dock-launcher`; the lock screen's and the polkit agent's cases join a group in the pull request that installs each binary.
 
 The four surfaces with a 12-second settle (`bar-network`, `bar-bluetooth`, whose capture also waits up to 10 stable rounds, `bar-audio` and `bar-battery`) sit in four different groups.
 
@@ -548,7 +551,7 @@ Section 4.3 of `release-1.0.md` runs the matrix again on the own compositor at 1
 
 **Interfaces:**
 - Consumes: `CHECKS`, `need`, `Failed`, `validate`.
-- Produces: a check `compositor()`: the peer of `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` through `SO_PEERCRED`, then `/proc/<pid>/exe`; `pass` when it is `/usr/bin/athanor-compositor`, `fail` with the executable as evidence otherwise. By-hand rows `frame-times` (the compositor's frame summary lines, mean and maximum, from its log after one hour), `explicit-sync` (the log's `explicit sync:` line on the NVIDIA desktop), `vrr`, `tablet` and `touch`; hardware the maintainer does not have goes in `[[untested]]` with its reason.
+- Produces: a check `compositor()`: the peer of `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` through `SO_PEERCRED`, then `/proc/<pid>/exe`; `pass` when it is `/usr/bin/athanor-compositor`, `fail` with the executable as evidence otherwise. By-hand rows `frame-times` (the compositor's frame summary lines, mean and maximum, from its log after one hour) and `explicit-sync` (the log's `explicit sync:` line on the NVIDIA desktop). `vrr`, `tablet` and `touch` are `[[untested]]` entries only (open question 5: no machine has them), never rows, so that no id is both.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -560,7 +563,7 @@ def test_compositor_with_a_dead_peer_is_a_failure(self): ...
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest scripts.tests.test_hardware_matrix` fails, `compositor` is not in `CHECKS`.
 
-- [ ] **Step 3: Implement the check and the rows**; the rows' `machines` and `[[untested]]` entries follow the maintainer's answers to open questions 4 and 5. By the answer to open question 4, `suspend-resume` and `outputs-hotplug` become `machines = ["laptop"]`, and the desktop gets two `[[untested]]` entries, `suspend-resume-desktop` and `outputs-hotplug-desktop`, each with the reason "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)". The ids differ from the rows' because `validate` in `matrix.py` rejects an id that a row and an untested entry share.
+- [ ] **Step 3: Implement the check and the rows**; the rows' `machines` and `[[untested]]` entries follow the maintainer's answers to open questions 4 and 5; `vrr`, `tablet` and `touch` are written as `[[untested]]` entries with the reason that no machine has them, and no row carries those ids. By the answer to open question 4, `suspend-resume` and `outputs-hotplug` become `machines = ["laptop"]`, and the desktop gets two `[[untested]]` entries, `suspend-resume-desktop` and `outputs-hotplug-desktop`, each with the reason "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)". The ids differ from the rows' because `validate` in `matrix.py` rejects an id that a row and an untested entry share.
 
 - [ ] **Step 4: Run**: `python3 -B -m unittest scripts.tests.test_hardware_matrix` passes, `test_committed_rows_are_valid` among them.
 
@@ -587,7 +590,7 @@ Prerequisite: C1 task 9a merged (the session exists in the image). Until then th
 
 - [ ] **Step 1: Run each acceptance under the own session in the dev VM** (one VM, the memory check first) and record each failure.
 - [ ] **Step 2: Change only what depends on the compositor** (the privileged list, cosmic-comp's process name), never an expectation of the surface.
-- [ ] **Step 3: Run**: `compositor-acceptance.sh`, `bar-acceptance.sh`, `dock-acceptance.sh` and `launcher-acceptance.sh` pass under both sessions. `lock-acceptance.sh` passes under the own session as well, with the lock screen's line of task 4. The ST7 keyboard traversal runs per surface; Orca started by its key, the gate refusals and the KeyboardMonitor refusal of AX17 wait for `athanor-a11y`, the AX5 gate and the AX4 monitor, and the pull request says so.
+- [ ] **Step 3: Run**: `compositor-acceptance.sh`, `bar-acceptance.sh`, `dock-acceptance.sh` and `launcher-acceptance.sh` pass under both sessions. `lock-acceptance.sh` passes under the own session as well once the pull request that installs `athanor-lock` has landed with its line (Global Constraints); until then it is not claimed. The ST7 keyboard traversal runs per surface; Orca started by its key, the gate refusals and the KeyboardMonitor refusal of AX17 wait for `athanor-a11y`, the AX5 gate and the AX4 monitor, and the pull request says so.
 - [ ] **Step 4: Commit**
 
 ```bash
