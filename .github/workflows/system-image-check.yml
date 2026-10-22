@@ -96,6 +96,8 @@ jobs:
           name: kernel-artifacts
           path: kernel-artifacts
 
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+
       - name: Login to GHCR
         # system/Containerfile binds the athanor-forge-tier{0..3}-repo images of the project registry and
         # pulls the azoth-nvidia modules by digest: the build needs a registry session before it
@@ -106,9 +108,14 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
 
       - name: Tier repositories by digest (system/tier-digests.sh)
-        # The published tiers, read once: every image of this job installs the same ones (UD28).
+        # The published tiers, read once and only when signed by a trusted run: every image of
+        # this job installs the same ones (UD28, UD44). GH_TOKEN reads the rules of a base branch
+        # other than iso-v0 and main, trusted only when a ruleset protects it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/tier-digests.sh resolve
 
       - name: Build the planned images

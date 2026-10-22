@@ -21,6 +21,7 @@ KEYWORDS = {
     "const",
     "enum",
     "minimum",
+    "uniqueItems",
 }
 TYPES = {
     "object": dict,
@@ -70,6 +71,10 @@ def errors(doc, schema, at="$"):
         for k, v in doc.items():
             if k in props:
                 out += errors(v, props[k], f"{at}.{k}")
+    if isinstance(doc, list) and schema.get("uniqueItems"):
+        seen = [json.dumps(v, sort_keys=True) for v in doc]
+        if len(set(seen)) != len(seen):
+            out.append(f"{at}: repeats an item")
     if isinstance(doc, list) and "items" in schema:
         for i, v in enumerate(doc):
             out += errors(v, schema["items"], f"{at}[{i}]")
