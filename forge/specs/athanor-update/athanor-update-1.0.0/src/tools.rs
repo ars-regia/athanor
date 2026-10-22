@@ -68,6 +68,9 @@ pub trait Tools {
     fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
     /// NetworkManager's `Metered` is 1 (yes) or 3 (guessed yes). No NetworkManager: false.
     fn metered(&self) -> bool;
+    /// `boot-complete.target` is active: greenboot's required health checks passed on this
+    /// boot. Any other answer, an error included, is false.
+    fn boot_complete(&self) -> bool;
 }
 
 /// Seconds since the epoch of an RFC 3339 time, as the image labels carry it.
@@ -356,6 +359,11 @@ impl Tools for System {
     fn metered(&self) -> bool {
         let property = ["--system", "get-property", "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager", "Metered"];
         matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok("u 1" | "u 3"))
+    }
+
+    fn boot_complete(&self) -> bool {
+        let property = ["--system", "get-property", "org.freedesktop.systemd1", "/org/freedesktop/systemd1/unit/boot_2dcomplete_2etarget", "org.freedesktop.systemd1.Unit", "ActiveState"];
+        matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok(r#"s "active""#))
     }
 }
 

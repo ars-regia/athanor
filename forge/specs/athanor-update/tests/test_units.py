@@ -77,7 +77,7 @@ class Units(unittest.TestCase):
         after = " ".join(line.removeprefix("After=") for line in lines if line.startswith("After=")).split()
         self.assertIn("ostree-finalize-staged.service", after)
 
-    def test_the_check_runs_after_greenboot_s_verdict(self):
+    def test_the_check_is_ordered_after_boot_complete(self):
         after = [line for line in directives("athanor-update-check.service") if line.startswith("After=")]
         self.assertIn("boot-complete.target", " ".join(after).split(), after)
 
