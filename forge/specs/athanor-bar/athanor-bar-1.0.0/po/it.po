@@ -175,7 +175,7 @@ msgstr "Dispositivi vicini"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348 src/ui/power.rs:110
-#: src/ui/shield.rs:542
+#: src/ui/shield.rs:596
 msgid "Cancel"
 msgstr "Annulla"
 
@@ -265,47 +265,47 @@ msgstr "Password per {network}"
 msgid "The action did not complete."
 msgstr "L'azione non è stata completata."
 
-#: src/ui/accessibility.rs:35
+#: src/ui/accessibility.rs:36
 msgid "Greyscale"
 msgstr "Scala di grigi"
 
-#: src/ui/accessibility.rs:36
+#: src/ui/accessibility.rs:37
 msgid "Red-green (protanopia)"
 msgstr "Rosso-verde (protanopia)"
 
-#: src/ui/accessibility.rs:37
+#: src/ui/accessibility.rs:38
 msgid "Green-red (deuteranopia)"
 msgstr "Verde-rosso (deuteranopia)"
 
-#: src/ui/accessibility.rs:38
+#: src/ui/accessibility.rs:39
 msgid "Blue-yellow (tritanopia)"
 msgstr "Blu-giallo (tritanopia)"
 
-#: src/ui/accessibility.rs:39
+#: src/ui/accessibility.rs:40
 msgid "No colour filter"
 msgstr "Nessun filtro colore"
 
-#: src/ui/accessibility.rs:159
+#: src/ui/accessibility.rs:160
 msgid "Accessibility"
 msgstr "Accessibilità"
 
-#: src/ui/accessibility.rs:160
+#: src/ui/accessibility.rs:161
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui/accessibility.rs:161
+#: src/ui/accessibility.rs:162
 msgid "Screen reader"
 msgstr "Lettore dello schermo"
 
-#: src/ui/accessibility.rs:162
+#: src/ui/accessibility.rs:163
 msgid "Magnifier"
 msgstr "Lente d'ingrandimento"
 
-#: src/ui/accessibility.rs:163
+#: src/ui/accessibility.rs:164
 msgid "Invert colours"
 msgstr "Inverti i colori"
 
-#: src/ui/accessibility.rs:167
+#: src/ui/accessibility.rs:168
 msgid "Colour filter"
 msgstr "Filtro colore"
 
@@ -354,11 +354,11 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
-#: src/ui/mod.rs:684
+#: src/ui/mod.rs:678
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/mod.rs:686
+#: src/ui/mod.rs:680
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
@@ -428,212 +428,245 @@ msgstr "Spegnere ora?"
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:528
-#: src/ui/shield.rs:564
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:566
+#: src/ui/shield.rs:665
 msgid "Restart to update"
 msgstr "Riavvia per aggiornare"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:563
+#: src/ui/power.rs:154 src/ui/shield.rs:664
 msgid "Restart and install the update now?"
 msgstr "Riavviare e installare l'aggiornamento adesso?"
 
-#: src/ui/shield.rs:296
+#: src/ui/shield.rs:305
 msgid "System image verified"
 msgstr "Immagine di sistema verificata"
 
-#: src/ui/shield.rs:297
+#: src/ui/shield.rs:306
 msgid "Not verified yet"
 msgstr "Non ancora verificata"
 
-#: src/ui/shield.rs:298
+#: src/ui/shield.rs:307
 msgid "Update refused"
 msgstr "Aggiornamento rifiutato"
 
-#: src/ui/shield.rs:304
+#: src/ui/shield.rs:313
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui/shield.rs:305
+#: src/ui/shield.rs:314
 msgid "Not verified: installed from media"
 msgstr "Non verificata: installata da supporto"
 
-#: src/ui/shield.rs:306
+#: src/ui/shield.rs:315
 msgid "Not verified: no signature"
 msgstr "Non verificata: nessuna firma"
 
-#: src/ui/shield.rs:307
+#: src/ui/shield.rs:316
 msgid "Not verified: its key is not in the policy"
 msgstr "Non verificata: la sua chiave non è nella policy"
 
-#: src/ui/shield.rs:308
+#: src/ui/shield.rs:317
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Non verificata: scaricata con una policy permissiva"
 
-#: src/ui/shield.rs:309
+#: src/ui/shield.rs:318
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Non verificata: l'immagine è fuori dall'ambito della policy"
 
-#: src/ui/shield.rs:310
+#: src/ui/shield.rs:319
 msgid "Not verified: the system was changed on this machine"
 msgstr "Non verificata: il sistema è stato modificato su questa macchina"
 
-#: src/ui/shield.rs:311
+#: src/ui/shield.rs:320
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Non verificata: in attesa della pubblicazione del canale stabile"
 
-#: src/ui/shield.rs:312
+#: src/ui/shield.rs:321
 msgid "Not verified: this machine does not verify its updates"
 msgstr "Non verificata: questa macchina non verifica i suoi aggiornamenti"
 
-#: src/ui/shield.rs:313
+#: src/ui/shield.rs:322
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Firmata, ma ferma su una sola build: non riceve aggiornamenti"
 
-#: src/ui/shield.rs:319
+#: src/ui/shield.rs:328
 msgid "Up to date"
 msgstr "Aggiornato"
 
-#: src/ui/shield.rs:320
+#: src/ui/shield.rs:329
 msgid "An update is available; it downloads at the next check"
 msgstr "È disponibile un aggiornamento; verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:321
+#: src/ui/shield.rs:330
 msgid "An update is ready; it installs when you restart"
 msgstr "Un aggiornamento è pronto; si installa al riavvio"
 
-#: src/ui/shield.rs:322
+#: src/ui/shield.rs:331
 msgid "The update installs at the next restart"
 msgstr "L'aggiornamento si installa al prossimo riavvio"
 
-#: src/ui/shield.rs:323
+#: src/ui/shield.rs:332
 msgid "The last update was refused by the policy"
 msgstr "L'ultimo aggiornamento è stato rifiutato dalla policy"
 
-#: src/ui/shield.rs:325
+#: src/ui/shield.rs:334
 msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
 msgstr "La versione proposta è trattenuta: sei tornato indietro da essa, oppure non si è avviata. Verrà proposta solo una versione più nuova"
 
-#: src/ui/shield.rs:327
+#: src/ui/shield.rs:336
 msgid "This version is older than one this machine has run"
 msgstr "Questa versione è più vecchia di una già avviata su questa macchina"
 
-#: src/ui/shield.rs:334
+#: src/ui/shield.rs:343
 msgid "The last check failed: network error"
 msgstr "L'ultimo controllo è fallito: errore di rete"
 
-#: src/ui/shield.rs:335
+#: src/ui/shield.rs:344
 msgid "The last check failed: registry error"
 msgstr "L'ultimo controllo è fallito: errore del registry"
 
-#: src/ui/shield.rs:336
+#: src/ui/shield.rs:345
 msgid "The last check failed: refused by the policy"
 msgstr "L'ultimo controllo è fallito: rifiutato dalla policy"
 
-#: src/ui/shield.rs:337
+#: src/ui/shield.rs:346
 msgid "The last check failed: storage error"
 msgstr "L'ultimo controllo è fallito: errore di archiviazione"
 
-#: src/ui/shield.rs:338
+#: src/ui/shield.rs:347
 msgid "The last check failed: internal error"
 msgstr "L'ultimo controllo è fallito: errore interno"
 
-#: src/ui/shield.rs:344
+#: src/ui/shield.rs:353
 msgid "No trust state yet: the first check has not run"
 msgstr "Nessuno stato di fiducia: il primo controllo non è ancora avvenuto"
 
-#: src/ui/shield.rs:346
+#: src/ui/shield.rs:355
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "Il file dello stato di fiducia non appartiene al sistema ed è stato ignorato"
 
-#: src/ui/shield.rs:348
+#: src/ui/shield.rs:357
 msgid "The trust state file could not be read"
 msgstr "Impossibile leggere il file dello stato di fiducia"
 
-#: src/ui/shield.rs:349 src/ui/shield.rs:363
+#: src/ui/shield.rs:358 src/ui/shield.rs:376
 msgid "The update service did not answer"
 msgstr "Il servizio di aggiornamento non ha risposto"
 
-#: src/ui/shield.rs:355
+#: src/ui/shield.rs:364
 msgid "Not authorised"
 msgstr "Non autorizzato"
 
-#: src/ui/shield.rs:356
+#: src/ui/shield.rs:365
 msgid "Another update request is running"
 msgstr "È in corso un'altra richiesta di aggiornamento"
 
-#: src/ui/shield.rs:358
+#: src/ui/shield.rs:367
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr "Non c'è ancora nulla di scaricato; l'aggiornamento verrà scaricato al prossimo controllo"
 
-#: src/ui/shield.rs:360
+#: src/ui/shield.rs:369
 msgid "There is no previous version to go back to"
 msgstr "Non c'è una versione precedente a cui tornare"
 
-#: src/ui/shield.rs:361
+#: src/ui/shield.rs:370
 msgid "A program is blocking the restart; close it and try again"
 msgstr "Un programma impedisce il riavvio; chiudilo e riprova"
 
-#: src/ui/shield.rs:362
+#: src/ui/shield.rs:371
 msgid "The request failed; the system journal says why"
 msgstr "La richiesta è fallita; il registro di sistema ne spiega il motivo"
 
-#: src/ui/shield.rs:424
+#: src/ui/shield.rs:373
+msgid "This security update was already postponed once, or can no longer be"
+msgstr "Questo aggiornamento di sicurezza è già stato rimandato una volta, o non si può più rimandare"
+
+#: src/ui/shield.rs:375
+msgid "Only security updates can be postponed"
+msgstr "Si possono rimandare solo gli aggiornamenti di sicurezza"
+
+#: src/ui/shield.rs:449
 #, rust-format
 msgid "Version {version}"
 msgstr "Versione {version}"
 
-#: src/ui/shield.rs:429
+#: src/ui/shield.rs:454
 #, rust-format
 msgid "Built on {date}"
 msgstr "Compilata il {date}"
 
-#: src/ui/shield.rs:435
+#: src/ui/shield.rs:460
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Ultimo controllo il {date}"
 
-#: src/ui/shield.rs:436
+#: src/ui/shield.rs:461
 msgid "Never checked"
 msgstr "Mai controllato"
 
-#: src/ui/shield.rs:442
+#: src/ui/shield.rs:467
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:446
+#: src/ui/shield.rs:471
 msgid "Signature policy in force"
 msgstr "Policy delle firme in vigore"
 
-#: src/ui/shield.rs:448
+#: src/ui/shield.rs:473
 msgid "Signature policy not in force"
 msgstr "Policy delle firme non in vigore"
 
-#: src/ui/shield.rs:451
+#: src/ui/shield.rs:476
 msgid "The policy is the one Athanor ships"
 msgstr "La policy è quella fornita da Athanor"
 
-#: src/ui/shield.rs:453
+#: src/ui/shield.rs:478
 msgid "The policy was changed on this machine"
 msgstr "La policy è stata modificata su questa macchina"
 
-#: src/ui/shield.rs:456
+#: src/ui/shield.rs:481
 msgid "Secure Boot on"
 msgstr "Secure Boot attivo"
 
-#: src/ui/shield.rs:458
+#: src/ui/shield.rs:483
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot disattivo: questa macchina funziona nella modalità degradata dichiarata"
 
-#: src/ui/shield.rs:530
+#: src/ui/shield.rs:487
+msgid "Automatic security updates are off: security fixes wait until someone installs them."
+msgstr "Gli aggiornamenti di sicurezza automatici sono disattivati: le correzioni di sicurezza aspettano che qualcuno le installi."
+
+#: src/ui/shield.rs:491
+#, rust-format
+msgid "Postponed until {date}"
+msgstr "Rimandato fino al {date}"
+
+#: src/ui/shield.rs:568
+msgid "Postpone"
+msgstr "Rimanda"
+
+#: src/ui/shield.rs:570
 msgid "Go back to the previous version"
 msgstr "Torna alla versione precedente"
 
-#: src/ui/shield.rs:569
+#: src/ui/shield.rs:572
+msgid "Automatic security updates"
+msgstr "Aggiornamenti di sicurezza automatici"
+
+#: src/ui/shield.rs:640
+msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+msgstr "Disattivare gli aggiornamenti di sicurezza automatici? Le correzioni di sicurezza aspetteranno che qualcuno le installi, e fino ad allora questo computer resta esposto. Vale per tutti gli utenti di questo computer."
+
+#: src/ui/shield.rs:641
+msgid "Turn Off"
+msgstr "Disattiva"
+
+#: src/ui/shield.rs:670
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Tornare alla versione precedente e riavviare? Serve la password di un amministratore."
 
-#: src/ui/shield.rs:570
+#: src/ui/shield.rs:671
 msgid "Go back"
 msgstr "Torna indietro"
 

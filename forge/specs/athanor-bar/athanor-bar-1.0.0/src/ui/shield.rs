@@ -169,6 +169,10 @@ impl Trust {
         shield::go_back_offered(&self.read.borrow())
     }
 
+    pub fn postpone_offered(&self) -> bool {
+        shield::postpone_offered(&self.read.borrow())
+    }
+
     pub fn withdrawn(&self, request: Request) -> Refusal {
         shield::withdrawn(&self.read.borrow(), request)
     }
@@ -265,6 +269,11 @@ async fn uid_of(system: &gio::DBusConnection, name: &str) -> Option<u32> {
 pub fn request(bar: &Rc<Bar>, request: Request, origin: &gtk4::Widget) {
     let weak = Rc::downgrade(bar);
     let origin = origin.downgrade();
+    // Only the switch carries an argument.
+    let body = match request {
+        Request::SetAutomatic(enabled) => Some((enabled,).to_variant()),
+        _ => None,
+    };
     glib::spawn_future_local(async move {
         let result = match gio::bus_get_future(gio::BusType::System).await {
             Ok(system) => bus::call(
@@ -273,7 +282,7 @@ pub fn request(bar: &Rc<Bar>, request: Request, origin: &gtk4::Widget) {
                 shield::UPDATE_PATH,
                 shield::UPDATE_INTERFACE,
                 request.method(),
-                None,
+                body.as_ref(),
                 REQUEST_TIMEOUT_MS,
             )
             .await
@@ -360,6 +369,10 @@ fn refusal_words(refusal: Refusal) -> String {
         Refusal::NoPreviousVersion => tr("There is no previous version to go back to"),
         Refusal::Blocked => tr("A program is blocking the restart; close it and try again"),
         Refusal::Failed => tr("The request failed; the system journal says why"),
+        Refusal::AlreadyPostponed => {
+            tr("This security update was already postponed once, or can no longer be")
+        }
+        Refusal::NotSecurityClass => tr("Only security updates can be postponed"),
         Refusal::NoAnswer => tr("The update service did not answer"),
     }
 }
@@ -398,8 +411,19 @@ fn fill_sheet(content: &gtk4::Box, trust: &Trust, actions: &Actions) {
     heading.append(&title);
     content.append(&heading);
     match trust.sheet() {
-        Sheet::Unreadable(why) => content.append(&note(&unreadable_words(why))),
-        Sheet::Read(rows) => append_rows(content, &rows),
+        Sheet::Unreadable(why) => {
+            actions.switch_row.set_visible(false);
+            content.append(&note(&unreadable_words(why)));
+        }
+        Sheet::Read(rows) => {
+            // The programmatic change is not the person's: the handler lets it through.
+            actions.syncing.set(true);
+            actions.switch.set_active(rows.automatic_security_updates);
+            actions.switch.set_state(rows.automatic_security_updates);
+            actions.syncing.set(false);
+            actions.switch_row.set_visible(true);
+            append_rows(content, &rows);
+        }
     }
     if let Some(refusal) = trust.refusal() {
         let refused = gtk4::Label::builder()
@@ -416,6 +440,7 @@ fn fill_sheet(content: &gtk4::Box, trust: &Trust, actions: &Actions) {
         .restart
         .set_visible(trust.restart_to_update_offered());
     actions.go_back.set_visible(trust.go_back_offered());
+    actions.postpone.set_visible(trust.postpone_offered());
     content.append(&actions.row);
 }
 
@@ -457,13 +482,26 @@ fn append_rows(content: &gtk4::Box, rows: &Rows) {
     } else {
         tr("Secure Boot off: this machine runs in the declared degraded mode")
     }));
+    if !rows.automatic_security_updates {
+        content.append(&note(&tr(
+            "Automatic security updates are off: security fixes wait until someone installs them.",
+        )));
+    }
+    if let Some(until) = rows.postponed_until {
+        content.append(&note(&tr_with("Postponed until {date}", "date", &date(until))));
+    }
 }
 
 /// The sheet's two actions; built once per shield and moved into each fill of the sheet.
 struct Actions {
     row: gtk4::Box,
     restart: gtk4::Button,
+    postpone: gtk4::Button,
     go_back: gtk4::Button,
+    switch_row: gtk4::Box,
+    switch: gtk4::Switch,
+    /// Set while the sheet is drawn, so the handler tells a redraw from a click.
+    syncing: Rc<Cell<bool>>,
 }
 
 struct ShieldUi {
@@ -527,10 +565,26 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
     let restart = gtk4::Button::with_label(&tr("Restart to update"));
     restart.add_css_class("bar-row");
+    let postpone = gtk4::Button::with_label(&tr("Postpone"));
+    postpone.add_css_class("bar-row");
     let go_back = gtk4::Button::with_label(&tr("Go back to the previous version"));
     go_back.add_css_class("bar-row");
+    let switch_label = gtk4::Label::new(Some(&tr("Automatic security updates")));
+    switch_label.set_xalign(0.0);
+    switch_label.set_hexpand(true);
+    let switch = gtk4::Switch::new();
+    switch.set_valign(gtk4::Align::Center);
+    switch.update_relation(&[gtk4::accessible::Relation::LabelledBy(&[
+        switch_label.upcast_ref::<gtk4::Accessible>(),
+    ])]);
+    let switch_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    switch_row.append(&switch_label);
+    switch_row.append(&switch);
+    let syncing = Rc::new(Cell::new(false));
     let row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    row.append(&switch_row);
     row.append(&restart);
+    row.append(&postpone);
     row.append(&go_back);
 
     // The confirmation page, as in the power menu: Cancel focused, so a stray Enter backs out.
@@ -556,6 +610,53 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     popup.popover.set_child(Some(&stack));
 
     let pending: Rc<Cell<Option<Request>>> = Rc::new(Cell::new(None));
+    {
+        // Turning off asks first; turning on is not a risk and goes straight through. The
+        // switch itself only follows the state, which comes back when the service changes it.
+        let (pending, question, confirm, stack, cancel, syncing) = (
+            pending.clone(),
+            question.downgrade(),
+            confirm.downgrade(),
+            stack.downgrade(),
+            cancel.downgrade(),
+            syncing.clone(),
+        );
+        let (bar, origin) = (Rc::downgrade(bar), popup.button.downgrade());
+        switch.connect_state_set(move |_, wanted| {
+            if syncing.get() {
+                return glib::Propagation::Proceed;
+            }
+            if wanted {
+                if let (Some(bar), Some(origin)) = (bar.upgrade(), origin.upgrade()) {
+                    request(&bar, Request::SetAutomatic(true), origin.upcast_ref());
+                }
+            } else if let (Some(question), Some(confirm), Some(stack), Some(cancel)) = (
+                question.upgrade(),
+                confirm.upgrade(),
+                stack.upgrade(),
+                cancel.upgrade(),
+            ) {
+                pending.set(Some(Request::SetAutomatic(false)));
+                question.set_text(&tr("Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."));
+                confirm.set_label(&tr("Turn Off"));
+                stack.set_visible_child_name("confirm");
+                cancel.grab_focus();
+            }
+            glib::Propagation::Stop
+        });
+    }
+    {
+        // Postpone needs no password for the active user, so no second question.
+        let (bar, origin) = (Rc::downgrade(bar), popup.button.downgrade());
+        postpone.connect_clicked(move |_| {
+            let (Some(bar), Some(origin)) = (bar.upgrade(), origin.upgrade()) else { return };
+            if bar.trust().postpone_offered() {
+                request(&bar, Request::Postpone, origin.upcast_ref());
+            } else {
+                bar.trust().refused(bar.trust().withdrawn(Request::Postpone));
+            }
+        });
+    }
     for (button, wanted, ask, label) in [
         (
             &restart,
@@ -605,12 +706,13 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     {
         // Cancel gives the focus back to the action that asked.
         let (back, pending) = (back.clone(), pending.clone());
-        let (restart, go_back) = (restart.downgrade(), go_back.downgrade());
+        let (restart, go_back, switch) = (restart.downgrade(), go_back.downgrade(), switch.downgrade());
         cancel.connect_clicked(move |_| {
             let opener = match pending.get() {
-                Some(Request::Apply) => restart.upgrade(),
-                Some(Request::GoBack) => go_back.upgrade(),
-                None => None,
+                Some(Request::Apply) => restart.upgrade().map(|button| button.upcast::<gtk4::Widget>()),
+                Some(Request::GoBack) => go_back.upgrade().map(|button| button.upcast()),
+                Some(Request::SetAutomatic(_)) => switch.upgrade().map(|switch| switch.upcast()),
+                Some(Request::Postpone) | None => None,
             };
             back();
             if let Some(opener) = opener {
@@ -642,6 +744,9 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             let still = match wanted {
                 Request::Apply => bar.trust().restart_to_update_offered(),
                 Request::GoBack => bar.trust().go_back_offered(),
+                Request::Postpone => bar.trust().postpone_offered(),
+                // Offered in every readable state; the service has the last word.
+                Request::SetAutomatic(_) => true,
             };
             if still {
                 if let Some(origin) = origin.upgrade() {
@@ -660,7 +765,11 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         actions: Actions {
             row,
             restart,
+            postpone,
             go_back,
+            switch_row,
+            switch,
+            syncing,
         },
         drawn: RefCell::new(None),
     };
