@@ -58,11 +58,16 @@ enum Change {
 
 type Queue = Rc<RefCell<Vec<Change>>>;
 
-/// Whether `change` makes the cached images stale: a new look tints them anew, and an
+/// The images by icon, size and scale; `None` for one that could not be read.
+type Images = HashMap<(String, u16, u16), Option<Image>>;
+
+/// Drops the cached images that `change` makes stale: a new look tints them anew, and an
 /// application installed or removed can bring the icon an entry fell back from, as the GTK
 /// dock follows the theme.
-fn drops_images(change: &Change) -> bool {
-    matches!(change, Change::Appearance(_) | Change::Apps)
+fn drop_stale_images(images: &mut Images, change: &Change) {
+    if matches!(change, Change::Appearance(_) | Change::Apps) {
+        images.clear();
+    }
 }
 
 /// The icon an entry is drawn with: its desktop entry's, or [`FALLBACK_ICON`].
@@ -229,8 +234,7 @@ pub struct Dock {
     look: Look,
     rtl: bool,
     icons: IconTheme,
-    /// The images by icon, size and scale; `None` for one that could not be read.
-    images: HashMap<(String, u16, u16), Option<Image>>,
+    images: Images,
     outs: HashMap<SurfaceId, Out>,
     queue: Queue,
     debounce: Slot,
@@ -954,9 +958,7 @@ impl Application for Dock {
         }
         let changes = std::mem::take(&mut *self.queue.borrow_mut());
         for change in changes {
-            if drops_images(&change) {
-                self.images.clear();
-            }
+            drop_stale_images(&mut self.images, &change);
             match change {
                 Change::Windows => self.stale = true,
                 Change::Files => self
@@ -1008,11 +1010,17 @@ mod tests {
 
     #[test]
     fn a_new_look_or_a_change_of_the_installed_applications_reads_the_icons_again() {
-        assert!(drops_images(&Change::Appearance(Appearance::default())));
-        assert!(drops_images(&Change::Apps));
-        assert!(!drops_images(&Change::Windows));
-        assert!(!drops_images(&Change::Files));
-        assert!(!drops_images(&Change::Reload));
+        let cached = || Images::from([(("mail-client".to_owned(), 24, 1), None)]);
+        for change in [Change::Windows, Change::Files, Change::Reload] {
+            let mut images = cached();
+            drop_stale_images(&mut images, &change);
+            assert_eq!(images.len(), 1, "the images stay");
+        }
+        for change in [Change::Appearance(Appearance::default()), Change::Apps] {
+            let mut images = cached();
+            drop_stale_images(&mut images, &change);
+            assert!(images.is_empty(), "the images are read again");
+        }
     }
 
     fn info(icon: &str, name: &str) -> Option<DesktopAppInfo> {
