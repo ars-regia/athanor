@@ -1709,6 +1709,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn shutdown_unlocks_once_the_boots_run_out() {
+        let mut lineage = open_lineage(NOW, true);
+        lineage.open.as_mut().expect("open").boots_remaining = 0;
+        let (machine, tools) = staged_for_shutdown("shutdown-boots", security(), &lineage);
+        at_shutdown(&machine.ctx(&tools, NOW + 1)).expect("evaluated");
+        assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
+        assert!(!locked(&tools));
+    }
+
+    #[test]
+    fn shutdown_with_an_unreadable_file_unlocks_nothing() {
+        for (name, text) in [("automatic-security-updates", "maybe\n"), ("lineage.json", "{")] {
+            let (machine, tools) = staged_for_shutdown(&format!("shutdown-unreadable-{name}"), security(), &open_lineage(NOW, true));
+            std::fs::write(machine.store.var.join(name), text).expect("write");
+            let failure = at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect_err("unreadable");
+            assert_eq!(failure.code, ErrorCode::Storage, "{name}");
+            assert!(!tools.called("apply_downloaded") && locked(&tools), "{name}");
+            assert_eq!(std::fs::read_to_string(machine.store.var.join(name)).expect("read"), text, "{name} is left as it is");
+        }
+    }
+
+    #[test]
+    fn shutdown_unlocks_nothing_whose_attestation_no_longer_verifies() {
+        let (machine, tools) = staged_for_shutdown("shutdown-rotated", security(), &open_lineage(NOW, true));
+        // The key of the attestations was rotated since the check stored this one.
+        let policy = machine.root.join("usr/policy.json");
+        let text = std::fs::read_to_string(&policy).expect("read");
+        assert_eq!(text.matches("made/a.pub").count(), 1);
+        std::fs::write(&policy, text.replace("made/a.pub", "real/k1.pub")).expect("write");
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools));
+    }
+
+    #[test]
     fn shutdown_with_the_store_busy_changes_nothing() {
         let _spawning = crate::goback::tests::SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (machine, tools) = staged_for_shutdown("shutdown-busy", security(), &open_lineage(NOW, true));
