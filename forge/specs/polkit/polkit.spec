@@ -25,9 +25,9 @@
 #     dist tag of the image base and .athanorN appended (1.fc45.athanorN on Fedora 45): it
 #     sorts above every Fedora build of that base today (127-5.fc45), Fedora 44's
 #     127-2.fc44.N and Fedora 43's 126-6.fc43.N, and below Rawhide's 128-1.fc46, any
-#     128-2.fc45 and every later Fedora build, so a Fedora rebuild replaces this fork instead
+#     128-2.fc45 and every later Fedora build, so a later Fedora build replaces this fork instead
 #     of being hidden by it; a Fedora 128-1.fc45, which does not exist today, would sort
-#     below it. A later Fedora build that lacks the two changes of the exit condition is
+#     below it and would not replace it. A later Fedora build that lacks the two changes of the exit condition is
 #     taken only after the fork is rebased onto it;
 #     system/Containerfile fails the image build when the installed polkit is not this fork;
 #   - drop-ins limit the agent helper socket to 8 connections per UID and end a helper

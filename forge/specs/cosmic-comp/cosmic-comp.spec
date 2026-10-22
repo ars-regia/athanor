@@ -2,8 +2,8 @@
 # archive with three patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
-# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
-# above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
+# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc45.athanor1 sorts
+# above 1.8.0-1.fc45 and below 1.8.0-2.fc45: the Nix builder defines no %%dist.
 %global fedora_release 2.fc45
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
 %global commit 41497b42d9744d9963c4c6d17e8add49489b45ee
