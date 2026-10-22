@@ -41,6 +41,7 @@ class PinnedVersion(unittest.TestCase):
         text = INSTALL.read_text()
         for name in ("COSIGN", "REGISTRY"):
             self.assertRegex(text, rf"(?m)^{name}_SHA256=[0-9a-f]{{64}}$")
+            self.assertRegex(text, rf'(?m)^fetch "\${name}_URL" "\${name}_SHA256" ')
 
 
 class RealCosign(unittest.TestCase):

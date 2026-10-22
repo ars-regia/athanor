@@ -19,12 +19,20 @@ for tool in cosign skopeo registry python3; do
         exit 2
     }
 done
+# The releases sign with the cosign that install-tools.sh pins; another one proves nothing about them.
+pinned=$(sed -n 's/^COSIGN_VERSION=//p' "$root/scripts/ci/install-tools.sh")
+found=$(cosign version --json | python3 -c 'import json, sys; print(json.load(sys.stdin)["gitVersion"])')
+[[ $found == "$pinned" ]] || {
+    echo "${0##*/}: cosign on PATH is $found, the releases use $pinned (scripts/ci/install-tools.sh)" >&2
+    exit 2
+}
 
 work=$(mktemp -d)
 registry_pid=''
 cleanup() {
     local status=$?
-    [[ -z $registry_pid ]] || kill "$registry_pid"
+    # A registry that died at start has nothing to stop, and its log says why.
+    [[ -z $registry_pid || ! -e /proc/$registry_pid ]] || kill "$registry_pid"
     # The registry logs every 404 a push expects as an error: shown only when the check failed.
     [[ $status -eq 0 || ! -s $work/registry.log ]] || {
         echo "registry log:" >&2
