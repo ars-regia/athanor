@@ -112,7 +112,7 @@ fn policy_keys(policy: &InForce, repository: &str) -> Option<Vec<VerifyingKey>> 
 
 /// The class of `digest` by the release attestation stored for it, verified again with the
 /// keys of the policy in force (UT13): no verdict is kept. Nothing stored is the feature class.
-fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &str, digest: &str) -> Class {
+pub(crate) fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &str, digest: &str) -> Class {
     match ctx.store.attestation_dir(digest) {
         Some(dir) => attestation::class_of(&dir, &policy_keys(policy, repository).unwrap_or_default(), repository, digest),
         None => Class::Feature,
@@ -173,7 +173,7 @@ fn settled_security(update: Result<UpdateState, Failure>, failure: Option<Failur
 /// True when `digest` is the build `booted` runs under another digest: the same build time
 /// and the same version, both known. A build time of 0 is an absent label, which says
 /// nothing about the build.
-fn same_build(booted: &Deployed, digest: &str, version: &str, build_time: i64) -> bool {
+pub(crate) fn same_build(booted: &Deployed, digest: &str, version: &str, build_time: i64) -> bool {
     digest != booted.digest && booted.build_time > 0 && build_time == booted.build_time && version == booted.version
 }
 
@@ -1232,25 +1232,25 @@ pub(crate) mod tests {
         assert_eq!((state.booted.build_time, state.newest_booted_build_time), (1000, 2000));
     }
 
-    const NOW: i64 = 1_790_000_000;
+    pub(crate) const NOW: i64 = 1_790_000_000;
 
     /// The digest the release attestations under tests/vectors/made cover.
-    fn attested() -> String {
+    pub(crate) fn attested() -> String {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/made/image-digest")).expect("vector").trim().to_owned()
     }
 
-    fn in_att_repo(deployed: Deployed) -> Deployed {
+    pub(crate) fn in_att_repo(deployed: Deployed) -> Deployed {
         Deployed { image: format!("{ATT_REPO}:stable"), ..deployed }
     }
 
-    fn security() -> Class {
+    pub(crate) fn security() -> Class {
         Class::Security { advisories: vec!["CVE-2026-0001".into()] }
     }
 
     /// A machine on `ATT_REPO` at digest(1), offered `attested()` with an attestation of
     /// `class`, or none. The signature object of the candidate is already stored, so the only
     /// fetch that can fail is the attestation's.
-    fn offered_attested(test: &str, class: Option<Class>) -> (Machine, Fake) {
+    pub(crate) fn offered_attested(test: &str, class: Option<Class>) -> (Machine, Fake) {
         let machine = Machine::new(test, &["real/k1.pub"]);
         machine.store_signature(&attested(), "real");
         let mut tools = Fake::booted(in_att_repo(deployed(&digest(1), 1000))).offering(&attested(), 2000);
@@ -1262,16 +1262,16 @@ pub(crate) mod tests {
     }
 
     /// The candidate is staged and locked already, as `Postpone()` or an earlier check left it.
-    fn stage(tools: &Fake) {
+    pub(crate) fn stage(tools: &Fake) {
         tools.status.borrow_mut().staged = Some(tools.download.clone().expect("a deployment"));
     }
 
-    fn open_lineage(first_notice_at: i64, postponed: bool) -> Lineage {
+    pub(crate) fn open_lineage(first_notice_at: i64, postponed: bool) -> Lineage {
         Lineage { anchor: None, anchor_build_time: 0, open: Some(Open { first_notice_at, boots_remaining: 7, postponed, last_boot_id: "boot-0".into() }) }
     }
 
     /// The release attestation of `attested()` is stored, as the check that offered it left it.
-    fn store_attestation(machine: &Machine, tools: &Fake) {
+    pub(crate) fn store_attestation(machine: &Machine, tools: &Fake) {
         tools.fetch_attestation(ATT_REPO, &attested(), &machine.store.attestation_dir(&attested()).expect("dir")).expect("stored");
     }
 
@@ -1569,7 +1569,7 @@ pub(crate) mod tests {
 
     /// `attested()` is staged and locked, of `class` by its stored attestation, under `lineage`;
     /// the calls of the setup are forgotten.
-    fn staged_for_shutdown(test: &str, class: Class, lineage: &Lineage) -> (Machine, Fake) {
+    pub(crate) fn staged_for_shutdown(test: &str, class: Class, lineage: &Lineage) -> (Machine, Fake) {
         let (machine, tools) = offered_attested(test, Some(class));
         store_attestation(&machine, &tools);
         stage(&tools);
@@ -1578,7 +1578,7 @@ pub(crate) mod tests {
         (machine, tools)
     }
 
-    fn locked(tools: &Fake) -> bool {
+    pub(crate) fn locked(tools: &Fake) -> bool {
         tools.status.borrow().staged.as_ref().is_some_and(|staged| staged.download_only)
     }
 

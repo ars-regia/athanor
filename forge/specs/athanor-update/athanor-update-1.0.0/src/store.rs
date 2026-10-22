@@ -337,7 +337,6 @@ impl Store {
 
     /// # Errors
     /// The file cannot be written.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
     pub fn set_automatic_security_updates(&self, enabled: bool) -> std::io::Result<()> {
         Self::replace(&self.var, "automatic-security-updates", 0o644, if enabled { "on\n" } else { "off\n" }.as_bytes())
     }
