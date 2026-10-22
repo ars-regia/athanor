@@ -88,8 +88,8 @@ predicate type of point 1 as written below:
     the anchor, and `rollbackQueued` is false. A boot that greenboot returns from is not
     applied.
     *Amended on 2026-10-22 by the maintainer:* the booted digest must also have been built
-    after the anchor. `lineage.json` keeps the anchor's build time beside it (0 before the
-    first), and a digest without a build time label never counts, so a return by `GoBack()`
+    after the anchor. `lineage.json` keeps the anchor's build time beside it, in seconds, `null`
+    before the first, and a digest without a build time label never counts, so a return by `GoBack()`
     to an earlier security digest does not reset the budget. The rule compares with the
     anchor, not with the newest build ever booted: a security digest built after the anchor
     counts even when a newer feature digest booted in between. Only `athanor-update check`

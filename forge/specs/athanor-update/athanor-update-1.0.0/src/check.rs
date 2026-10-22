@@ -448,7 +448,7 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         // it. Only the check service counts it: it is ordered after greenboot's verdict
         // (`After=boot-complete.target`), where the state service at boot runs before it.
         let booted = &status.booted;
-        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) {
+        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) {
             lineage.applied(&booted.digest, booted.build_time);
         }
     }
@@ -1236,7 +1236,7 @@ pub(crate) mod tests {
     }
 
     fn open_lineage(first_notice_at: i64, postponed: bool) -> Lineage {
-        Lineage { anchor: None, anchor_build_time: 0, open: Some(Open { first_notice_at, boots_remaining: 7, postponed, last_boot_id: "boot-0".into() }) }
+        Lineage { anchor: None, anchor_build_time: None, open: Some(Open { first_notice_at, boots_remaining: 7, postponed, last_boot_id: "boot-0".into() }) }
     }
 
     /// The release attestation of `attested()` is stored, as the check that offered it left it.
@@ -1378,7 +1378,7 @@ pub(crate) mod tests {
     #[test]
     fn a_greenboot_return_does_not_count_as_applied() {
         let machine = Machine::new("greenboot-return", &["real/k1.pub"]);
-        let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, false) };
+        let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, false) };
         machine.store.set_lineage(&lineage).expect("write");
         // The state service's check at boot runs before greenboot's verdict: it never counts.
         let state = run(&machine.ctx(&booted_attested(&machine, false), NOW), true).expect("offline");
@@ -1392,11 +1392,11 @@ pub(crate) mod tests {
     #[test]
     fn booting_a_security_digest_resets_the_lineage() {
         let machine = Machine::new("security-booted", &["real/k1.pub"]);
-        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, true) }).expect("write");
+        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, true) }).expect("write");
         let tools = booted_attested(&machine, false);
         let state = run(&machine.ctx(&tools, NOW), false).expect("check");
         assert_eq!(state.postpone, None);
-        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: 2000, open: None });
+        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: Some(2000), open: None });
     }
 
     #[test]
@@ -1405,7 +1405,7 @@ pub(crate) mod tests {
         // security digest applied before it, then to one older still: neither is applied again.
         for (name, build_time) in [("previous", 2000), ("older", 1000)] {
             let machine = Machine::new(&format!("go-back-{name}"), &["real/k1.pub"]);
-            let lineage = Lineage { anchor: Some(digest(3)), anchor_build_time: 3000, ..open_lineage(NOW - 86_400, true) };
+            let lineage = Lineage { anchor: Some(digest(3)), anchor_build_time: Some(3000), ..open_lineage(NOW - 86_400, true) };
             machine.store.set_lineage(&lineage).expect("write");
             let tools = booted_attested(&machine, false);
             tools.status.borrow_mut().booted.build_time = build_time;
@@ -1420,11 +1420,11 @@ pub(crate) mod tests {
         // A feature digest built at 3000 booted since the anchor (1000). A security digest built
         // between them is still newer than the last one applied, and counts.
         let machine = Machine::new("between", &["real/k1.pub"]);
-        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: 1000, ..open_lineage(NOW - 86_400, false) }).expect("write");
+        machine.store.set_lineage(&Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, false) }).expect("write");
         machine.store.record_booted(3000).expect("a newer feature boot");
         let state = run(&machine.ctx(&booted_attested(&machine, false), NOW), false).expect("check");
         assert_eq!((state.newest_booted_build_time, state.postpone), (3000, None));
-        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: 2000, open: None });
+        assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: Some(2000), open: None });
         // A digest without a build time label says nothing about its age: it never counts.
         let machine = Machine::new("no-label", &["real/k1.pub"]);
         let tools = booted_attested(&machine, false);
