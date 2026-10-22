@@ -65,6 +65,30 @@ mod tests {
     }
 
     #[test]
+    fn the_local_zone_is_readable_under_confinement() {
+        // Fedora links /etc/localtime into /usr/share/zoneinfo; Landlock judges the resolved file.
+        let Ok(target) = std::fs::read_link("/etc/localtime") else {
+            eprintln!("skipped: /etc/localtime is not a symlink on this host");
+            return;
+        };
+        let resolved = Path::new("/etc").join(target);
+        if !std::fs::canonicalize(&resolved).is_ok_and(|real| real.starts_with("/usr")) {
+            eprintln!("skipped: /etc/localtime does not resolve into /usr on this host");
+            return;
+        }
+        let writable = std::env::temp_dir().join(format!("athanor-update-notify-zone-{}", std::process::id()));
+        std::fs::create_dir_all(&writable).expect("mkdir");
+        let dir = writable.clone();
+        std::thread::spawn(move || {
+            restrict(&[Path::new("/usr")], &dir).expect("Landlock must be enforced, not skipped");
+            assert!(std::fs::read("/etc/localtime").is_ok_and(|zone| zone.starts_with(b"TZif")));
+        })
+        .join()
+        .expect("sandboxed thread");
+        std::fs::remove_dir_all(writable).expect("cleanup");
+    }
+
+    #[test]
     fn a_second_thread_fails_the_single_thread_check() {
         let (release, wait) = std::sync::mpsc::channel::<()>();
         let other = std::thread::spawn(move || wait.recv());

@@ -1,6 +1,6 @@
 //! `athanor-update-notify`: the user side of updates until the shield exists
 //! (docs/architecture/doc_update_trust.md, UT11). It reads the state file, sends
-//! notifications, and calls `Apply()` and `GoBack()`. Nothing else.
+//! notifications, and calls `Apply()`, `GoBack()` and `Postpone()`. Nothing else.
 mod notices;
 mod sandbox;
 mod text;
@@ -24,13 +24,16 @@ const POLL: Duration = Duration::from_secs(30);
 
 async fn send(session: &Connection, notice: &Notice) -> zbus::Result<(u32, String)> {
     let t = text::texts(text::session_locale().as_deref());
-    let (summary, body, actions) = match notice {
-        Notice::Ready { .. } => (t.ready_summary, t.ready_body.to_owned(), vec![notices::ACTION_APPLY, t.restart, notices::ACTION_LATER, t.later]),
+    let actions = text::actions(notice, t);
+    let (summary, body) = match notice {
+        Notice::Ready { .. } => (t.ready_summary, t.ready_body.to_owned()),
+        Notice::Security { until: None, .. } => (t.security_title, t.security_body.to_owned()),
+        Notice::Security { until: Some(until), .. } => (t.security_title, t.postponed_until.replace("{time}", &t.time(*until))),
         Notice::Running { version, build_time, .. } => {
             let date = chrono::DateTime::from_timestamp(*build_time, 0).map(|time| time.format("%Y-%m-%d").to_string()).unwrap_or_default();
             // The version comes from a world-readable file: plain text, stripped, truncated.
             let body = t.running_body.replace("{version}", &athanor_trust_state::display(version)).replace("{date}", &date);
-            (t.running_summary, body, vec![notices::ACTION_GO_BACK, t.go_back])
+            (t.running_summary, body)
         }
     };
     // The owner is read before the call, so the id returned is tied to the server asked.
@@ -57,6 +60,7 @@ async fn request(system: &Connection, request: Request) {
     let method = match request {
         Request::Apply => "Apply",
         Request::GoBack => "GoBack",
+        Request::Postpone => "Postpone",
     };
     if let Err(err) = system.call_method(Some(UPDATE), UPDATE_PATH, Some(UPDATE), method, &()).await {
         tracing::warn!(%err, method, "the request was refused");
@@ -94,7 +98,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                         Ok((id, server)) => {
                             serverless = false;
                             match &notice {
-                                Notice::Ready { digest } => {
+                                Notice::Ready { digest } | Notice::Security { digest, .. } => {
                                     tracing::info!(%digest, "update offered");
                                     if let Err(err) = notices::record_announced(state_dir, digest) {
                                         tracing::warn!(%err, "the announced digest was not recorded; it is offered once per session");
