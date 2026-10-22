@@ -43,7 +43,17 @@ pub struct MoveRecord {
 }
 
 /// Holds the lock of UT1 until dropped.
-pub struct Lock(#[allow(dead_code)] File);
+pub struct Lock(File);
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        // Released by hand, not by the close: a child forked by another thread holds a copy of
+        // the descriptor until its exec, and the flock lives as long as any copy does.
+        if let Err(err) = self.0.unlock() {
+            tracing::error!(%err, "cannot release the lock of athanor-update");
+        }
+    }
+}
 
 impl Store {
     #[must_use]
@@ -241,9 +251,29 @@ impl Store {
 
     /// The directory of the release attestation of `digest`; `None` for anything but `sha256:<64 hex>`.
     #[must_use]
-    #[cfg_attr(not(test), allow(dead_code))] // read by the check from UT13's classification on
     pub fn attestation_dir(&self, digest: &str) -> Option<PathBuf> {
         self.object_dir("attestations", digest)
+    }
+
+    /// Removes the release attestation of every digest but `keep`, so that a registry that
+    /// names a new digest at each check cannot fill `/var`.
+    ///
+    /// # Errors
+    /// The directory cannot be listed, or an entry cannot be removed.
+    pub fn retain_attestations(&self, keep: &[&str]) -> std::io::Result<()> {
+        let keep: Vec<PathBuf> = keep.iter().filter_map(|digest| self.attestation_dir(digest)).collect();
+        for entry in std::fs::read_dir(self.var.join("attestations"))? {
+            let entry = entry?;
+            if keep.contains(&entry.path()) {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+        Ok(())
     }
 
     fn object_dir(&self, kind: &str, digest: &str) -> Option<PathBuf> {
@@ -278,6 +308,9 @@ impl Store {
         if lineage.anchor.as_deref().is_some_and(|anchor| !sha256_digest(anchor)) {
             return Err(invalid("the anchor is not a sha256 digest".into()));
         }
+        if lineage.anchor.is_some() != lineage.anchor_build_time.is_some() || lineage.anchor_build_time.is_some_and(|time| time < 0) {
+            return Err(invalid("the anchor's build time is missing, unexpected or negative".into()));
+        }
         match lineage.published() {
             Some(postpone) if !postpone.consistent() => Err(invalid("boots or first notice out of range".into())),
             _ => Ok(lineage),
@@ -286,7 +319,6 @@ impl Store {
 
     /// # Errors
     /// The file cannot be written.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
     pub fn set_lineage(&self, lineage: &Lineage) -> std::io::Result<()> {
         let json = serde_json::to_vec(lineage).map_err(std::io::Error::other)?;
         Self::replace(&self.var, "lineage.json", 0o644, &json)
@@ -315,7 +347,6 @@ impl Store {
 
     /// # Errors
     /// The file cannot be written.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
     pub fn set_automatic_security_updates(&self, enabled: bool) -> std::io::Result<()> {
         Self::replace(&self.var, "automatic-security-updates", 0o644, if enabled { "on\n" } else { "off\n" }.as_bytes())
     }
@@ -333,6 +364,10 @@ mod tests {
 
     pub(crate) fn scratch(test: &str) -> Store {
         let dir = std::env::temp_dir().join(format!("athanor-update-store-{}-{test}", std::process::id()));
+        // A reused TMPDIR may hold the files of an earlier run with the same pid.
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).expect("clean");
+        }
         let store = Store { run: dir.join("run"), var: dir.join("var") };
         std::fs::create_dir_all(&store.run).expect("mkdir");
         std::fs::create_dir_all(store.var.join("signatures")).expect("mkdir");
@@ -386,7 +421,7 @@ mod tests {
         let store = scratch("lineage");
         assert_eq!(store.lineage().expect("absent"), Lineage::default());
         let mut lineage = Lineage::default();
-        lineage.applied(&format!("sha256:{}", "a".repeat(64)));
+        lineage.applied(&format!("sha256:{}", "a".repeat(64)), 1_789_000_000);
         lineage.notice(1_790_000_000, "boot-0");
         store.set_lineage(&lineage).expect("write");
         assert_eq!(store.lineage().expect("read"), lineage);
@@ -397,10 +432,10 @@ mod tests {
     #[test]
     fn a_malformed_lineage_file_is_a_storage_error() {
         let store = scratch("lineage-malformed");
-        let good = r#"{"anchor":null,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
+        let good = r#"{"anchor":null,"anchor_build_time":null,"open":{"first_notice_at":1790000000,"boots_remaining":7,"postponed":false,"last_boot_id":"b"}}"#;
         std::fs::write(store.var.join("lineage.json"), good).expect("write");
         assert!(store.lineage().is_ok());
-        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#)] {
+        for bad in ["", "{", "{}", "null", &good.replace("7", "8"), &good.replace("1790000000", "-1"), &good.replace(r#""b"}"#, r#""b","extra":1}"#), &good.replace(r#""anchor_build_time":null,"#, "")] {
             std::fs::write(store.var.join("lineage.json"), bad).expect("write");
             assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:?}");
             assert_eq!(std::fs::read_to_string(store.var.join("lineage.json")).expect("read"), bad, "the file is left as it is");
@@ -414,7 +449,7 @@ mod tests {
     fn a_lineage_anchor_that_is_no_digest_is_a_storage_error() {
         let store = scratch("lineage-anchor");
         let digest = format!("sha256:{}", "a".repeat(64));
-        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"open":null}}"#);
+        let with = |anchor: &str| format!(r#"{{"anchor":{anchor},"anchor_build_time":{},"open":null}}"#, if anchor == "null" { "null" } else { "1789000000" });
         for good in ["null".to_owned(), format!("\"{digest}\"")] {
             std::fs::write(store.var.join("lineage.json"), with(&good)).expect("write");
             assert!(store.lineage().is_ok(), "{good}");
@@ -424,6 +459,21 @@ mod tests {
         for bad in ["sha256:aa", "sha512:aa", "", "aaaa", &upper, &long, &format!("{digest}\n")] {
             std::fs::write(store.var.join("lineage.json"), with(&serde_json::to_string(bad).expect("json"))).expect("write");
             assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad:.20?}");
+        }
+    }
+
+    #[test]
+    fn the_anchor_and_its_build_time_are_null_together() {
+        let store = scratch("lineage-anchor-time");
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let with = |anchor: &str, time: &str| format!(r#"{{"anchor":{anchor},"anchor_build_time":{time},"open":null}}"#);
+        for good in [with("null", "null"), with(&format!("\"{digest}\""), "0"), with(&format!("\"{digest}\""), "1789000000")] {
+            std::fs::write(store.var.join("lineage.json"), &good).expect("write");
+            assert!(store.lineage().is_ok(), "{good}");
+        }
+        for bad in [with("null", "0"), with("null", "1789000000"), with(&format!("\"{digest}\""), "null"), with(&format!("\"{digest}\""), "-1")] {
+            std::fs::write(store.var.join("lineage.json"), &bad).expect("write");
+            assert_eq!(store.lineage().map_err(|err| err.kind()), Err(std::io::ErrorKind::InvalidData), "{bad}");
         }
     }
 

@@ -194,7 +194,7 @@ fn gbm(path: &Path) -> Result<(Gpu, DrmDeviceFd), Error> {
 }
 
 /// The GLES renderer of `node`.
-fn gles<'a>(
+pub fn gles<'a>(
     manager: &'a mut GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>,
     node: &DrmNode,
 ) -> Result<&'a mut GlesRenderer, Error> {

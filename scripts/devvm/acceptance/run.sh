@@ -293,7 +293,8 @@ stage_older() { # item 9
   other=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$ACC_REGISTRY/athanor-system-nvidia:v2")
   [[ $booted == "$other" ]] || die "the nvidia copy of v2 must share the digest of the booted image"
   guest_ssh "sudo rm -rf /var/lib/athanor-update/signatures/${booted#sha256:} && sudo skopeo copy --policy /usr/share/athanor/containers/attachments-policy.json docker://$ACC_REGISTRY/athanor-system-nvidia:sha256-${other#sha256:}.sig dir:/var/lib/athanor-update/signatures/${booted#sha256:}"
-  guest_ssh sudo systemctl start athanor-update-state.service
+  # The unit stays active (RemainAfterExit=yes): only a restart publishes again.
+  guest_ssh sudo systemctl restart athanor-update-state.service
   expect "9: a valid signature object copied from another of our repositories reads no-signature" .verified.reason no-signature
   guest_ssh "sudo rm -rf /var/lib/athanor-update/signatures/${booted#sha256:}"
   point_stable v2

@@ -27,8 +27,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool,
-    wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
+    wl_shm_pool, wl_surface,
 };
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, Proxy, QueueHandle, WEnum,
@@ -136,6 +136,8 @@ struct Client {
     /// Each workspace and its last state.
     workspaces: Vec<(ObjectId, Option<ext_workspace_handle_v1::State>)>,
     workspaces_done: bool,
+    /// The evdev code of each key pressed while the client had the keyboard.
+    keys: Vec<u32>,
 }
 
 /// A window of the foreign toplevel list as the client has seen it.
@@ -275,6 +277,26 @@ delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
 delegate_noop!(Client: ext_idle_notifier_v1::ExtIdleNotifierV1);
 delegate_noop!(Client: wp_security_context_manager_v1::WpSecurityContextManagerV1);
 delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
+
+impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_keyboard::WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_keyboard::Event::Key {
+            key,
+            state: WEnum::Value(wl_keyboard::KeyState::Pressed),
+            ..
+        } = event
+        {
+            client.keys.push(key);
+        }
+    }
+}
 
 impl Dispatch<wl_callback::WlCallback, Synced> for Client {
     fn event(
@@ -915,6 +937,12 @@ enum Step {
     /// The exclusive surface commits again, unchanged; the sender is told once the compositor
     /// has handled it.
     Recommit(mpsc::Sender<()>),
+    /// The exclusive surface, unmapped, is mapped again as it was first; the sender is told
+    /// once the compositor has handled it.
+    RemapExclusive(mpsc::Sender<()>),
+    /// The sender is told, once the compositor has handled every step before, the keys the
+    /// shell's client was sent.
+    Keys(mpsc::Sender<Vec<u32>>),
 }
 
 /// The shell's stand-in: its connection's queue and state, and the globals it binds.
@@ -978,6 +1006,22 @@ impl Shell {
             &qh,
             (),
         );
+        self.map_layer(&surface, &layer, anchor, height, zone, keyboard)?;
+        Ok((surface, layer))
+    }
+
+    /// Maps the layer surface `layer` of `surface`, new or unmapped, which forgets its state:
+    /// its state, a commit, the configure acknowledged and a black buffer of its size.
+    fn map_layer(
+        &mut self,
+        surface: &wl_surface::WlSurface,
+        layer: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+        anchor: zwlr_layer_surface_v1::Anchor,
+        height: u32,
+        zone: i32,
+        keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    ) -> Result<(), Error> {
+        layer.set_layer(zwlr_layer_shell_v1::Layer::Top);
         layer.set_anchor(anchor);
         layer.set_size(0, height);
         layer.set_exclusive_zone(zone);
@@ -992,7 +1036,7 @@ impl Shell {
         let buffer = self.buffer(i32::try_from(width)?, i32::try_from(height)?)?;
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
-        Ok((surface, layer))
+        Ok(())
     }
 
     /// Maps a popup of the fixture's size on the layer surface `parent`, grabbing the seat with
@@ -1061,6 +1105,7 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
         queue,
         client,
     };
+    let _keyboard = shell.seat.get_keyboard(&qh, ());
     let mut exclusive = None;
     let mut bar = None;
     while let Ok(step) = steps.recv() {
@@ -1111,6 +1156,24 @@ fn shell_client(stream: UnixStream, steps: &mpsc::Receiver<Step>) -> Result<(), 
                 surface.commit();
                 shell.queue.roundtrip(&mut shell.client)?;
                 done.send(()).map_err(|_| "the test is gone")?;
+            }
+            Step::RemapExclusive(done) => {
+                let (surface, layer) = exclusive.clone().ok_or("no exclusive surface")?;
+                shell.map_layer(
+                    &surface,
+                    &layer,
+                    Anchor::Top | Anchor::Left | Anchor::Right,
+                    50,
+                    50,
+                    KeyboardInteractivity::Exclusive,
+                )?;
+                shell.queue.roundtrip(&mut shell.client)?;
+                done.send(()).map_err(|_| "the test is gone")?;
+            }
+            Step::Keys(done) => {
+                shell.queue.roundtrip(&mut shell.client)?;
+                done.send(shell.client.keys.clone())
+                    .map_err(|_| "the test is gone")?;
             }
         }
         connection.flush()?;
@@ -1347,6 +1410,437 @@ fn a_bar_popup_leaves_the_keyboard_to_the_window() {
         .join()
         .expect("the shell's client thread")
         .expect("the shell's client");
+    run.stop();
+}
+
+/// Presses the keys of evdev codes `codes` in order and releases them in reverse, as the
+/// backend hands them to the seat.
+fn chord(state: &mut State, codes: &[u32]) {
+    use smithay::backend::input::{InputTime, KeyState};
+    // An xkb keycode is the evdev code plus 8.
+    for code in codes {
+        state.key_input((code + 8).into(), KeyState::Pressed, InputTime::now());
+    }
+    for code in codes.iter().rev() {
+        state.key_input((code + 8).into(), KeyState::Released, InputTime::now());
+    }
+}
+
+/// Left Super and Escape, as evdev numbers them.
+const ESCAPE_CHORD: [u32; 2] = [125, 1];
+
+/// The keys the shell's client was sent, once the compositor has handled every step before.
+fn shell_keys(run: &mut Running, steps: &mpsc::Sender<Step>) -> Vec<u32> {
+    let (sent, keys) = mpsc::channel();
+    steps.send(Step::Keys(sent)).expect("the shell's client");
+    let got = std::cell::RefCell::new(None);
+    run.until("the shell's client tells its keys", |_| {
+        if let Ok(keys) = keys.try_recv() {
+            got.replace(Some(keys));
+        }
+        got.borrow().is_some()
+    });
+    got.into_inner().expect("the keys")
+}
+
+/// The key the compositor keeps for itself (C1 task 8): Super+Escape takes the keyboard back at
+/// the press from a granted client's exclusive surface, and ends its popup's grab, with no lock
+/// client to take the lock, and asks for the lock; the client never sees the Escape. The escape
+/// holds for the identity the grant went to: its surface committing again, as a bar does each
+/// frame, mapped again, a new one, or one of a second connection does not take the keyboard
+/// back. A click on a layer surface of the client that takes the keyboard gives it back; one on
+/// its window, or on its bar, which takes none, does not. With no exclusive surface the key asks
+/// for the lock all the same and is not the window's; while the session is locked it is the lock
+/// surface's, and asks for nothing. Super+Shift+Escape is the window's. A lock alone escapes
+/// nobody.
+#[test]
+fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
+    let mut run = Running::start(None);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).is_some()
+    });
+    let window = focus(&run.state);
+    let window_client = window.as_ref().and_then(|s| s.client()).map(|c| c.id());
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    let shell_has_it = {
+        let id = shell_id.clone();
+        move |state: &State| {
+            focus(state).is_some_and(|surface| surface.client().map(|c| c.id()) == Some(id.clone()))
+        }
+    };
+
+    // A popup of the exclusive surface, opened with the keyboard's grab: the key ends the grab.
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", &shell_has_it);
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, shell_id.clone()));
+    steps
+        .send(Step::Popup(serial.into()))
+        .expect("the shell's client");
+    run.until("the popup's grab takes the keyboard", |state| {
+        state.seat.get_keyboard().is_some_and(|k| k.is_grabbed())
+    });
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    chord(&mut run.state, &ESCAPE_CHORD);
+    assert_eq!(run.state.lock_requests, 1, "Super+Escape asks for the lock");
+    // No lock client runs, as in a session with none, or logind failed: the keyboard is back at
+    // the press, and the popup's grab is over.
+    assert_eq!(
+        focus(&run.state),
+        window,
+        "the press takes the keyboard back"
+    );
+    assert!(!keyboard.is_grabbed(), "the press ends the popup's grab");
+    assert_eq!(
+        run.state.escaped.len(),
+        1,
+        "the identity whose surface held the keyboard is escaped"
+    );
+    // A second connection of the same identity maps an exclusive surface: it does not take the
+    // keyboard either.
+    {
+        let mut second = Local::connect(&mut run, None);
+        let compositor: wl_compositor::WlCompositor = second.bind(4);
+        let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = second.bind(4);
+        let qh = second.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "second".into(),
+            &qh,
+            (),
+        );
+        layer.set_size(100, 100);
+        layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+        assert!(second.answer(&mut run, &surface), "the surface is mapped");
+        assert!(
+            run.state.exclusive_layer().is_none(),
+            "a second connection of an escaped identity holds no exclusive surface"
+        );
+        assert_eq!(focus(&run.state), window, "and does not take the keyboard");
+    }
+    // The escape does not decay when the identity's last connection goes: it ends only by a click.
+    run.until("the second connection is gone", |state| {
+        state.escaped.len() == 1
+    });
+    // A lock client takes the lock that follows: it changes nothing for the escape.
+    let mut local = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
+    let lock = locks.lock(&local.queue.handle(), ());
+    local.pump(&mut run, "the session is locked", |client, _| client.locked);
+    lock.unlock_and_destroy();
+    local.pump(
+        &mut run,
+        "the unlock gives the window the keyboard",
+        |_, state| focus(state) == window,
+    );
+    assert!(
+        run.state.kept_keys.is_empty(),
+        "each key the compositor kept is released"
+    );
+    assert_eq!(
+        shell_keys(&mut run, &steps),
+        [ESCAPE_CHORD[0]],
+        "the client saw Super go down, never the Escape"
+    );
+
+    let (done, done_rx) = mpsc::channel();
+    steps
+        .send(Step::Recommit(done))
+        .expect("the shell's client");
+    run.until("the recommit is handled", |_| done_rx.try_recv().is_ok());
+    assert_eq!(focus(&run.state), window, "a commit does not take it back");
+    steps
+        .send(Step::UnmapExclusive)
+        .expect("the shell's client");
+    let (done, done_rx) = mpsc::channel();
+    steps
+        .send(Step::RemapExclusive(done))
+        .expect("the shell's client");
+    run.until("the remap is handled", |_| done_rx.try_recv().is_ok());
+    assert_eq!(
+        focus(&run.state),
+        window,
+        "mapped again, it does not take it back"
+    );
+    steps.send(Step::Exclusive).expect("the shell's client");
+    shell_keys(&mut run, &steps);
+    assert_eq!(focus(&run.state), window, "a new surface does not either");
+
+    // No exclusive surface holds the keyboard: Super+Escape asks for the lock all the same, and
+    // is not the window's; Super+Shift+Escape is.
+    use smithay::backend::input::{InputTime, KeyState};
+    use smithay::input::keyboard::Keycode;
+    let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
+    let now = InputTime::now;
+    let requests = run.state.lock_requests;
+    run.state.key_input(logo, KeyState::Pressed, now());
+    let logo_sent = run.state.grab_serials.key_press.clone();
+    run.state.key_input(escape, KeyState::Pressed, now());
+    let escape_sent = run.state.grab_serials.key_press.clone();
+    run.state.key_input(escape, KeyState::Released, now());
+    run.state.key_input(logo, KeyState::Released, now());
+    assert_eq!(escape_sent, logo_sent, "the Escape is not sent on");
+    assert_eq!(
+        run.state.lock_requests,
+        requests + 1,
+        "it asks for the lock"
+    );
+    let shift = Keycode::from(42u32 + 8);
+    run.state.key_input(logo, KeyState::Pressed, now());
+    run.state.key_input(shift, KeyState::Pressed, now());
+    run.state.key_input(escape, KeyState::Pressed, now());
+    let escape_sent = run.state.grab_serials.key_press.clone();
+    for key in [escape, shift, logo] {
+        run.state.key_input(key, KeyState::Released, now());
+    }
+    assert_eq!(
+        escape_sent.map(|(_, to)| to),
+        window_client,
+        "Super+Shift+Escape is the window's"
+    );
+    assert_eq!(
+        run.state.lock_requests,
+        requests + 1,
+        "and asks for nothing"
+    );
+
+    // A click on a window of the client, or on its surface that takes no keyboard, does not
+    // end the escape.
+    steps.send(Step::Window).expect("the shell's client");
+    steps.send(Step::Bar).expect("the shell's client");
+    shell_keys(&mut run, &steps);
+    let shell_window = run
+        .state
+        .space
+        .elements()
+        .find(|window| {
+            window
+                .toplevel()
+                .and_then(|toplevel| toplevel.wl_surface().client())
+                .map(|client| client.id())
+                == Some(shell_id.clone())
+        })
+        .cloned()
+        .expect("the shell's window");
+    let window_area = run
+        .state
+        .space
+        .element_geometry(&shell_window)
+        .expect("mapped");
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let bar_area = {
+        let map = layer_map_for_output(&output);
+        let bar = map
+            .layers()
+            .find(|layer| layer.namespace() == "bar")
+            .expect("the bar");
+        let mut area = map.layer_geometry(bar).expect("placed");
+        area.loc += run
+            .state
+            .space
+            .output_geometry(&output)
+            .expect("placed")
+            .loc;
+        area
+    };
+    for (area, what) in [(window_area, "its window"), (bar_area, "its bar")] {
+        let centre = area.to_f64().loc
+            + Point::from((f64::from(area.size.w) / 2.0, f64::from(area.size.h) / 2.0));
+        run.state.click_focus(centre);
+        assert_eq!(
+            run.state.escaped.len(),
+            1,
+            "a click on {what} keeps the escape"
+        );
+    }
+
+    // A click on the client's surface that takes the keyboard gives it back.
+    run.state
+        .click_focus(Point::from((f64::from(OUTPUTS[0].width) / 2.0, 25.0)));
+    assert!(run.state.escaped.is_empty(), "a click ends the escape");
+    assert!(
+        focus(&run.state).is_some() && focus(&run.state) == run.state.exclusive_layer(),
+        "a click gives it back"
+    );
+
+    // Locked, the key is the lock surface's and asks for nothing. The exclusive surface held the
+    // keyboard when the lock was taken and nobody pressed the key: it has it again at the
+    // unlock.
+    let mut local = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
+    let lock = locks.lock(&local.queue.handle(), ());
+    local.pump(&mut run, "the session is locked", |client, _| client.locked);
+    let requests = run.state.lock_requests;
+    chord(&mut run.state, &ESCAPE_CHORD);
+    assert_eq!(
+        run.state.lock_requests, requests,
+        "the key asks for nothing while locked"
+    );
+    assert!(run.state.escaped.is_empty(), "a lock alone escapes nobody");
+    lock.unlock_and_destroy();
+    local.pump(
+        &mut run,
+        "the unlock gives the exclusive surface the keyboard",
+        |_, state| shell_has_it(state),
+    );
+    assert!(
+        !shell_keys(&mut run, &steps).contains(&ESCAPE_CHORD[1]),
+        "the client never saw the Escape"
+    );
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// A virtual-terminal switch kept a key press, and the release comes on the other terminal: the
+/// session pausing forgets the record, so the next release of that key reaches the client.
+#[test]
+fn task8_a_pause_forgets_the_keys_the_compositor_kept() {
+    use smithay::backend::input::{InputTime, KeyState};
+    use smithay::input::keyboard::Keycode;
+    let mut run = Running::start(None);
+    let [ctrl, alt, f1] = [29u32, 56, 59].map(|code| Keycode::from(code + 8));
+    let now = InputTime::now;
+    for key in [ctrl, alt, f1] {
+        run.state.key_input(key, KeyState::Pressed, now());
+    }
+    assert_eq!(run.state.kept_keys, [f1], "Ctrl+Alt+F1 is kept");
+    run.state.pause();
+    assert!(run.state.kept_keys.is_empty(), "the pause forgets it");
+    run.state.grab_serials.key_release = None;
+    run.state.key_input(f1, KeyState::Released, now());
+    assert!(
+        run.state.grab_serials.key_release.is_some(),
+        "a later release of F1 reaches the client"
+    );
+    run.stop();
+}
+
+/// A failure the backend cannot go on after ends the loop with the reason, which `main` turns
+/// into the exit status.
+#[test]
+fn task8_a_fatal_failure_is_kept_for_main() {
+    let mut run = Running::start(None);
+    run.state.fail("the GPU was removed".into());
+    run.state.fail("a second reason".into());
+    assert_eq!(run.state.fatal.as_deref(), Some("the GPU was removed"));
+    run.stop();
+}
+
+/// An output that goes takes no window with it (C1 task 8): a window only it showed is centred
+/// on the first output, where it was placed at first.
+#[test]
+fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
+    let mut run = Running::start(None);
+    let window = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+    let placed = run.state.space.element_location(&window);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .expect("the second output")
+        .clone();
+    let area = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("the second output's area");
+    run.state
+        .space
+        .relocate_element(&window, area.loc + Point::from((10, 10)));
+    run.state.remove_output(&second);
+    assert_eq!(
+        run.state.space.element_location(&window),
+        placed,
+        "centred on the first output"
+    );
+    run.stop();
+}
+
+/// An output that takes another size (C1 task 8): the outputs side by side again leave no window
+/// outside them and no pointer outside them.
+#[test]
+fn task8_an_output_that_shrinks_strands_no_window_and_no_pointer() {
+    let mut run = Running::start(None);
+    let window = run
+        .state
+        .space
+        .elements()
+        .next()
+        .expect("the window")
+        .clone();
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let inside = area.loc + Point::from((area.size.w - 20, area.size.h - 20));
+    run.state.space.relocate_element(&window, inside);
+    run.state
+        .pointer_to(inside.to_f64(), smithay::backend::input::InputTime::now());
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let shown = |area: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|output| output.overlaps(area))
+    };
+    let moved = run
+        .state
+        .space
+        .element_geometry(&window)
+        .expect("the window is mapped");
+    assert!(shown(moved), "the window is on an output");
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert!(
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|output| output.to_f64().contains(at)),
+        "the pointer is on an output"
+    );
     run.stop();
 }
 

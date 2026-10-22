@@ -182,7 +182,6 @@ fn verdict(statement: &[u8], repository: &str, hex: &str) -> Option<Class> {
 
 /// The class of `digest` in `repository` by the attestation object in `dir`, verified with
 /// `keys`, the keys the policy in force names for the repository.
-#[cfg_attr(not(test), allow(dead_code))] // the check classifies its candidate with it from UT13's classification on
 pub fn class_of(dir: &Path, keys: &[VerifyingKey], repository: &str, digest: &str) -> Class {
     let Some(hex) = sha256_hex(digest) else {
         return Class::Feature;

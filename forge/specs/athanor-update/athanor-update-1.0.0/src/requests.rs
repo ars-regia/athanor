@@ -1,12 +1,16 @@
-//! The two requests of UT6, free of D-Bus so they are tested with fakes. `serve.rs` adds
-//! the bus, polkit and logind around them.
-use crate::check::Context;
+//! The requests of UT6 and UT13, free of D-Bus so they are tested with fakes. `serve.rs`
+//! adds the bus, polkit and logind around them.
+use crate::attestation::Class;
+use crate::check::{self, Context};
 use crate::sigobj;
 use crate::tools::{Deployed, Status, Tools};
 
 pub const ACTION_APPLY: &str = "os.athanor.update.apply";
 /// `Apply()` while another session is open: a restart ends that work too (ADR-0103 D22).
 pub const ACTION_APPLY_MULTI_SESSION: &str = "os.athanor.update.apply-multi-session";
+pub const ACTION_POSTPONE: &str = "os.athanor.update.postpone";
+/// Asked on every call: the action is never kept (ADR-0094).
+pub const ACTION_SET_AUTOMATIC: &str = "os.athanor.update.set-automatic";
 
 /// The bus sender of `Apply()`, as far as the request needs it.
 pub trait Caller {
@@ -47,6 +51,11 @@ pub enum Refusal {
     NoPreviousVersion,
     Blocked,
     Failed,
+    /// `Postpone()`: the lineage's one postpone is used, or its budget expired (UT13).
+    AlreadyPostponed,
+    /// `Postpone()`: the staged digest is of the feature class, or a signed copy of the
+    /// booted build (UT5).
+    NotSecurityClass,
 }
 
 impl From<RebootError> for Refusal {
@@ -150,6 +159,106 @@ pub async fn apply<T: Tools, P: Power, C: Caller>(ctx: &Context<'_, T>, power: &
     Ok(())
 }
 
+/// True when `staged` is a security update: of the security class by the attestation the
+/// check stored, and not a signed copy of the booted build (UT5), which updates nothing.
+fn staged_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, staged: &Deployed) -> bool {
+    let policy = crate::policy::in_force(&ctx.policy);
+    !check::same_build(&status.booted, &staged.digest, &staged.version, staged.build_time)
+        && matches!(check::stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })
+}
+
+/// `Postpone()`: spends the lineage's one postpone (UT13) and locks the staged security
+/// digest again, so the next shutdown does not apply it. Returns the expiry, after which the
+/// check or the shutdown unlocks it. The refusals are those of ADR-0127 point 14.
+///
+/// # Errors
+/// See [`Refusal`]. A refusal changes nothing; an unreadable opt-out or lineage is
+/// [`Refusal::Failed`], never read as the default. polkit has asked for [`ACTION_POSTPONE`]
+/// before `ctx` is made, so `ctx.now` is the time of the answer, however long the prompt took.
+pub fn postpone<T: Tools>(ctx: &Context<'_, T>) -> Result<i64, Refusal> {
+    let _lock = ctx.store.try_lock().map_err(|_| Refusal::Busy)?;
+    let automatic = ctx.store.automatic_security_updates().map_err(|err| {
+        tracing::error!(%err, "cannot read the opt-out of automatic security updates; Postpone() refuses");
+        Refusal::Failed
+    })?;
+    let mut lineage = ctx.store.lineage().map_err(|err| {
+        tracing::error!(%err, "cannot read the lineage of security updates; Postpone() refuses");
+        Refusal::Failed
+    })?;
+    let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
+    // With the opt-out on nothing applies by itself, so there is nothing to postpone.
+    let staged = status.staged.as_ref().filter(|_| automatic && !status.rollback_queued).ok_or(Refusal::NothingDownloaded)?;
+    let postponed = lineage.open.as_ref().is_some_and(|open| open.postponed);
+    // Locked and not postponed: nothing applies at the next shutdown.
+    if staged.download_only && !postponed {
+        return Err(Refusal::NothingDownloaded);
+    }
+    if !staged_security(ctx, &status, staged) {
+        return Err(Refusal::NotSecurityClass);
+    }
+    if postponed || lineage.expired(ctx.now) {
+        return Err(Refusal::AlreadyPostponed);
+    }
+    // The check opens the lineage when it unlocks; a digest `Apply()` unlocked has none yet.
+    lineage.notice(ctx.now, ctx.boot_id.as_deref().unwrap_or_default());
+    let until = lineage.postpone(ctx.now).map_err(|_| Refusal::AlreadyPostponed)?;
+    // Locked first: a postpone recorded over a deployment that still applies would be false.
+    ctx.tools.relock().map_err(|_| Refusal::Failed)?;
+    if let Err(err) = ctx.store.set_lineage(&lineage) {
+        tracing::error!(%err, "cannot record the postpone; the update is unlocked again");
+        republish(ctx);
+        return Err(Refusal::Failed);
+    }
+    republish(ctx);
+    Ok(until)
+}
+
+/// `SetAutomaticSecurityUpdates(enabled)`: writes the opt-out of UT13 in any state, an
+/// unreadable one included. Turned off, it first locks an unlocked security digest again;
+/// turned on, the run after the request unlocks a waiting one and opens its lineage (ADR-0127
+/// point 8). Returns whether the value changed, with the result: a write can fail after the
+/// value changed, and the change is logged either way. polkit has asked for
+/// [`ACTION_SET_AUTOMATIC`] before `ctx` is made, as for [`postpone`].
+///
+/// # Errors
+/// See [`Refusal`]. When the relock fails nothing is written.
+pub fn set_automatic<T: Tools>(ctx: &Context<'_, T>, enabled: bool) -> (bool, Result<(), Refusal>) {
+    let Ok(_lock) = ctx.store.try_lock() else {
+        return (false, Err(Refusal::Busy));
+    };
+    let previous = ctx.store.automatic_security_updates().ok();
+    if !enabled {
+        // Locked first, as in `postpone`: an opt-out written over a deployment that still
+        // applies at the next shutdown would be false.
+        let Ok(status) = ctx.tools.status() else {
+            return (false, Err(Refusal::Failed));
+        };
+        let unlocked = status.staged.as_ref().filter(|staged| !staged.download_only && !status.rollback_queued);
+        if unlocked.is_some_and(|staged| staged_security(ctx, &status, staged)) && ctx.tools.relock().is_err() {
+            tracing::error!("the security update could not be locked again; the opt-out is unchanged");
+            return (false, Err(Refusal::Failed));
+        }
+    }
+    let written = ctx.store.set_automatic_security_updates(enabled);
+    // After a failed write too: the run reads the opt-out as it is on disk, and unlocks again
+    // what was just locked when it still reads on.
+    republish(ctx);
+    match written {
+        Ok(()) => (changed(previous, Some(enabled), enabled), Ok(())),
+        Err(err) => {
+            tracing::error!(%err, "cannot write the opt-out of automatic security updates");
+            // The write fails after its rename when the directory cannot be synced: the value
+            // read back says whether it changed.
+            (changed(previous, ctx.store.automatic_security_updates().ok(), enabled), Err(Refusal::Failed))
+        }
+    }
+}
+
+/// Whether the opt-out went from `previous` to `enabled`, by the value `now` on disk.
+fn changed(previous: Option<bool>, now: Option<bool>, enabled: bool) -> bool {
+    previous != Some(enabled) && now == Some(enabled)
+}
+
 /// `GoBack()`: the immediately previous deployment, the digest left recorded as held, a reboot.
 ///
 /// # Errors
@@ -177,9 +286,10 @@ pub async fn go_back<T: Tools, P: Power>(ctx: &Context<'_, T>, power: &P) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::tests::{deployed, digest, Fake, Machine};
-    use crate::tools::Deployed;
-    use athanor_trust_state::UpdateState;
+    use crate::check::tests::{attested, deployed, digest, in_att_repo, locked, offered_attested, open_lineage, security, stage, staged_for_shutdown, store_attestation, Fake, Machine, NOW};
+    use crate::lineage::Lineage;
+    use crate::tools::{Deployed, Failure};
+    use athanor_trust_state::{ErrorCode, State, UpdateState};
     use std::cell::{Cell, RefCell};
 
     struct FakePower {
@@ -253,9 +363,13 @@ mod tests {
         tools
     }
 
-    fn published(machine: &Machine) -> UpdateState {
+    fn state(machine: &Machine) -> State {
         let text = std::fs::read_to_string(machine.store.run.join("state.json")).expect("state");
-        athanor_trust_state::parse(&text).expect("schema 2").update
+        athanor_trust_state::parse(&text).expect("schema 2")
+    }
+
+    fn published(machine: &Machine) -> UpdateState {
+        state(machine).update
     }
 
     #[tokio::test]
@@ -483,5 +597,199 @@ mod tests {
         assert_eq!(machine.store.held().expect("read"), Some(digest(2)));
         assert!(tools.calls.borrow().is_empty(), "no second rollback");
         assert!(power.rebooted.get());
+    }
+
+    /// `attested()` staged and unlocked for the next shutdown, of `class` by its stored
+    /// attestation, under `lineage`; the calls of the setup are forgotten.
+    fn will_apply(test: &str, class: Class, lineage: &Lineage) -> (Machine, Fake) {
+        let (machine, tools) = staged_for_shutdown(test, class, lineage);
+        tools.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
+        (machine, tools)
+    }
+
+    fn lineage_file(machine: &Machine) -> Vec<u8> {
+        std::fs::read(machine.store.var.join("lineage.json")).expect("lineage.json")
+    }
+
+    fn first_notice_at(machine: &Machine) -> Option<i64> {
+        machine.store.lineage().expect("lineage").open.map(|open| open.first_notice_at)
+    }
+
+    /// `postpone` refuses with `refusal`, calls no tool and leaves the lineage file as it was.
+    fn refused_untouched(machine: &Machine, tools: &Fake, now: i64, refusal: Refusal) {
+        let before = lineage_file(machine);
+        assert_eq!(postpone(&machine.ctx(tools, now)), Err(refusal));
+        assert!(tools.calls.borrow().is_empty(), "{:?}", tools.calls.borrow());
+        assert_eq!(lineage_file(machine), before, "the lineage is untouched");
+    }
+
+    #[test]
+    fn postpone_relocks_and_records() {
+        let (machine, tools) = will_apply("postpone", security(), &open_lineage(NOW, false));
+        assert_eq!(postpone(&machine.ctx(&tools, NOW + 60)), Ok(NOW + 604_800));
+        assert_eq!(*tools.calls.borrow(), ["relock"]);
+        let state = state(&machine);
+        assert_eq!(state.update, UpdateState::Downloaded);
+        assert!(state.postpone.expect("open").postponed);
+    }
+
+    #[test]
+    fn postpone_opens_the_lineage_of_a_digest_apply_unlocked() {
+        let (machine, tools) = will_apply("postpone-no-lineage", security(), &Lineage::default());
+        assert_eq!(postpone(&machine.ctx(&tools, NOW)), Ok(NOW + 604_800));
+        assert_eq!(first_notice_at(&machine), Some(NOW));
+        assert!(locked(&tools));
+    }
+
+    #[test]
+    fn a_second_postpone_is_already_postponed() {
+        let (machine, tools) = will_apply("postpone-twice", security(), &open_lineage(NOW, false));
+        assert_eq!(postpone(&machine.ctx(&tools, NOW)), Ok(NOW + 604_800));
+        tools.calls.borrow_mut().clear();
+        refused_untouched(&machine, &tools, NOW + 60, Refusal::AlreadyPostponed);
+        assert_eq!(first_notice_at(&machine), Some(NOW));
+    }
+
+    #[test]
+    fn a_newer_digest_of_the_lineage_is_already_postponed() {
+        // The lineage's postpone is spent and the check left a newer security digest locked.
+        let (machine, tools) = staged_for_shutdown("postpone-newer", security(), &open_lineage(NOW - 86_400, true));
+        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
+        assert_eq!(first_notice_at(&machine), Some(NOW - 86_400));
+    }
+
+    #[test]
+    fn an_expired_budget_is_already_postponed() {
+        let (machine, tools) = will_apply("postpone-expired", security(), &open_lineage(NOW, false));
+        refused_untouched(&machine, &tools, NOW + 604_800, Refusal::AlreadyPostponed);
+        let mut booted_out = open_lineage(NOW, false);
+        booted_out.open.as_mut().expect("open").boots_remaining = 0;
+        let (machine, tools) = will_apply("postpone-booted-out", security(), &booted_out);
+        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
+    }
+
+    #[test]
+    fn a_feature_digest_is_not_security_class() {
+        let (machine, tools) = will_apply("postpone-feature", Class::Feature, &open_lineage(NOW, false));
+        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass);
+    }
+
+    #[test]
+    fn postpone_with_nothing_staged_is_nothing_downloaded() {
+        let (machine, tools) = offered_attested("postpone-nothing", Some(security()));
+        store_attestation(&machine, &tools);
+        machine.store.set_lineage(&open_lineage(NOW, false)).expect("write");
+        tools.calls.borrow_mut().clear();
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
+        // Staged and locked with nothing postponed: an unlock that failed applies nothing.
+        stage(&tools);
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
+        // A queued rollback: the return, not the staged digest, is the next boot.
+        let (machine, tools) = will_apply("postpone-queued", security(), &open_lineage(NOW, false));
+        tools.status.borrow_mut().rollback_queued = true;
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
+    }
+
+    #[test]
+    fn postpone_with_the_opt_out_on_is_nothing_downloaded() {
+        let (machine, tools) = will_apply("postpone-opt-out", security(), &open_lineage(NOW, false));
+        machine.store.set_automatic_security_updates(false).expect("write");
+        refused_untouched(&machine, &tools, NOW, Refusal::NothingDownloaded);
+    }
+
+    #[test]
+    fn postpone_of_a_signed_copy_is_not_security_class() {
+        // The staged digest is the booted build under another digest, however it is attested.
+        let (machine, tools) = will_apply("postpone-signed-copy", security(), &open_lineage(NOW, false));
+        tools.status.borrow_mut().booted = in_att_repo(deployed(&digest(1), 2000));
+        refused_untouched(&machine, &tools, NOW, Refusal::NotSecurityClass);
+    }
+
+    #[test]
+    fn postpone_with_an_unreadable_lineage_is_failed() {
+        let (machine, tools) = will_apply("postpone-unreadable", security(), &open_lineage(NOW, false));
+        std::fs::write(machine.store.var.join("lineage.json"), b"").expect("write");
+        refused_untouched(&machine, &tools, NOW, Refusal::Failed);
+        let (machine, tools) = will_apply("postpone-unreadable-opt-out", security(), &open_lineage(NOW, false));
+        std::fs::write(machine.store.var.join("automatic-security-updates"), b"").expect("write");
+        refused_untouched(&machine, &tools, NOW, Refusal::Failed);
+    }
+
+    #[test]
+    fn turning_automatic_off_relocks_an_unlocked_security_digest() {
+        let (machine, tools) = will_apply("automatic-off", security(), &open_lineage(NOW, false));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
+        assert_eq!(*tools.calls.borrow(), ["relock"]);
+        let state = state(&machine);
+        assert_eq!((state.update, state.automatic_security_updates), (UpdateState::Downloaded, false));
+        assert!(!machine.store.automatic_security_updates().expect("read"));
+        // A feature digest unlocked by Apply() is the user's restart: it stays unlocked.
+        let (machine, tools) = will_apply("automatic-off-feature", Class::Feature, &Lineage::default());
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
+        assert!(tools.calls.borrow().is_empty() && !locked(&tools));
+    }
+
+    #[test]
+    fn turning_it_on_unlocks_a_waiting_one_and_starts_the_clock() {
+        let (machine, tools) = staged_for_shutdown("automatic-on", security(), &Lineage::default());
+        machine.store.set_automatic_security_updates(false).expect("write");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (true, Ok(())));
+        assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
+        let state = state(&machine);
+        assert_eq!((state.update, state.automatic_security_updates), (UpdateState::WillApplyAtNextShutdown, true));
+        assert_eq!(state.postpone.map(|postpone| postpone.first_notice_at), Some(NOW));
+        assert_eq!(attested(), tools.status.borrow().staged.as_ref().expect("staged").digest);
+    }
+
+    #[test]
+    fn set_automatic_reports_only_a_change() {
+        let (machine, tools) = staged_for_shutdown("automatic-change", security(), &Lineage::default());
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (false, Ok(())), "on by default");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (false, Ok(())));
+        // An unreadable opt-out is rewritten, and the write is a change.
+        std::fs::write(machine.store.var.join("automatic-security-updates"), b"").expect("write");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (true, Ok(())));
+        assert!(!machine.store.automatic_security_updates().expect("read"));
+    }
+
+    #[test]
+    fn turning_automatic_off_writes_nothing_when_the_relock_fails() {
+        let (machine, mut tools) = will_apply("automatic-off-relock-fails", security(), &open_lineage(NOW, false));
+        tools.relock = Err(Failure { code: ErrorCode::Internal, host: None });
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), false), (false, Err(Refusal::Failed)));
+        assert!(machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
+        assert_eq!(*tools.calls.borrow(), ["relock"]);
+    }
+
+    #[test]
+    fn a_failed_write_of_the_opt_out_is_no_change() {
+        let (machine, tools) = staged_for_shutdown("automatic-write-fails", security(), &Lineage::default());
+        machine.store.set_automatic_security_updates(false).expect("write");
+        // A directory at the temporary name fails the write before its rename, root included.
+        std::fs::create_dir(machine.store.var.join(format!(".automatic-security-updates.{}", std::process::id()))).expect("mkdir");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (false, Err(Refusal::Failed)));
+        assert!(!machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
+    }
+
+    #[test]
+    fn a_change_is_judged_by_the_value_read_back() {
+        // A write that failed after its rename: the value on disk is the new one.
+        assert!(changed(Some(true), Some(false), false));
+        assert!(changed(None, Some(false), false), "an unreadable opt-out rewritten");
+        assert!(!changed(Some(true), Some(true), false), "failed before the rename");
+        assert!(!changed(Some(true), None, false), "unreadable afterwards");
+        assert!(!changed(Some(false), Some(false), false), "the same value");
+    }
+
+    #[tokio::test]
+    async fn go_back_does_not_reset_the_lineage() {
+        let machine = Machine::new("go-back-lineage", &["real/k1.pub"]);
+        let lineage = open_lineage(NOW, true);
+        machine.store.set_lineage(&lineage).expect("write");
+        let tools = Fake::booted(deployed(&digest(2), 2000));
+        tools.status.borrow_mut().rollback = Some(deployed(&digest(1), 1000));
+        assert_eq!(go_back(&machine.ctx(&tools, NOW), &FakePower::new(false, Ok(()))).await, Ok(()));
+        assert_eq!(machine.store.lineage().expect("read"), lineage);
     }
 }
