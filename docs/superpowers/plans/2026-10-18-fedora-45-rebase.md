@@ -269,7 +269,7 @@ Green, all on the branch and before the merge (ADR-0078; the definition M5 confi
   - If the run stops at a job that needs a signing environment, see Q6.
 - [ ] **Laptop ISO test.** `SECURE_BOOT=1 MEMORY_MIB=4096 VCPUS=4 forge/test/iso/run_iso_test.sh <branch ISO> /var/tmp/f45-iso`, with the verdict case `secure-boot` and `greeter.txt` reporting the greeter. The 4 GiB guest is for a 7 GB host *(estimated sufficient)*; if it is not, the test moves to the desktop after S1.
 - [ ] **Desktop S1.** The spike's items pass on the branch image (task 8).
-- [ ] **Regressions found by task 11.**
+- [ ] **Open regressions, found early by a Fedora 45 rig run on the task 11 branch.**
   - #699: the bar's Screen reader row is back on Fedora 45 (at-spi2-core 2.62 no longer serves `ScreenReaderEnabled`), and still works on Fedora 43.
   - #700: task 8 records that a GTK 4.24 client reads the appearance keys through the Settings portal, on the session and on the greeter; a surface without the portal is fixed on the branch.
 - [ ] **Console, by the maintainer.**
@@ -286,9 +286,10 @@ Then the pull request leaves draft and goes to the card. After the merge, the `i
 
 - [ ] Follow `docs/spikes/s1-bootc-fedora45.md`, sections 2 to 4, unchanged, on the desktop (M7): one VM at a time, the runner guest stopped for each sitting (M11), and `uptime` before each start.
 - [ ] Input: `ACC_BASE` names the image of the task 7 branch run, by digest. The spike's own route, a local build with only the base lines changed, stays for the items that can run before the branch image exists. With fc43 tier RPMs on a Fedora 45 base, that route installs only the chain's packages, as its section 3 says.
-- [ ] Two additions, written into the spike in the same pull request as the answers:
+- [ ] Three additions, written into the spike in the same pull request as the answers:
   - item 7 also measures a Fedora 43 `v1` → `v2` run, as the baseline every Fedora 45 number is read against;
-  - item 6 records `tpm2_pcrread sha256:0,4,7,9,11` at each boot (Q2).
+  - item 6 records `tpm2_pcrread sha256:0,4,7,9,11` at each boot (Q2);
+  - the font, hinting, button layout, animations, colour scheme, accent colour and contrast that a GTK 4.24 client reads through the Settings portal, on the session and on the greeter (#700).
 - [ ] The answers go into the spike's `**Answer.**` lines, through a pull request touching only `docs/spikes/` (no owner, ADR-0107).
 - [ ] Check, for M5: items 0, 2, 4, 5 and 6 (S1-a, S1-b, S1-c, S1-e) pass, item 5 meaning that Fedora 45 enforces the shipped signature policy and `containerPolicy` and that its three stages behave as the spike expects; item 1 passes for the four subjects across the update and across phase 4. The rollback rule of item 1 phase 3 is the one the spike expects today's bootc to fail, so it is recorded, not required. Items 3, 6 (S1-d) and 7 are recorded.
 - Runs on: desktop, about 2 hours of builds and 4 hours of VM time over two or three sittings (the spike's estimate). Depends on: task 6, the task 7 branch run, the 0.9 acceptance ending, and M11.
