@@ -55,6 +55,36 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Name entry.'", lines[0])
 
+    def test_a_text_and_its_line_may_be_heard_as_one_entry_utterance(self):
+        # Orca says a GTK text view's line after it; an entry's line in the same utterance.
+        reference = ["Notes text.", "The end.", "Note testo.", "La fine."]
+        transcript = ["Notes entry The end.", "Note campo inserimento La fine."]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Notes entry The end.'", lines[1])
+
+    def test_a_line_is_joined_only_to_the_text_it_follows(self):
+        self.assertEqual(
+            compare.compare(["Notes text.", "Another line."], ["Notes entry The end."])[1],
+            ["'Notes text.': missing", "'Another line.': missing"],
+        )
+        self.assertEqual(
+            compare.compare(["The end."], ["Notes entry The end."])[1], ["'The end.': missing"]
+        )
+        self.assertEqual(
+            compare.compare(["Sample text", "The end."], ["Sample entry The end."])[1],
+            ["'Sample text': missing", "'The end.': missing"],
+        )
+
+    def test_only_a_text_area_of_the_gallery_joins_its_line(self):
+        # A single-line field's line and the next utterance are two things to hear.
+        self.assertEqual(
+            compare.compare(
+                ["Name text.", "Screen reader off."], ["Name entry Screen reader off."]
+            )[1],
+            ["'Name text.': missing", "'Screen reader off.': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",

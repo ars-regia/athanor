@@ -16,3 +16,6 @@ slider	A slider	Un cursore
 page.lists	Lists	Elenchi
 list	A list	Un elenco
 row	Row	Riga
+page.text	Text	Testo
+notes	Notes	Note
+notes.text	Lines wrap at the width of the area, as in the text view of GTK.\nThe caret starts here.	Le righe vanno a capo alla larghezza dell'area, come nella vista di testo di GTK.\nIl cursore parte da qui.

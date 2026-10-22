@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use athanor_layout::favorites::{self, FavoritesError};
 use gio_unix::DesktopAppInfo;
 
+#[derive(PartialEq)]
 enum State {
     Loaded(Vec<String>),
     /// A rejected file, a crash-loop give-up, or no configuration directory: nothing is
@@ -76,10 +77,11 @@ impl Store {
         }
     }
 
-    /// Reads the file again. A file removed since start is a deliberate user act, not an
-    /// error: nothing is pinned, and the next start imports again.
-    pub fn reload(&self) {
-        let Some(file) = &self.file else { return };
+    /// Reads the file again, and tells whether what the store holds changed. A file removed
+    /// since start is a deliberate user act, not an error: nothing is pinned, and the next
+    /// start imports again.
+    pub fn reload(&self) -> bool {
+        let Some(file) = &self.file else { return false };
         let now = match favorites::read(file) {
             Ok(ids) => State::Loaded(ids.unwrap_or_default()),
             Err(err) => {
@@ -87,7 +89,7 @@ impl Store {
                 State::Unavailable
             }
         };
-        self.state.replace(now);
+        self.state.replace(now) != *self.state.borrow()
     }
 
     /// Applies `change` to the file as it is on disk, under its lock, and keeps the
@@ -202,6 +204,19 @@ mod tests {
         assert!(store.change(|list| favorites::pinned(list, C)));
         assert_eq!(favorites::read(&file).expect("read"), Some(ids(&[A, B, C])));
         assert_eq!(store.ids(), Some(ids(&[A, B, C])));
+    }
+
+    #[test]
+    fn a_reload_tells_whether_the_favourites_changed() {
+        let file = scratch("reload-changed");
+        favorites::save(&file, &ids(&[A])).expect("save");
+        let store = store(&file);
+        assert!(!store.reload());
+        favorites::save(&file, &ids(&[A, B])).expect("other writer");
+        assert!(store.reload());
+        assert!(!store.reload());
+        fs::write(&file, BROKEN).expect("break");
+        assert!(store.reload());
     }
 
     #[test]

@@ -70,6 +70,17 @@ class Units(unittest.TestCase):
         for unit in ("athanor-update-migrate.timer", "athanor-update-migrate.service"):
             self.assertFalse(any("/var/lib/athanor-update/migrated" in line for line in directives(unit)), unit)
 
+    def test_state_unit_evaluates_at_shutdown(self):
+        lines = directives("athanor-update-state.service")
+        for directive in ("RemainAfterExit=yes", "ExecStop=/usr/bin/athanor-update shutdown", "TimeoutStopSec=30", "PrivateNetwork=yes", *MEASURED):
+            self.assertIn(directive, lines)
+        after = " ".join(line.removeprefix("After=") for line in lines if line.startswith("After=")).split()
+        self.assertIn("ostree-finalize-staged.service", after)
+
+    def test_the_check_is_ordered_after_greenboot_s_verdict(self):
+        after = [line for line in directives("athanor-update-check.service") if line.startswith("After=")]
+        self.assertIn("greenboot-success.target", " ".join(after).split(), after)
+
     def test_the_check_does_not_wait_on_the_migration(self):
         wants = [line for line in directives("athanor-update-check.service") if line.startswith(("Wants=", "Requires="))]
         self.assertFalse(any("athanor-update-migrate" in line for line in wants), wants)
@@ -102,13 +113,13 @@ class Presets(unittest.TestCase):
 
 
 class Bus(unittest.TestCase):
-    def test_the_bus_policy_allows_three_members_and_introspection_only(self):
+    def test_the_bus_policy_allows_five_members_and_introspection_only(self):
         doc = xml.dom.minidom.parse(str(SOURCES / "usr/share/dbus-1/system.d/os.athanor.Update1.conf"))
         allows = [dict(node.attributes.items()) for node in doc.getElementsByTagName("allow")]
         sends = [a for a in allows if "send_destination" in a]
         self.assertEqual(sorted((a["send_interface"], a["send_member"]) for a in sends),
                          [("org.freedesktop.DBus.Introspectable", "Introspect"), ("os.athanor.Update1", "Apply"), ("os.athanor.Update1", "GoBack"),
-                          ("os.athanor.Update1", "State")])
+                          ("os.athanor.Update1", "Postpone"), ("os.athanor.Update1", "SetAutomaticSecurityUpdates"), ("os.athanor.Update1", "State")])
         self.assertTrue(all(a["send_destination"] == "os.athanor.Update1" for a in sends))
         self.assertEqual([a for a in allows if "own" in a], [{"own": "os.athanor.Update1"}])
 
@@ -116,7 +127,7 @@ class Bus(unittest.TestCase):
         lines = (SOURCES / "usr/share/dbus-1/system-services/os.athanor.Update1.service").read_text().splitlines()
         self.assertEqual(lines, ["[D-BUS Service]", "Name=os.athanor.Update1", "Exec=/bin/false", "User=root", "SystemdService=athanor-update.service"])
 
-    def test_the_polkit_defaults_are_logind_s_for_apply_and_auth_admin_otherwise(self):
+    def test_the_polkit_defaults_are_logind_s_for_apply_and_postpone_and_auth_admin_otherwise(self):
         doc = xml.dom.minidom.parse(str(SOURCES / "usr/share/polkit-1/actions/os.athanor.update.policy"))
         found = {}
         for action in doc.getElementsByTagName("action"):
@@ -124,7 +135,9 @@ class Bus(unittest.TestCase):
             found[action.getAttribute("id")] = tuple(defaults.getElementsByTagName(tag)[0].firstChild.data for tag in ("allow_any", "allow_inactive", "allow_active"))
         self.assertEqual(found, {"os.athanor.update.apply": ("auth_admin_keep", "auth_admin_keep", "yes"),
                                  "os.athanor.update.apply-multi-session": ("auth_admin", "auth_admin", "auth_admin"),
-                                 "os.athanor.update.rollback": ("auth_admin", "auth_admin", "auth_admin")})
+                                 "os.athanor.update.postpone": ("auth_admin", "auth_admin", "yes"),
+                                 "os.athanor.update.rollback": ("auth_admin", "auth_admin", "auth_admin"),
+                                 "os.athanor.update.set-automatic": ("auth_admin", "auth_admin", "auth_admin")})
 
 
 if __name__ == "__main__":

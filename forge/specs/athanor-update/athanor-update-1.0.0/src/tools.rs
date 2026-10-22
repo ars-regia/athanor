@@ -63,8 +63,15 @@ pub trait Tools {
     fn switch(&self, image: &str) -> Result<(), Failure>;
     /// Copies `<repository>:sha256-<hex>.sig` into `dest` under the attachments policy.
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
+    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
+    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
     /// NetworkManager's `Metered` is 1 (yes) or 3 (guessed yes). No NetworkManager: false.
     fn metered(&self) -> bool;
+    /// `greenboot-success.target` is active: greenboot's required health checks passed on this
+    /// boot. `boot-complete.target` does not say it: it becomes active whatever they say. Any
+    /// other answer, an error included, is false.
+    fn boot_healthy(&self) -> bool;
 }
 
 /// Seconds since the epoch of an RFC 3339 time, as the image labels carry it.
@@ -269,15 +276,6 @@ fn fetch_attachment(repository: &str, digest: &str, suffix: &str, dest: &Path) -
     run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
 }
 
-impl System {
-    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
-    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
-    #[cfg_attr(not(test), allow(dead_code))] // called by the check from UT13's classification on
-    pub fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        fetch_attachment(repository, digest, "att", dest)
-    }
-}
-
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
     run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
 }
@@ -355,9 +353,18 @@ impl Tools for System {
         fetch_attachment(repository, digest, "sig", dest)
     }
 
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
+        fetch_attachment(repository, digest, "att", dest)
+    }
+
     fn metered(&self) -> bool {
         let property = ["--system", "get-property", "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager", "Metered"];
         matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok("u 1" | "u 3"))
+    }
+
+    fn boot_healthy(&self) -> bool {
+        let property = ["--system", "get-property", "org.freedesktop.systemd1", "/org/freedesktop/systemd1/unit/greenboot_2dsuccess_2etarget", "org.freedesktop.systemd1.Unit", "ActiveState"];
+        matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok(r#"s "active""#))
     }
 }
 

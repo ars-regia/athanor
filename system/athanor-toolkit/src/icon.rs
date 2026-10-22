@@ -146,6 +146,22 @@ impl Image {
         self.pixmap.height()
     }
 
+    /// The image in one colour, its own alpha kept: a symbolic icon drawn in the text's colour,
+    /// as GTK recolours them. The colour's own alpha is not used.
+    pub fn tinted(&self, colour: crate::Rgba) -> Self {
+        let mut pixmap = (*self.pixmap).clone();
+        let [r, g, b, _] = colour.0;
+        for pixel in pixmap.data_mut() {
+            let alpha = u16::from(pixel.a);
+            // At most 255 * 255 / 255: the quotient fits a u8.
+            let premultiply = |c: u8| ((u16::from(c) * alpha + 127) / 255) as u8;
+            (pixel.r, pixel.g, pixel.b) = (premultiply(r), premultiply(g), premultiply(b));
+        }
+        Self {
+            pixmap: Arc::new(pixmap),
+        }
+    }
+
     pub(crate) fn pixmap(&self) -> &Arc<Pixmap> {
         &self.pixmap
     }
@@ -905,6 +921,21 @@ mod widget_tests {
         let node = crate::a11y::node(&ui, decorative, 1.0);
         assert!(node.is_hidden());
         assert_eq!(node.label(), None);
+    }
+
+    #[test]
+    fn a_tinted_image_keeps_its_alpha() {
+        let half = [0x66, 0, 0, 0x80].repeat(4);
+        let metadata = PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false);
+        let image = Image {
+            pixmap: Arc::new(Pixmap::from_parts(half, 2, 2, metadata)),
+        };
+        let tinted = image.tinted(crate::Rgba::rgb(0, 0, 0xff));
+        let p = tinted.pixmap.sample(1, 1);
+        assert_eq!((p.r, p.g, p.b, p.a), (0, 0, 0x80, 0x80));
+        // The original is untouched: images are shared.
+        let p = image.pixmap.sample(1, 1);
+        assert_eq!((p.r, p.a), (0x66, 0x80));
     }
 
     #[test]

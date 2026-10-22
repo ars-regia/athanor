@@ -45,4 +45,26 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+  <action id="os.athanor.update.postpone">
+    <description>Postpone a security update</description>
+    <description xml:lang="it">Rimanda un aggiornamento di sicurezza</description>
+    <message>Authentication is required to postpone a security update</message>
+    <message xml:lang="it">È richiesta l'autenticazione per rimandare un aggiornamento di sicurezza</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+  <action id="os.athanor.update.set-automatic">
+    <description>Turn automatic security updates on or off</description>
+    <description xml:lang="it">Attiva o disattiva gli aggiornamenti di sicurezza automatici</description>
+    <message>Authentication is required to change automatic security updates</message>
+    <message xml:lang="it">È richiesta l'autenticazione per modificare gli aggiornamenti di sicurezza automatici</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
 </policyconfig>
