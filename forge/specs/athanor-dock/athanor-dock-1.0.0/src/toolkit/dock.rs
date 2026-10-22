@@ -65,6 +65,27 @@ fn drops_images(change: &Change) -> bool {
     matches!(change, Change::Appearance(_) | Change::Apps)
 }
 
+/// The icon an entry is drawn with: its desktop entry's, or [`FALLBACK_ICON`].
+fn entry_icon(info: Option<&DesktopAppInfo>) -> String {
+    info.and_then(|info| info.string("Icon"))
+        .map_or_else(|| FALLBACK_ICON.to_owned(), |icon| icon.to_string())
+}
+
+/// Whether a surface drawn from `before` must be drawn again for `now`: an entry changed, or
+/// what its button shows of the desktop entry, its icon or its name, as when the application
+/// of a pinned entry is installed or its desktop entry edited.
+fn redraws(before: &[State], now: &[State]) -> bool {
+    let drawn = |states: &[State]| {
+        states
+            .iter()
+            .map(|(entry, info)| {
+                (entry.clone(), entry_icon(info.as_ref()), app_name(entry, info.as_ref()))
+            })
+            .collect::<Vec<_>>()
+    };
+    drawn(before) != drawn(now)
+}
+
 /// A GLib timeout that can be replaced. The slot holds the id until the timeout fires and
 /// takes it then, so a fired timeout is never removed: GLib aborts on that.
 #[derive(Default)]
@@ -388,10 +409,7 @@ impl Dock {
         opener(self, ui, acts, Opener::Workspaces);
         for (index, (entry, info)) in states.iter().enumerate() {
             let label = entry_label(&app_name(entry, info.as_ref()), &entry.windows);
-            let icon = info
-                .as_ref()
-                .and_then(|info| info.string("Icon"))
-                .map_or_else(|| FALLBACK_ICON.to_owned(), |icon| icon.to_string());
+            let icon = entry_icon(info.as_ref());
             let indicator = entries::active(entry).then(|| edge::indicator_side(anchor));
             let button = self.icon_button(ui, island, &icon, ENTRY_ICON, scale, &label, indicator);
             if !entry.windows.is_empty() {
@@ -472,7 +490,7 @@ impl Dock {
         self.stale = false;
     }
 
-    /// Draws again the surfaces whose entries changed.
+    /// Draws again the surfaces whose entries, or what their buttons show, changed.
     fn refresh(&mut self, shell: &mut Shell) {
         self.stale = false;
         let states = self.states();
@@ -487,10 +505,8 @@ impl Dock {
             .outs
             .iter()
             .filter(|(_, out)| out.placement.is_some())
-            .filter_map(|(id, out)| {
-                let before = entries(&out.states);
-                (before != now).then(|| (*id, model::same_shape(&before, &now)))
-            })
+            .filter(|(_, out)| redraws(&out.states, &states))
+            .map(|(id, out)| (*id, model::same_shape(&entries(&out.states), &now)))
             .collect();
         for (id, same) in changed {
             self.build(shell, id, &states, same);
@@ -997,5 +1013,33 @@ mod tests {
         assert!(!drops_images(&Change::Windows));
         assert!(!drops_images(&Change::Files));
         assert!(!drops_images(&Change::Reload));
+    }
+
+    fn info(icon: &str, name: &str) -> Option<DesktopAppInfo> {
+        let file = glib::KeyFile::new();
+        let data = format!("[Desktop Entry]\nType=Application\nName={name}\nIcon={icon}\nExec=true\n");
+        file.load_from_data(&data, glib::KeyFileFlags::NONE).ok()?;
+        DesktopAppInfo::from_keyfile(&file)
+    }
+
+    #[test]
+    fn a_pinned_entry_is_drawn_again_when_its_application_comes_or_its_desktop_entry_changes() {
+        let entry = athanor_apps::model::Entry {
+            desktop_id: Some("org.example.Mail.desktop".to_owned()),
+            app_id: "org.example.Mail".to_owned(),
+            pinned: true,
+            windows: Vec::new(),
+        };
+        let missing: Vec<State> = vec![(entry.clone(), None)];
+        let installed: Vec<State> = vec![(entry.clone(), info("mail-client", "Mail"))];
+        assert!(installed[0].1.is_some(), "the fixture is a desktop entry");
+        assert!(!redraws(&missing, &missing));
+        assert!(!redraws(&installed, &installed));
+        // The same entry: the fallback icon and the app id give way to the desktop entry's.
+        assert!(redraws(&missing, &installed));
+        let renamed: Vec<State> = vec![(entry.clone(), info("mail-client", "Post"))];
+        let new_icon: Vec<State> = vec![(entry, info("mail-new", "Mail"))];
+        assert!(redraws(&installed, &renamed));
+        assert!(redraws(&installed, &new_icon));
     }
 }
