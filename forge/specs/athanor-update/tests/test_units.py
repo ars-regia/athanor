@@ -70,6 +70,13 @@ class Units(unittest.TestCase):
         for unit in ("athanor-update-migrate.timer", "athanor-update-migrate.service"):
             self.assertFalse(any("/var/lib/athanor-update/migrated" in line for line in directives(unit)), unit)
 
+    def test_state_unit_evaluates_at_shutdown(self):
+        lines = directives("athanor-update-state.service")
+        for directive in ("RemainAfterExit=yes", "ExecStop=/usr/bin/athanor-update shutdown", "TimeoutStopSec=30", "PrivateNetwork=yes", *MEASURED):
+            self.assertIn(directive, lines)
+        after = " ".join(line.removeprefix("After=") for line in lines if line.startswith("After=")).split()
+        self.assertIn("ostree-finalize-staged.service", after)
+
     def test_the_check_runs_after_greenboot_s_verdict(self):
         after = [line for line in directives("athanor-update-check.service") if line.startswith("After=")]
         self.assertIn("boot-complete.target", " ".join(after).split(), after)
