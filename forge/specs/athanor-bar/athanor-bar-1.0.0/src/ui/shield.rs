@@ -384,12 +384,39 @@ fn date(epoch: i64) -> String {
         .map_or_else(|_| epoch.to_string(), |text| text.to_string())
 }
 
-/// The expiry as UT13 words it: local day, month and hour, "28 October, 14:30", in the
-/// session's language.
+/// The month's name from the bar's own catalog, so that it speaks the language of the
+/// sentence around it, not GLib's `LC_TIME`.
+fn month_name(month: i32) -> Option<String> {
+    Some(match month {
+        1 => tr("January"),
+        2 => tr("February"),
+        3 => tr("March"),
+        4 => tr("April"),
+        5 => tr("May"),
+        6 => tr("June"),
+        7 => tr("July"),
+        8 => tr("August"),
+        9 => tr("September"),
+        10 => tr("October"),
+        11 => tr("November"),
+        12 => tr("December"),
+        _ => return None,
+    })
+}
+
+/// The expiry as UT13 words it: local day, month and hour, "28 October, 14:30", the month
+/// from the catalog and the rest numeric.
 fn local_time(epoch: i64) -> String {
-    glib::DateTime::from_unix_local(epoch)
-        .and_then(|time| time.format("%-d %B, %H:%M"))
-        .map_or_else(|_| epoch.to_string(), |text| text.to_string())
+    let words = glib::DateTime::from_unix_local(epoch)
+        .ok()
+        .and_then(|time| Some((time.day_of_month(), month_name(time.month())?, time.hour(), time.minute())));
+    match words {
+        Some((day, month, hour, minute)) => format!("{day} {month}, {hour:02}:{minute:02}"),
+        None => {
+            tracing::warn!(epoch, "cannot format the postponed-until time; showing the raw epoch");
+            epoch.to_string()
+        }
+    }
 }
 
 fn note(text: &str) -> gtk4::Label {

@@ -175,7 +175,7 @@ msgstr "Nearby devices"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348 src/ui/power.rs:110
-#: src/ui/shield.rs:608
+#: src/ui/shield.rs:641
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -428,12 +428,12 @@ msgstr "Shut down now?"
 msgid "Power"
 msgstr "Power"
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:578
-#: src/ui/shield.rs:677
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:610
+#: src/ui/shield.rs:721
 msgid "Restart to update"
 msgstr "Restart to update"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:676
+#: src/ui/power.rs:154 src/ui/shield.rs:720
 msgid "Restart and install the update now?"
 msgstr "Restart and install the update now?"
 
@@ -585,88 +585,136 @@ msgstr "This security update was already postponed once, or can no longer be"
 msgid "Only security updates can be postponed"
 msgstr "Only security updates can be postponed"
 
-#: src/ui/shield.rs:457
+#: src/ui/shield.rs:391
+msgid "January"
+msgstr "January"
+
+#: src/ui/shield.rs:392
+msgid "February"
+msgstr "February"
+
+#: src/ui/shield.rs:393
+msgid "March"
+msgstr "March"
+
+#: src/ui/shield.rs:394
+msgid "April"
+msgstr "April"
+
+#: src/ui/shield.rs:395
+msgid "May"
+msgstr "May"
+
+#: src/ui/shield.rs:396
+msgid "June"
+msgstr "June"
+
+#: src/ui/shield.rs:397
+msgid "July"
+msgstr "July"
+
+#: src/ui/shield.rs:398
+msgid "August"
+msgstr "August"
+
+#: src/ui/shield.rs:399
+msgid "September"
+msgstr "September"
+
+#: src/ui/shield.rs:400
+msgid "October"
+msgstr "October"
+
+#: src/ui/shield.rs:401
+msgid "November"
+msgstr "November"
+
+#: src/ui/shield.rs:402
+msgid "December"
+msgstr "December"
+
+#: src/ui/shield.rs:489
 #, rust-format
 msgid "Version {version}"
 msgstr "Version {version}"
 
-#: src/ui/shield.rs:462
+#: src/ui/shield.rs:494
 #, rust-format
 msgid "Built on {date}"
 msgstr "Built on {date}"
 
-#: src/ui/shield.rs:468
+#: src/ui/shield.rs:500
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Last checked on {date}"
 
-#: src/ui/shield.rs:469
+#: src/ui/shield.rs:501
 msgid "Never checked"
 msgstr "Never checked"
 
-#: src/ui/shield.rs:475
+#: src/ui/shield.rs:507
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:479
+#: src/ui/shield.rs:511
 msgid "Signature policy in force"
 msgstr "Signature policy in force"
 
-#: src/ui/shield.rs:481
+#: src/ui/shield.rs:513
 msgid "Signature policy not in force"
 msgstr "Signature policy not in force"
 
-#: src/ui/shield.rs:484
+#: src/ui/shield.rs:516
 msgid "The policy is the one Athanor ships"
 msgstr "The policy is the one Athanor ships"
 
-#: src/ui/shield.rs:486
+#: src/ui/shield.rs:518
 msgid "The policy was changed on this machine"
 msgstr "The policy was changed on this machine"
 
-#: src/ui/shield.rs:489
+#: src/ui/shield.rs:521
 msgid "Secure Boot on"
 msgstr "Secure Boot on"
 
-#: src/ui/shield.rs:491
+#: src/ui/shield.rs:523
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot off: this machine runs in the declared degraded mode"
 
-#: src/ui/shield.rs:495
+#: src/ui/shield.rs:527
 msgid "Automatic security updates are off: security fixes wait until someone installs them."
 msgstr "Automatic security updates are off: security fixes wait until someone installs them."
 
-#: src/ui/shield.rs:500
+#: src/ui/shield.rs:532
 #, rust-format
 msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
 msgstr "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
 
-#: src/ui/shield.rs:580
+#: src/ui/shield.rs:612
 msgid "Postpone"
 msgstr "Postpone"
 
-#: src/ui/shield.rs:582
+#: src/ui/shield.rs:614
 msgid "Go back to the previous version"
 msgstr "Go back to the previous version"
 
-#: src/ui/shield.rs:584
+#: src/ui/shield.rs:616
 msgid "Automatic security updates"
 msgstr "Automatic security updates"
 
-#: src/ui/shield.rs:652
+#: src/ui/shield.rs:686
 msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
 msgstr "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
 
-#: src/ui/shield.rs:653
+#: src/ui/shield.rs:687
 msgid "Turn Off"
 msgstr "Turn Off"
 
-#: src/ui/shield.rs:682
+#: src/ui/shield.rs:726
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Go back to the previous version and restart? This asks for an administrator's password."
 
-#: src/ui/shield.rs:683
+#: src/ui/shield.rs:727
 msgid "Go back"
 msgstr "Go back"
 
