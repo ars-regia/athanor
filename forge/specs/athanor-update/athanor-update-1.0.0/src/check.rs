@@ -122,8 +122,10 @@ fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &s
 /// The class of the candidate: its release attestation is fetched, then verified. A failed
 /// fetch is logged and not a failure of the check: the attestation stored by an earlier check
 /// decides, and with none the digest is of the feature class and waits for `Apply()`; the next
-/// check fetches again. Only the attestations of the booted, the staged and the candidate
-/// digest are kept.
+/// check fetches again. A fetched copy replaces a stored attestation that verifies as the
+/// security class only when it verifies as that class too: the attachments policy accepts
+/// anything, so a registry could otherwise turn a waiting security digest into a feature one.
+/// Only the attestations of the booted, the staged and the candidate digest are kept.
 fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status, digest: &str) -> Class {
     let repository = sigobj::repository_of(&status.booted.image);
     let keep: Vec<&str> = [Some(status.booted.digest.as_str()), status.staged.as_ref().map(|staged| staged.digest.as_str()), Some(digest)].into_iter().flatten().collect();
@@ -143,7 +145,15 @@ fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &St
         })
     });
     if fetched.is_ok() {
-        if let Err(err) = remove_dir(&dir).and_then(|()| std::fs::rename(&partial, &dir)) {
+        let keys = policy_keys(policy, repository).unwrap_or_default();
+        let security = |dir: &std::path::Path| matches!(attestation::class_of(dir, &keys, repository, digest), Class::Security { .. });
+        let stored = if security(&partial) || !security(&dir) {
+            replace_copy(&partial, &dir)
+        } else {
+            tracing::warn!(%digest, "the fetched release attestation does not verify as the security class; the stored one, which does, is kept");
+            remove_dir(&partial)
+        };
+        if let Err(err) = stored {
             tracing::error!(%err, %digest, "cannot store the fetched release attestation");
         }
     }
@@ -154,6 +164,32 @@ fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &St
         tracing::warn!(%digest, "the release attestation does not verify as the security class; the candidate is of the feature class");
     }
     class
+}
+
+/// Moves the attestation copy in `from` over the one in `to`, in an order that leaves `to` a
+/// whole copy at every step, so a crash never loses a stored attestation: the blobs first,
+/// named by their digest, then the manifest that names them, then what only the earlier copy
+/// held. A crash before the manifest leaves the earlier copy with extra blobs.
+fn replace_copy(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    if !to.exists() {
+        return std::fs::rename(from, to);
+    }
+    let names = std::fs::read_dir(from)?.map(|entry| entry.map(|entry| entry.file_name())).collect::<std::io::Result<Vec<_>>>()?;
+    for name in names.iter().filter(|name| *name != "manifest.json") {
+        std::fs::rename(from.join(name), to.join(name))?;
+    }
+    std::fs::rename(from.join("manifest.json"), to.join("manifest.json"))?;
+    for entry in std::fs::read_dir(to)? {
+        let entry = entry?;
+        if !names.contains(&entry.file_name()) {
+            if entry.file_type()?.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            } else {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+    }
+    std::fs::remove_dir(from)
 }
 
 /// Removes a directory and what it holds; one that does not exist is no error.
@@ -502,12 +538,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         }
         // Applied (ADR-0127 point 10, as amended on 2026-10-22): the booted digest verifies as
         // the security class, was built after the anchor, greenboot is not returning from it,
-        // and greenboot declared the boot good: `boot-complete.target` is active, read here at
-        // run time, since a unit ordering only holds within one transaction. The state service
-        // at boot runs before that verdict and never counts it. A boot that failed its health
+        // and greenboot declared the boot good: `greenboot-success.target` is active, read here
+        // at run time, since a unit ordering only holds within one transaction.
+        // `boot-complete.target` is not that verdict: it becomes active whatever the health
+        // check says. The state service at boot runs before the verdict and never counts it. A boot that failed its health
         // checks is not counted, and the check still runs and downloads.
         let booted = &status.booted;
-        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) && ctx.tools.boot_complete() {
+        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) && ctx.tools.boot_healthy() {
             lineage.applied(&booted.digest, booted.build_time);
         }
     }
@@ -641,8 +678,11 @@ pub(crate) mod tests {
         pub attestations: RefCell<HashMap<String, Class>>,
         /// The attestation copy fails midway, as skopeo's does, leaving only `version` behind.
         pub attestation_breaks: Cell<bool>,
-        /// `boot-complete.target` is active: greenboot's required health checks passed.
-        pub boot_complete: bool,
+        /// The test vector the registry serves in place of the one of the digest's class; ""
+        /// serves a manifest with no layers.
+        pub served: Cell<Option<&'static str>>,
+        /// `greenboot-success.target` is active: greenboot's required health checks passed.
+        pub boot_healthy: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -661,7 +701,8 @@ pub(crate) mod tests {
                 names: true,
                 attestations: RefCell::new(HashMap::new()),
                 attestation_breaks: Cell::new(false),
-                boot_complete: true,
+                served: Cell::new(None),
+                boot_healthy: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -759,16 +800,21 @@ pub(crate) mod tests {
                 std::fs::write(dest.join("version"), "Directory Transport Version: 1.1\n").expect("write");
                 return Err(Failure { code: ErrorCode::Network, host: Some("registry.example".into()) });
             }
-            let vector = match self.attestations.borrow().get(digest) {
-                Some(Class::Security { .. }) => "att-security",
-                Some(Class::Feature) => "att-feature",
-                None => return Err(Failure { code: ErrorCode::Registry, host: Some("registry.example".into()) }),
+            let vector = match (self.served.get(), self.attestations.borrow().get(digest)) {
+                (Some(served), _) => served,
+                (None, Some(Class::Security { .. })) => "att-security",
+                (None, Some(Class::Feature)) => "att-feature",
+                (None, None) => return Err(Failure { code: ErrorCode::Registry, host: Some("registry.example".into()) }),
             };
             // skopeo replaces what an earlier copy left in the directory.
             if dest.exists() {
                 std::fs::remove_dir_all(dest).expect("clean");
             }
             std::fs::create_dir_all(dest).expect("mkdir");
+            if vector.is_empty() {
+                std::fs::write(dest.join("manifest.json"), r#"{"schemaVersion":2,"layers":[]}"#).expect("write");
+                return Ok(());
+            }
             for entry in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/made").join(vector)).expect("vectors") {
                 let entry = entry.expect("entry");
                 std::fs::copy(entry.path(), dest.join(entry.file_name())).expect("copy");
@@ -778,8 +824,8 @@ pub(crate) mod tests {
         fn metered(&self) -> bool {
             self.metered
         }
-        fn boot_complete(&self) -> bool {
-            self.boot_complete
+        fn boot_healthy(&self) -> bool {
+            self.boot_healthy
         }
     }
 
@@ -1477,13 +1523,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_boot_that_failed_its_health_checks_is_not_applied() {
-        // Greenboot failed boot-complete.target, and no rollback is queued: someone intervenes
+        // Greenboot's health check failed, and no rollback is queued: someone intervenes
         // by hand. The check still runs and asks the registry; the boot is not counted.
         let machine = Machine::new("health-failed", &["real/k1.pub"]);
         let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, false) };
         machine.store.set_lineage(&lineage).expect("write");
         let mut tools = booted_attested(&machine, false);
-        tools.boot_complete = false;
+        tools.boot_healthy = false;
         let state = run(&machine.ctx(&tools, NOW), false).expect("check");
         assert_eq!(state.postpone, lineage.published());
         assert_eq!(machine.store.lineage().expect("stored"), lineage);
@@ -1583,6 +1629,48 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, NOW + 6 * 86_400), true).expect("offline");
         assert_eq!(state.update, UpdateState::WillApplyAtNextShutdown, "the expired postpone still unlocks at boot");
         assert!(tools.called("apply_downloaded"));
+    }
+
+    #[test]
+    fn a_refetched_copy_that_does_not_verify_as_security_keeps_the_stored_one() {
+        // The attachments policy accepts anything: the registry may serve a feature statement,
+        // a copy signed by an unknown key, a bad signature or an empty manifest.
+        for served in ["att-feature", "att-unknown-key", "att-bad-signature", ""] {
+            let (machine, tools) = offered_attested(&format!("refetch-unverified-{served}"), Some(security()));
+            store_attestation(&machine, &tools);
+            stage(&tools);
+            machine.store.set_lineage(&open_lineage(NOW - 86_400, true)).expect("write");
+            tools.served.set(Some(served));
+            let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+            assert_eq!((state.update, state.last_error), (UpdateState::Downloaded, ErrorCode::None), "{served}");
+            assert!(tools.called("fetch_attestation"), "{served}");
+            let policy = crate::policy::in_force(&machine.policy);
+            assert_eq!(stored_class(&machine.ctx(&tools, NOW), &policy, ATT_REPO, &attested()), security(), "{served}: the stored attestation is kept");
+            let dir = machine.store.attestation_dir(&attested()).expect("dir");
+            assert!(!dir.with_extension("partial").exists(), "{served}: the copy is removed");
+        }
+    }
+
+    #[test]
+    fn a_refetched_security_copy_replaces_one_that_does_not_verify() {
+        let (machine, tools) = offered_attested("refetch-replaces", Some(security()));
+        let dir = machine.store.attestation_dir(&attested()).expect("dir");
+        tools.served.set(Some("att-unknown-key"));
+        store_attestation(&machine, &tools);
+        std::fs::write(dir.join("leftover"), "from the earlier copy").expect("write");
+        tools.served.set(None);
+        let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::WillApplyAtNextShutdown, ErrorCode::None));
+        let policy = crate::policy::in_force(&machine.policy);
+        assert_eq!(stored_class(&machine.ctx(&tools, NOW), &policy, ATT_REPO, &attested()), security());
+        let names = |dir: &std::path::Path| {
+            let mut names: Vec<_> = std::fs::read_dir(dir).expect("dir").map(|entry| entry.expect("entry").file_name()).collect();
+            names.sort();
+            names
+        };
+        let vectors = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors/made/att-security");
+        assert_eq!(names(&dir), names(&vectors), "only the new copy's files remain");
+        assert!(!dir.with_extension("partial").exists());
     }
 
     #[test]
