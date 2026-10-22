@@ -13,7 +13,7 @@
 # in the rig's output directory (rig.sh build-bar and build-dock). ATHANOR_RIG_OUT and
 # ATHANOR_REGISTRY mean what they mean to rig.sh; GUEST_MEMORY and GUEST_CPUS size the guest.
 #
-# Two boots. The first provisions: podman and git, and the newest Fedora 45 kernel, because
+# Two boots. The first provisions: podman and git, and the newest kernel of the runner guest (Fedora Cloud 43, task 10 moves it), because
 # the pinned image's kernel predates configfs support in vkms (Linux 6.19); Fedora's kernel
 # ships vkms in kernel-modules-core, so the Azoth kernel is not needed for it. The second
 # boot runs run-in-guest.sh and powers off. The cases do not gate a push (SH13), so a kernel
