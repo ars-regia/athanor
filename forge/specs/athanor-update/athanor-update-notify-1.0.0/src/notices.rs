@@ -68,8 +68,10 @@ impl Notices {
             // a security notice.
             (UpdateState::WillApplyAtNextShutdown, Some(postpone)) if !postpone.postponed => Some(Notice::Security { digest, until: None }),
             (UpdateState::WillApplyAtNextShutdown, Some(_)) => Some(Notice::SecurityApplies { digest }),
-            // UT13: a feature digest is never staged over a waiting security one, so a downloaded
-            // digest under a postponed lineage is the security digest.
+            // UT13: a feature digest is not staged over a waiting security one, so a downloaded
+            // digest under a postponed lineage is the security digest. Rare exceptions: a staged
+            // security digest that is held or older than the booted build (one left by `GoBack()`),
+            // and a tag that moves during the download; the notice then describes a feature digest.
             // Re-locked by the postpone: no second one is offered, and the opt-out still gets the UT11 notice.
             (UpdateState::Downloaded, Some(postpone)) if postpone.postponed && state.automatic_security_updates => Some(Notice::Security { digest, until: postponed_until(state) }),
             (UpdateState::Downloaded, _) => Some(Notice::Ready { digest }),
