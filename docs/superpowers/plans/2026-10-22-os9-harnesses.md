@@ -156,7 +156,7 @@ OS6 asks for the rig to run the shell against the compositor's headless backend,
 - Consumes: `athanor-compositor --headless --output <width>x<height>[@<scale>]` (`main.rs`); the output capture of task 2; `data/globals`.
 - Produces:
   - `RIG_HEADLESS_OUTPUTS=<n>` (default 1): under `RIG_COMPOSITOR=athanor`, `scene.sh` starts the compositor headless with `n` virtual outputs of the case's size and `RIG_SCALE`, named `headless-0`, `headless-1` in order, and captures each with `grim -o` through the compositor. `RIG_STABLE` applies to both compositors.
-  - `in-unit.sh <unit> <binary> [args...]`: the shell form of `bar_session.py`'s `as_unit`. It copies a binary that is not under `/usr` to `/usr/bin/<its name>` (staged and renamed, as `as_unit` does), creates `/sys/fs/cgroup/<unit>`, writes its own pid to that cgroup's `cgroup.procs` and execs the binary from `/usr/bin`. Tasks 7 and 8 use it from Python. `scene.sh` captures with `in-unit.sh rig-grim.service /usr/bin/grim -o <output> <png>`.
+  - `in-unit.sh <unit> <binary> [args...]`: the shell form of `bar_session.py`'s `as_unit`. It copies a binary that is not under `/usr` to `/usr/bin/<its name>` (staged and renamed, as `as_unit` does), creates `/sys/fs/cgroup/<unit>` with `mkdir -p` (`grim` runs again in the `RIG_STABLE` loop), writes its own pid to that cgroup's `cgroup.procs` and execs the binary from `/usr/bin`. The cgroup tree is writable only under `--systemd=always`, which `in_rig` sets only with `RIG_COMPOSITOR` (`rig.sh` `in_rig`), so every caller uses `in-unit.sh` only when `RIG_COMPOSITOR=athanor`, and under cosmic-comp runs the binary directly, as today. Tasks 7 and 8 use it from Python. Under the own compositor `scene.sh` captures with `in-unit.sh rig-grim.service /usr/bin/grim -o <output> <png>`.
   - The installed allow-list in the rig is `data/privileged-clients` followed by `rig-privileged-clients`. This task adds the line `/usr/bin/grim rig-grim.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1`.
 
 - [ ] **Step 1: Write the failing tests** in `test_rig_allow_list.py`
@@ -207,7 +207,6 @@ Under the allow-list only the bar keeps its top layer; the dock and the launcher
 **Files:**
 - Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients`
 - Modify: `scripts/verify.py` (new check `allow-list`, through an exact-match script)
-- Modify: `scripts/ci/known-red.txt` (the greeter's finding, see step 6)
 - Create: `scripts/tests/test_verify_allow_list.py`
 
 **Interfaces:**
@@ -215,7 +214,9 @@ Under the allow-list only the bar keeps its top layer; the dock and the launcher
 - Produces: `verify.py allow-list`, which works per binary target:
   - a binary target counts when its package's spec installs it to `/usr/bin` (`install ... target/release/<bin> %{buildroot}/usr/bin/<bin>`), so `athanor-dock-toolkit`, which the dock's spec does not install, is skipped;
   - a target's sources are the files under its `path`'s directory, minus those under the directory of another `[[bin]]` of the same crate (the dock's `src/toolkit/` belongs to `athanor-dock-toolkit`), minus `#[cfg(test)]` modules and `tests/`;
-  - the check fails when a counted target's sources call `set_layer(Layer::Top)` or `set_layer(Layer::Overlay)`, or set `layer: Layer::Top` or `Layer::Overlay`, and `/usr/bin/<bin>` has no line naming `zwlr_layer_shell_v1`; when they name a `privileged` row of `data/globals` without a line naming it; and when a line names an executable no spec installs.
+  - a target's sources include those of the workspace crates it depends on by `path =` in its crate's `[dependencies]`, followed transitively, so the dock's `ext_foreign_toplevel_list_v1`, bound in `system/athanor-compositor-client`, counts for the dock;
+  - the check fails when a counted target's sources call `set_layer(Layer::Top)` or `set_layer(Layer::Overlay)`, or set `layer: Layer::Top` or `Layer::Overlay`, and `/usr/bin/<bin>` has no line naming `zwlr_layer_shell_v1`; when they name a `privileged` row of `data/globals` without a line naming it; and when a line names an executable no spec installs;
+  - a named constant `PENDING_OPEN_QUESTION_3` lists the greeter's binary, `athanor-greeter-ui`, with a comment citing open question 3: its missing line is reported as a note, not a failure. When the maintainer answers open question 3 the constant is emptied and the line added.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -226,6 +227,10 @@ def test_a_target_the_spec_does_not_install_is_skipped(self): ...      # athanor
 def test_files_of_another_bin_target_are_not_counted(self): ...        # src/toolkit/
 def test_a_line_for_an_executable_nothing_installs_fails(self): ...
 def test_a_test_module_asking_for_the_top_layer_is_ignored(self): ...  # #[cfg(test)] and tests/
+def test_a_bind_in_a_path_dependency_counts(self): ...                 # athanor-compositor-client
+def test_a_pending_binary_is_a_note_not_a_failure(self): ...
+def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
+    # PENDING_OPEN_QUESTION_3 is a subset of the greeter, the lock screen and the polkit agent.
 ```
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest scripts.tests.test_verify_allow_list` fails, the check does not exist.
@@ -234,16 +239,16 @@ def test_a_test_module_asking_for_the_top_layer_is_ignored(self): ...  # #[cfg(t
 
 - [ ] **Step 4: Run it on the tree**: `python3 scripts/verify.py allow-list`. Expected at the head: it names `athanor-dock` (`src/ui/surface.rs`), `athanor-launcher`, `athanor-control-center` and `athanor-greeter-ui` (`src/ui.rs`, `Layer::Overlay`), and nothing under `src/toolkit/`.
 
-- [ ] **Step 5: Add the lines that are not on the login path**: `/usr/bin/athanor-dock athanor-dock.service`, `/usr/bin/athanor-launcher athanor-launcher.service`, `/usr/bin/athanor-control-center athanor-control-center.service`, each with the interfaces its target binds. Read the unit names from the packages' unit files, never from memory.
+- [ ] **Step 5: Add the lines that are not on the login path**: the dock's as C1 results, section 10 item 1, gives it, `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`; then `/usr/bin/athanor-launcher athanor-launcher.service` and `/usr/bin/athanor-control-center athanor-control-center.service`, each with the interfaces the check finds in its target and its path dependencies. Read the unit names from the packages' unit files, never from memory.
 
-- [ ] **Step 6: Stop and ask the maintainer for the greeter's line** (login path, open question 3). Paste the check's finding and a proposed line; add no line, shipped or rig-only, without the answer. Until then the finding goes into `scripts/ci/known-red.txt` with the issue of open question 3 and an expiry, as the repository's rule for known debt requires.
+- [ ] **Step 6: Stop and ask the maintainer for the greeter's line** (login path, open question 3). Paste the check's finding and a proposed line; add no line, shipped or rig-only, without the answer. Until then the greeter stays in `PENDING_OPEN_QUESTION_3`; `scripts/ci/known-red.txt` only shrinks and is not used.
 
-- [ ] **Step 7: Run**: `python3 scripts/verify.py allow-list` passes with only the known-red greeter finding; `python3 -B -m unittest discover -s scripts/tests` passes; `git diff --numstat scripts/verify.py` shows only the added lines.
+- [ ] **Step 7: Run**: `python3 scripts/verify.py allow-list` passes, with the greeter as its only note; `python3 -B -m unittest discover -s scripts/tests` passes; `git diff --numstat scripts/verify.py` shows only the added lines.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add scripts/verify.py scripts/tests/test_verify_allow_list.py scripts/ci/known-red.txt forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients
+git add scripts/verify.py scripts/tests/test_verify_allow_list.py forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients
 git commit -m "feat(compositor): allow-list lines for the dock, launcher and control center, and a check that no top-layer client lacks one"
 ```
 
@@ -278,7 +283,7 @@ def test_the_greeter_is_listed_as_waiting(self): ...
 
 - [ ] **Step 3: Implement `golden_report.py`** and the `rig.sh golden-report` command; generalise `--unit` to every client of the capture cases.
 
-- [ ] **Step 4: Run the report on the laptop**, one rig at a time: `forge/test/shell/rig.sh build-bar build-dock build-launcher build-compositor && RIG_COMPOSITOR=athanor forge/test/shell/rig.sh golden-report`, and record its wall time in the pull request. Write one entry per differing case with its cause from the eight of `c1-own-compositor.md` (#591) or a new one. Expected: exit 0, with every difference explained. A case without a cause fails the report; the task is not done until it is explained or fixed.
+- [ ] **Step 4: Run the report on the laptop**, one rig at a time: `forge/test/shell/rig.sh build-bar`, `rig.sh build-dock`, `rig.sh build-launcher`, `rig.sh build-layout` (the chooser cases) and `rig.sh build-compositor`, one invocation each, then `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh golden-report`, and record its wall time in the pull request. Write one entry per differing case with its cause from the eight of `c1-own-compositor.md` (#591) or a new one. Expected: exit 0, with every difference explained. A case without a cause fails the report; the task is not done until it is explained or fixed.
 
 - [ ] **Step 5: Run**: `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar` and `atspi bar it` pass with 6 widgets as before; `forge/test/shell/rig.sh surface bar` on cosmic-comp is unchanged.
 
@@ -341,7 +346,7 @@ git commit -am "feat(compositor): virtual keyboard and pointer for allow-listed 
 
 **Files:**
 - Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/input.rs`, `src/identity.rs`, `src/state.rs`, `src/handlers.rs`, `src/lock.rs`, `src/fixture.rs`, `data/globals`, `README.md`
-- Modify: `forge/test/shell/input_method_check.py`: the capture output comes from `RIG_CAPTURE_OUTPUT` (default `WINIT-0`; `scene.sh` sets `headless-0` under `RIG_COMPOSITOR=athanor`) instead of the hard-coded `grim -o WINIT-0`, and the capture runs through `in-unit.sh rig-grim.service`; the input method starts through `in-unit.sh rig-input-method.service /out/bin/athanor-toolkit-input-method`, not outside any unit
+- Modify: `forge/test/shell/input_method_check.py`: the capture output comes from `RIG_CAPTURE_OUTPUT` (default `WINIT-0`; `scene.sh` sets `headless-0` under `RIG_COMPOSITOR=athanor`) instead of the hard-coded `grim -o WINIT-0`, and, under `RIG_COMPOSITOR=athanor` only, the capture runs through `in-unit.sh rig-grim.service` and the input method starts through `in-unit.sh rig-input-method.service /out/bin/athanor-toolkit-input-method`; under cosmic-comp both run directly, as today
 - Modify: `forge/test/shell/tests/test_input_method_check.py`
 - Modify: `forge/test/shell/rig.sh` (`input-method` under `RIG_COMPOSITOR=athanor`), `forge/test/shell/rig-privileged-clients` (the line `/usr/bin/athanor-toolkit-input-method rig-input-method.service zwp_input_method_manager_v2`)
 
@@ -372,7 +377,7 @@ fn os9_a_sandboxed_client_cannot_be_an_input_method() {
 
 ```python
 def test_the_capture_output_follows_the_compositor(self): ...       # RIG_CAPTURE_OUTPUT
-def test_the_input_method_starts_in_its_rig_unit(self): ...         # argv starts with in-unit.sh
+def test_the_input_method_starts_in_its_rig_unit(self): ...         # under athanor only; directly under cosmic-comp
 ```
 
 - [ ] **Step 2: Run them**: the Rust tests FAIL, the globals are not offered; `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_input_method_check.py'` fails.
@@ -395,7 +400,7 @@ Orca references exist for the chooser, the dock and the gallery only (`golden/or
 
 **Files:**
 - Modify: `forge/test/shell/rig.sh`: the `orca` case takes `bar`, `launcher` and `greeter`, each with its key sequence (`Tab*N`, as the chooser's `Tab*11` is pinned there with a comment naming its controls), and runs under `RIG_COMPOSITOR=athanor`
-- Modify: `forge/test/shell/orca_walk.py`: each `wtype` press runs through `in-unit.sh rig-wtype.service /usr/bin/wtype ...`, not outside any unit
+- Modify: `forge/test/shell/orca_walk.py`: under `RIG_COMPOSITOR=athanor`, each `wtype` press runs through `in-unit.sh rig-wtype.service /usr/bin/wtype ...`; under cosmic-comp it runs directly, as today
 - Modify: `forge/test/shell/tests/test_orca_walk.py`
 - Modify: `forge/test/shell/rig-privileged-clients` (the line `/usr/bin/wtype rig-wtype.service zwp_virtual_keyboard_manager_v1`)
 - Create: `forge/test/shell/golden/orca/{bar,launcher,greeter}{,-it}.txt` and their AT-SPI references under `golden/atspi/`
@@ -404,7 +409,7 @@ Orca references exist for the chooser, the dock and the gallery only (`golden/or
 - Consumes: the virtual keyboard of task 6; `in-unit.sh` (task 3); `orca_compare.py`; the local rig image with Orca (`ATHANOR_RIG_IMAGE`).
 - Produces: `rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]`, the same command under both compositors; the reference is always the cosmic-comp transcript. Under the own compositor the greeter waits on open question 3.
 
-- [ ] **Step 1: Write the failing test** in `test_orca_walk.py`: `test_wtype_runs_in_its_rig_unit` (every press's argv starts with `in-unit.sh rig-wtype.service /usr/bin/wtype`).
+- [ ] **Step 1: Write the failing test** in `test_orca_walk.py`: `test_wtype_runs_in_its_rig_unit` (under `RIG_COMPOSITOR=athanor`, every press's argv starts with `in-unit.sh rig-wtype.service /usr/bin/wtype`; without it, with `wtype`).
 
 - [ ] **Step 2: Run it**: `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_orca_walk.py'` fails.
 
@@ -474,9 +479,13 @@ git commit -m "test(shell): the AX17 walk: extents, appearances, text scales, pa
 | --- | --- | --- |
 | `fixture-layout` | the crate's tests and the 27 layout cases | about 25 minutes |
 | `chooser-dock-launcher` | 36 cases | about 27 minutes |
-| `bar-1`, `bar-2` | five bar surfaces each, 60 cases | about 35 minutes each |
-| `bar-3` | four bar surfaces, 48 cases | about 31 minutes |
+| `bar-1` | `bar`, `bar-power`, `bar-input`, `bar-network`: 48 cases | about 32 minutes |
+| `bar-2` | `bar-calendar`, `bar-accessibility`, `bar-tiling`, `bar-bluetooth`: 48 cases | about 34 minutes |
+| `bar-3` | `bar-popups`, `bar-notifications`, `bar-audio`: 36 cases | about 28 minutes |
+| `bar-4` | `bar-tray`, `bar-shield`, `bar-battery`: 36 cases | about 28 minutes |
 | `ax17` | the matrix of task 9 on the bar, the dock and the launcher, 36 runs | about 27 minutes |
+
+The four surfaces with a 12-second settle (`bar-network`, `bar-bluetooth`, whose capture also waits up to 10 stable rounds, `bar-audio` and `bar-battery`) sit in four different groups.
 
 - [ ] **Step 1: Write the script**: each group runs its share under `RIG_COMPOSITOR=athanor`; no `|| true`, every step's failure fails the job. The script exits 0 only when every difference of its share is explained in `athanor-differences.toml`; an unexplained difference fails it.
 
@@ -531,7 +540,7 @@ git commit -m "feat(matrix): record the session's compositor, and the rows the o
 Prerequisite: C1 task 9a merged (the session exists in the image). Until then this task does not start.
 
 **Files:**
-- Modify: `scripts/devvm/compositor-acceptance.sh` (line 23), `scripts/devvm/dock-acceptance.sh` (line 39), `scripts/devvm/launcher-acceptance.sh` (line 56): each carries COSMIC's `PRIVILEGED` list; under the own session it is read from the repository's `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals` on the host (every row not `standard`), since the scripts run from the checkout (`ROOT`)
+- Modify: `scripts/devvm/compositor-acceptance.sh` (line 23), `scripts/devvm/dock-acceptance.sh` (line 39), `scripts/devvm/launcher-acceptance.sh` (line 56): each carries COSMIC's `PRIVILEGED` list; under the own session it is read from the repository's `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals` on the host: the `privileged` and `unconfined` rows only, since `layer-gated` and `standard` globals are offered to every client, since the scripts run from the checkout (`ROOT`)
 - Modify: `scripts/devvm/bar-acceptance.sh`, `scripts/devvm/lock-acceptance.sh` (the session choice only)
 
 **Interfaces:**
