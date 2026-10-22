@@ -21,14 +21,19 @@ class CompareTest(unittest.TestCase):
         self.assertTrue(compare.verdict(64))
         self.assertFalse(compare.verdict(65))
 
-    def test_a_dock_case_fails_without_its_running_indicator(self):
+    def test_a_toolkit_dock_case_fails_without_its_running_indicator(self):
         # The indicator is 2 px across a 32 px button at scale 1.0: 64 pixels, which the
         # default tolerance would let through.
         missing_indicator = 2 * 32
-        dock = compare.tolerance(Path("/repo/forge/test/shell/golden/dock"))
-        self.assertFalse(compare.verdict(missing_indicator, dock))
-        self.assertTrue(compare.verdict(0, dock))
-        self.assertEqual(compare.tolerance(Path("golden/bar")), compare.TOLERANCE)
+        dock = Path("/repo/forge/test/shell/golden/dock")
+        toolkit = compare.tolerance(dock, "toolkit-dock-light-1.0-en")
+        self.assertFalse(compare.verdict(missing_indicator, toolkit))
+        self.assertTrue(compare.verdict(0, toolkit))
+
+    def test_the_gtk_dock_and_other_surfaces_keep_the_default_tolerance(self):
+        dock = Path("/repo/forge/test/shell/golden/dock")
+        self.assertEqual(compare.tolerance(dock, "dock-light-1.0-en"), compare.TOLERANCE)
+        self.assertEqual(compare.tolerance(Path("golden/bar"), "toolkit-bar"), compare.TOLERANCE)
 
 
 if __name__ == "__main__":

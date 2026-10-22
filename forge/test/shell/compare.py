@@ -9,9 +9,9 @@ machine; llvmpipe chooses its code path from the host CPU, so 64 pixels, 0.003 %
 1920x1080 frame, is allowed between runner generations. The smallest thing that can move
 on a surface, a 12 px badge, is 113 pixels.
 
-A surface whose smallest mark is smaller has its own tolerance, named by its golden
-directory: the dock's running indicator is 2 px across a 32 px button at scale 1.0, 64
-pixels, so a dock case allows 16.
+The toolkit dock's captures, the dock goldens rig.sh tags toolkit-, allow 16: its
+running indicator is 2 px across a 32 px button at scale 1.0, 64 pixels. The GTK dock's
+goldens keep 64, as every other surface does.
 """
 import re
 import subprocess
@@ -19,11 +19,13 @@ import sys
 from pathlib import Path
 
 TOLERANCE = 64
-TOLERANCES = {"dock": 16}
+TOOLKIT_DOCK_TOLERANCE = 16
 
 
-def tolerance(golden_dir):
-    return TOLERANCES.get(golden_dir.name, TOLERANCE)
+def tolerance(golden_dir, tag):
+    if golden_dir.name == "dock" and tag.startswith("toolkit-"):
+        return TOOLKIT_DOCK_TOLERANCE
+    return TOLERANCE
 
 
 def parse_count(text):
@@ -55,7 +57,6 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     golden_dir, actual_dir, tags = Path(argv[0]), Path(argv[1]), argv[2:]
-    allowed = tolerance(golden_dir)
     failed = 0
     for tag in tags:
         golden, actual = golden_dir / f"{tag}.png", actual_dir / f"{tag}.png"
@@ -64,6 +65,7 @@ def main(argv):
             failed += 1
             continue
         differing = differing_pixels(golden, actual, actual_dir / f"{tag}-diff.png")
+        allowed = tolerance(golden_dir, tag)
         ok = verdict(differing, allowed)
         failed += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {tag}: {differing} pixel(s) differ (tolerance {allowed})")
