@@ -774,5 +774,14 @@ mod tests {
         let node = update.nodes.iter().find(|(n, _)| *n == node_id(area));
         let selection = node.and_then(|(_, n)| n.text_selection()).copied();
         assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
+
+        // After a final newline the caret is on the empty last line, which has a run of its own.
+        ui.set_field_text(area, "ab\n");
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let find = |id| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, n)| n);
+        let selection = find(node_id(area)).and_then(|n| n.text_selection()).copied();
+        assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
+        assert_eq!(find(text_run_id(area, 1)).and_then(Node::value), Some(""));
     }
 }

@@ -133,15 +133,18 @@ impl TextField {
     }
 
     /// The byte ranges of the committed text's lines as they are seen, wrapped, in order, which
-    /// together cover all of it. Before the layout is made again after an edit, and while the
-    /// input method composes, the whole text is one range.
+    /// together cover all of it; the empty line after a final newline is an empty range. Before
+    /// the layout is made again after an edit, and while the input method composes, the whole
+    /// text is one range.
     pub(crate) fn line_ranges(&self) -> Vec<std::ops::Range<usize>> {
         let len = self.text().len();
         let layout = self.editor.try_layout().filter(|_| !self.is_composing());
         let mut starts: Vec<usize> = layout.map_or_else(Vec::new, |l| {
             l.lines().map(|line| line.text_range().start).collect()
         });
-        starts.retain(|&s| s > 0 && s < len);
+        // A text that ends in a newline ends in an empty line, which starts at its end.
+        starts.retain(|&s| s > 0 && s <= len);
+        starts.dedup();
         starts.insert(0, 0);
         let ends = starts.iter().skip(1).copied().chain([len]);
         starts.iter().zip(ends).map(|(&s, e)| s..e).collect()
