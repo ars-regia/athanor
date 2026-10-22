@@ -50,6 +50,15 @@ def problems(doc, files=FILES):
 
 
 class PolkitModelTest(unittest.TestCase):
+    def test_update_policy_actions_have_tm9_rows(self):
+        root = SCRIPT.parents[1]
+        declared = "forge/specs/athanor-update/SOURCES/usr/share/polkit-1/actions/os.athanor.update.policy"
+        policy = (root / declared).read_text(encoding="utf-8")
+        doc = (root / "docs/architecture/doc_threat_model.md").read_text(encoding="utf-8")
+        for action, active in (("os.athanor.update.postpone", "yes"), ("os.athanor.update.set-automatic", "auth_admin")):
+            self.assertIn(f'<action id="{action}">', policy)
+            self.assertIn(f"| `{action}` | `{declared}` | `{active}` | yes |", doc)
+
     def test_a_complete_table_passes(self):
         self.assertEqual(problems(HEADER + ROWS), [])
 
