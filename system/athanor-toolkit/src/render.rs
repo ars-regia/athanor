@@ -9,8 +9,9 @@ use crate::widget::{
 };
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
-use vello_cpu::peniko::{Color, FontData};
-use vello_cpu::{Glyph, Pixmap, RenderContext};
+use vello_cpu::peniko::{Color, FontData, ImageSampler};
+use std::sync::Arc;
+use vello_cpu::{Glyph, Image, ImageSource, Pixmap, RenderContext};
 
 /// The error of drawing and of the GPU renderer: any error that can cross threads.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -32,6 +33,10 @@ pub trait Canvas {
     fn fill_path(&mut self, path: &BezPath);
     /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
+    /// Fills `rect` with an image, scaled to it on each axis: the caller keeps the aspect ratio.
+    /// vello_cpu reads the pixmap as it draws; vello_gpu draws the copy uploaded to its atlas
+    /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no copy of.
+    fn fill_image(&mut self, resources: &Self::Resources, rect: &Rect, pixmap: &Arc<Pixmap>);
     /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
@@ -47,7 +52,7 @@ pub trait Canvas {
 }
 
 macro_rules! canvas {
-    ($canvas:ty, $resources:ty) => {
+    ($canvas:ty, $resources:ty, $image_source:path, $glyph_resources:path) => {
         impl Canvas for $canvas {
             type Resources = $resources;
             fn set_transform(&mut self, transform: Affine) {
@@ -68,6 +73,26 @@ macro_rules! canvas {
             fn stroke_path(&mut self, path: &BezPath) {
                 <$canvas>::stroke_path(self, path);
             }
+            fn fill_image(&mut self, resources: &$resources, rect: &Rect, pixmap: &Arc<Pixmap>) {
+                let Some(source) = $image_source(resources, pixmap) else {
+                    return;
+                };
+                let image = Image {
+                    image: source,
+                    sampler: ImageSampler::default(),
+                };
+                <$canvas>::set_paint(self, image);
+                <$canvas>::set_paint_transform(
+                    self,
+                    Affine::translate((rect.x0, rect.y0))
+                        * Affine::scale_non_uniform(
+                            rect.width() / f64::from(pixmap.width()),
+                            rect.height() / f64::from(pixmap.height()),
+                        ),
+                );
+                <$canvas>::fill_rect(self, rect);
+                <$canvas>::set_paint_transform(self, Affine::IDENTITY);
+            }
             fn push_clip_path(&mut self, path: &BezPath) {
                 <$canvas>::push_clip_path(self, path);
             }
@@ -81,7 +106,7 @@ macro_rules! canvas {
                 size: f32,
                 glyphs: impl Iterator<Item = Glyph> + Clone,
             ) -> Result<(), Error> {
-                self.glyph_run(resources, font)
+                self.glyph_run($glyph_resources(resources), font)
                     .font_size(size)
                     .hint(true)
                     .fill_glyphs(glyphs)?;
@@ -91,9 +116,24 @@ macro_rules! canvas {
     };
 }
 
-canvas!(RenderContext, vello_cpu::Resources);
+/// vello_cpu draws an image straight from its pixmap.
+fn cpu_image(_: &vello_cpu::Resources, pixmap: &Arc<Pixmap>) -> Option<ImageSource> {
+    Some(ImageSource::Pixmap(Arc::clone(pixmap)))
+}
+
+/// vello_cpu's resources are its glyph cache.
+fn cpu_glyphs(resources: &mut vello_cpu::Resources) -> &mut vello_cpu::Resources {
+    resources
+}
+
+canvas!(RenderContext, vello_cpu::Resources, cpu_image, cpu_glyphs);
 #[cfg(feature = "gpu")]
-canvas!(vello_gpu::Scene, vello_gpu::Resources);
+canvas!(
+    vello_gpu::Scene,
+    crate::gpu::Resources,
+    crate::gpu::Resources::image,
+    crate::gpu::Resources::glyphs
+);
 
 fn color(c: Rgba) -> Color {
     let [r, g, b, a] = c.0;
@@ -324,6 +364,15 @@ pub fn paint<C: Canvas>(
                 for line in lines {
                     ctx.stroke_path(&line.to_path(0.1));
                 }
+            }
+            Kind::Image { image, .. } => {
+                // The image keeps its aspect ratio, centred in its square.
+                let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                let fit = (f64::from(r.w) / w).min(f64::from(r.h) / h);
+                let (w, h) = (w * fit, h * fit);
+                let x = f64::from(r.x) + (f64::from(r.w) - w) / 2.0;
+                let y = f64::from(r.y) + (f64::from(r.h) - h) / 2.0;
+                ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {

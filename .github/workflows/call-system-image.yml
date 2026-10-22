@@ -60,6 +60,8 @@ jobs:
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
             -e GITHUB_REF="${GITHUB_REF}" \
+            -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
+            -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
             bash scripts/aggregate_tier_repos.sh
 

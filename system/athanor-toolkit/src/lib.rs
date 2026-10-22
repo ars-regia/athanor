@@ -10,6 +10,7 @@ extern crate self as athanor_toolkit;
 pub mod a11y;
 pub mod driver;
 pub mod focus;
+pub mod icon;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 mod popup;
@@ -18,6 +19,7 @@ pub mod text;
 pub mod theme;
 pub mod widget;
 
+pub use icon::{IconTheme, Image};
 pub use theme::{Rgba, Theme};
 pub use widget::{
     Event, Key, Kind, PointerButton, Rect, Slider, Ui, Widget, WidgetId, WindowButton,
