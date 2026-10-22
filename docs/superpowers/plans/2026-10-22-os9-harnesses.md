@@ -573,21 +573,31 @@ git commit -am "test(devvm): run the acceptances under the own compositor's sess
 ## Open questions for the maintainer
 
 1. **Which surfaces does 1.0 carry under the own compositor?** `release-1.0.md` names the bar, the dock, the launcher, screenshot and screen share, the upstream lock and polkit agent, and cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings; the control center is not named. Task 5's report covers every non-toolkit case in `cases.py`; the cosmic components have no rig case. Which of them must be drawn in the rig before revision 2, and which are replaced (OS5)?
+   **Answer (maintainer, 2026-10-22):** only Athanor's own surfaces: the bar, the dock, the launcher, the lock screen and the polkit agent are drawn in the rig before revision 2. The cosmic components (cosmic-idle, cosmic-bg, cosmic-workspaces, cosmic-settings) get no rig case: OS5 replaces them.
 2. **Goldens: matched or re-recorded?** Task 5 compares against the cosmic-comp goldens with every difference explained. The alternative is a second set recorded under the own compositor once the differences are accepted. The clear colour, shadows and the focus outline (three of the eight causes of #591) need a decision either way.
    **Answer (maintainer, 2026-10-22):** matched. One set of goldens, cosmic-comp's; every difference has a cause and an issue. A second set is recorded only when cosmic-comp leaves the image.
 3. **The allow-list lines on the login path**: the greeter (`Layer::Overlay`) and the lock screen (`ext_session_lock_manager_v1`). Which executables and units, and do they land before revision 2? Until the answer, no such line exists, shipped or rig-only, and the cases that need one are excluded from pass claims (tasks 4, 5, 8, 9 and 12).
+   **Answer (maintainer, 2026-10-22):** before revision 2. The greeter UI's line, on its unit, carries `Layer::Overlay`; the lock screen's line, on its unit, carries `ext_session_lock_manager_v1`.
 4. **Suspend and resume, and output unplugging, on the laptop only** (#604, decided for C1 task 9): does the same hold for the 1.0 matrix rows?
    **Answer (maintainer, 2026-10-22):** yes. On the NVIDIA desktop both rows are recorded as untested, with #604 as the reason.
 5. **VRR, tablets and touch**: which machine has them? Without one, task 11 records them as `[[untested]]` with that reason.
+   **Answer (maintainer, 2026-10-22):** no machine has them. Task 11 records VRR, tablets and touch as `[[untested]]`, with that reason; they reopen when a machine with them arrives.
 6. **Frame-time thresholds**: what mean and maximum pass on each machine? Revision 2 sets them (C1 results, section 10 item 15); until then the rows record values without a verdict.
+   **Answer (maintainer, 2026-10-22):** after the NVIDIA desktop's console session. Until then the rows record values without a verdict; revision 2 sets the mean and maximum per machine from that session and an attended laptop run.
 7. **`ext_workspace_manager_v1`** is offered to every client outside a security context today. Should it be privileged, as the toplevel list is?
+   **Answer (maintainer, 2026-10-22):** yes. `ext_workspace_manager_v1` becomes privileged, granted by the allow-list as the toplevel list is.
 8. **Register row 9** (the special layer namespace counted only on overlay or top) is conditional on spike S3 and does not say what the own compositor does with the namespace. Is it a requirement of the own compositor, and with what behaviour, before a fixture test is written?
+   **Answer (maintainer, 2026-10-22):** deferred to spike S3. No fixture test is written until S3 says what behaviour the namespace needs.
 9. **The dev VM part of AX17** (Orca by its key, the gate refusals, the KeyboardMonitor refusal) needs `athanor-a11y`, the AX5 gate and the AX4 monitor, none of which exists. Is the KeyboardMonitor (about 500 lines, an estimate in the compositor's README) part of this milestone, or does that part of AX17 wait?
+   **Answer (maintainer, 2026-10-22):** no. This milestone covers AX17's rig part; the dev VM part waits for `athanor-a11y`, the AX5 gate and the AX4 monitor.
 10. **Output scale under the own compositor**: the `output-scale` row sets 150 % "in Settings", which drives cosmic-comp's output configuration. Which protocol or tool sets an output's scale on the own compositor (C1 results, section 10 item 9, the output model)?
+   **Answer (maintainer, 2026-10-22):** `zwlr_output_manager_v1` (wlr-output-management), privileged and granted to the control center only.
 11. **The CI jobs of task 10**: should they become required checks of `iso-v0` once they are green?
    **Answer (maintainer, 2026-10-22):** yes, once stable: after a week green without a flake. Until then they are informational.
 12. **A virtual keyboard while locked**: may a granted virtual keyboard type into the lock surface? OS4 and register row 8 say what happens to the input method's grab, not to a virtual keyboard. Task 6 writes no test and no special case until the answer.
+   **Answer (maintainer, 2026-10-22):** no, never. While the session is locked the compositor drops virtual keyboard keys aimed at the lock surface, as it drops the input method's grab; task 6 writes that test.
 13. **The class of `zwp_text_input_manager_v3`** (C1 results, section 10 item 12): offered to every client, or only outside a security context? Task 7 writes its row in `data/globals` from the answer.
+   **Answer (maintainer, 2026-10-22):** only outside a security context. Sandboxed clients do not receive `zwp_text_input_manager_v3`; task 7 writes its row in `data/globals` accordingly.
 14. **The allow-list lines of the launcher and the control center** (task 4 step 5). Candidates, each to be confirmed against the binary's actual binds:
     - both: `zwlr_layer_shell_v1`, since each draws on the overlay layer (`surface.rs`, `Layer::Overlay`);
     - the launcher: `ext_foreign_toplevel_list_v1`, if it lists open windows through `athanor-compositor-client`; and `ext_foreign_toplevel_image_capture_source_manager_v1` with `ext_image_copy_capture_manager_v1`, if its window previews (`athanor-preview`, the `launcher-window-preview` case) capture windows;
