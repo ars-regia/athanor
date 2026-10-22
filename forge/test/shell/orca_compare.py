@@ -20,8 +20,9 @@ from pathlib import Path
 #
 # The same goes for a single-line field: AccessKit's Role::TextInput reaches AT-SPI as an entry
 # and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
-# as an entry's. Only that line is rewritten: Orca ends a field's line with a full stop and a
-# label's without, so a label such as "Sample text" is matched as it is said.
+# as an entry's. Only the line of a field of the gallery (the `field` and `notes` keys of its
+# strings.tsv) is rewritten: Orca 51 ends no utterance with a full stop, so nothing else tells a
+# field's line from a label's, and a label such as "Sample text" is matched as it is said.
 #
 # A multi-line field too: GTK's GtkTextView reaches AT-SPI as a text, AccessKit's
 # Role::MultilineTextInput as a multi-line entry, and Orca says the line of the caret after a
@@ -30,10 +31,10 @@ from pathlib import Path
 # heard together, as an entry's line that ends in that utterance; neither alone, nor a line after
 # anything else, a single-line field's line included.
 #
-# And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
-# button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` key
-# of its strings.tsv) with the role and the state words together is rewritten: a real check box,
-# whatever its label, spoken as a toggle button still fails.
+# And a switch: GTK 4.24's GtkSwitch reaches AT-SPI as a switch, AccessKit's Role::Switch as a
+# toggle button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the
+# `switch` key of its strings.tsv) with the state and the role words together is rewritten: a
+# check box, whatever its label, spoken as a toggle button still fails.
 
 
 def gallery_labels(key):
@@ -51,11 +52,13 @@ def gallery_labels(key):
 
 SWITCH_LABELS = gallery_labels("switch")
 AREA_LABELS = gallery_labels("notes")
+FIELD_LABELS = gallery_labels("field") + AREA_LABELS
+# Orca 51's words, from its catalogue: the state, then the role.
 SWITCH_SPEECH = {
-    "check box checked.": "toggle button pressed.",
-    "check box not checked.": "toggle button not pressed.",
-    "casella di spunta spuntata.": "pulsante di commutazione premuto.",
-    "casella di spunta non spuntata.": "pulsante di commutazione non premuto.",
+    "on switch": "toggle button pressed",
+    "off switch": "toggle button not pressed",
+    "attivo selettore": "pulsante di commutazione premuto",
+    "non attivo selettore": "pulsante di commutazione non premuto",
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
@@ -68,9 +71,10 @@ def heard_as(utterance):
     for role, said in SAME_ROLE.items():
         if utterance.endswith(f" {role}"):
             yield f"{utterance[: -len(role)]}{said}"
-    for role, said in SAME_FIELD_ROLE.items():
-        if utterance.endswith(f" {role}."):
-            yield f"{utterance[: -len(role) - 1]}{said}."
+    for label in FIELD_LABELS:
+        for role, said in SAME_FIELD_ROLE.items():
+            if utterance == f"{label} {role}":
+                yield f"{label} {said}"
     for label in SWITCH_LABELS:
         for gtk, said in SWITCH_SPEECH.items():
             if utterance == f"{label} {gtk}":
@@ -88,7 +92,7 @@ def compare(reference, transcript):
     for field, after in pairwise(reference):
         for label in AREA_LABELS:
             for role, said in SAME_FIELD_ROLE.items():
-                if field != f"{label} {role}.":
+                if field != f"{label} {role}":
                     continue
                 joined = f"{label} {said} {after}"
                 if joined in spoken:

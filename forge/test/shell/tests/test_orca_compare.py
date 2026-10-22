@@ -49,15 +49,15 @@ class CompareTest(unittest.TestCase):
 
     def test_a_text_is_heard_as_an_entry_in_english_and_italian(self):
         lines, failures = compare.compare(
-            ["Name text.", "Nome testo."],
-            ["Name entry.", "Nome campo inserimento."],
+            ["Name text", "Nome testo"],
+            ["Name entry", "Nome campo inserimento"],
         )
         self.assertEqual(failures, [])
-        self.assertIn("as 'Name entry.'", lines[0])
+        self.assertIn("as 'Name entry'", lines[0])
 
     def test_a_text_and_its_line_may_be_heard_as_one_entry_utterance(self):
         # Orca says a GTK text view's line after it; an entry's line in the same utterance.
-        reference = ["Notes text.", "The end.", "Note testo.", "La fine."]
+        reference = ["Notes text", "The end.", "Note testo", "La fine."]
         transcript = ["Notes entry The end.", "Note campo inserimento La fine."]
         lines, failures = compare.compare(reference, transcript)
         self.assertEqual(failures, [])
@@ -65,8 +65,8 @@ class CompareTest(unittest.TestCase):
 
     def test_a_line_is_joined_only_to_the_text_it_follows(self):
         self.assertEqual(
-            compare.compare(["Notes text.", "Another line."], ["Notes entry The end."])[1],
-            ["'Notes text.': missing", "'Another line.': missing"],
+            compare.compare(["Notes text", "Another line."], ["Notes entry The end."])[1],
+            ["'Notes text': missing", "'Another line.': missing"],
         )
         self.assertEqual(
             compare.compare(["The end."], ["Notes entry The end."])[1], ["'The end.': missing"]
@@ -80,30 +80,30 @@ class CompareTest(unittest.TestCase):
         # A single-line field's line and the next utterance are two things to hear.
         self.assertEqual(
             compare.compare(
-                ["Name text.", "Screen reader off."], ["Name entry Screen reader off."]
+                ["Name text", "Screen reader off."], ["Name entry Screen reader off."]
             )[1],
-            ["'Name text.': missing", "'Screen reader off.': missing"],
+            ["'Name text': missing", "'Screen reader off.': missing"],
         )
 
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
-            ["A switch check box checked.", "A switch check box not checked.",
-             "Un interruttore casella di spunta spuntata.",
-             "Un interruttore casella di spunta non spuntata."],
-            ["A switch toggle button pressed.", "A switch toggle button not pressed.",
-             "Un interruttore pulsante di commutazione premuto.",
-             "Un interruttore pulsante di commutazione non premuto."],
+            ["A switch on switch", "A switch off switch",
+             "Un interruttore attivo selettore", "Un interruttore non attivo selettore"],
+            ["A switch toggle button pressed", "A switch toggle button not pressed",
+             "Un interruttore pulsante di commutazione premuto",
+             "Un interruttore pulsante di commutazione non premuto"],
         )
         self.assertEqual(failures, [])
-        self.assertIn("as 'A switch toggle button pressed.'", lines[0])
+        self.assertIn("as 'A switch toggle button pressed'", lines[0])
 
     def test_a_check_box_that_is_not_a_switch_is_matched_as_it_is_said(self):
         # The anchor is the switch's label with the role and state words: a real check box, or a
         # switch spoken with other words, still fails.
         for reference, heard in [
-            ("Option one check box checked.", "Option one toggle button pressed."),
-            ("A switch check box checked.", "A switch toggle button not pressed."),
-            ("A switch check box checked.", "A switch checked."),
+            ("Option one check box checked", "Option one toggle button pressed"),
+            ("A switch check box checked", "A switch toggle button pressed"),
+            ("A switch on switch", "A switch toggle button not pressed"),
+            ("A switch on switch", "A switch checked"),
         ]:
             self.assertEqual(
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
