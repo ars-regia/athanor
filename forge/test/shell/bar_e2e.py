@@ -149,6 +149,8 @@ def labelled(app, Atspi, role, label):
     """Every showing accessible of `role` named `label`, directly or through a LabelledBy
     relation to a label accessible: a GTK Switch takes its accessible name from the row's
     label this way, not from its own Property::Label."""
+    # at-spi2-core 2.62 reports GtkSwitch as "switch"; 2.58 said "check box".
+    roles = {role, "switch"} if role == "check box" else {role}
     found = []
 
     def name_of(accessible):
@@ -168,7 +170,7 @@ def labelled(app, Atspi, role, label):
     def visit(accessible):
         try:
             if (
-                accessible.get_role_name() == role
+                accessible.get_role_name() in roles
                 and showing(accessible, Atspi)
                 and name_of(accessible) == label
             ):
@@ -453,8 +455,7 @@ def main():
     )
 
     check("the accessibility popover opens", press(app, Atspi, "Accessibility"))
-    # GtkSwitch reports as "check box" on the rig's at-spi2-core, the same naming
-    # variance atspi_check.py already notes for the push button role.
+    # GtkSwitch is a "switch" on at-spi2-core 2.62 and a "check box" before; `labelled` takes both.
     check(
         "High contrast shows",
         wait_for(lambda: labelled(app, Atspi, "check box", "High contrast"), 5),
