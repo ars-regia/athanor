@@ -2,19 +2,26 @@
 system/tag-images.sh with a skopeo stub that keeps a registry in a directory
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import base64
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
 import textwrap
+import sys
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts/ci"))
+import release_attestation  # noqa: E402
+
 SIGN = ROOT / "system" / "sign-images.sh"
 DIGESTS = ROOT / "system" / "image-digests.sh"
 VERIFY = ROOT / "system" / "verify-images.sh"
+ATTESTATION = ROOT / "scripts" / "ci" / "release_attestation.py"
 TAG = ROOT / "system" / "tag-images.sh"
 A_KEY = (
     ROOT / "forge/specs/athanor-update/athanor-update-1.0.0/tests/vectors/made/a.pub"
@@ -131,6 +138,59 @@ PODMAN = textwrap.dedent("""\
     cmd = args[args.index(image) + 1:]
     os.execvpe(cmd[0], cmd, {**os.environ, "STUB_IN_CONTAINER": "1"})
     """)
+COSIGN = textwrap.dedent("""\
+    #!/usr/bin/env python3
+    # A cosign that keeps the attestations it made in attested.json (digest -> envelopes) and
+    # records every call in cosign.log. verify-attestation prints the envelopes of a digest whose
+    # predicate type is --type, one JSON document per line, as cosign does. STUB_ATTEST_FAIL fails
+    # attest; STUB_ONLY_KEY names the one public key that verifies, STUB_DOWN_KEY one that cannot
+    # reach the registry.
+    import base64, json, os, pathlib, stat, sys
+    state = pathlib.Path(os.environ["STUB_STATE"])
+    args = sys.argv[1:]
+    stdin = sys.stdin.read() if args[0] == "attest" else ""
+    with open(state / "cosign.log", "a") as log:
+        log.write(json.dumps({"args": args, "stdin": stdin, "env": sorted(k for k in os.environ if k.startswith("COSIGN_"))}) + "\\n")
+    store = state / "attested.json"
+    attested = json.loads(store.read_text()) if store.exists() else {}
+    kind = args[args.index("--type") + 1]
+    repository, digest = args[-1].split("@")
+    if args[0] == "attest":
+        key = pathlib.Path(args[args.index("--key") + 1])
+        mode, parent = stat.S_IMODE(key.stat().st_mode), stat.S_IMODE(key.parent.stat().st_mode)
+        assert mode == 0o600 and parent == 0o700, (key, oct(mode), oct(parent))
+        if os.environ.get("STUB_ATTEST_FAIL"):
+            sys.exit("Error: signing attestation: PUT https://ghcr.io: unexpected status 500")
+        statement = {
+            "_type": "https://in-toto.io/Statement/v0.1",
+            "predicateType": kind,
+            "subject": [{"name": repository, "digest": {"sha256": digest.removeprefix("sha256:")}}],
+            "predicate": json.loads(pathlib.Path(args[args.index("--predicate") + 1]).read_text()),
+        }
+        payload = base64.b64encode(json.dumps(statement).encode()).decode()
+        attested.setdefault(digest, []).append({"payloadType": "application/vnd.in-toto+json", "payload": payload, "signatures": [{"keyid": "", "sig": "c3R1Yg=="}]})
+        store.write_text(json.dumps(attested))
+    elif args[0] == "verify-attestation":
+        key = pathlib.Path(args[args.index("--key") + 1]).name
+        once = state / "down-once"
+        if os.environ.get("STUB_DOWN_ONCE") and not once.exists():
+            once.touch()
+            sys.exit("Error: GET https://ghcr.io/v2/: net/http: TLS handshake timeout")
+        if key == os.environ.get("STUB_DOWN_KEY"):
+            sys.exit("Error: GET https://ghcr.io/v2/: dial tcp: connection refused")
+        def kind_of(envelope):  # one it cannot read is the test's forgery: print it
+            try:
+                return json.loads(base64.b64decode(envelope["payload"]))["predicateType"]
+            except ValueError:
+                return kind
+        found = [e for e in attested.get(digest, []) if kind_of(e) == kind]
+        if not found or os.environ.get("STUB_REFUSE") or os.environ.get("STUB_ONLY_KEY", key) != key:
+            sys.exit("Error: no matching attestations")
+        for envelope in found:
+            print(json.dumps(envelope))
+    else:
+        sys.exit(f"stub cosign: unsupported {args}")
+    """)
 BUILDER = "ab" * 32
 
 
@@ -145,6 +205,9 @@ class SignImages(unittest.TestCase):
         podman = self.dir / "bin" / "podman"
         podman.write_text(PODMAN)
         podman.chmod(0o755)
+        cosign = self.dir / "bin" / "cosign"
+        cosign.write_text(COSIGN)
+        cosign.chmod(0o755)
         self.state = self.dir / "state"
         self.state.mkdir()
         self.tags = {
@@ -218,6 +281,29 @@ class SignImages(unittest.TestCase):
             env={**self.env, **env},
         )
 
+    def statements(self):
+        """The release statements candidate writes, one per image of the digests file."""
+        out = self.dir / "artifacts" / "attestations"
+        for line in self.file.read_text().splitlines():
+            repository, _, digest = line.split()
+            record = {"repository": repository, "candidate_digest": digest, "class": "feature",
+                      "advisories": [], "class_reason": "no-baseline", "updateinfo_timestamp": None}
+            path = out / repository.rsplit("/", 1)[1] / f"{digest.removeprefix('sha256:')}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(release_attestation.statement(record, "2026-10-21T04:00:00Z", "c" * 40, "412")))
+        return out
+
+    def sign_attest(self, statements, **env):
+        return subprocess.run(
+            ["bash", str(SIGN), "--registry", REG, "--attestations", str(statements), str(self.file)],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
+
+    def cosign_calls(self):
+        log = self.state / "cosign.log"
+        return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def verify(self, *args, **env):
         # The verification job holds no key.
@@ -681,6 +767,237 @@ class SignImages(unittest.TestCase):
                 r = self.sign_kernel(path)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertFalse((self.state / "calls.log").exists())
+
+    def test_sign_images_attests_every_statement(self):
+        """ADR-0127 point 2: one cosign attest per image, after the skopeo signatures, by digest,
+        with the key file on tmpfs and the passphrase on stdin, never in the environment."""
+        self.digests()
+        statements = self.statements()
+        r = self.sign_attest(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads((self.state / "signed.json").read_text()), list(self.tags.values()))
+        calls = self.cosign_calls()
+        self.assertEqual([c["args"][-1] for c in calls], [f"{REG}/{n}@{self.tags[f'{REG}/{n}:412']}" for n in NAMES])
+        for call in calls:
+            args = call["args"]
+            self.assertEqual(args[0], "attest")
+            self.assertEqual(args[args.index("--type") + 1], release_attestation.PREDICATE_TYPE)
+            self.assertIn("--tlog-upload=false", args)
+            self.assertIn("--new-bundle-format=false", args)
+            self.assertTrue(pathlib.Path(args[args.index("--key") + 1]).is_relative_to(self.dir / "runtime"))
+            self.assertIn("--predicate", args)
+            self.assertEqual(call["stdin"], "correct horse")
+            self.assertEqual(call["env"], [], "COSIGN_* must not be in the environment of cosign")
+            self.assertNotIn("not-a-real-key", " ".join(args))
+            self.assertNotIn("correct horse", " ".join(args))
+        attested = json.loads((self.state / "attested.json").read_text())
+        for name in NAMES:
+            digest = self.tags[f"{REG}/{name}:412"]
+            statement = json.loads((statements / name / f"{digest.removeprefix('sha256:')}.json").read_text())
+            (envelope,) = attested[digest]
+            payload = json.loads(base64.b64decode(envelope["payload"]))
+            self.assertEqual(payload["predicate"], statement["predicate"])
+            self.assertEqual(payload["subject"], statement["subject"])
+        self.assertEqual(r.stdout.count("attested: "), 3)
+        self.assertEqual(list((self.dir / "runtime").iterdir()), [], "the private directory is removed on exit")
+
+    def test_sign_images_refuses_a_statement_for_an_unlisted_digest(self):
+        """The statements come from another job: each must name an image of the checked digests
+        file, under its own file name, once; anything else fails before the registry."""
+        other = "9" * 64
+
+        def first(out):
+            digest = self.tags[f"{REG}/athanor-system:412"].removeprefix("sha256:")
+            return out / "athanor-system" / f"{digest}.json"
+
+        def unlisted(out):
+            statement = json.loads(first(out).read_text())
+            statement["subject"][0]["digest"]["sha256"] = other
+            first(out).unlink()
+            (out / "athanor-system" / f"{other}.json").write_text(json.dumps(statement))
+
+        def renamed(out):
+            statement = json.loads(first(out).read_text())
+            statement["subject"][0]["digest"]["sha256"] = other
+            first(out).write_text(json.dumps(statement))
+
+        def missing(out):
+            next((out / "athanor-system-nvidia").iterdir()).unlink()
+
+        def other_type(out):
+            statement = json.loads(first(out).read_text())
+            statement["predicateType"] = "https://example.com/other"
+            first(out).write_text(json.dumps(statement))
+
+        for change in (unlisted, renamed, missing, other_type):
+            with self.subTest(change=change.__name__):
+                shutil.rmtree(self.dir / "artifacts", ignore_errors=True)
+                (self.state / "calls.log").unlink(missing_ok=True)
+                (self.state / "cosign.log").unlink(missing_ok=True)
+                self.digests()
+                before = len(self.calls())
+                statements = self.statements()
+                change(statements)
+                r = self.sign_attest(statements)
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertEqual(self.cosign_calls(), [])
+                self.assertEqual(len(self.calls()), before, "nothing is signed")
+
+    def test_the_attestations_are_verified_against_the_statements(self):
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        before = len(self.cosign_calls())
+        r = self.verify("--attestations", str(statements))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.cosign_calls()[before:]
+        self.assertEqual([c["args"][0] for c in calls], ["verify-attestation"] * 3)
+        for call in calls:
+            args = call["args"]
+            self.assertEqual(args[args.index("--key") + 1], str(self.dir / "keys" / "athanor-image-1.pub"))
+            self.assertEqual(args[args.index("--type") + 1], release_attestation.PREDICATE_TYPE)
+            self.assertIn("--insecure-ignore-tlog=true", args)
+            self.assertIn("--new-bundle-format=false", args)
+        self.assertEqual(r.stdout.count("attestation verified: "), 3)
+
+    def test_an_image_without_its_attestation_fails_the_verification(self):
+        self.digests()
+        statements = self.statements()
+        self.sign()
+        r = self.verify("--attestations", str(statements))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("no attestation verifies", r.stderr)
+
+    def test_an_attestation_that_differs_from_the_statement_fails_the_verification(self):
+        """What the registry holds is what candidate derived: a class changed on either side fails."""
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        path = next((statements / "athanor-system").iterdir())
+        statement = json.loads(path.read_text())
+        statement["predicate"]["class"] = "security"
+        path.write_text(json.dumps(statement))
+        r = self.verify("--attestations", str(statements))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("differs from the release statement", r.stderr)
+
+    def test_a_failing_cosign_attest_fails_the_script(self):
+        self.digests()
+        r = self.sign_attest(self.statements(), STUB_ATTEST_FAIL="1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("attested: ", r.stdout)
+        self.assertEqual(len(self.cosign_calls()), 1, "the first failure stops the script")
+
+    def test_an_attestation_of_another_shape_fails_the_verification(self):
+        """payloadType, subject and payload encoding are the statement's too, not only the
+        predicate."""
+        self.digests()
+        statements = self.statements()
+        digest = self.tags[f"{REG}/athanor-system:412"]
+
+        def payload_type(envelope):
+            envelope["payloadType"] = "application/json"
+
+        def subject(envelope):
+            statement = json.loads(base64.b64decode(envelope["payload"]))
+            statement["subject"][0]["name"] = f"{REG}/athanor-system:412"
+            envelope["payload"] = base64.b64encode(json.dumps(statement).encode()).decode()
+
+        def encoding(envelope):
+            envelope["payload"] = "!" + envelope["payload"]
+
+        for change in (payload_type, subject, encoding):
+            with self.subTest(change=change.__name__):
+                (self.state / "attested.json").unlink(missing_ok=True)
+                self.assertEqual(self.sign_attest(statements).returncode, 0)
+                attested = json.loads((self.state / "attested.json").read_text())
+                change(attested[digest][0])
+                (self.state / "attested.json").write_text(json.dumps(attested))
+                r = self.verify("--attestations", str(statements))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(f"{digest}: an attestation differs from the release statement", r.stderr)
+
+    def test_with_several_keys_one_that_verifies_is_enough(self):
+        self.digests()
+        statements = self.statements()
+        self.sign_attest(statements)
+        shutil.copy(self.dir / "keys" / "athanor-image-1.pub", self.dir / "keys" / "athanor-image-0.pub")
+        for only in ("athanor-image-0.pub", "athanor-image-1.pub"):
+            with self.subTest(only=only):
+                r = self.verify("--attestations", str(statements), STUB_ONLY_KEY=only)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(r.stdout.count("attestation verified: "), 3)
+        r = self.verify("--attestations", str(statements), STUB_ONLY_KEY="athanor-image-1.pub", STUB_DOWN_KEY="athanor-image-0.pub")
+        self.assertNotEqual(r.returncode, 0, "a key that fails for another reason is not a key without attestations")
+        self.assertIn("connection refused", r.stderr)
+
+    def prior(self, statements, **env):
+        return subprocess.run(
+            [sys.executable, "-B", str(ATTESTATION), "prior", "--dir", str(statements), "--keys-dir", str(self.dir / "keys")],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+        )
+
+    def test_candidate_refuses_an_image_attested_with_another_statement(self):
+        """A re-run whose class changed would add a second attestation that contradicts the
+        first, and the image would never verify: candidate refuses it before anything is signed."""
+        self.digests()
+        statements = self.statements()
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("no prior attestation: "), 3)
+        self.sign_attest(statements)
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.count("matching prior attestation: "), 3)
+        path = next((statements / "athanor-system").iterdir())
+        statement = json.loads(path.read_text())
+        statement["predicate"]["class"] = "security"
+        path.write_text(json.dumps(statement))
+        r = self.prior(statements)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("already carries an attestation that differs", r.stderr)
+        r = self.prior(statements, STUB_DOWN_KEY="athanor-image-1.pub")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("connection refused", r.stderr)
+
+    def test_a_hanging_prior_ends_with_retry_sh_inside_the_candidate_timeout(self):
+        """Attempts x images x keys x the timeout of one call, plus the backoff of retry.sh
+        (15 s doubling), stays under half of candidate's timeout-minutes, so a cosign that hangs
+        ends with retry.sh's error and leaves the earlier steps their time."""
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        candidate = workflow.split("\n  candidate:\n", 1)[1].split("\n  sign-images:\n", 1)[0]
+        job_minutes = int(re.search(r"^    timeout-minutes: (\d+)$", candidate, re.M)[1])
+        step = candidate.split("release_attestation.py prior", 1)[0].rsplit("      - name:", 1)[1]
+        attempts = int(re.search(r'RETRY_ATTEMPTS: "(\d+)"', step)[1])
+        per_call = int(re.search(r"prior --timeout (\d+) ", candidate)[1])
+        keys = len(list((ROOT / "system" / "keys").glob("*.pub")))
+        backoff = sum(15 * 2**n for n in range(attempts - 1))
+        worst = attempts * len(NAMES) * keys * per_call + backoff
+        self.assertLess(worst, job_minutes * 60 / 2, (attempts, per_call, keys, backoff))
+        r = subprocess.run(
+            [sys.executable, "-B", str(ATTESTATION), "prior", "--timeout", "x", "--dir", "d", "--keys-dir", "k"],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        self.assertEqual(r.returncode, 2, "prior takes a whole number of seconds")
+
+    def test_candidate_runs_prior_through_retry_and_outlasts_a_transient_error(self):
+        """release.yml runs the prior check through retry.sh, as verify-images reads the
+        registry: a dropped connection is read again, not fatal."""
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertIn("run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior --timeout ", workflow)
+        self.digests()
+        statements = self.statements()
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge" / "scripts" / "retry.sh"), sys.executable, "-B", str(ATTESTATION), "prior",
+             "--dir", str(statements), "--keys-dir", str(self.dir / "keys")],
+            capture_output=True, text=True, env={**self.env, "STUB_DOWN_ONCE": "1", "RETRY_ATTEMPTS": "2"},
+        )  # fmt: skip
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("TLS handshake timeout", r.stderr)
+        self.assertIn("attempt 1 of 2", r.stderr)
+        self.assertEqual(r.stdout.count("no prior attestation: "), 3)
 
 
 if __name__ == "__main__":

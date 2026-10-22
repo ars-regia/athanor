@@ -69,6 +69,7 @@ def run_object(**over):
         "status": "in_progress",
         "conclusion": None,
         "created_at": "2026-10-11T04:00:00Z",
+        "run_started_at": "2026-10-11T04:00:05Z",
         "head_repository": {"full_name": R},
         **over,
     }
@@ -232,6 +233,7 @@ class Candidate(Tool):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         got = self.candidate()
         self.assertEqual(got["schema_version"], 2)
+        self.assertEqual(got["build_time"], "2026-10-11T04:00:05Z")
         schema.validate(got, schema.load("release-candidate"))
         self.assertEqual(
             [(c["repository"], c["baseline_digest"], c["candidate_digest"], c["class"]) for c in got["classes"]],
