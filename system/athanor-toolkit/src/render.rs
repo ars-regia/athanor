@@ -570,12 +570,12 @@ mod tests {
         let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
         let field = ui.field(crate::Ui::ROOT, "Name", "");
         ui.set_focus(Some(field));
+        // The focus stays, as losing it ends the composition; both carets are at the text's end.
         if composed {
-            ui.compose("abc", None);
+            ui.compose("abc", Some((3, 3)));
         } else {
             ui.commit("abc");
         }
-        ui.set_focus(None);
         render(&mut ui, 1.0)
     }
 

@@ -756,11 +756,27 @@ impl Ui {
         match id {
             Some(id) if !self.widgets[id].is_focusable() || !self.is_visible(id) => {}
             Some(id) if self.focus != Some(id) => {
-                self.focus = Some(id);
+                self.move_focus(Some(id));
                 self.reveal(id);
             }
-            _ => self.focus = id,
+            _ => self.move_focus(id),
         }
+    }
+
+    /// Moves the focus to `to`. A field that loses it ends its input method's composition: the
+    /// input method sends a preedit only for the focused field, so another would stay shown.
+    fn move_focus(&mut self, to: Option<WidgetId>) {
+        if to == self.focus {
+            return;
+        }
+        if let Some(Kind::Field(field) | Kind::TextArea(field)) =
+            self.focus.map(|id| &mut self.widgets[id].kind)
+        {
+            if field.is_composing() {
+                field.compose(&mut self.text, "", None);
+            }
+        }
+        self.focus = to;
     }
 
     /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
@@ -781,7 +797,8 @@ impl Ui {
             let after = focus::chain(self);
             let next = before[at + 1..].iter().find(|w| after.contains(w));
             let previous = before[..at].iter().rev().find(|w| after.contains(w));
-            self.focus = next.or(previous).copied();
+            let to = next.or(previous).copied();
+            self.move_focus(to);
         }
     }
 
@@ -2349,6 +2366,22 @@ mod tests {
         let most = field.layout(&mut ui.text).height() - field.view_height(&mut ui.text);
         let offset = field.offset;
         assert!(most > 0.0 && (offset - most).abs() < 0.5, "offset {offset} of {most}");
+    }
+
+    #[test]
+    fn a_field_that_loses_the_focus_ends_its_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        let notes = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        ui.set_focus(Some(notes));
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
+        assert_eq!(field.shown(), "ab");
     }
 
     #[test]
