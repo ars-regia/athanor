@@ -63,6 +63,9 @@ pub struct TextField {
     lines: usize,
     /// How far a text area is scrolled, in logical pixels from the top of its text.
     pub(crate) offset: f32,
+    /// The caret's byte offset after the last move up or down, and the horizontal position the
+    /// moves keep while the caret stays there.
+    column: Option<(usize, f32)>,
 }
 
 impl TextField {
@@ -77,6 +80,7 @@ impl TextField {
             editor,
             lines: 1,
             offset: 0.0,
+            column: None,
         }
     }
 
@@ -231,42 +235,59 @@ impl TextField {
         self.vertical(cx, true);
     }
 
-    /// Up or down a line. Parley 0.12 draws a right-to-left caret on an empty line (one that
-    /// holds no more than its newline) on the line below, and moves from there; so to or from an
-    /// empty line, where the caret is at the start edge, the caret goes to the start of the line
-    /// above or below.
+    /// Up or down a line, to the point of the line's middle at the column the caret had before
+    /// the first of these moves, as GTK's text view keeps it, an empty line between included; to
+    /// an empty line, to its start. Parley's own moves start from the line its caret is drawn
+    /// on, which Parley 0.12 gets wrong for a right-to-left caret on an empty line (see `caret`),
+    /// and forget the column at a move to a byte.
     fn vertical(&mut self, cx: &mut TextContext, down: bool) {
         let (line, ranges) = self.caret_line(cx);
-        let empty_here = self.empty_line(ranges.get(line));
+        let index = self.editor.raw_selection().focus().index();
+        // ponytail: an edit that leaves the caret at the same offset keeps the column.
+        let x = match self.column {
+            Some((at, x)) if at == index => x,
+            _ => self.caret(cx, 0.0).map_or(0.0, |c| c.x0 as f32),
+        };
         let target = if down {
             line.checked_add(1)
         } else {
             line.checked_sub(1)
         };
-        let target = target.and_then(|t| ranges.get(t));
-        let jump = match target {
-            Some(r) if empty_here || self.empty_line(Some(r)) => Some(Some(r.start)),
-            // On an empty first or last line, the caret is already at the start or the end.
-            None if empty_here => Some(None),
-            _ => None,
-        };
+        let layout = self.layout(cx);
+        let middle = target.and_then(|t| layout.get(t)).map(|l| {
+            let m = l.metrics();
+            (m.block_min_coord + m.block_max_coord) / 2.0
+        });
+        let range = target.and_then(|t| ranges.get(t));
+        let empty = self.empty_line(range);
         let mut driver = self.editor.driver(&mut cx.fonts, &mut cx.layouts);
-        match jump {
-            Some(Some(start)) => driver.move_to_byte(start),
-            Some(None) => {}
-            None if down => driver.move_down(),
-            None => driver.move_up(),
+        match (middle, range) {
+            (Some(_), Some(r)) if empty => driver.move_to_byte(r.start),
+            (Some(y), _) => driver.move_to_point(x, y),
+            // Past the last line, to its end; before the first, to its start.
+            (None, _) if down => driver.move_to_text_end(),
+            (None, _) => driver.move_to_text_start(),
         }
+        self.column = Some((self.editor.raw_selection().focus().index(), x));
     }
 
     /// The line the caret is on, by its byte offset, and the byte ranges of the layout's lines: a
-    /// line holds the offsets from its start to before its end, the last line also the end.
+    /// line holds the offsets from its start to before its end, the last line also the end. A
+    /// caret at the start of a line that a wrap began, drawn at the end of the line before (its
+    /// affinity upstream), is on the line before.
     fn caret_line(&mut self, cx: &mut TextContext) -> (usize, Vec<std::ops::Range<usize>>) {
-        let index = self.editor.raw_selection().focus().index();
+        let focus = self.editor.raw_selection().focus();
+        let index = focus.index();
         let ranges: Vec<_> = self.layout(cx).lines().map(|l| l.text_range()).collect();
         let last = ranges.len().saturating_sub(1);
         let line = ranges.iter().position(|r| r.contains(&index));
-        (line.unwrap_or(last), ranges)
+        let line = line.unwrap_or(last);
+        let before_caret = self.editor.raw_text().get(..index);
+        let wrapped = before_caret.is_some_and(|t| !t.ends_with('\n'));
+        let upstream = focus.affinity() == parley::Affinity::Upstream;
+        let starts = ranges.get(line).is_some_and(|r| r.start == index);
+        let before = line > 0 && starts && wrapped && upstream;
+        (line - usize::from(before), ranges)
     }
 
     /// Whether the line of `range` is empty, or holds only its newline, while nothing composes.
@@ -309,7 +330,8 @@ impl TextField {
         width: f32,
     ) -> Option<parley::BoundingBox> {
         let (line, ranges) = self.caret_line(cx);
-        // On an empty line the caret is at its start edge (see `vertical`).
+        // On an empty line (one that holds no more than its newline) the caret is at its start
+        // edge: Parley 0.12 draws a right-to-left caret there on the line below.
         let collapsed = self.editor.raw_selection().is_collapsed();
         let empty = collapsed && self.empty_line(ranges.get(line));
         let layout = self.editor.layout(&mut cx.fonts, &mut cx.layouts);
@@ -329,6 +351,61 @@ impl TextField {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The caret's byte offset, its line, and its horizontal position.
+    fn caret_at(cx: &mut TextContext, field: &mut TextField) -> (usize, usize, f64) {
+        let index = field.editor.raw_selection().focus().index();
+        let line = field.caret_line(cx).0;
+        let x = field.caret(cx, 1.0).map_or(f64::NAN, |c| c.x0);
+        (index, line, x)
+    }
+
+    #[test]
+    fn up_and_down_keep_the_column_across_an_empty_line() {
+        let mut cx = TextContext::default();
+        for (rtl, top, bottom) in [(false, "abcdef", "xyz"), (true, "אבגדהו", "זחט")] {
+            let text = format!("{top}\n\n{bottom}");
+            let mut area = TextField::area("Notes", &text, (15.0, rtl), 300.0, 3);
+            let column5 = top.char_indices().nth(5).map(|(i, _)| i).unwrap();
+            area.editor
+                .driver(&mut cx.fonts, &mut cx.layouts)
+                .move_to_byte(column5);
+            area.down(&mut cx);
+            assert_eq!(caret_at(&mut cx, &mut area).1, 1, "rtl {rtl}");
+            // Clamped to the end of the shorter line, as in a GTK text view.
+            area.down(&mut cx);
+            assert_eq!(caret_at(&mut cx, &mut area).0, text.len(), "rtl {rtl}");
+            // And back at column 5, through the empty line.
+            area.up(&mut cx);
+            area.up(&mut cx);
+            assert_eq!(caret_at(&mut cx, &mut area).0, column5, "rtl {rtl}");
+        }
+    }
+
+    #[test]
+    fn up_and_down_keep_the_column_across_wrapped_lines() {
+        let mut cx = TextContext::default();
+        for (rtl, word) in [(false, "word "), (true, "שלום ")] {
+            let text = word.repeat(30);
+            let mut area = TextField::area("Notes", &text, (15.0, rtl), 100.0, 3);
+            let column2 = text.char_indices().nth(2).map(|(i, _)| i).unwrap();
+            area.editor
+                .driver(&mut cx.fonts, &mut cx.layouts)
+                .move_to_byte(column2);
+            let (_, line, x) = caret_at(&mut cx, &mut area);
+            assert_eq!(line, 0, "rtl {rtl}");
+            for n in 1..=3 {
+                area.down(&mut cx);
+                let (_, line, at) = caret_at(&mut cx, &mut area);
+                assert_eq!(line, n, "rtl {rtl}");
+                assert!((at - x).abs() < 1.0, "rtl {rtl}: line {n} at {at}, not {x}");
+            }
+            for _ in 0..3 {
+                area.up(&mut cx);
+            }
+            assert_eq!(caret_at(&mut cx, &mut area).0, column2, "rtl {rtl}");
+        }
+    }
 
     #[test]
     fn the_field_edits_and_composes() {
