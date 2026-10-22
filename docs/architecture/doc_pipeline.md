@@ -711,15 +711,19 @@ release compares later than the old one's, so the Fedora half counts no advisory
 fetch the updateinfo (`updateinfo_timestamp` is `null`); the release is classified from the git
 half alone, and `class_reason` reads `base-change:<from>-><to>` (for example
 `base-change:43->45`), after `unlabelled-baseline,` when the baseline is unlabelled
-(maintainer decision of 2026-10-22, #681).
+(maintainer decision of 2026-10-22, #681). A Fedora security fix that arrives with the change
+of release is therefore not labelled `security`: across a base change only a `security`
+`release-class.toml` in the git half yields `security`, and the release otherwise reads as
+`feature`, the side that asks the user to confirm (ADR-0094 item 5).
 
 In the two bootstrap cases, `class_reason` records the case. The fallback to `feature` extends the rule of
 ADR-0094 item 5, that an unknown class reads as feature, the side that asks the user to
 confirm, to a signed record that carries `class_reason`, as part of this proposal. It is
 not silent: `class_reason` goes in the run summary and in the job summary the maintainer
 approves for the promotion to `:stable` (PL60). Each repository's first marked release
-ends its fallback, so the step needs no switch. At bootstrap the maintainer does
-nothing on a `class_reason`; anywhere else it is a defect to report. With a labelled
+ends its fallback, so the step needs no switch. At bootstrap, and on a
+`base-change:*` reason, the maintainer does nothing on a `class_reason`; anywhere else it is
+a defect to report. With a labelled
 baseline, a missing or unavailable updateinfo source, or an unreadable image, fails
 `candidate`, because the answer would otherwise be wrong.
 

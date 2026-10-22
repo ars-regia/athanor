@@ -11,6 +11,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import release_class as rc  # noqa: E402
+import schema  # noqa: E402
 
 REPO = "ghcr.io/owner/athanor-system"
 OLD, NEW = "sha256:" + "1" * 64, "sha256:" + "2" * 64
@@ -354,6 +355,21 @@ class Malformed(Derive):
     def test_an_advisory_id_outside_the_schema_pattern_fails(self):
         with self.assertRaisesRegex(rc.ClassError, REPO):
             self.derive("", self.commit(), info=updateinfo(("FEDORA 2026", "security", "2.fc45")))
+
+
+
+class ClassReasonSchema(unittest.TestCase):
+    PATTERN = schema.load("release-candidate")["properties"]["classes"]["items"]["properties"]["class_reason"]
+
+    def test_every_reason_derive_writes_is_valid(self):
+        for value in ("", "no-baseline", "unlabelled-baseline", "base-change:43->45", "unlabelled-baseline,base-change:43->45"):
+            with self.subTest(value=value):
+                schema.validate(value, self.PATTERN)
+
+    def test_a_malformed_reason_is_rejected(self):
+        for value in ("unlabelled-baseline,", "no-baseline,base-change:43->45", "base-change:43->", "base-change:f43->45"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                schema.validate(value, self.PATTERN)
 
 
 class Compare(unittest.TestCase):
