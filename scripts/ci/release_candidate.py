@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 
+import release_class
 import schema
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -36,6 +37,7 @@ IMAGE_JOB = "system-image / 💿 System Image & Disk Build"
 ARTIFACTS = ["release-request", "image-digests", "kernel-digests"]
 FILES = ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"]
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+TIMEOUT = 300  # seconds for one external command
 CREATED = "org.opencontainers.image.created"
 REVISION = "org.opencontainers.image.revision"
 
@@ -49,8 +51,16 @@ def sha256(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
+def sh(args, **kw):
+    """subprocess.run, with a timeout that refuses the release instead of hanging it."""
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=TIMEOUT, **kw)
+    except subprocess.TimeoutExpired:
+        raise Refused(f"{' '.join(args)}: timed out after {TIMEOUT} s") from None
+
+
 def tool(*args):
-    r = subprocess.run(args, capture_output=True, text=True)
+    r = sh(args)
     if r.returncode:
         raise Refused(f"{' '.join(args)}: {r.stderr.strip()}")
     return r.stdout
@@ -106,16 +116,14 @@ def order(repo, digests, commit):
             "verdict": "absent",
         }
         verdicts.append(entry)
-        r = subprocess.run(
+        r = sh(
             [
                 "skopeo",
                 "inspect",
                 "--format",
                 "{{.Digest}}",
                 f"docker://{repository}:latest",
-            ],
-            capture_output=True,
-            text=True,
+            ]
         )
         if r.returncode:
             if "manifest unknown" not in r.stderr:
@@ -188,6 +196,34 @@ def superseded(repo, run, verdicts):
     )
 
 
+def classes(verdicts, commit, sources):
+    """PL55: one class record per repository, the :latest of each as its baseline."""
+    records = []
+    for v in verdicts:
+        repository = v["repository"]
+        if v["verdict"] == "equal":
+            # Nothing is compared, so a security release would read as feature. The re-run
+            # rule of PB4b (read back the recorded class) is later work; until then refuse.
+            raise Refused(
+                f"{repository}: :latest is already the candidate; deriving its class needs "
+                "the re-run rule of PB4b, which is not built yet"
+            )
+        baseline = None
+        if v["latest_digest"]:
+            ref = f"{repository}@{v['latest_digest']}"
+            baseline = release_class.Baseline(
+                ref, v["latest_digest"], labels(ref).get(REVISION) or None
+            )
+        candidate = release_class.Image(
+            f"{repository}@{v['candidate_digest']}", v["candidate_digest"]
+        )
+        try:
+            records.append(release_class.derive(repository, baseline, candidate, commit, sources))
+        except release_class.ClassError as error:
+            raise Refused(str(error)) from None
+    return records
+
+
 def check(out):
     run_id = os.environ.get("BUILD_RUN_ID", "")
     if not re.fullmatch(r"[1-9][0-9]*", run_id):
@@ -238,7 +274,7 @@ def check(out):
         ]
         if [j["conclusion"] for j in jobs if j["name"] == IMAGE_JOB] != ["success"]:
             why.append(f"image job '{IMAGE_JOB}' did not succeed once")
-        trusted = subprocess.run(
+        trusted = sh(
             [
                 "bash",
                 str(ROOT / "system/trusted-run.sh"),
@@ -246,8 +282,6 @@ def check(out):
                 run_id,
                 BUILD_WORKFLOW,
             ],
-            capture_output=True,
-            text=True,
             env={**os.environ, "RELEASE_BRANCH": BRANCH},
         )
         if trusted.returncode:
@@ -260,10 +294,20 @@ def check(out):
         for name in FILES:
             shutil.copy(tmp / name, out / name)
     verdicts = order(repo, out / "image-digests.txt", request["commit"])
+    records = classes(verdicts, request["commit"], release_class.PodmanSources(ROOT))
+    notes = [f"- {r['repository']}: class_reason `{r['class_reason']}`\n" for r in records if r["class_reason"]]
+    if notes and os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            f.write("Class derived by fallback (PL55):\n" + "".join(notes))
+    else:
+        sys.stderr.write("".join(notes))
     candidate = {
-        "schema_version": 1,
+        "schema_version": 2,
         "request": request,
+        # The start of the attempt that built the images: the build_time of PB4b (ADR-0127).
+        "build_time": run["run_started_at"],
         "order": verdicts,
+        "classes": records,
         "superseded": superseded(repo, run, verdicts),
     }
     try:

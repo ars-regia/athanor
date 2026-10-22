@@ -104,6 +104,46 @@ class SystemImages(Tool):
         self.assertEqual(self.prune(versions, self.index(1, 12)), [99])
 
 
+TIER = "athanor-forge-tier0-repo"
+
+
+class SignedPackages(Tool):
+    """Every package keeps what signs the versions it keeps (UD44: the tier repositories are
+    verified before every system build)."""
+
+    VERSIONS = [image(1, ["latest"], OLD), *referrers(10, 1),
+                image(2, ["101"], "2026-06-01"), *referrers(20, 2),
+                image(3, ["102"], "2026-07-01"),
+                image(4, ["103"], RECENT), *referrers(40, 4)]
+
+    def run_janitor(self, **fixture):
+        self.registry({"user_packages": [TIER], "packages": {TIER: self.VERSIONS}, **fixture})
+        r = subprocess.run(["bash", str(JANITOR), "hr-mes"], capture_output=True, text=True, env=self.env)
+        log = self.dir / "calls.log"
+        calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return r, sorted(int(c[-1].rsplit("/", 1)[1]) for c in calls if "DELETE" in c)
+
+    @staticmethod
+    def index(of, member):
+        return {f"ghcr.io/hr-mes/{TIER}:sha256-{of:064x}": {"manifests": [{"digest": f"sha256:{member:064x}"}]}}
+
+    def test_the_signatures_of_a_kept_version_stay_and_a_deleted_one_s_go(self):
+        r, deleted = self.run_janitor(raw={**self.index(1, 12), **self.index(4, 42)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(deleted, [2, 20, 21, 22])
+
+    def test_a_version_without_tags_deletes_nothing(self):
+        self.VERSIONS = [*SignedPackages.VERSIONS, {"id": 5, "name": f"sha256:{5:064x}", "created_at": f"{OLD}T00:00:00Z", "metadata": {"container": {}}}]
+        r, deleted = self.run_janitor(raw={**self.index(1, 12), **self.index(4, 42)})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(deleted, [])
+
+    def test_an_unreadable_signature_index_deletes_nothing(self):
+        r, deleted = self.run_janitor(raw=self.index(4, 42), errors=[f"ghcr.io/hr-mes/{TIER}:sha256-{1:064x}"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(deleted, [])
+
+
 PROMOTED_SYSTEM = [image(1, ["100", "stable", "stable-20260914"], RECENT), image(2, ["90", "stable-previous", "stable-20260801"], OLD),
                    image(3, ["80", "stable-20250501"], OLD), image(4, ["70"], OLD), image(5, ["released-3-101", "101"], RECENT)]
 

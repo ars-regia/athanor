@@ -11,7 +11,9 @@ pub type Brush = [u8; 4];
 /// The font database and the shaping scratch space, shared by every widget of a [`crate::Ui`].
 #[derive(Default)]
 pub struct TextContext {
+    /// The fonts the system offers.
     pub fonts: FontContext,
+    /// The scratch space shaping uses.
     pub layouts: LayoutContext<Brush>,
 }
 
@@ -47,6 +49,7 @@ pub struct TextField {
 }
 
 impl TextField {
+    /// A field named `name` for assistive technologies, holding `text` at `size` logical pixels; `rtl` sets the base reading direction.
     pub fn new(name: &str, text: &str, size: f32, rtl: bool) -> Self {
         let mut editor = PlainEditor::new(size);
         editor.edit_styles().insert(GenericFamily::SansSerif.into());
@@ -68,6 +71,7 @@ impl TextField {
         self.editor.raw_text()
     }
 
+    /// Whether an input method's composition is in progress.
     pub fn is_composing(&self) -> bool {
         self.editor.is_composing()
     }
@@ -77,18 +81,21 @@ impl TextField {
         self.editor.set_text(text);
     }
 
+    /// Types `text` at the caret, replacing the selection.
     pub fn insert(&mut self, cx: &mut TextContext, text: &str) {
         self.editor
             .driver(&mut cx.fonts, &mut cx.layouts)
             .insert_or_replace_selection(text);
     }
 
+    /// Deletes the selection, or the cluster before the caret.
     pub fn backspace(&mut self, cx: &mut TextContext) {
         self.editor
             .driver(&mut cx.fonts, &mut cx.layouts)
             .backdelete();
     }
 
+    /// Deletes the selection, or the cluster after the caret.
     pub fn delete(&mut self, cx: &mut TextContext) {
         self.editor.driver(&mut cx.fonts, &mut cx.layouts).delete();
     }
@@ -101,6 +108,7 @@ impl TextField {
             .move_left();
     }
 
+    /// Moves the caret one cluster to the right on screen, which is forwards in left-to-right text and backwards in right-to-left text.
     pub fn right(&mut self, cx: &mut TextContext) {
         self.editor
             .driver(&mut cx.fonts, &mut cx.layouts)

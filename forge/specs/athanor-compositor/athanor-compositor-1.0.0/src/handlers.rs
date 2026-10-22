@@ -551,13 +551,13 @@ impl OutputHandler for State {
 }
 
 impl SecurityContextHandler for State {
-    /// Clients connecting through the context's listener carry it: they see none of the
-    /// privileged globals (`unconfined`).
+    /// Clients connecting through the context's listener carry it: they are granted none of the
+    /// privileged globals, whatever their identity (OS4).
     fn context_created(&mut self, source: SecurityContextListenerSource, context: SecurityContext) {
         let inserted = self
             .loop_handle
             .insert_source(source, move |stream, _, state| {
-                let data = state.contained_client_state(Some(context.clone()));
+                let data = state.client_state(&stream, Some(context.clone()));
                 if let Err(error) = state.display_handle.insert_client(stream, data) {
                     tracing::warn!(%error, "a sandboxed client could not be added");
                 }

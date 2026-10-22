@@ -5,6 +5,9 @@
 # tier3, the digest of the image this run published, or of the published image whose RPM
 # content is the same, which is not pushed again. The build takes the tiers by these digests,
 # never by tag, so a tier that another run publishes meanwhile cannot reach this run's images.
+# Each image this run pushes is signed keyless by digest, and a published image is reused only
+# when system/tier-digests.sh finds it signed by a trusted run (UD44): an image that carries
+# the same content label but no such signature is pushed again, never adopted and signed here.
 # The rolling aggregate (repo-cache/repo) is published as well; no build consumes it.
 #
 # The tag comes from $GITHUB_REF: `latest` on refs/heads/iso-v0 and refs/heads/main, and
@@ -14,7 +17,8 @@
 #
 # Usage: publish_tiers.sh OUT   (from forge/, after fetch_repo_rpms.sh)
 # The registry is $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER (default ghcr.io and ars-regia), in
-# lower case, as system/tier-digests.sh resolves it. Needs buildah, skopeo, createrepo_c and jq.
+# lower case, as system/tier-digests.sh resolves it. Needs buildah, skopeo, createrepo_c, jq and
+# cosign, with the workflow's OIDC token for the keyless signature.
 set -euo pipefail
 
 [[ $# -eq 1 && -n $1 ]] || {
@@ -37,22 +41,29 @@ case $GITHUB_REF in
 esac
 REGISTRY=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
 REGISTRY=${REGISTRY,,}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+tier_digests=$here/../../system/tier-digests.sh
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 # publish NAME DIR: pushes DIR as $REGISTRY/NAME:$TAG unless the published image already
 # carries the same RPM content hash, and writes the digest of the image in use to $work/NAME.
 publish() {
-    local name=$1 dir=$2 image=$REGISTRY/$1:$TAG new_hash inspect ctr
+    local name=$1 dir=$2 image=$REGISTRY/$1:$TAG new_hash inspect digest verdict ctr
     new_hash=$(find "$dir" -name '*.rpm' -type f | sort | xargs -r sha256sum | sha256sum | awk '{print $1}')
     # One manifest read of the tag about to be pushed gives both the content label and the digest it belongs to. An image
     # that cannot be read (never published yet) counts as changed, with skopeo's error left in
     # the log: the push that follows fails on its own if the registry is the problem.
     if inspect=$(skopeo inspect "docker://$image") &&
         [[ $(jq -r '.Labels["tier.content.sha256"] // ""' <<< "$inspect") == "$new_hash" ]]; then
-        echo "$name: RPM content unchanged, not pushed"
-        jq -r .Digest <<< "$inspect" > "$work/$name"
-        return 0
+        digest=$(jq -r .Digest <<< "$inspect")
+        verdict=$(bash "$tier_digests" signed "$REGISTRY/$name@$digest")
+        if [[ $verdict == signed ]]; then
+            echo "$name: RPM content unchanged, not pushed"
+            echo "$digest" > "$work/$name"
+            return 0
+        fi
+        echo "$name: RPM content unchanged but not signed by a trusted run: pushed again"
     fi
     (
         cd "$dir"
@@ -65,6 +76,7 @@ publish() {
         buildah rm "$ctr"
         buildah rmi "$image"
     )
+    bash "$here/retry.sh" cosign sign --yes "$REGISTRY/$name@$(< "$work/$name")"
 }
 
 pids=()

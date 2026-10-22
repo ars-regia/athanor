@@ -217,6 +217,8 @@ mod tests {
             last_successful_check: Some(NOW - 30 * 3600),
             last_error: ErrorCode::None,
             last_error_host: None,
+            automatic_security_updates: true,
+            postpone: None,
         }
     }
 

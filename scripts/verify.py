@@ -190,7 +190,15 @@ SIGN_ONLY_INPUTS = {
     "actions/checkout": {"persist-credentials"},
     "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
     "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
+    "sigstore/cosign-installer": set(),
 }
+# The one third-party action a job with a key runs, pinned by a full commit SHA, with no input,
+# and only in sign-images of release.yml, for `cosign attest` (D43 as amended by ADR-0127).
+COSIGN_INSTALLER = re.compile(r"^sigstore/cosign-installer@[0-9a-f]{40}$")
+COSIGN_INSTALLER_JOB = ("release.yml", "sign-images")
+# The login cosign attest reads in that job alone: cosign reads the docker config that cosign
+# login writes (go-containerregistry authn.DefaultKeychain), not the auth file of skopeo login.
+COSIGN_LOGIN = 'echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin'
 # Where a sign-only job may download: a directory that is not in the checkout, so an artifact
 # never replaces the sign script (a download without a path lands on the workspace root).
 SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
@@ -206,8 +214,8 @@ SIGN_JOB_COMMANDS = {
     "bash forge/specs/azoth/signer/run.sh sign",
     'echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin',
     'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
-    ' --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt'
-    ' | tee -a "${GITHUB_STEP_SUMMARY}"',
+    ' --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations'
+    ' artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"',
     RELEASE_REF_CHECK,
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
@@ -215,8 +223,15 @@ SIGN_JOB_COMMANDS = {
 SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
 # The image sign script runs beside the key and starts no container: system/verify-images.sh
 # verifies its signatures in a job without the key (D43). The kernel signer is the exception
-# by design: it runs a digest-pinned signer image it verifies first.
+# by design: it runs a digest-pinned signer image it verifies first. Of cosign it runs only
+# `cosign attest` (ADR-0127 point 5).
 IMAGE_SIGN_SCRIPT = "system/sign-images.sh"
+# Every word cosign on a line of it, quoted, in a substitution or an assignment alike, and
+# the bare command cosign followed by attest, which alone it may be; and eval, which runs a
+# command no line names.
+EVAL = re.compile(r"(?:^|(?<=[\s;&|(]))eval\b")
+COSIGN_WORD = re.compile(r"\bcosign\b")
+COSIGN_ATTEST = re.compile(r"(?:^|(?<=[\s;&|(]))cosign\s+attest\b")
 # A container engine as a command, not the docker:// transport of an image reference.
 CONTAINER_ENGINE = re.compile(r"\b(?:podman|docker|buildah|nerdctl|crun|runc)\b(?!://)")
 # The runners a signing job may use: GitHub-hosted, never a self-hosted machine (D43).
@@ -225,8 +240,8 @@ GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 SIGN_SCRIPTS = re.compile(
     r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
     r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}"'
-    r' --kernel-digests artifacts/kernel-unsigned\.txt artifacts/image-digests\.txt'
-    r' \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
+    r' --kernel-digests artifacts/kernel-unsigned\.txt --attestations artifacts/attestations'
+    r' artifacts/image-digests\.txt \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 # Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.
 SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
@@ -615,18 +630,30 @@ def policy_pull_problems(root):
 
 
 def image_sign_script_problems(root):
-    """The image sign script starts no container: a line outside a comment that names a
-    container engine as a command is a problem (D43)."""
+    """The image sign script starts no container and runs no cosign subcommand but attest: a
+    line outside a comment that names a container engine as a command, or names cosign anywhere
+    but as the bare command `cosign attest` (quoted, through a variable, a substitution or a path
+    alike), or runs eval, is a problem (D43, ADR-0127). The lint catches mistakes, not a
+    deliberate evasion: a name built from pieces passes it, and the review of sign-images.sh,
+    a code-owned path, is the boundary. The scripts it runs are not read here: of those,
+    scripts/ci/release_attestation.py runs cosign only in verify, which verify-images.sh calls in
+    a job without the key, where the pinned installer puts cosign beside no secret."""
     path = Path(root) / IMAGE_SIGN_SCRIPT
     if not path.is_file():
         return []
     problems = []
     for number, line in enumerate(read(path).splitlines(), 1):
         code = line.strip()
-        if code.startswith("#") or not CONTAINER_ENGINE.search(code):
+        if code.startswith("#"):
             continue
-        problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
-                        "signatures in a job without it, system/verify-images.sh (D43)")
+        if CONTAINER_ENGINE.search(code):
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
+                            "signatures in a job without it, system/verify-images.sh (D43)")
+        if len(COSIGN_WORD.findall(code)) != len(COSIGN_ATTEST.findall(code)):
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs cosign other than cosign attest beside the "
+                            "key (D43, ADR-0127)")
+        if EVAL.search(code):
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs eval beside the key (D43, ADR-0127)")
     return problems
 
 
@@ -660,7 +687,8 @@ def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, re
                 problems.append(f"{name}: job {job_id} inherits every secret into {called}, which has a "
                                 "signing job or cannot be read: pass the secrets it needs by name (D43)")
         if environment in signing:
-            problems += signing_job_problems(f"{name}: signing job {job_id}", job, steps, environment, holders)
+            problems += signing_job_problems(f"{name}: signing job {job_id}", job, steps, environment, holders,
+                                             (name, job_id) == COSIGN_INSTALLER_JOB)
     return problems
 
 
@@ -669,11 +697,12 @@ def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, re
 SIGN_JOB_DEFAULTS = {"run": {"shell": "bash"}}
 
 
-def signing_job_problems(where, job, steps, environment, holders):
+def signing_job_problems(where, job, steps, environment, holders, attests=False):
     """A job of a signing environment: GitHub-hosted, no container, no defaults but the bash
-    shell, only the pinned actions with their allowed inputs, only the allow-listed commands, no
-    shell or working directory of its own, and in env only the secrets of its environment and
-    plain values."""
+    shell, only the pinned actions with their allowed inputs (with attests, the job of
+    COSIGN_INSTALLER_JOB, also the cosign installer and COSIGN_LOGIN), only the allow-listed
+    commands, no shell or working directory of its own, and in env only the secrets of its
+    environment and plain values."""
     problems = []
     runs_on = job.get("runs-on")
     if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
@@ -701,13 +730,13 @@ def signing_job_problems(where, job, steps, environment, holders):
         for key in ("shell", "working-directory"):
             if key in step:
                 problems.append(f"{where} step {index + 1} sets {key} (D43)")
-        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS:
+        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS | ({COSIGN_LOGIN} if attests else set()):
             command = str(step["run"]).strip().splitlines()[0] if str(step["run"]).strip() else ""
             problems.append(f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}")
         if "uses" not in step:
             continue
         action = str(step["uses"])
-        if not SIGN_ONLY_ACTIONS.match(action):
+        if not (SIGN_ONLY_ACTIONS.match(action) or (attests and COSIGN_INSTALLER.match(action))):
             problems.append(f"{where} uses {action}: only checkout, download-artifact and upload-artifact "
                             "pinned by SHA (D43)")
             continue
@@ -1032,6 +1061,41 @@ def check_os_release():
 TOOLKIT = "system/athanor-toolkit"
 # SPDX identifier -> the licence file that carries its text.
 TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
+# The gallery is a client of the toolkit outside the workspace: its one dependency.
+GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
+GALLERY_DEPENDENCY = {"athanor-toolkit": {"path": ".."}}
+
+
+def dependency_tables(data, kinds):
+    """Every table of `kinds` in a manifest, at the top and under [target.*], with the
+    underscore spellings cargo still accepts (`build_dependencies`, `dev_dependencies`)."""
+    kinds = [spelling for kind in kinds for spelling in dict.fromkeys((kind, kind.replace("-", "_")))]
+    tables = [(kind, data.get(kind, {})) for kind in kinds]
+    for target, spec in data.get("target", {}).items():
+        tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
+    return tables
+
+
+def gallery_problems(root):
+    """The gallery depends on the toolkit by its path and on nothing else, as an application
+    outside Athanor would (ADR-0126)."""
+    if not (root / GALLERY_MANIFEST).is_file():
+        return []
+    try:
+        data = tomllib.loads(read(root / GALLERY_MANIFEST))
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
+    out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
+           for kind in ("patch", "replace") if kind in data]
+    out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
+            for key in data.get("workspace", {})]
+    for table, deps in tables:
+        for name, dep in deps.items():
+            if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
+                out.append(f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
+                           'the gallery depends only on athanor-toolkit = { path = ".." }')
+    return out
 
 
 def toolkit_boundary_problems(root=None):
@@ -1044,11 +1108,7 @@ def toolkit_boundary_problems(root=None):
         workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{manifest}: cannot read ({err})"]
-    tables = [("dependencies", data.get("dependencies", {})),
-              ("build-dependencies", data.get("build-dependencies", {}))]
-    for target, spec in data.get("target", {}).items():
-        tables += [(f"target.{target}.{kind}", spec.get(kind, {}))
-                   for kind in ("dependencies", "build-dependencies")]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies"))
     out = []
     for table, deps in tables:
         for name, dep in deps.items():
@@ -1072,7 +1132,7 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out
+    return out + gallery_problems(root)
 
 
 @check("toolkit-boundary", "The toolkit names no Athanor crate outside dev-dependencies, and its licence files match its license")
@@ -2711,6 +2771,8 @@ OWN_LICENCE_EXCEPTIONS = {
     # doc_own_stack.md OS7).
     "system/athanor-toolkit/Cargo.toml":
         ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
+    "system/athanor-toolkit/gallery/Cargo.toml":
+        ("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None),
 }
 # The crate whose dependency forces the greeter's exception above; a crate that depends on it
 # must be in the table with it as its dependency.
