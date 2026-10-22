@@ -355,6 +355,10 @@ mod tests {
 
     pub(crate) fn scratch(test: &str) -> Store {
         let dir = std::env::temp_dir().join(format!("athanor-update-store-{}-{test}", std::process::id()));
+        // A reused TMPDIR may hold the files of an earlier run with the same pid.
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).expect("clean");
+        }
         let store = Store { run: dir.join("run"), var: dir.join("var") };
         std::fs::create_dir_all(&store.run).expect("mkdir");
         std::fs::create_dir_all(store.var.join("signatures")).expect("mkdir");
