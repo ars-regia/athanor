@@ -27,7 +27,7 @@ async fn send(session: &Connection, notice: &Notice) -> zbus::Result<(u32, Strin
     let actions = text::actions(notice, t);
     let (summary, body) = match notice {
         Notice::Ready { .. } => (t.ready_summary, t.ready_body.to_owned()),
-        Notice::Security { until: None, .. } => (t.security_title, t.security_body.to_owned()),
+        Notice::Security { until: None, .. } | Notice::SecurityApplies { .. } => (t.security_title, t.security_body.to_owned()),
         Notice::Security { until: Some(until), .. } => (t.security_title, t.postponed_until.replace("{time}", &t.time(*until))),
         Notice::Running { version, build_time, .. } => {
             let date = chrono::DateTime::from_timestamp(*build_time, 0).map(|time| time.format("%Y-%m-%d").to_string()).unwrap_or_default();
@@ -100,7 +100,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
                         Ok((id, server)) => {
                             serverless = false;
                             match &notice {
-                                Notice::Ready { digest } | Notice::Security { digest, .. } => {
+                                Notice::Ready { digest } | Notice::Security { digest, .. } | Notice::SecurityApplies { digest } => {
                                     tracing::info!(%digest, "update offered");
                                     if let Err(err) = notices::record_announced(state_dir, digest) {
                                         tracing::warn!(%err, "the announced digest was not recorded; it is offered once per session");

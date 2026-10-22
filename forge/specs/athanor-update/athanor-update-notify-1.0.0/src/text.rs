@@ -68,7 +68,7 @@ pub fn actions(notice: &Notice, t: &Texts) -> Vec<&'static str> {
         Notice::Ready { .. } => vec![ACTION_APPLY, t.restart, ACTION_LATER, t.later],
         Notice::Running { .. } => vec![ACTION_GO_BACK, t.go_back],
         Notice::Security { until: None, .. } => vec![ACTION_POSTPONE, t.postpone],
-        Notice::Security { until: Some(_), .. } => vec![],
+        Notice::Security { until: Some(_), .. } | Notice::SecurityApplies { .. } => vec![],
     }
 }
 

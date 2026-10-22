@@ -13,6 +13,9 @@ pub enum Notice {
     /// A security digest applies at the next shutdown (UT13). `until` is the expiry of the
     /// lineage's postpone once it is used; before that the notice offers the postpone.
     Security { digest: String, until: Option<i64> },
+    /// A security digest applies at the next shutdown and the lineage's postpone is spent
+    /// (a newer digest after the expiry): the same text, no offer, no expiry line.
+    SecurityApplies { digest: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,30 +61,30 @@ impl Notices {
         if seen_booted.is_some_and(|seen| seen != state.booted.digest) && state.previous.is_some() && self.offered.insert(format!("running {}", state.booted.digest)) {
             return Some(Notice::Running { digest: state.booted.digest.clone(), version: state.booted.version.clone(), build_time: state.booted.build_time });
         }
-        let (downloaded, security) = match (state.update, &state.postpone) {
-            // The service unlocked it: nothing restarts by itself, and one postpone is offered
-            // while the lineage's is unused. A signed copy (no lineage) is not a security notice.
-            (UpdateState::WillApplyAtNextShutdown, Some(postpone)) if !postpone.postponed => (state.downloaded.as_ref()?, Some(None)),
+        let staged = state.downloaded.as_ref()?;
+        let notice = |digest: String| match (state.update, &state.postpone) {
+            // The service unlocked it: nothing restarts by itself. One postpone is offered while
+            // the lineage's is unused, none once it is spent. A signed copy (no lineage) is not
+            // a security notice.
+            (UpdateState::WillApplyAtNextShutdown, Some(postpone)) if !postpone.postponed => Some(Notice::Security { digest, until: None }),
+            (UpdateState::WillApplyAtNextShutdown, Some(_)) => Some(Notice::SecurityApplies { digest }),
             // Re-locked by the postpone: no second one is offered, and the opt-out still gets the UT11 notice.
-            (UpdateState::Downloaded, Some(postpone)) if postpone.postponed && state.automatic_security_updates => (state.downloaded.as_ref()?, Some(postponed_until(state))),
-            (UpdateState::Downloaded, _) => (state.downloaded.as_ref()?, None),
-            _ => return None,
+            (UpdateState::Downloaded, Some(postpone)) if postpone.postponed && state.automatic_security_updates => Some(Notice::Security { digest, until: postponed_until(state) }),
+            (UpdateState::Downloaded, _) => Some(Notice::Ready { digest }),
+            _ => None,
         };
-        if self.announced.as_deref() == Some(downloaded.digest.as_str()) {
+        if self.announced.as_deref() == Some(staged.digest.as_str()) {
             return None;
         }
-        let digest = downloaded.digest.clone();
-        self.offered.insert(digest.clone()).then_some(match security {
-            Some(until) => Notice::Security { digest, until },
-            None => Notice::Ready { digest },
-        })
+        let notice = notice(staged.digest.clone())?;
+        self.offered.insert(staged.digest.clone()).then_some(notice)
     }
 
     /// A notice that could not be sent, typically before the session's notification server
     /// has started: it is due again at the next poll instead of being lost.
     pub fn withdraw(&mut self, notice: &Notice) {
         self.offered.remove(&match notice {
-            Notice::Ready { digest } | Notice::Security { digest, .. } => digest.clone(),
+            Notice::Ready { digest } | Notice::Security { digest, .. } | Notice::SecurityApplies { digest } => digest.clone(),
             Notice::Running { digest, .. } => format!("running {digest}"),
         });
     }
@@ -212,6 +215,19 @@ mod tests {
         assert_eq!(crate::text::actions(&notice, crate::text::texts(None)), vec![ACTION_POSTPONE, "Postpone"], "no open-ended Later");
         assert_eq!(notices.due(&staged, Some("sha256:a")), None, "once per session");
         assert_eq!(Notices::new(Some("sha256:b".into())).due(&staged, Some("sha256:a")), None, "and never in a later one");
+    }
+
+    #[test]
+    fn a_newer_digest_after_an_expired_postpone_is_announced_without_an_offer() {
+        let mut staged = state("sha256:a", Some("sha256:s2"), UpdateState::WillApplyAtNextShutdown);
+        security(&mut staged, true);
+        let mut notices = Notices::new(Some("sha256:s1".into()));
+        let notice = notices.due(&staged, Some("sha256:a")).expect("S2 installs at the next shutdown");
+        assert_eq!(notice, Notice::SecurityApplies { digest: "sha256:s2".into() });
+        let t = crate::text::texts(None);
+        assert!(crate::text::actions(&notice, t).is_empty(), "no postpone offer");
+        assert_eq!(notices.invoked(":1.1", 1, ACTION_POSTPONE), None);
+        assert_eq!(notices.due(&staged, Some("sha256:a")), None, "once per digest");
     }
 
     #[test]
