@@ -277,7 +277,8 @@ the home directory, not under `/usr`. The bar and the dock are the image's.
 
 ### 1. The binary, and the grants
 
-On the laptop, build it (`rig.sh` needs podman; nothing else building beside it):
+On the laptop, from the repository root, build it (`rig.sh` needs podman; nothing else building
+beside it):
 
 ```
 forge/test/shell/rig.sh build-compositor
@@ -301,9 +302,13 @@ removes the list again.
 [ "$(findmnt -no FSTYPE /usr)" = overlay ] || sudo bootc usr-overlay
 sudo install -D -m 0644 /dev/stdin /usr/share/athanor/compositor/privileged-clients <<'LIST'
 /usr/bin/athanor-bar c1-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
-/usr/bin/athanor-dock c1-dock.service zwlr_layer_shell_v1
+/usr/bin/athanor-dock c1-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1
 LIST
 ```
+
+The shipped `data/privileged-clients` has no line for the dock, so the dock's top layer and its
+window list are refused in any image: a gap to close in task 9a. The dock line above is only for
+this run.
 
 ### 2. Start
 
@@ -313,28 +318,55 @@ at `info`; it reads no `RUST_LOG`), which goes to a file:
 
 ```
 mkdir -p ~/c1/log && cd ~/c1/log
-~/c1/athanor-compositor --drm &> compositor-$(date +%F-%H%M).log &
-sleep 3
-log=$(ls -t compositor-*.log | head -n 1); echo "$log"   # the log path to send back
-sock=$(sed -n 's/.*listening.*"\(wayland-[0-9]*\)".*/\1/p' "$log" | head -n 1)
-echo "$sock"                                              # empty: it did not start, read the log
+date '+%F %T' > ~/c1/log/start                             # the time window of step 5
+log=$PWD/compositor-$(date +%F-%H%M).log; echo "$log"      # the log path to send back
+~/c1/athanor-compositor --drm &> "$log" &
+for _ in $(seq 100); do
+    sock=$(sed -n 's/.*listening.*"\(wayland-[0-9]*\)".*/\1/p' "$log" | head -n 1)
+    [ -n "$sock" ] && break
+    sleep 0.1
+done
+[ -n "$sock" ] || { cat "$log"; echo "the compositor never listened"; }
+echo "$sock"
 ```
 
-`--drm` takes no other option (`src/main.rs`). Then the clients, the bar and the dock as user
-units, so that the allow-list's unit names hold (the COSMIC session's own bar and dock, still
-running on VT 1, are untouched):
+If the last message appears, stop here and send the log.
+
+The bar and the dock are unique applications on the user's D-Bus (`os.athanor.Bar`,
+`os.athanor.Dock`): a second copy would only wake the one running in the COSMIC session on VT 1
+and exit, and nothing would be drawn here. Stop those two units first; the graphical session
+loses its bar and dock until step 6 or the end of the run:
 
 ```
-systemd-run --user --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo /usr/bin/athanor-bar
-systemd-run --user --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo /usr/bin/athanor-dock
-WAYLAND_DISPLAY="$sock" ptyxis &> terminal.log &
+systemctl --user stop athanor-bar.service athanor-dock.service
 ```
 
-The bar and the dock must be drawn. If a monitor shows none, run `grep "was closed" "$log"`: the
-line "a surface on the top layers of a client not granted them was closed" means the allow-list
-did not match (wrong unit name, or the file is missing: redo step 1).
+`--drm` takes no other option (`src/main.rs`). Then the clients: the bar and the dock as user
+units, so that the allow-list's unit names hold. Each keeps a crash record in the runtime
+directory its unit names (`RUNTIME_DIRECTORY`, an entry named `athanor-bar` or `athanor-dock`;
+`system/athanor-unit/src/dirs.rs`); the record is shared with the real units, and five failed
+starts in ten minutes put the real bar or dock on the vendor layout. These starts therefore
+keep their record under `~/c1/run`. The terminal is started apart from the COSMIC session's
+Ptyxis (`--standalone`, an option the installed binary carries; its behaviour is not checked
+here: if it opens a window on VT 1 instead, close every Ptyxis window there first):
 
-Ctrl+Alt+F1 returns to the graphical session; Ctrl+Alt+F3 comes back to the compositor.
+```
+mkdir -p ~/c1/run/athanor-bar ~/c1/run/athanor-dock
+systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
+systemd-run --user --collect --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-dock" /usr/bin/athanor-dock
+WAYLAND_DISPLAY="$sock" ptyxis --standalone &> terminal.log &
+```
+
+The bar and the dock must be drawn; `systemctl --user status c1-bar c1-dock` shows whether they
+run. A unit that failed is retried with the same command (`--collect` removes it). If a monitor
+shows none while they run, `grep "was closed" "$log"`: the line "a surface on the top layers of a
+client not granted them was closed" means the allow-list did not match (wrong unit name, or the
+file is missing: redo step 1). If `status` shows a unit failed, read `journalctl --user -u
+c1-bar`; the bar's Landlock ruleset may refuse the runtime directory under `~/c1/run`, which is
+not checked here.
+
+Ctrl+Alt+F1 returns to the graphical session, without its bar and dock until step 6;
+Ctrl+Alt+F3 comes back to the compositor.
 
 ### 3. If the screen stays black
 
@@ -346,8 +378,9 @@ In this order, stopping at the first that works:
 3. From another machine over SSH, as the same user:
    ```
    systemctl --user stop c1-bar c1-dock
-   pkill -TERM -x athanor-compositor
+   pkill -TERM -f '^/[^ ]*athanor-compositor --drm'
    sudo chvt 1
+   systemctl --user start athanor-bar.service athanor-dock.service
    ```
    The compositor ends with an error and logs it when the session or the GPU is lost; that
    last line is the first thing to send back.
@@ -368,10 +401,10 @@ Laptop only, after the hour, each noted with its time:
 
 ### 5. What to send back
 
-On the same machine, `since` being the local time you started:
+On the same machine, `since` being the local time written at the start:
 
 ```
-since="2026-10-22 18:00"
+since=$(cat ~/c1/log/start)       # written at the start, step 2
 journalctl -b --since "$since" --no-pager > ~/c1/log/journal.txt
 sudo dmesg --ctime | grep -iE 'drm|nvidia|NVRM|amdgpu|i915|xe |Xid' > ~/c1/log/dmesg-gpu.txt
 tar -C ~/c1 -czf ~/c1/c1-task9-$(hostname).tar.gz log
@@ -390,3 +423,20 @@ section for every NVIDIA defect and the frame times of each machine. Until then 
 an issue or goes into the pull request that fixes it, as machine, time, what was seen, and the
 verbatim lines of the compositor log, the journal and `dmesg`; task 10 gathers them. A suspend
 or an unplug that resets the desktop is not a defect of this work: it is #604.
+
+### 6. Back to the graphical session
+
+When the run ends, from the console (or over SSH), as the same user:
+
+```
+systemctl --user stop c1-bar c1-dock
+pkill -TERM -f '^/[^ ]*athanor-compositor --drm'
+sudo chvt 1
+systemctl --user start athanor-bar.service athanor-dock.service
+```
+
+The real bar and dock keep the crash record of their own runtime directory, which this run does
+not touch. If the bar or the dock was started under `c1-bar` or `c1-dock` without the
+`RUNTIME_DIRECTORY` above, the real record may count those starts and, after five in ten
+minutes, put the real unit on the vendor layout; clear it before the `start` line with
+`rm -f "$XDG_RUNTIME_DIR/athanor-bar/failures" "$XDG_RUNTIME_DIR/athanor-dock/failures"`.
