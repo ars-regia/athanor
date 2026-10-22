@@ -221,7 +221,7 @@ SSH, driven by a script:
   `118c3a7df459829ce79033033700bd66f2c11ddfcb06bd6c522ae60c94866551`.
 - **Session.** A system unit with `PAMName=login` on `/dev/tty3` opened logind session 449, and
   the compositor ran in it with `--drm`, on `seat0` by its own log. The script then switched to
-  tty3 with `chvt 3`, so the compositor started before its session was the active one (T9-2).
+  tty3 with `chvt 3`, so the compositor may have started before its session was the active one (T9-2).
   The script's check of the session read the wrong one and shows nothing about session 449.
   cosmic-comp's session on tty1 stayed alive throughout, in the background.
 - **Allow-list.** The README's hand-written list under `bootc usr-overlay`, plus one line per
@@ -265,12 +265,12 @@ bus (#604). The desktop gets one hour of three-output use only.
 | Id | Machine | Defect | Log lines | Revision 2 item |
 | --- | --- | --- | --- | --- |
 | T9-1 | Laptop | `grim` cannot capture an output: "compositor doesn't support the screen capture protocol". The compositor offers capture of windows only (section 4) and no output capture source, which explains the message; the compositor's log has no line about the request, so a refused grant cannot be ruled out. Either way no screenshot of the session exists and a screenshot tool does not work under it. | journal, `c1-grim-start.service` at 21:54:15 CEST | 11: an output capture source, behind an allow-list line of its own |
-| T9-2 | Laptop | No input device for the first hour. libinput was initialised at 19:54:03Z and added no device until the resume at 20:55:19Z, when it added nine at once. The compositor started while its session was not yet the active one; the devices it could not open then were not opened when the session became active, only when the suspend paused and resumed libinput. `ActivateSession` calls `resume()` (`udev.rs:213`), which re-enumerates only a suspended libinput. | `log/compositor-2026-10-22-2154.log` at 19:54:03Z and 20:55:19Z | 13: a compositor started on an inactive session takes its input devices when the session becomes active |
+| T9-2 | Laptop | No input device for the first hour. libinput was initialised at 19:54:03Z and added no device until 20:55:19Z, just after the resume, when it added nine at once. The cause is not established. The compositor's `pause()` and `resume()` log "the session is paused" and "the session resumes" (`udev.rs:304`, `udev.rs:315`), and neither line is in the log, so logind never sent the session a pause or an activation: `rtcwake` bypasses logind, and the devices most likely came back with udev re-adding them after the resume. One hypothesis is that the compositor started before its session was the active one (the script ran `chvt 3` after the start, and the drm master warning below); the missing activation line does not confirm it. | `log/compositor-2026-10-22-2154.log` at 19:54:03Z and 20:55:19Z | 13: find why, and require the compositor to have its input devices whenever its session is active |
 
 Two warnings from smithay were met; neither stopped drawing:
 
 - **"Unable to become drm master, assuming unprivileged mode"**, once at 19:54:02Z, the same
-  second in which cosmic-comp on tty1 lost the device. It fits the start order of T9-2. The
+  second in which cosmic-comp on tty1 lost the device. It fits the start order in T9-2's hypothesis. The
   compositor set the mode 1.5 s later and drew for the hour.
 - **"Failed to destroy old mode property blob"**, at each modeset (19:54:04Z and 20:55:50Z).
 
@@ -359,9 +359,11 @@ Each item names the finding that makes it necessary.
     virtual input, data control, primary selection, `zwp_text_input_v3`, idle inhibit,
     single-pixel buffer, server decorations, output power and output management. Each belongs to
     a consumer named in `c1-protocols.md` section 4 and needs a decision on its privilege.
-13. **Supervision.** Finding: README, task 8: nothing supervises the compositor; under greetd its
-    exit ends the session and brings the greeter back. Revision 2 states that as the design or
-    adds a supervisor.
+13. **Supervision and the session.** Findings: README, task 8, and T9-2 (section 7.3). Nothing
+    supervises the compositor; under greetd its exit ends the session and brings the greeter back.
+    Revision 2 states that as the design or adds a supervisor. On the laptop the compositor ran for
+    an hour without input devices, for a cause not yet found; revision 2 requires the input devices
+    whenever the session is active, with a test that starts the compositor on an inactive session.
 14. **Hardware evidence for the acceptance.** Findings: sections 6 to 8. The laptop has an
     unattended hour on a console, a suspend and resume and an output unplugged (section 7); nobody
     has looked at the screen, input was missing for that hour (T9-2), the text console switch and
