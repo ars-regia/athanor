@@ -503,14 +503,21 @@ clock_ahead() {
 # timesyncd saves its clock file when it stops, with the time of the moved clock: touched to the
 # restored time, so that no later boot starts seven days ahead.
 clock_restore() {
-  local now
+  local now present
   [[ -n $ACC_CLOCK_MOVED ]] || return 0
   now=$(date +%s)
   guest_ssh "sudo date -s @$now" > /dev/null || return 1
-  if guest_ssh test -e /var/lib/systemd/timesync/clock; then
-    guest_ssh "sudo touch -d @$now /var/lib/systemd/timesync/clock" || return 1
-    [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
-  fi
+  # test exits 1 when the file is absent; any other status (255: ssh failed) is a failure.
+  present=0
+  guest_ssh test -e /var/lib/systemd/timesync/clock || present=$?
+  case $present in
+    0)
+      guest_ssh "sudo touch -d @$now /var/lib/systemd/timesync/clock" || return 1
+      [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
+      ;;
+    1) ;;
+    *) return 1 ;;
+  esac
   if [[ $ACC_CLOCK_NTP == yes ]]; then guest_ssh sudo timedatectl set-ntp true || return 1; fi
   ACC_CLOCK_MOVED=''
 }
@@ -648,6 +655,7 @@ stage_security() { # items 16 and 17; doc_shell.md section 7, item 4
   wait_boot_healthy
   for n in 1 2; do
     check_now
+    expect "17: the check after booting vsec1 ran with no error" .last_error none
     [[ $(lineage_anchor) == "$digest2" ]] || die "FAIL  17: booting the earlier vsec1 moved the anchor to '$(lineage_anchor)', expected $digest2"
   done
   expect "17: vsec1 is the booted digest" .booted.digest "$digest1"
@@ -693,7 +701,7 @@ stage_postpone() { # item 17
   expect_error "17: and Postpone() after it is published is refused" "$(call_active Postpone)" os.athanor.Update1.Error.AlreadyPostponed
   expect "17: with first_notice_at unmoved" .postpone.first_notice_at "$first"
   # The seven days pass: the shutdown that would apply unlocks the deployment (Task 7).
-  trap 'clock_restore' EXIT
+  trap 'clock_restore || echo "FAIL  the guest clock was not restored" >&2' EXIT
   clock_ahead
   power_cycle
   clock_restore
