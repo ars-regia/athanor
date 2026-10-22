@@ -70,7 +70,7 @@ class Units(unittest.TestCase):
         for unit in ("athanor-update-migrate.timer", "athanor-update-migrate.service"):
             self.assertFalse(any("/var/lib/athanor-update/migrated" in line for line in directives(unit)), unit)
 
-    def test_the_check_runs_after_greenboot_s_verdict(self):
+    def test_the_check_is_ordered_after_boot_complete(self):
         after = [line for line in directives("athanor-update-check.service") if line.startswith("After=")]
         self.assertIn("boot-complete.target", " ".join(after).split(), after)
 

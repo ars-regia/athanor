@@ -93,9 +93,12 @@ predicate type of point 1 as written below:
     to an earlier security digest does not reset the budget. The rule compares with the
     anchor, not with the newest build ever booted: a security digest built after the anchor
     counts even when a newer feature digest booted in between. Only `athanor-update check`
-    counts a boot as applied, and its unit is ordered `After=boot-complete.target`, after
-    greenboot's verdict: the check at boot of `athanor-update-state.service` runs before that
-    verdict, when `rollbackQueued` cannot yet say that greenboot rejected the boot.
+    counts a boot as applied, and only while `boot-complete.target` is active, which it reads
+    at run time: greenboot reaches that target when the required health checks pass. Its unit
+    is also ordered `After=boot-complete.target`, an ordering that holds within one
+    transaction only. The check at boot of `athanor-update-state.service` runs before
+    greenboot's verdict and never counts a boot. A boot whose health checks failed is not
+    counted, whether or not a rollback is queued, and the check still runs and downloads.
 11. **What counts as a boot.** A new `/proc/sys/kernel/random/boot_id` seen by
     `athanor-update check --offline`. A soft reboot keeps the boot id and is not counted.
 12. **Item 19's three checks.** UT6's hold stands: the digest stays held until a newer one is

@@ -462,11 +462,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
             lineage.boot(boot_id);
         }
         // Applied (ADR-0127 point 10, as amended on 2026-10-22): the booted digest verifies as
-        // the security class, was built after the anchor, and greenboot is not returning from
-        // it. Only the check service counts it: it is ordered after greenboot's verdict
-        // (`After=boot-complete.target`), where the state service at boot runs before it.
+        // the security class, was built after the anchor, greenboot is not returning from it,
+        // and greenboot declared the boot good: `boot-complete.target` is active, read here at
+        // run time, since a unit ordering only holds within one transaction. The state service
+        // at boot runs before that verdict and never counts it. A boot that failed its health
+        // checks is not counted, and the check still runs and downloads.
         let booted = &status.booted;
-        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) {
+        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) && ctx.tools.boot_complete() {
             lineage.applied(&booted.digest, booted.build_time);
         }
     }
@@ -600,6 +602,8 @@ pub(crate) mod tests {
         pub attestations: RefCell<HashMap<String, Class>>,
         /// The attestation copy fails midway, as skopeo's does, leaving only `version` behind.
         pub attestation_breaks: Cell<bool>,
+        /// `boot-complete.target` is active: greenboot's required health checks passed.
+        pub boot_complete: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -618,6 +622,7 @@ pub(crate) mod tests {
                 names: true,
                 attestations: RefCell::new(HashMap::new()),
                 attestation_breaks: Cell::new(false),
+                boot_complete: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -733,6 +738,9 @@ pub(crate) mod tests {
         }
         fn metered(&self) -> bool {
             self.metered
+        }
+        fn boot_complete(&self) -> bool {
+            self.boot_complete
         }
     }
 
@@ -1426,6 +1434,21 @@ pub(crate) mod tests {
         let state = run(&machine.ctx(&tools, NOW), false).expect("check");
         assert_eq!(state.postpone, None);
         assert_eq!(machine.store.lineage().expect("stored"), Lineage { anchor: Some(attested()), anchor_build_time: Some(2000), open: None });
+    }
+
+    #[test]
+    fn a_boot_that_failed_its_health_checks_is_not_applied() {
+        // Greenboot failed boot-complete.target, and no rollback is queued: someone intervenes
+        // by hand. The check still runs and asks the registry; the boot is not counted.
+        let machine = Machine::new("health-failed", &["real/k1.pub"]);
+        let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, false) };
+        machine.store.set_lineage(&lineage).expect("write");
+        let mut tools = booted_attested(&machine, false);
+        tools.boot_complete = false;
+        let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert_eq!(state.postpone, lineage.published());
+        assert_eq!(machine.store.lineage().expect("stored"), lineage);
+        assert!(tools.called("candidate"), "the check still runs: {:?}", tools.calls.borrow());
     }
 
     #[test]
