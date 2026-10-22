@@ -137,6 +137,29 @@
   "value": ""
  },
  {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Lists",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Lists",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
   "depth": 3,
   "role": "grouping",
   "name": "",
