@@ -15,6 +15,12 @@ pub struct Lineage {
     /// at least: an absent one is no lineage the service wrote.
     #[serde(deserialize_with = "Option::deserialize")]
     pub anchor: Option<String>,
+    /// The build time of the anchor, in seconds since the epoch; `null` with the anchor, before
+    /// the first. A booted security digest counts as applied only when it was built after it,
+    /// so going back to an earlier one never resets the budget (ADR-0127 point 10, as amended
+    /// on 2026-10-22).
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub anchor_build_time: Option<i64>,
     /// `None` until a security digest reaches `will-apply-at-next-shutdown` after the anchor.
     #[serde(deserialize_with = "Option::deserialize")]
     pub open: Option<Open>,
@@ -34,7 +40,7 @@ pub struct Open {
 }
 
 /// Why `Postpone()` has no budget to spend.
-#[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
+#[cfg_attr(not(test), expect(dead_code, reason = "Postpone() of UT13 calls it; until then only the tests do"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Budget {
     /// The lineage's one postpone is spent.
@@ -45,7 +51,6 @@ pub enum Budget {
     NotOpen,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the security-class check and Postpone() of UT13 call it; until then only the tests do"))]
 impl Lineage {
     /// A security digest reached `will-apply-at-next-shutdown` at `now`, during `boot_id`:
     /// opens the lineage, unless one is open, which the digest then inherits unchanged.
@@ -63,10 +68,11 @@ impl Lineage {
         }
     }
 
-    /// The security update `digest` booted (ADR-0127 point 10): the anchor moves to it and
-    /// the next security digest opens a new lineage with a new budget.
-    pub fn applied(&mut self, digest: &str) {
+    /// The security update `digest`, built at `build_time`, booted (ADR-0127 point 10): the
+    /// anchor moves to it and the next security digest opens a new lineage with a new budget.
+    pub fn applied(&mut self, digest: &str, build_time: i64) {
         self.anchor = Some(digest.to_owned());
+        self.anchor_build_time = Some(build_time);
         self.open = None;
     }
 
@@ -81,6 +87,7 @@ impl Lineage {
     ///
     /// # Errors
     /// See [`Budget`]; the lineage is unchanged then.
+    #[cfg_attr(not(test), expect(dead_code, reason = "Postpone() of UT13 calls it; until then only the tests do"))]
     pub fn postpone(&mut self, now: i64) -> Result<i64, Budget> {
         let expired = self.expired(now);
         let open = self.open.as_mut().ok_or(Budget::NotOpen)?;
@@ -181,8 +188,8 @@ mod tests {
     fn applied_resets_and_records_the_anchor() {
         let mut lineage = opened();
         assert!(lineage.postpone(FIRST).is_ok());
-        lineage.applied("sha256:aa");
-        assert_eq!(lineage, Lineage { anchor: Some("sha256:aa".into()), open: None });
+        lineage.applied("sha256:aa", 5);
+        assert_eq!(lineage, Lineage { anchor: Some("sha256:aa".into()), anchor_build_time: Some(5), open: None });
         assert_eq!(lineage.published(), None);
         lineage.notice(FIRST + 30 * 86_400, "boot-9");
         let published = lineage.published().expect("a new lineage");
