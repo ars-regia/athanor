@@ -58,6 +58,13 @@ enum Change {
 
 type Queue = Rc<RefCell<Vec<Change>>>;
 
+/// Whether `change` makes the cached images stale: a new look tints them anew, and an
+/// application installed or removed can bring the icon an entry fell back from, as the GTK
+/// dock follows the theme.
+fn drops_images(change: &Change) -> bool {
+    matches!(change, Change::Appearance(_) | Change::Apps)
+}
+
 /// A GLib timeout that can be replaced. The slot holds the id until the timeout fires and
 /// takes it then, so a fired timeout is never removed: GLib aborts on that.
 #[derive(Default)]
@@ -931,6 +938,9 @@ impl Application for Dock {
         }
         let changes = std::mem::take(&mut *self.queue.borrow_mut());
         for change in changes {
+            if drops_images(&change) {
+                self.images.clear();
+            }
             match change {
                 Change::Windows => self.stale = true,
                 Change::Files => self
@@ -939,7 +949,6 @@ impl Application for Dock {
                 Change::Reload => self.reload(shell),
                 Change::Appearance(current) => {
                     self.look = look::look(&current);
-                    self.images.clear();
                     self.rebuild_all(shell);
                 }
                 Change::Apps => {
@@ -979,5 +988,14 @@ mod tests {
         // Unavailable favourites, or an entry without a desktop id: no row.
         assert!(pin_act(None, Some(id)).is_none());
         assert!(pin_act(Some(Vec::new()), None).is_none());
+    }
+
+    #[test]
+    fn a_new_look_or_a_change_of_the_installed_applications_reads_the_icons_again() {
+        assert!(drops_images(&Change::Appearance(Appearance::default())));
+        assert!(drops_images(&Change::Apps));
+        assert!(!drops_images(&Change::Windows));
+        assert!(!drops_images(&Change::Files));
+        assert!(!drops_images(&Change::Reload));
     }
 }
