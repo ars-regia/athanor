@@ -63,9 +63,9 @@ pub struct TextField {
     lines: usize,
     /// How far a text area is scrolled, in logical pixels from the top of its text.
     pub(crate) offset: f32,
-    /// The caret's byte offset after the last move up or down, and the horizontal position the
-    /// moves keep while the caret stays there.
-    column: Option<(usize, f32)>,
+    /// The horizontal position moves up and down keep, from the first of them to the next other
+    /// change of the caret or the text.
+    column: Option<f32>,
 }
 
 impl TextField {
@@ -179,48 +179,39 @@ impl TextField {
 
     /// Replaces the whole text, as an assistive technology's SetValue does.
     pub fn set_text(&mut self, text: &str) {
+        self.column = None;
         self.editor.set_text(text);
     }
 
     /// Moves the caret to the end of the text.
     pub(crate) fn move_to_end(&mut self, cx: &mut TextContext) {
-        self.editor
-            .driver(&mut cx.fonts, &mut cx.layouts)
-            .move_to_text_end();
+        self.driver(cx).move_to_text_end();
     }
 
     /// Types `text` at the caret, replacing the selection.
     pub fn insert(&mut self, cx: &mut TextContext, text: &str) {
-        self.editor
-            .driver(&mut cx.fonts, &mut cx.layouts)
-            .insert_or_replace_selection(text);
+        self.driver(cx).insert_or_replace_selection(text);
     }
 
     /// Deletes the selection, or the cluster before the caret.
     pub fn backspace(&mut self, cx: &mut TextContext) {
-        self.editor
-            .driver(&mut cx.fonts, &mut cx.layouts)
-            .backdelete();
+        self.driver(cx).backdelete();
     }
 
     /// Deletes the selection, or the cluster after the caret.
     pub fn delete(&mut self, cx: &mut TextContext) {
-        self.editor.driver(&mut cx.fonts, &mut cx.layouts).delete();
+        self.driver(cx).delete();
     }
 
     /// Moves the caret one cluster to the left on screen, which is backwards in left-to-right
     /// text and forwards in right-to-left text.
     pub fn left(&mut self, cx: &mut TextContext) {
-        self.editor
-            .driver(&mut cx.fonts, &mut cx.layouts)
-            .move_left();
+        self.driver(cx).move_left();
     }
 
     /// Moves the caret one cluster to the right on screen, which is forwards in left-to-right text and backwards in right-to-left text.
     pub fn right(&mut self, cx: &mut TextContext) {
-        self.editor
-            .driver(&mut cx.fonts, &mut cx.layouts)
-            .move_right();
+        self.driver(cx).move_right();
     }
 
     /// Moves the caret to the line above as it is seen, keeping its horizontal position; on the
@@ -242,11 +233,9 @@ impl TextField {
     /// and forget the column at a move to a byte.
     fn vertical(&mut self, cx: &mut TextContext, down: bool) {
         let (line, ranges) = self.caret_line(cx);
-        let index = self.editor.raw_selection().focus().index();
-        // ponytail: an edit that leaves the caret at the same offset keeps the column.
         let x = match self.column {
-            Some((at, x)) if at == index => x,
-            _ => self.caret(cx, 0.0).map_or(0.0, |c| c.x0 as f32),
+            Some(x) => x,
+            None => self.caret(cx, 0.0).map_or(0.0, |c| c.x0 as f32),
         };
         let target = if down {
             line.checked_add(1)
@@ -260,7 +249,7 @@ impl TextField {
         });
         let range = target.and_then(|t| ranges.get(t));
         let empty = self.empty_line(range);
-        let mut driver = self.editor.driver(&mut cx.fonts, &mut cx.layouts);
+        let mut driver = self.driver(cx);
         match (middle, range) {
             (Some(_), Some(r)) if empty => driver.move_to_byte(r.start),
             (Some(y), _) => driver.move_to_point(x, y),
@@ -268,7 +257,7 @@ impl TextField {
             (None, _) if down => driver.move_to_text_end(),
             (None, _) => driver.move_to_text_start(),
         }
-        self.column = Some((self.editor.raw_selection().focus().index(), x));
+        self.column = Some(x);
     }
 
     /// The line the caret is on, by its byte offset, and the byte ranges of the layout's lines: a
@@ -304,7 +293,7 @@ impl TextField {
         let cursor = cursor.filter(|&(start, end)| {
             start <= end && preedit.is_char_boundary(start) && preedit.is_char_boundary(end)
         });
-        let mut driver = self.editor.driver(&mut cx.fonts, &mut cx.layouts);
+        let mut driver = self.driver(cx);
         if preedit.is_empty() {
             driver.clear_compose();
         } else {
@@ -314,9 +303,16 @@ impl TextField {
 
     /// Commits `text` from the input method, replacing the preedit.
     pub fn commit(&mut self, cx: &mut TextContext, text: &str) {
-        let mut driver = self.editor.driver(&mut cx.fonts, &mut cx.layouts);
+        let mut driver = self.driver(cx);
         driver.clear_compose();
         driver.insert_or_replace_selection(text);
+    }
+
+    /// Parley's editing driver, for a change of the caret or the text; one but a move up or down
+    /// forgets the column those keep.
+    fn driver<'a>(&'a mut self, cx: &'a mut TextContext) -> parley::PlainEditorDriver<'a, Brush> {
+        self.column = None;
+        self.editor.driver(&mut cx.fonts, &mut cx.layouts)
     }
 
     pub(crate) fn layout(&mut self, cx: &mut TextContext) -> &Layout<Brush> {
@@ -405,6 +401,23 @@ mod tests {
             }
             assert_eq!(caret_at(&mut cx, &mut area).0, column2, "rtl {rtl}");
         }
+    }
+
+    #[test]
+    fn a_move_that_is_not_up_or_down_forgets_the_column() {
+        let mut cx = TextContext::default();
+        let text = "abcdef\nxy\nabcdef";
+        let mut area = TextField::area("Notes", text, (15.0, false), 300.0, 3);
+        area.editor
+            .driver(&mut cx.fonts, &mut cx.layouts)
+            .move_to_byte(5);
+        area.down(&mut cx);
+        assert_eq!(caret_at(&mut cx, &mut area).0, 9);
+        // Back at the end of "xy", but by Left and Right: Down starts from there, column 2.
+        area.left(&mut cx);
+        area.right(&mut cx);
+        area.down(&mut cx);
+        assert_eq!(caret_at(&mut cx, &mut area).0, 12);
     }
 
     #[test]
