@@ -242,7 +242,7 @@ def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
 
 - [ ] **Step 4: Run it on the tree**: `python3 scripts/verify.py allow-list`. Expected at the head: it names `athanor-dock` (`src/ui/surface.rs`), `athanor-launcher`, `athanor-control-center` and `athanor-greeter-ui` (`src/ui.rs`, `Layer::Overlay`), and nothing under `src/toolkit/`.
 
-- [ ] **Step 5: Stop and ask the maintainer for the new lines.** Each interface in a line is a privilege grant. Paste the check's findings and the proposed lines: the dock's as C1 results, section 10 item 1, gives it, `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`; the launcher's and the control center's, `/usr/bin/athanor-launcher athanor-launcher.service` and `/usr/bin/athanor-control-center athanor-control-center.service`, with the candidate sets of open question 14. Read the unit names from the packages' unit files, never from memory. Add each line only with the maintainer's answer; until then the task's pull request stays a draft.
+- [ ] **Step 5: Add the three lines the maintainer gave.** The dock's as C1 results, section 10 item 1, gives it: `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`. The launcher's and the control center's from the answer to open question 14: `/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1` and `/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1`. Read the unit names from the packages' unit files, never from memory. Before each line lands, confirm it against what the binary actually binds: list the globals its crate and the path dependencies `verify.py allow-list` follows bind in source, and compare them with the line. A global the binary binds that its line lacks, or one the line grants that nothing binds, goes back to the maintainer with that list; the line is never widened or narrowed on one's own. With the three lines in, the task's pull request stays a draft only for the greeter's line (step 6, open question 3).
 
 - [ ] **Step 6: Stop and ask the maintainer for the greeter's line** (login path, open question 3). Paste the check's finding and a proposed line; add no line, shipped or rig-only, without the answer. Until then the greeter stays in `PENDING_OPEN_QUESTION_3`; `scripts/ci/known-red.txt` only shrinks and is not used.
 
@@ -470,13 +470,14 @@ git commit -m "test(shell): the AX17 walk: extents, appearances, text scales, pa
 
 **Files:**
 - Create: `forge/test/shell/ci-own-compositor.sh`
-- Modify: `.github/workflows/shell-surfaces.yml`: one job per group below, each calling the script and uploading `out/`; `forge/specs/athanor-compositor/**` added to the push filter
-- Modify: `scripts/ci/changes.py`: `forge/specs/athanor-compositor/` added to the `shell` area, beside the push filter, as its comment requires
-- Modify: `docs/architecture/doc_ci.md`, `docs/architecture/doc_pipeline.md` section 3.5 (exact-match script)
+- Create: `.github/workflows/own-compositor.yml`, a workflow of its own outside `pr.yml`, so that `gate` does not need it: `gate` needs `shell` (`pr.yml`), and a job in `shell-surfaces.yml` would block every merge while `continue-on-error` is forbidden. It runs on `pull_request` to `iso-v0`, on a push to `iso-v0` with the paths of the `compositor` area, on `workflow_dispatch`, and on `workflow_call` for step 5. Its first job runs `scripts/ci/changes.py` as the `changes` job of `pr.yml` does; then one job per group below, each under `if: ${{ fromJSON(needs.changes.outputs.changes).compositor }}`, calling the script and uploading `out/`. A red job is red; it blocks nothing until step 5.
+- Modify: `scripts/ci/changes.py`: a `compositor` area, the `shell` area's entries without `.github/workflows/shell-surfaces.yml`, plus `forge/specs/athanor-compositor/` and `.github/workflows/own-compositor.yml`. The `shell` area is unchanged, so a change to the compositor alone runs no cosmic-comp job. The docstring's "an area exists only with the pr.yml job that consumes it" gains the one exception, `compositor`, consumed by `own-compositor.yml` until step 5.
+- Modify: `scripts/ci/tests/test_changes.py` (`compositor` in `NONE` and `ALL`, a case for `forge/specs/athanor-compositor/`), `scripts/ci/tests/test_pr_workflow.py` (`own-compositor.yml`'s push filter matches the `compositor` area, as `ShellAreaTest` does for `shell`)
+- Modify: `docs/architecture/doc_ci.md` (an entry for the workflow under the next free CI number, saying that it reports and does not block), `docs/architecture/doc_pipeline.md` (the `changes.json` row of the artefact table names `compositor`; section 3.5 gains the workflow's row and the count in its heading goes up by one, as `verify.py workflows` requires) (exact-match script)
 
 **Interfaces:**
 - Consumes: `rig.sh build-compositor`, `surface`, `golden-report [surface...]`, `atspi ... --matrix`, `cargo test -p athanor-compositor`.
-- Produces: `ci-own-compositor.sh <group>`, where each group builds what it needs and runs one share of the work. Whether the jobs become required is open question 11. Estimates, at about 20 seconds a case (task 5), plus about 15 minutes of builds a job (an estimate, unmeasured), against a 45-minute timeout:
+- Produces: `ci-own-compositor.sh <group>`, where each group builds what it needs and runs one share of the work. The jobs are informational; by the answer to open question 11 they become required after a week green without a flake (step 5). Estimates, at about 20 seconds a case (task 5), plus about 15 minutes of builds a job (an estimate, unmeasured), against a 45-minute timeout:
 
 | Group | Work | Estimate |
 | --- | --- | --- |
@@ -494,13 +495,20 @@ The four surfaces with a 12-second settle (`bar-network`, `bar-bluetooth`, whose
 
 - [ ] **Step 2: Run each group locally on the laptop**, one at a time: `bash forge/test/shell/ci-own-compositor.sh <group>`. Expected: exit 0, and each group's wall time recorded in the pull request; a group above 40 minutes is split again before the job is added.
 
-- [ ] **Step 3: Add the jobs, the filters and the documents**; then `python3 scripts/verify.py ci docs paths`, `python3 -B -m unittest scripts.tests.test_verify_ci` and `actionlint .github/workflows/shell-surfaces.yml` pass.
+- [ ] **Step 3: Add the workflow, the area, the tests and the documents**; then `python3 scripts/verify.py ci workflows docs paths`, `python3 -B -m unittest scripts.tests.test_verify_ci`, `python3 -B -m unittest discover -s scripts/ci/tests` and `actionlint .github/workflows/own-compositor.yml` pass, and `git diff --numstat .github/workflows/pr.yml .github/workflows/shell-surfaces.yml` prints nothing.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add forge/test/shell/ci-own-compositor.sh .github/workflows/shell-surfaces.yml scripts/ci/changes.py docs/architecture/doc_ci.md docs/architecture/doc_pipeline.md
-git commit -m "ci(shell): run the own compositor's scenes on every pull request"
+git add forge/test/shell/ci-own-compositor.sh .github/workflows/own-compositor.yml scripts/ci/changes.py scripts/ci/tests/test_changes.py scripts/ci/tests/test_pr_workflow.py docs/architecture/doc_ci.md docs/architecture/doc_pipeline.md
+git commit -m "ci(shell): run the own compositor's scenes on every pull request, informational"
+```
+
+- [ ] **Step 5: Make the jobs required, after a week green without a flake** (open question 11). The week counts from the first run on `iso-v0`; a flake is a red run that a rerun of the same sha turns green, and it starts the week again. Record the runs in the pull request: `gh run list --workflow own-compositor.yml --branch iso-v0 --limit 50`. Then, in a pull request of its own, add `own-compositor.yml` to `gate`'s needs: a `compositor` job in `pr.yml` that calls it through `workflow_call` under `if: ${{ fromJSON(needs.changes.outputs.changes).compositor }}`, `compositor` in `gate`'s needs, and the `pull_request` trigger, the `changes` job and the jobs' conditions removed from `own-compositor.yml`, since `pr.yml` then selects it; `doc_ci.md` and `doc_pipeline.md` say it blocks, and `changes.py` drops the docstring's exception. `python3 -B -m unittest discover -s scripts/ci/tests` passes, `test_gate_needs_every_job_that_does_not_follow_it` and `test_every_build_job_is_named_after_its_area` among them. The pull request changes `pr.yml`, so it waits for the maintainer's approval and is not merged without it.
+
+```bash
+git add .github/workflows/pr.yml .github/workflows/own-compositor.yml scripts/ci/changes.py docs/architecture/doc_ci.md docs/architecture/doc_pipeline.md
+git commit -m "ci: gate needs the own compositor's scenes"
 ```
 
 ### Task 11: the hardware matrix on the own compositor
@@ -525,7 +533,7 @@ def test_compositor_with_a_dead_peer_is_a_failure(self): ...
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest scripts.tests.test_hardware_matrix` fails, `compositor` is not in `CHECKS`.
 
-- [ ] **Step 3: Implement the check and the rows**; the rows' `machines` and `[[untested]]` entries follow the maintainer's answers to open questions 4 and 5. `suspend-resume` and `outputs-hotplug` keep their present machines until open question 4 is answered.
+- [ ] **Step 3: Implement the check and the rows**; the rows' `machines` and `[[untested]]` entries follow the maintainer's answers to open questions 4 and 5. By the answer to open question 4, `suspend-resume` and `outputs-hotplug` become `machines = ["laptop"]`, and the desktop gets two `[[untested]]` entries, `suspend-resume-desktop` and `outputs-hotplug-desktop`, each with the reason "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)". The ids differ from the rows' because `validate` in `matrix.py` rejects an id that a row and an untested entry share.
 
 - [ ] **Step 4: Run**: `python3 -B -m unittest scripts.tests.test_hardware_matrix` passes, `test_committed_rows_are_valid` among them.
 
