@@ -43,7 +43,17 @@ pub struct MoveRecord {
 }
 
 /// Holds the lock of UT1 until dropped.
-pub struct Lock(#[allow(dead_code)] File);
+pub struct Lock(File);
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        // Released by hand, not by the close: a child forked by another thread holds a copy of
+        // the descriptor until its exec, and the flock lives as long as any copy does.
+        if let Err(err) = self.0.unlock() {
+            tracing::error!(%err, "cannot release the lock of athanor-update");
+        }
+    }
+}
 
 impl Store {
     #[must_use]
