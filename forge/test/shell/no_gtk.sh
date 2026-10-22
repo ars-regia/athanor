@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # no_gtk.sh - the shell's shared crates without their gtk feature, for a surface drawn
 # without GTK (plan 2026-10-18-toolkit-dock, task 2): no GTK crate in their tree, and clippy
-# and the tests pass, the compositor client with its calloop source. Runs in the build stage
-# of the rig: rig.sh no-gtk.
+# and the tests pass, the compositor client with its calloop source and athanor-dock with its
+# toolkit binary (task 6). Runs in the build stage of the rig: rig.sh no-gtk.
 set -euo pipefail
 
 crates=(athanor-apps athanor-compositor-client athanor-style athanor-dock)
 status=0
 for crate in "${crates[@]}"; do
-    tree=$(cargo tree --locked --no-default-features -p "$crate" -e normal,build,dev --prefix none --format '{p}')
+    toolkit=()
+    if [ "$crate" = athanor-dock ]; then
+        toolkit=(--features toolkit)
+    fi
+    tree=$(cargo tree --locked --no-default-features "${toolkit[@]}" -p "$crate" -e normal,build,dev --prefix none --format '{p}')
     if gtk=$(grep -E '^(gtk4|gdk4)[-a-z0-9]* ' <<<"$tree" | sort -u); then
         echo "no_gtk.sh: $crate without gtk still depends on:" >&2
         echo "$gtk" >&2
@@ -23,6 +27,6 @@ packages=()
 for crate in "${crates[@]}"; do
     packages+=(-p "$crate")
 done
-features=(--no-default-features --features athanor-compositor-client/calloop)
+features=(--no-default-features --features athanor-compositor-client/calloop --features athanor-dock/toolkit)
 cargo clippy --locked "${features[@]}" "${packages[@]}" --all-targets -- -D warnings
 cargo test --locked "${features[@]}" "${packages[@]}"

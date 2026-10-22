@@ -133,7 +133,8 @@ identica in locale. Passi, tutti senza rete tranne i download verificati:
 1. scarica nella cache e verifica: hash di ogni file contro il manifest, firma
    PGP del tarball CachyOS e di quello vanilla contro le chiavi vendorizzate,
    firma RPM del SRPM ricucito;
-2. scrive `~/.rpmmacros` con `%_topdir` e `%buildid .azoth`; `rpm -i` del SRPM;
+2. scrive `~/.rpmmacros` con `%_topdir`, `%buildid .azoth` e `%dist` (the `.fcNN` of
+   `FEDORA_KERNEL_NVR`, so the built NVR is the one `nvr.sh` gives on any builder); `rpm -i` del SRPM;
    `dnf builddep -y SPECS/kernel.spec` con gli stessi bcond di rpmbuild e ogni
    repository spento, dopo le patch (passo 3) e prima della derivazione del config,
    che deve vedere la toolchain vera (rust-src, bindgen, pahole: `RUST_IS_AVAILABLE`

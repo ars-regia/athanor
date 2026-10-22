@@ -2,7 +2,7 @@
 id: ADR-0123
 title: "Name the Fedora rebase release 0.10 and place rows 7 and 25 in it"
 date: 2026-10-18
-status: accepted
+status: amended by ADR-0128
 issues: [124, 125, 126, 543]
 areas: [process, docs, platform, security, update, shell]
 ---

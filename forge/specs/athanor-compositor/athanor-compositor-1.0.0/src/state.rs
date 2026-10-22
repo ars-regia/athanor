@@ -3,12 +3,14 @@
 
 use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
-use crate::identity::{AllowList, Privilege, Proc, Process};
+use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::lock::Lock;
+use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
@@ -18,6 +20,7 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Kind, RenderElementStates,
 };
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::{ImportAll, ImportDma, Renderer, Texture};
 use smithay::desktop::space::render_output;
 use smithay::desktop::utils::{
@@ -28,19 +31,24 @@ use smithay::desktop::utils::{
 use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
 };
+use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
-use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::backend::{
+    ClientData, ClientId, DisconnectReason, GlobalId,
+};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
-use smithay::wayland::compositor::{CompositorClientState, CompositorState, SurfaceData};
+use smithay::wayland::compositor::{
+    CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
+};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
@@ -70,6 +78,9 @@ use std::time::Duration;
 /// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
 /// colour the desktop's hearth wallpaper starts from (system/athanor-style/calmo/tokens.toml).
 // ponytail: dark always; the session's light or dark theme when the compositor reads appearance.
+/// A surface on no output, or shown on another one, still gets a frame callback this often.
+pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
+
 pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
 
 /// What draws the outputs.
@@ -78,6 +89,8 @@ pub enum Backend {
     Nested(Box<Nested>),
     /// Virtual outputs drawn off screen.
     Headless(Box<Headless>),
+    /// The monitors of a GPU, through DRM and KMS, in a session of the seat (C1 task 8).
+    Drm(Box<Drm>),
 }
 
 pub struct State {
@@ -91,6 +104,18 @@ pub struct State {
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
+    /// The keys whose press the compositor kept for itself: their release is kept as well.
+    pub kept_keys: Vec<Keycode>,
+    /// The identities (executable and unit, as the grants go) whose exclusive layer surface
+    /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
+    /// on any connection, hold it again only after a click on one of their surfaces
+    /// (`escape_exclusive`).
+    pub escaped: Vec<Identity>,
+    /// The locks the user asked for with Super+Escape (`request_lock`).
+    pub lock_requests: u64,
+    /// Why the compositor must end with an error: set by `fail`, read by `main` once the loop
+    /// has stopped.
+    pub fatal: Option<String>,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -175,11 +200,8 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
-        // or overlay layer (`layer_commit`).
-        // ponytail: no escape from exclusive keyboard focus: a granted client's 1x1 transparent
-        // exclusive overlay surface holds the keyboard for as long as it lives, acceptable only
-        // while the compositor runs nested or headless. C1 task 8, the DRM backend, adds the
-        // escape: the compositor does not run on a console (task 9) without it.
+        // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
+        // exclusive surface of a granted client (`escape_exclusive`).
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
@@ -229,6 +251,10 @@ impl State {
             popups: PopupManager::default(),
             seat,
             last_input_serial: None,
+            kept_keys: Vec::new(),
+            escaped: Vec::new(),
+            lock_requests: 0,
+            fatal: None,
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -273,8 +299,8 @@ impl State {
         stream: &UnixStream,
         context: Option<SecurityContext>,
     ) -> Arc<ClientState> {
-        let grants = match &context {
-            Some(_) => Vec::new(),
+        let (identity, grants) = match &context {
+            Some(_) => (None, Vec::new()),
             None => match crate::identity::identify(
                 stream.as_fd(),
                 self.process.as_ref(),
@@ -282,11 +308,11 @@ impl State {
             ) {
                 Ok((identity, grants)) => {
                     tracing::debug!(?identity, ?grants, "a client connected");
-                    grants
+                    (Some(identity), grants)
                 }
                 Err(error) => {
                     tracing::warn!(%error, "a client's identity cannot be read: no privileged global");
-                    Vec::new()
+                    (None, Vec::new())
                 }
             },
         };
@@ -295,6 +321,7 @@ impl State {
             gone: self.client_gone.clone(),
             security_context: context,
             grants,
+            identity,
         })
     }
 
@@ -308,6 +335,81 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+    }
+
+    /// An output that goes: its layer surfaces are closed, and the windows no output left shows
+    /// are centred on the first one, where the user can reach them.
+    pub fn remove_output(&mut self, output: &Output) {
+        self.close_layers(output);
+        self.space.unmap_output(output);
+        self.fit_to_outputs();
+    }
+
+    /// After the outputs changed (one went, or took another size): the windows no output shows
+    /// are centred on the first one, the pointer is brought back onto the outputs and the lock
+    /// surfaces take the size of their output.
+    pub fn fit_to_outputs(&mut self) {
+        let outputs: Vec<Rectangle<i32, Logical>> = self
+            .space
+            .outputs()
+            .filter_map(|output| self.space.output_geometry(output))
+            .collect();
+        let stranded: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|window| {
+                self.space
+                    .element_geometry(window)
+                    .is_some_and(|area| !outputs.iter().any(|output| output.overlaps(area)))
+            })
+            .cloned()
+            .collect();
+        if let Some(area) = self.window_area() {
+            for window in stranded {
+                let at = centred(area, window.geometry());
+                self.space.relocate_element(&window, at);
+            }
+        }
+        self.space.refresh();
+        if let Some(pointer) = self.seat.get_pointer() {
+            let at = pointer.current_location();
+            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+                self.pointer_to(to, InputTime::now());
+            }
+        }
+        if let Some(lock) = &self.lock {
+            lock.resize(&self.space);
+        }
+    }
+
+    /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
+    /// callbacks are sent at the throttle of `frame_done`.
+    pub fn frame_callbacks_waiting(&self) -> bool {
+        let mut waiting = false;
+        let mut check = |_: &WlSurface, states: &SurfaceData| {
+            let mapped = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .is_some_and(|data| data.lock().is_ok_and(|data| data.buffer().is_some()));
+            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+            waiting |= mapped && !attributes.current().frame_callbacks.is_empty();
+        };
+        for window in self.space.elements() {
+            window.with_surfaces(&mut check);
+        }
+        for output in self.space.outputs() {
+            for layer in layer_map_for_output(output).layers() {
+                layer.with_surfaces(&mut check);
+            }
+        }
+        if let Some(lock) = &self.lock {
+            for output in self.space.outputs() {
+                if let Some(surface) = lock.surface_on(output) {
+                    with_surfaces_surface_tree(surface, &mut check);
+                }
+            }
+        }
+        waiting
     }
 
     /// The area of the first output: where the pointer moves.
@@ -346,6 +448,7 @@ impl State {
                 nested.backend.renderer().import_dmabuf(dmabuf, None)?;
             }
             Backend::Headless(headless) => headless.import_dmabuf(dmabuf)?,
+            Backend::Drm(drm) => drm.import_dmabuf(dmabuf)?,
         }
         Ok(())
     }
@@ -387,33 +490,14 @@ impl State {
             with_surfaces_surface_tree(surface, scanout);
         }
         if damaged {
-            let mut feedback = OutputPresentationFeedback::new(output);
-            let flags = |surface: &WlSurface, _: &SurfaceData| {
-                surface_presentation_feedback_flags_from_states(surface, None, states)
-            };
-            for window in self.space.elements() {
-                window.take_presentation_feedback(
-                    &mut feedback,
-                    surface_primary_scanout_output,
-                    flags,
-                );
-            }
-            for layer in &layers {
-                layer.take_presentation_feedback(
-                    &mut feedback,
-                    surface_primary_scanout_output,
-                    flags,
-                );
-            }
-            feedback.presented(
+            self.presentation_feedback(output, states).presented(
                 frame_target,
                 Refresh::fixed(period),
                 0,
                 wp_presentation_feedback::Kind::Vsync,
             );
         }
-        // A surface on no output yet, or shown on another one, still gets a frame each second.
-        let throttle = Some(Duration::from_secs(1));
+        let throttle = Some(FRAME_THROTTLE);
         for window in self.space.elements() {
             window.send_frame(
                 output,
@@ -439,6 +523,29 @@ impl State {
                 surface_primary_scanout_output,
             );
         }
+    }
+
+    /// The presentation feedback the surfaces shown on `output` asked for, to be answered when
+    /// the frame drawn with `states` is presented; after `frame_done`, which says where each
+    /// surface is shown.
+    pub fn presentation_feedback(
+        &self,
+        output: &Output,
+        states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let mut feedback = OutputPresentationFeedback::new(output);
+        let flags = |surface: &WlSurface, _: &SurfaceData| {
+            surface_presentation_feedback_flags_from_states(surface, None, states)
+        };
+        for window in self.space.elements() {
+            window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+        // Collected, as in `frame_done`.
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        for layer in &layers {
+            layer.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+        feedback
     }
 
     /// What is under `pos`, with its origin in the space, in the order the outputs are drawn
@@ -579,6 +686,21 @@ pub fn new_output(
     transform: Transform,
     scale: f64,
 ) -> Output {
+    let output = build_output(name, model, size, refresh, transform, scale);
+    publish_output(dh, &output);
+    output
+}
+
+/// An output with no global yet (`publish_output`): for a backend that learns whether the
+/// monitor works only after it has the output.
+pub fn build_output(
+    name: &str,
+    model: &str,
+    size: Size<i32, Physical>,
+    refresh: i32,
+    transform: Transform,
+    scale: f64,
+) -> Output {
     let output = Output::new(
         name.into(),
         PhysicalProperties {
@@ -589,7 +711,6 @@ pub fn new_output(
             serial_number: String::new(),
         },
     );
-    output.create_global::<State>(dh);
     let mode = Mode { size, refresh };
     output.change_current_state(
         Some(mode),
@@ -600,6 +721,17 @@ pub fn new_output(
     output.set_preferred(mode);
     output
 }
+
+/// Offers `output` to the clients; the global is kept in its user data.
+pub fn publish_output(dh: &DisplayHandle, output: &Output) {
+    let global = output.create_global::<State>(dh);
+    output
+        .user_data()
+        .insert_if_missing(|| OutputGlobal(global));
+}
+
+/// The global of an output, kept in its user data: removed with the output.
+pub struct OutputGlobal(pub GlobalId);
 
 /// Dispatches the clients' requests. The callback owns the display: it dispatches without the
 /// unsafe access a source holding it would need.
@@ -614,6 +746,8 @@ fn dispatch_clients(
             Generic::new(fd, Interest::READ, smithay::reexports::calloop::Mode::Level),
             move |_, _, state| {
                 display.dispatch_clients(state)?;
+                // A request may change what is on screen: a surface destroyed, a lock taken.
+                state.request_redraw();
                 if let Err(error) = state.display_handle.flush_clients() {
                     tracing::warn!(%error, "the clients could not be flushed");
                 }
@@ -664,6 +798,15 @@ pub struct ClientState {
     pub security_context: Option<SecurityContext>,
     /// The privileged globals granted when it connected.
     grants: Vec<Privilege>,
+    /// What the grants were decided on, when the process could be read.
+    identity: Option<Identity>,
+}
+
+/// The identity `client` connected with, when it could be read.
+pub fn identity_of(client: &Client) -> Option<Identity> {
+    client
+        .get_data::<ClientState>()
+        .and_then(|data| data.identity.clone())
 }
 
 /// Whether `client` was granted `privilege` when it connected.
@@ -692,6 +835,16 @@ impl ClientData for ClientState {
             tracing::warn!(%error, "a client's disconnection reached no event loop");
         }
     }
+}
+
+/// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
+pub fn centred(
+    area: Rectangle<i32, Logical>,
+    geometry: Rectangle<i32, Logical>,
+) -> Point<i32, Logical> {
+    let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
+    let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
+    (x, y).into()
 }
 
 /// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of

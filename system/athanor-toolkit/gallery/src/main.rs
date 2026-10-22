@@ -13,7 +13,7 @@ const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 4] = ["buttons", "choices", "values", "lists"];
+const PAGES: [&str; 5] = ["buttons", "choices", "values", "lists", "text"];
 
 /// The command line.
 struct Options {
@@ -111,6 +111,10 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), Str
             for n in 1..=50 {
                 ui.list_row(list, &format!("{row} {n}"));
             }
+        }
+        "text" => {
+            let text = t("notes.text")?.replace("\\n", "\n");
+            ui.text_area(group, t("notes")?, &text, 4);
         }
         _ => return Err(format!("no page {name:?}")),
     }

@@ -3,7 +3,7 @@
 //! binary's `ui::shield` says each of these in our own translations, so "verified" never
 //! comes from the file. Every string taken from the file passes `athanor_trust_state::display`.
 
-use athanor_trust_state::{display, Badge, ErrorCode, ReadError, Reason, State, UpdateState};
+use athanor_trust_state::{display, postponed_until, Badge, ErrorCode, Postpone, ReadError, Reason, State, UpdateState, POSTPONE_SECS};
 
 pub use athanor_trust_state::{state_reply, STATE_METHOD, UPDATE_INTERFACE, UPDATE_NAME, UPDATE_PATH};
 use athanor_trust_state::ERROR_PREFIX;
@@ -49,6 +49,11 @@ pub struct Rows {
     pub secure_boot_on: bool,
     pub restart_to_update: bool,
     pub go_back: bool,
+    /// The per-machine opt-out of UT13, inverted: `false` shows the persistent warning.
+    pub automatic_security_updates: bool,
+    /// The expiry of the lineage's postpone once it is used (`first_notice_at` + 7 days).
+    pub postponed_until: Option<i64>,
+    pub postpone_offered: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +63,7 @@ pub enum Sheet {
 }
 
 #[must_use]
-pub fn sheet(read: &Result<State, ReadError>) -> Sheet {
+pub fn sheet(read: &Result<State, ReadError>, now: i64) -> Sheet {
     let state = match read {
         Ok(state) => state,
         Err(ReadError::Missing) => return Sheet::Unreadable(Unreadable::Missing),
@@ -80,6 +85,10 @@ pub fn sheet(read: &Result<State, ReadError>) -> Sheet {
         secure_boot_on: state.secure_boot.on(),
         restart_to_update: restart_to_update_offered(read),
         go_back: go_back_offered(read),
+        automatic_security_updates: state.automatic_security_updates,
+        // An expired budget shows the will-apply row alone: UT13 words no "until" for it.
+        postponed_until: postponed_until(state).filter(|_| state.postpone.as_ref().is_some_and(|postpone| budget_open(postpone, now))),
+        postpone_offered: postpone_offered(read, now),
     })
 }
 
@@ -95,10 +104,29 @@ pub fn go_back_offered(read: &Result<State, ReadError>) -> bool {
     read.as_ref().is_ok_and(|state| state.previous.is_some())
 }
 
+/// The lineage's budget is unexpired: boots left and fewer than seven days since the first
+/// notice, the service's own rule (`Lineage::expired`).
+fn budget_open(postpone: &Postpone, now: i64) -> bool {
+    postpone.boots_remaining > 0 && now < postpone.first_notice_at.saturating_add(POSTPONE_SECS)
+}
+
+/// UT13, BR6 item 7: `Postpone()` is for a security digest unlocked for the next shutdown
+/// whose lineage has its one postpone unused and unexpired at `now`.
+#[must_use]
+pub fn postpone_offered(read: &Result<State, ReadError>, now: i64) -> bool {
+    read.as_ref().is_ok_and(|state| {
+        state.update == UpdateState::WillApplyAtNextShutdown
+            && state.postpone.as_ref().is_some_and(|postpone| !postpone.postponed && budget_open(postpone, now))
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
     Apply,
     GoBack,
+    Postpone,
+    /// `SetAutomaticSecurityUpdates(enabled)`.
+    SetAutomatic(bool),
 }
 
 impl Request {
@@ -107,6 +135,8 @@ impl Request {
         match self {
             Request::Apply => "Apply",
             Request::GoBack => "GoBack",
+            Request::Postpone => "Postpone",
+            Request::SetAutomatic(_) => "SetAutomaticSecurityUpdates",
         }
     }
 }
@@ -119,6 +149,10 @@ pub enum Refusal {
     NoPreviousVersion,
     Blocked,
     Failed,
+    /// `Postpone()`: the lineage's one postpone is used, or its budget expired (UT13).
+    AlreadyPostponed,
+    /// `Postpone()`: the staged digest is not of the security class.
+    NotSecurityClass,
     /// The service is not there, did not answer, or the system bus is not reachable.
     NoAnswer,
 }
@@ -132,6 +166,9 @@ pub fn withdrawn(read: &Result<State, ReadError>, request: Request) -> Refusal {
         (Err(ReadError::Io(_)), _) => Refusal::NoAnswer,
         (_, Request::Apply) => Refusal::NothingDownloaded,
         (_, Request::GoBack) => Refusal::NoPreviousVersion,
+        (_, Request::Postpone) => Refusal::AlreadyPostponed,
+        // The switch is offered in every state, so nothing withdraws it.
+        (_, Request::SetAutomatic(_)) => Refusal::Failed,
     }
 }
 
@@ -146,6 +183,8 @@ pub fn refusal(remote_error: Option<&str>) -> Refusal {
         Some("NothingDownloaded") => Refusal::NothingDownloaded,
         Some("NoPreviousVersion") => Refusal::NoPreviousVersion,
         Some("Blocked") => Refusal::Blocked,
+        Some("AlreadyPostponed") => Refusal::AlreadyPostponed,
+        Some("NotSecurityClass") => Refusal::NotSecurityClass,
         Some(_) => Refusal::Failed,
         None => Refusal::NoAnswer,
     }
@@ -154,7 +193,7 @@ pub fn refusal(remote_error: Option<&str>) -> Refusal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_trust_state::{Deployment, ErrorCode, Reason, UpdateState};
+    use athanor_trust_state::{Deployment, ErrorCode, Postpone, Reason, UpdateState, POSTPONE_BOOTS};
 
     const NOW: i64 = 1_789_725_600;
 
@@ -195,7 +234,7 @@ mod tests {
         ] {
             let read = Err(error);
             assert_eq!(badge(&read, NOW), Badge::Attention);
-            assert_eq!(sheet(&read), Sheet::Unreadable(why));
+            assert_eq!(sheet(&read, NOW), Sheet::Unreadable(why));
             assert!(!restart_to_update_offered(&read) && !go_back_offered(&read));
         }
     }
@@ -223,7 +262,7 @@ mod tests {
 
     #[test]
     fn the_rows_carry_what_the_file_backs() {
-        let Sheet::Read(rows) = sheet(&Ok(downloaded())) else {
+        let Sheet::Read(rows) = sheet(&Ok(downloaded()), NOW) else {
             panic!("read")
         };
         assert_eq!(rows.version, "43.20260915.2");
@@ -241,7 +280,7 @@ mod tests {
         let mut state = verified();
         state.last_error = ErrorCode::Registry;
         state.last_error_host = Some("registry.example".into());
-        let Sheet::Read(rows) = sheet(&Ok(state)) else {
+        let Sheet::Read(rows) = sheet(&Ok(state), NOW) else {
             panic!("read")
         };
         assert_eq!(
@@ -256,7 +295,7 @@ mod tests {
         state.verified.value = false;
         state.verified.reason = Reason::PolicyNotInForce;
         state.policy.shipped = false;
-        let Sheet::Read(rows) = sheet(&Ok(state)) else {
+        let Sheet::Read(rows) = sheet(&Ok(state), NOW) else {
             panic!("read")
         };
         assert!(!rows.policy_in_force && !rows.policy_shipped);
@@ -268,7 +307,7 @@ mod tests {
         state.booted.version = format!("43.\u{202E}evil\u{0007}{}", "9".repeat(300));
         state.last_error = ErrorCode::Network;
         state.last_error_host = Some("<b>host</b>\u{200F}.example".into());
-        let Sheet::Read(rows) = sheet(&Ok(state)) else {
+        let Sheet::Read(rows) = sheet(&Ok(state), NOW) else {
             panic!("read")
         };
         assert!(!rows.version.contains('\u{202E}') && !rows.version.contains('\u{0007}'));
@@ -298,6 +337,8 @@ mod tests {
             ),
             ("os.athanor.Update1.Error.Blocked", Refusal::Blocked),
             ("os.athanor.Update1.Error.Failed", Refusal::Failed),
+            ("os.athanor.Update1.Error.AlreadyPostponed", Refusal::AlreadyPostponed),
+            ("os.athanor.Update1.Error.NotSecurityClass", Refusal::NotSecurityClass),
             (
                 "org.freedesktop.DBus.Error.ServiceUnknown",
                 Refusal::NoAnswer,
@@ -328,5 +369,108 @@ mod tests {
     fn requests_name_their_method() {
         assert_eq!(Request::Apply.method(), "Apply");
         assert_eq!(Request::GoBack.method(), "GoBack");
+        assert_eq!(Request::Postpone.method(), "Postpone");
+        assert_eq!(Request::SetAutomatic(false).method(), "SetAutomaticSecurityUpdates");
+    }
+
+    fn security_notice() -> State {
+        let mut state = downloaded();
+        state.update = UpdateState::WillApplyAtNextShutdown;
+        state.postpone = Some(Postpone {
+            anchor: None,
+            first_notice_at: NOW,
+            boots_remaining: POSTPONE_BOOTS,
+            postponed: false,
+        });
+        state
+    }
+
+    fn rows(state: State) -> Rows {
+        rows_at(state, NOW)
+    }
+
+    fn rows_at(state: State, now: i64) -> Rows {
+        let Sheet::Read(rows) = sheet(&Ok(state), now) else { panic!("read") };
+        rows
+    }
+
+    #[test]
+    fn the_switch_reflects_the_state() {
+        assert!(rows(verified()).automatic_security_updates);
+        let mut off = verified();
+        off.automatic_security_updates = false;
+        assert!(!rows(off).automatic_security_updates);
+    }
+
+    #[test]
+    fn the_persistent_warning_shows_while_automatic_is_off() {
+        // Item 17: the warning row is drawn from this one field, whatever the update state.
+        for update in [UpdateState::None, UpdateState::Downloaded, UpdateState::Held] {
+            let mut state = verified();
+            state.update = update;
+            state.automatic_security_updates = false;
+            assert!(!rows(state).automatic_security_updates, "{update:?}");
+        }
+    }
+
+    #[test]
+    fn postpone_is_offered_only_for_an_unpostponed_security_digest() {
+        assert!(postpone_offered(&Ok(security_notice()), NOW));
+        assert!(rows(security_notice()).postpone_offered);
+        assert!(!postpone_offered(&Ok(downloaded()), NOW), "no lineage open");
+        assert!(!postpone_offered(&Ok(verified()), NOW));
+        let mut not_unlocked = security_notice();
+        not_unlocked.update = UpdateState::Downloaded;
+        assert!(!postpone_offered(&Ok(not_unlocked), NOW));
+        let mut used = security_notice();
+        if let Some(postpone) = used.postpone.as_mut() {
+            postpone.postponed = true;
+        }
+        assert!(!postpone_offered(&Ok(used), NOW));
+        let mut no_boots = security_notice();
+        if let Some(postpone) = no_boots.postpone.as_mut() {
+            postpone.boots_remaining = 0;
+        }
+        assert!(!postpone_offered(&Ok(no_boots), NOW));
+        assert!(!postpone_offered(&Err(ReadError::Missing), NOW));
+    }
+
+    #[test]
+    fn the_postponed_row_carries_the_expiry() {
+        let mut state = security_notice();
+        if let Some(postpone) = state.postpone.as_mut() {
+            postpone.postponed = true;
+        }
+        assert_eq!(rows(state).postponed_until, Some(NOW + 604_800));
+        assert_eq!(rows(security_notice()).postponed_until, None);
+        assert_eq!(rows(verified()).postponed_until, None);
+    }
+
+    #[test]
+    fn the_budget_ends_seven_days_after_the_first_notice() {
+        let last = NOW + POSTPONE_SECS - 1;
+        let expired = NOW + POSTPONE_SECS;
+        assert!(postpone_offered(&Ok(security_notice()), last));
+        assert!(!postpone_offered(&Ok(security_notice()), expired), "BR6 item 7: unexpired only");
+        assert!(rows_at(security_notice(), last).postpone_offered);
+        assert!(!rows_at(security_notice(), expired).postpone_offered);
+    }
+
+    #[test]
+    fn an_expired_postpone_shows_no_until() {
+        let mut state = security_notice();
+        if let Some(postpone) = state.postpone.as_mut() {
+            postpone.postponed = true;
+        }
+        let last = NOW + POSTPONE_SECS - 1;
+        assert_eq!(rows_at(state.clone(), last).postponed_until, Some(NOW + POSTPONE_SECS));
+        assert_eq!(rows_at(state, NOW + POSTPONE_SECS).postponed_until, None, "a past date is not shown");
+    }
+
+    #[test]
+    fn a_withdrawn_postpone_says_already_postponed() {
+        assert_eq!(withdrawn(&Ok(downloaded()), Request::Postpone), Refusal::AlreadyPostponed);
+        let no_answer = Err(ReadError::Io(std::io::ErrorKind::NotConnected));
+        assert_eq!(withdrawn(&no_answer, Request::Postpone), Refusal::NoAnswer);
     }
 }

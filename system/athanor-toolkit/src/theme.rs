@@ -47,6 +47,14 @@ pub struct Theme {
     pub focus_width: f32,
     /// The width of a text field, before its text widens it.
     pub field_width: f32,
+    /// The fill behind an island's children: Calmo's `bar` token, light variant.
+    pub island: Rgba,
+    /// The corner radius of an island's fill.
+    pub island_radius: f32,
+    /// Between an island's fill and its children.
+    pub island_padding: f32,
+    /// The smallest width and height of an icon button.
+    pub button_min: f32,
 }
 
 impl Default for Theme {
@@ -68,6 +76,10 @@ impl Default for Theme {
             radius: 9.0,
             focus_width: 2.0,
             field_width: 240.0,
+            island: Rgba::rgb(0xfb, 0xfc, 0xfd),
+            island_radius: 10.0,
+            island_padding: 4.0,
+            button_min: 32.0,
         }
     }
 }

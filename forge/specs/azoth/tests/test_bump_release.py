@@ -35,7 +35,7 @@ class ReleaseTest(unittest.TestCase):
         # 99, not the repository's own release: the values must come from the patched file.
         self.containerfile("FROM scratch\nARG FEDORA_VERSION=99\nENV FEDORA_VERSION=$FEDORA_VERSION\n")
         self.assertEqual(bump.fedora_version(), 99)
-        self.assertEqual(bump.fedora_releases(), ("F99", "F100"))
+        self.assertEqual(bump.fedora_releases("7.2.11-300.fc45"), ("F99", "F100"))
         self.assertTrue(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc99"))
         self.assertIsNone(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc45"))
         with mock.patch.object(bump, "http", return_value=(200, b'{"updates": []}')) as http:
@@ -48,6 +48,21 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("%global fedora_release 2.fc99\n", spec)
         self.assertEqual(bump.cosmic_comp_pin(spec), "1.9.0-2.fc99")
         self.assertIn("stable F99 build moved", bump.cosmic_comp_body({"old": "1.8.0-1.fc45", "new": "1.9.0-2.fc99"}))
+
+    def test_the_kernel_never_moves_back_from_its_pinned_release(self):
+        # The kernel source runs ahead of the image: FEDORA_VERSION 43, pin fc45.
+        self.containerfile("FROM scratch\nARG FEDORA_VERSION=43\n")
+        self.assertEqual(bump.fedora_releases("7.2.11-300.fc45"), ("F45", "F46"))
+        with mock.patch.object(bump, "http", return_value=(200, b'{"pages": 1, "updates": []}')) as http:
+            self.assertEqual(bump.fedora_kernels("7.2.11-300.fc45"), {})
+        self.assertEqual([c.args[0].count("releases=F45") for c in http.call_args_list], [1, 0])
+        self.assertEqual([c.args[0].count("releases=F46") for c in http.call_args_list], [0, 1])
+        with mock.patch.object(bump, "http", return_value=(200, b'{"updates": []}')) as http:
+            bump.cosmic_comp_nvrs()
+        self.assertIn("releases=F43", http.call_args.args[0])
+        self.assertTrue(bump.cosmic_comp_re().match("cosmic-comp-1.9.0-2.fc43"))
+        with self.assertRaisesRegex(SystemExit, "no Fedora release"):
+            bump.fedora_releases("7.2.11-300.el9")
 
     def test_a_missing_or_malformed_line_is_an_error(self):
         for text in ("FROM scratch\n", "ARG FEDORA_VERSION=\n", "ARG FEDORA_VERSION=rawhide\n"):

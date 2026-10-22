@@ -100,6 +100,8 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // Also reached outside a dispatch of the clients, when a held commit's fence signals.
+        self.request_redraw();
         on_commit_buffer_handler::<Self>(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
@@ -261,8 +263,7 @@ impl State {
                 .new_toplevel::<Self>(title, app_id);
             window.user_data().insert_if_missing(|| handle);
         }
-        let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
-        let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
+        let (x, y) = crate::state::centred(area, geometry).into();
         let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
         let holder = self
             .seat

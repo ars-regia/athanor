@@ -17,7 +17,7 @@ use gtk4::{gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use super::Dock;
-use crate::i18n::tr;
+use athanor_dock::i18n::tr;
 use crate::layer_guard;
 
 /// The auto-hide state of one surface and its one timer.

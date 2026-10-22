@@ -3,18 +3,20 @@
 
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role, Toggled,
-    TreeId, TreeInfo, TreeUpdate,
+    Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role,
+    TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
+use std::ops::Range;
 
 /// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id as u64)
 }
 
-/// The node of a field's text, beside the widgets' ids.
-pub fn text_run_id(id: WidgetId) -> NodeId {
-    NodeId(id as u64 | 1 << 32)
+/// The node of line `line` of a field's text, beside the widgets' ids: a single-line field has
+/// one line, a text area one per line as it is seen.
+pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
+    NodeId(id as u64 | (line as u64 + 1) << 32)
 }
 
 /// The node of widget `id`, with its bounds in physical pixels at `scale`. The match is
@@ -27,7 +29,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(ui.title.as_str());
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar => Node::new(Role::GenericContainer),
+        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+            Node::new(Role::GenericContainer)
+        }
         Kind::Group(name) => {
             // A group stacks its children as a column, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Group);
@@ -46,7 +50,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        Kind::Button(label) => {
+        Kind::Button(label) | Kind::IconButton { label, .. } => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
@@ -120,8 +124,13 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             }
             node
         }
-        Kind::Field(field) => {
-            let mut node = Node::new(Role::TextInput);
+        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines.
+        Kind::Field(field) | Kind::TextArea(field) => {
+            let mut node = Node::new(if matches!(widget.kind, Kind::TextArea(_)) {
+                Role::MultilineTextInput
+            } else {
+                Role::TextInput
+            });
             node.set_label(field.name.as_str());
             node.set_value(field.text());
             node.add_action(Action::SetValue);
@@ -166,23 +175,57 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if matches!(widget.kind, Kind::Field(_)) {
-        children.push(text_run_id(id));
+    if let Kind::Field(field) | Kind::TextArea(field) = &widget.kind {
+        let lines = field.line_ranges();
+        children.extend((0..lines.len()).map(|n| text_run_id(id, n)));
+        // The caret, which AT-SPI's caret offset gives and Orca reads the line of.
+        if let Some((anchor, focus)) = field.selection() {
+            let text = field.text();
+            let at = |index| text_position(id, &text, &lines, index);
+            node.set_text_selection(TextSelection {
+                anchor: at(anchor),
+                focus: at(focus),
+            });
+        }
     }
     node.set_children(children);
     node
 }
 
-/// A field's committed text as one run, which AT-SPI's Text and EditableText interfaces read:
-/// AccessKit offers them only for a text input with a run.
-fn text_run(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let text = ui.field_text(id)?;
-    let mut run = Node::new(Role::TextRun);
-    let lengths: Vec<u8> = text.chars().map(|c| c.len_utf8() as u8).collect();
-    run.set_value(text);
-    run.set_character_lengths(lengths);
-    run.set_bounds(bounds(ui, id, scale));
-    Some((text_run_id(id), run))
+/// A field's committed text as one run per line as it is seen, which AT-SPI's Text and
+/// EditableText interfaces read: AccessKit offers them only for a text input with runs. A line
+/// that ends in a newline holds it.
+fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
+    let (Kind::Field(field) | Kind::TextArea(field)) = &ui.widget(id).kind else {
+        return Vec::new();
+    };
+    let text = field.text();
+    let lines = field.line_ranges().into_iter().enumerate();
+    lines
+        .map(|(n, range)| {
+            let line = text.get(range).unwrap_or_default();
+            let mut run = Node::new(Role::TextRun);
+            let lengths: Vec<u8> = line.chars().map(|c| c.len_utf8() as u8).collect();
+            run.set_value(line);
+            run.set_character_lengths(lengths);
+            // ponytail: every run has the field's bounds; the line's own, when a screen reader
+            // asks where a character is.
+            run.set_bounds(bounds(ui, id, scale));
+            (text_run_id(id, n), run)
+        })
+        .collect()
+}
+
+/// Byte `index` of field `id`'s `text`, split in `lines` as its runs, as a run and a character
+/// in it: the line that holds the index, or the last line for the end of the text.
+fn text_position(id: WidgetId, text: &str, lines: &[Range<usize>], index: usize) -> TextPosition {
+    let line = lines.iter().position(|r| r.contains(&index));
+    let line = line.unwrap_or(lines.len().saturating_sub(1));
+    let start = lines.get(line).map_or(0, |r| r.start);
+    TextPosition {
+        node: text_run_id(id, line),
+        character_index: text.get(start..index).map_or(0, |s| s.chars().count()),
+    }
 }
 
 /// Widget `id`'s rectangle in physical pixels at `scale`.
@@ -205,7 +248,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
-            .chain(shown().filter_map(|id| text_run(ui, id, scale)))
+            .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -462,7 +505,7 @@ mod tests {
                     .find(|(n, _)| *n == id)
                     .and_then(|(_, node)| node.value().map(str::to_owned))
             };
-            (value(node_id(field)), value(text_run_id(field)))
+            (value(node_id(field)), value(text_run_id(field, 0)))
         };
 
         // A preedit is not text yet; the commit is.
@@ -474,7 +517,7 @@ mod tests {
         let lengths = update
             .nodes
             .iter()
-            .find(|(n, _)| *n == text_run_id(field))
+            .find(|(n, _)| *n == text_run_id(field, 0))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
     }
@@ -659,5 +702,88 @@ mod tests {
             out.extend(descendants(ui, c));
         }
         out
+    }
+
+    #[test]
+    fn a_text_area_reads_as_gtks_text_view() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 4);
+        let field = ui.field(Ui::ROOT, "Name", "one");
+        ui.layout();
+        // Two hard lines, the second longer than the field is wide.
+        let long = "word ".repeat(30);
+        ui.set_field_text(area, &format!("first\n{long}"));
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let find = |id: NodeId| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, n)| n);
+
+        let node = find(node_id(area));
+        assert_eq!(node.map(Node::role), Some(Role::MultilineTextInput));
+        assert_eq!(node.and_then(Node::label), Some("Notes"));
+        let value = format!("first\n{long}");
+        assert_eq!(node.and_then(Node::value), Some(value.as_str()));
+
+        // One run per line as it is seen, in order, their text the whole value.
+        let runs: Vec<&Node> = (0..)
+            .map_while(|n| find(text_run_id(area, n)))
+            .collect();
+        assert!(runs.len() > 2, "{} runs: the long line wraps", runs.len());
+        assert_eq!(runs[0].value(), Some("first\n"));
+        let joined: String = runs.iter().filter_map(|r| r.value()).collect();
+        assert_eq!(joined, value);
+        assert!(runs.iter().all(|r| r.role() == Role::TextRun));
+        let children: Vec<NodeId> = (0..runs.len()).map(|n| text_run_id(area, n)).collect();
+        assert_eq!(node.map(|n| n.children().to_vec()), Some(children));
+        assert_eq!(text_run_id(area, 2), NodeId(area as u64 | 3 << 32));
+
+        // A single-line field keeps its one run at `id | 1 << 32`.
+        assert_eq!(text_run_id(field, 0), NodeId(field as u64 | 1 << 32));
+        assert_eq!(find(text_run_id(field, 0)).and_then(Node::value), Some("one"));
+        assert!(find(text_run_id(field, 1)).is_none());
+    }
+
+    #[test]
+    fn a_fields_caret_is_its_text_selection() {
+        // Orca reads the line of the caret, as AT-SPI's caret offset gives it: the end of a text
+        // area's text, the start of a field's, as GTK's.
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "ab\ncd", 4);
+        let field = ui.field(Ui::ROOT, "Name", "one");
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let selection = |id| {
+            let node = update.nodes.iter().find(|(n, _)| *n == node_id(id));
+            node.and_then(|(_, n)| n.text_selection()).copied()
+        };
+        let at = |node, character_index| accesskit::TextPosition {
+            node,
+            character_index,
+        };
+        let caret = |position| accesskit::TextSelection {
+            anchor: position,
+            focus: position,
+        };
+        assert_eq!(selection(area), Some(caret(at(text_run_id(area, 1), 2))));
+        assert_eq!(selection(field), Some(caret(at(text_run_id(field, 0), 0))));
+
+        // On a line's start after a newline, the caret is on that line, not at the end of the
+        // line before.
+        ui.set_focus(Some(area));
+        ui.key(crate::Key::Left);
+        ui.key(crate::Key::Left);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let node = update.nodes.iter().find(|(n, _)| *n == node_id(area));
+        let selection = node.and_then(|(_, n)| n.text_selection()).copied();
+        assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
+
+        // After a final newline the caret is on the empty last line, which has a run of its own.
+        ui.set_field_text(area, "ab\n");
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let find = |id| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, n)| n);
+        let selection = find(node_id(area)).and_then(|n| n.text_selection()).copied();
+        assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
+        assert_eq!(find(text_run_id(area, 1)).and_then(Node::value), Some(""));
     }
 }

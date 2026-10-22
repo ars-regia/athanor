@@ -4,7 +4,7 @@
 | --- | --- |
 | Purpose | What Athanor 1.0 contains, how each item is accepted, what waits for 1.1, and the order of work |
 | Owner | the maintainer (`@hr-mes`) |
-| Status | revision 4, 2026-10-19, with [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md): 1.0 waits for Athanor's own compositor ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0122](../decisions/0122-own-compositor-optional-session-and-desktop-first.md)), and the Fedora rebase ships as release 0.10. Revision 3, 2026-10-14: scope from [ADR-0103](../decisions/0103-audit-5-decisions.md) (revision 1, D1), order and release points from [ADR-0105](../decisions/0105-releases-before-1-0.md), amended by [ADR-0115](../decisions/0115-zero-nine-in-one-week.md) (two releases, 0.3 and 0.9, and rows moved to 1.1) and [ADR-0120](../decisions/0120-security-class-updates-in-1-0.md) (row 25) |
+| Status | revision 5, 2026-10-22, with [ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md): row 7 and image key 2 move to 1.0, and release 0.11 "anchor", signed with key 1, follows 0.10. Revision 4, 2026-10-19, with [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md): 1.0 waits for Athanor's own compositor ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0122](../decisions/0122-own-compositor-optional-session-and-desktop-first.md)), and the Fedora rebase ships as release 0.10. Revision 3, 2026-10-14: scope from [ADR-0103](../decisions/0103-audit-5-decisions.md) (revision 1, D1), order and release points from [ADR-0105](../decisions/0105-releases-before-1-0.md), amended by [ADR-0115](../decisions/0115-zero-nine-in-one-week.md) (two releases, 0.3 and 0.9, and rows moved to 1.1) and [ADR-0120](../decisions/0120-security-class-updates-in-1-0.md) (row 25) |
 
 ## 1. Purpose and date
 
@@ -22,8 +22,9 @@ The date of the Fedora rebase is set outside the project. Fedora 43 reaches its 
 2026-12-02. Fedora 45 final is due on 2026-10-20; if its image is not green by mid-November 2026,
 the base moves to Fedora 44 instead ([ADR-0078](../decisions/0078-fedora-release-target.md)). Release 0.9 ships on Fedora 43; the rebase ships as
 release 0.10 "base" before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)). The Fedora 43 line gets no feature
-release after 0.9. Until 1.0, each later Fedora rebase ships as a release 0.x of its own
-(`doc_own_stack.md` section 8).
+release after 0.9. Release 0.11 "anchor" follows 0.10 and is not a rebase ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). 0.11 is the last 0.x release before 1.0: a further Fedora rebase
+before 1.0 (`doc_own_stack.md` section 8) changes the release points, and a decision record
+places it (section 5).
 
 ## 2. In 1.0
 
@@ -35,10 +36,10 @@ pull request that builds the row adds it, under that name or a better one.
 | Signed immutable image, three variants: default, `-nvidia`, and `-nvidia-legacy` only on its evidence (D24; the evidence is in 1.1, so the variant stays unpromoted, [ADR-0115](../decisions/0115-zero-nine-in-one-week.md)) | `doc_system_image.md` S1 to S5, `doc_update_trust.md` UT2, UT3 | `system/verify-images.sh --registry REGISTRY/OWNER DIGESTS_FILE`; `python3 -B -m unittest discover -s system/tests`; `python3 scripts/verify.py registry` |
 | NVIDIA failures do not block the other images (D24) | `doc_update_delivery.md` UD4 | `system/tests/test_build_variants.py` (image stage); `system/tests/test_kernel_artifacts.py` and `system/tests/test_optional_branch.py` (kernel-module stage) |
 | Update chain to `:stable`: the PB5 slice, promotion only on acceptance evidence for the same digests (D15) | `doc_pipeline.md` PB5, `doc_update_delivery.md` UD1 to UD6 | `python3 -B -m unittest discover -s system/tests` (`test_promote.py`: missing evidence, a fail verdict, another digest or another run are refused); `scripts/ci/evidence.py`; `.github/workflows/accept.yml` writes the verdict file; `.github/workflows/promote-stable.yml` |
-| One human approval per promotion to `:stable`, in the environment `release`, and `:latest` signed with no approval from step 3 of the image key rotation; agents open, push and merge pull requests as a GitHub App (D2, D25, ADR-0104) | ADR-0103 D2, D25; ADR-0104; `doc_pipeline.md` PL5, PL56, PL60 | `python3 scripts/github-settings/ghsettings.py diff`; `release` in `.github/settings/environments.json`; `.github/workflows/promote-stable.yml` runs `system/promote.sh` only in its job `promote`, in `release` |
+| One human approval per promotion to `:stable`, in the environment `release`, and `:latest` signed with no approval from step 3 of the image key rotation, the switch of Task B4b of `docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md`, merged after 0.11 and before 1.0 is signed ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)); agents open, push and merge pull requests as a GitHub App (D2, D25, ADR-0104) | ADR-0103 D2, D25; ADR-0104; `doc_pipeline.md` PL5, PL56, PL60 | `python3 scripts/github-settings/ghsettings.py diff`; `release` in `.github/settings/environments.json`; `.github/workflows/promote-stable.yml` runs `system/promote.sh` only in its job `promote`, in `release` |
 | Signed evidence bundle copied off GitHub at promotion (D23) | `doc_pipeline.md` PL42 | `system/evidence-bundle.sh verify`, run by both jobs of `.github/workflows/promote-stable.yml`; `system/tests/test_evidence_bundle.py` |
 | Resolved Fedora package set recorded for every build (D16) | `doc_update_delivery.md` UD28 | `system/package-set.sh`, artifact `package-sets`; `system/promote.sh` refuses a promoted image without its set (`test_promote.py` `test_a_promoted_image_without_its_package_set_is_refused`); the set is in the evidence bundle |
-| Key hierarchy for the image key; MOK interim key set with not-after and revocation (D5; in 0.10, [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)) | `doc_update_trust.md` UT2, [ADR-0084](../decisions/0084-key-custody-model.md) | `scripts/devvm/acceptance/run.sh` (stages `rotate`, `recover`); to add: `cargo test -p athanor-update` cases for an expired and a revoked key |
+| Key hierarchy for the image key; MOK interim key set with not-after and revocation (D5; in 1.0, [ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends items 2 and 4 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), item 4 for row 7 only) | `doc_update_trust.md` UT2, [ADR-0084](../decisions/0084-key-custody-model.md) | `scripts/devvm/acceptance/run.sh` (stages `rotate`, `recover`); to add: `cargo test -p athanor-update` cases for an expired and a revoked key |
 | Installer path from the ISO to the first session: Anaconda Users and Timezone pages, MOK import in `%post` with a shown one-time password, x86-64-v3 and UEFI check at ISO start (D17) | `doc_platform_experience.md`, `doc_kernel_profile.md` D3, D14 | `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR` (the install, MokManager answered with the shown password, the first session and Settings; `SECURE_BOOT=1` on Secure Boot firmware); `.github/workflows/accept.yml`; `python3 scripts/verify.py installer`; `system/tests/test_installer_scripts.py`; to add: the `SECURE_BOOT=1` case in `accept.yml` (#252) |
 | Greeter: user list, "Other user", PAM conversation by message type (D7) | `doc_lock_and_prompts.md` LP19 for 0.9, LP18 step 4 for 1.1 | `doc_lock_and_prompts.md` section 5, items 18 to 24: `cargo test -p athanor-greeter-ui` (items 18 to 22, the lockout and expiry against a fake greetd among them); `scripts/devvm/greeter-acceptance.sh` (items 23 and 24, on the dev VM) |
 | Recovery and rollback: text console, GoBack, greenboot | `doc_recovery.md` R1 to R7 | `cargo test -p athanor-update`; `scripts/devvm/acceptance/run.sh` (stage `goback`); `scripts/devvm/switch-acceptance.sh rollback`; `scripts/devvm/acceptance/run.sh` (stages `console` and `greenboot`: acceptance 1 and 7 of `doc_recovery.md`) |
@@ -90,8 +91,8 @@ and provenance as promotion conditions (D15). The Bridge (UD45 to UD50) is dropp
 
 ## 4. Order of work
 
-Three releases lead to 1.0: 0.3, then 0.9 within about one week ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md), which cut the four of
-[ADR-0105](../decisions/0105-releases-before-1-0.md)), then 0.10 "base", the Fedora rebase, before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)). The
+Four releases lead to 1.0: 0.3, then 0.9 within about one week ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md), which cut the four of
+[ADR-0105](../decisions/0105-releases-before-1-0.md)), then 0.10 "base", the Fedora rebase, before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)), then 0.11 "anchor", the transitional release, signed with key 1 and carrying the new trust anchor ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). The
 dates are estimates. Each 0.x release is a signed tag on `iso-v0` plus a `:stable` promotion of
 that build on evidence (BRN4 of `branching.md`), with the `release` approval. 1.0 is the last
 0.x release with Athanor's own compositor in place of cosmic-comp as the default session, its
@@ -103,7 +104,7 @@ revisions and shell work run in parallel with it, within the machine's CPU budge
 placement of S1 and P4b after 0.9, with the rebase in 0.10, is a proposal of ADR-0115. The Fedora 45
 rebase does not wait for P3 (D26); the Fedora 44 fallback date holds. In the release half of the
 pipeline the PB5 slice comes first (D15), then the evidence copy (D23); the key hierarchy (D5)
-waits for the maintainer's LUKS2 key backup, which is done in the week of 2026-10-09.
+waits for the maintainer's LUKS2 key backup, which is not made yet (maintainer, 2026-10-22) and is Task A2 of `docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md`.
 
 ### 4.1 Releases
 
@@ -111,8 +112,9 @@ waits for the maintainer's LUKS2 key backup, which is done in the week of 2026-1
 | --- | --- | --- | --- |
 | 0.3 "chain" | its exit was met on 2026-10-14; tagged when its remaining issues close | rows 1 (image, three variants, without the `-nvidia-legacy` evidence), 2, 3, 4, 5, 6; `release.yml` (PB13, [ADR-0104](../decisions/0104-release-workflow-and-stable-gate.md), merged in #354); P2 (#122) | The first `:stable` promotion on evidence. Existing: `python3 -B -m unittest discover -s system/tests` (`test_promote.py`). `system/promote.sh` reads `:stable` back and refuses unless it is the evidence digest (`test_promote.py` `test_stable_is_read_back`) |
 | 0.9 "surface" | about 2026-10-21 (one week), some days later by [ADR-0122](../decisions/0122-own-compositor-optional-session-and-desktop-first.md) | rows 8, 9, 11, 12, 13 (patches 1 and 2), 15 (the image ships the pinned Flathub remote and the daily update timer, `athanor-flatpak-update.timer`; the `*.preinstall` reader of decision 7 and the packaged store follow), 17, 18, 19, 20, 22, 23, 24; the ISO acceptance under Secure Boot (#252, the "to add" of row 8); the hardware work of 4.3; the visual language and accessibility, without the keyboard monitor that answers Orca alone (AX4, a 1.0 requirement of the own compositor by ADR-0123 item 5); the maintainer's aesthetic sign-offs (ST8, VL12). It ships on Fedora 43. Being finished on 2026-10-18: the shell stage 1 and stage 2 acceptance (#133, #134) and the hardware session (#538) are open; ST8 and VL12 were signed with reservations on #538, and the aesthetic targets they set apply to the surfaces rebuilt on the toolkit (#616); #600 (doubled shell surfaces after an output is disabled and enabled in software, milestone 1.0) and #604 (the NVIDIA desktop's GPU falls off the bus on resume or unplug, milestone After 1.0) are known limits in its release notes | The release candidate: every row placed here holds and the hardware matrix is a recorded run. Existing: `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `compositor-acceptance.sh`, `python3 scripts/verify.py services pam polkit polkit-model contacts shipped coverage`, `forge/test/iso/run_iso_test.sh ISO OUTPUT_DIR`, and the unit tests the rows name. To add: the image checks and acceptance cases the rows mark "to add", the ISO test under Secure Boot firmware ending in an update to a newer `:stable`, and the hardware matrix. A matrix row that fails on a known limit names its issue (#600, #604) |
-| 0.10 "base" | before 2026-12-02 | 0.9 rebased onto Fedora 45 (P4a, #125), or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); S1 (#124) and P4b (#126), the bootc two-step update chain (proposed by ADR-0115); row 7 (key hierarchy, not-after and revocation) with the image key rotation (PB5b), its key ceremony and key 2; row 25, the security-class updates of UT13 (#543). The rebase does not wait for rows 7 and 25: a row not ready by the Fedora 44 decision point moves to the next release ([ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)) | A `:stable` promotion of the rebased build on evidence before 2026-12-02; the checks the rebase moves (kernel, package set, compositor) run again on it (ADR-0115). Existing: `test_promote.py`, `scripts/devvm/acceptance/run.sh`. To add: the gate of P4a (#125) and the cases rows 7 and 25 mark "to add" |
-| 1.0 | no date: when the own compositor passes its acceptance ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5) | rows 12 and 13 on Athanor's own compositor, the default session in place of cosmic-comp, with the GTK4 shell on top; PB5b closes here when an earlier release carried key 2 (section 4.2); no blocking defect | The acceptance of `doc_own_stack.md` revision 2 (section 6 step 4): every surface 1.0 carries drawn in the rig against the own compositor with its goldens matched; OS4 and OS5 tested in the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on cosmic-comp; the hardware matrix of 4.3, NVIDIA's driver included, a recorded run on the 1.0 build, where a failing row names its issue and only an issue of milestone 1.0 or earlier blocks. Every row of section 2 holds. To add: the checks revision 2 names, and a query for open blocking issues that must return none |
+| 0.10 "base" | before 2026-12-02 | 0.9 rebased onto Fedora 45 (P4a, #125), or Fedora 44 per [ADR-0078](../decisions/0078-fedora-release-target.md); S1 (#124) and P4b (#126), the bootc two-step update chain (proposed by ADR-0115); row 25, the security-class updates of UT13 (#543). The rebase does not wait for row 25: a row not ready by the Fedora 44 decision point moves to the next release ([ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)) | A `:stable` promotion of the rebased build on evidence before 2026-12-02; the checks the rebase moves (kernel, package set, compositor) run again on it (ADR-0115). Existing: `test_promote.py`, `scripts/devvm/acceptance/run.sh`. To add: the gate of P4a (#125) and the cases row 25 marks "to add" |
+| 0.11 "anchor" | after 0.10 and before 1.0; no date | The new trust anchor of the key hierarchy in its policy, signed with key 1 ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)); nothing else is assigned to it, and fixes that land meanwhile ship in it as usual | A `:stable` promotion of the build on evidence, signed with key 1, with the `release` approval; its policy names the new trust anchor. Existing: `test_promote.py`. To add: the check that the policy of the build names the new trust anchor |
+| 1.0 | no date: when the own compositor passes its acceptance ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5) | row 7 (key hierarchy, not-after and revocation) with image key 2, 1.0 being the first release signed under the hierarchy; rows 12 and 13 on Athanor's own compositor, the default session in place of cosmic-comp, with the GTK4 shell on top; PB5b closes at the first release after 1.0 (section 4.2); no blocking defect | The acceptance of `doc_own_stack.md` revision 2 (section 6 step 4): every surface 1.0 carries drawn in the rig against the own compositor with its goldens matched; OS4 and OS5 tested in the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on cosmic-comp; the hardware matrix of 4.3, NVIDIA's driver included, a recorded run on the 1.0 build, where a failing row names its issue and only an issue of milestone 1.0 or earlier blocks. Every row of section 2 holds. To add: the checks revision 2 names, and a query for open blocking issues that must return none |
 
 Row numbers are those of revision 2 of this file, so that issues and records that cite them
 stay valid: 1 signed immutable image; 2 NVIDIA failures; 3 update chain to `:stable`; 4 one
@@ -126,13 +128,17 @@ rows narrowed below.
 
 ### 4.2 Rows split or narrowed
 
-- **Row 7, key hierarchy.** It leaves 0.9 for 0.10, with the PB5b rotation, its key ceremony
-  and key 2 ([ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)). `doc_update_trust.md` UT2 already says "before 1.0"; the
-  mechanism is not written, and the approved text defers it to the revision that builds it.
-  The next step is an amendment of UT2 that defines the mechanism, for approval. As the
-  approved text defines PB5b, its close needs a key-2 release on `:stable` and one more
-  release: 0.10 carries key 2, and PB5b closes with 1.0. If row 7 leaves 0.10 (ADR-0123 item
-  4), key 2 moves with it, and PB5b closes with the release after the one that carries it.
+- **Row 7, key hierarchy.** It leaves 0.9 for 1.0, with the PB5b rotation, its key ceremony
+  and key 2 ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md), which amends items 2 and 4 of [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md), item 4 for row 7 only; it was in 0.10).
+  0.10 is signed with key 1 and changes nothing of the keys: its policy already trusts the
+  public half of key 2, committed by `secrets.md` section 4.1 step 1, as every image since. Release 0.11 "anchor" is signed with key 1 and
+  carries the new trust anchor in its policy: the hierarchy's root, which machines pin
+  (`doc_update_trust.md` UT2), in the form the amendment of UT2 defines; key 2 arrives with the hierarchy in 1.0, the
+  first release signed under it. Key 1 is retired, and PB5b closes, at the first release
+  after 1.0. [ADR-0103](../decisions/0103-audit-5-decisions.md) D25 stands: no release is
+  signed with key 2 before the hierarchy exists. `doc_update_trust.md` UT2 already says
+  "before 1.0", read as: the hierarchy exists before 1.0 is signed; the mechanism is not written, and the approved text defers it to the revision
+  that builds it. The next step is an amendment of UT2 that defines the mechanism, for approval.
 - **Row 9, greeter.** For 0.9, D7's acceptance is met on the greeter's own conversation code.
   LP18 step 4, moving it into `athanor-auth`, waits for Athanor's lock and moves to 1.1 with
   step 3.
@@ -144,7 +150,7 @@ rows narrowed below.
   (`doc_lock_and_prompts.md` LP18) are in 1.1 (section 3). In 1.0 the same tier runs on the own
   compositor, which provides cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings the
   protocols they use or replaces them (`doc_own_stack.md` OS5, ADR-0121).
-- **Row 13, the compositor.** cosmic-comp with patches 1 and 2 is 0.9 and 0.10. In 1.0 the own
+- **Row 13, the compositor.** cosmic-comp with patches 1 and 2 is 0.9, 0.10 and 0.11. In 1.0 the own
   compositor replaces it as the default session, and the rows of the register of
   `doc_compositor.md` CO3 become its requirements or leave with cosmic-comp, as
   `doc_own_stack.md` OS4 says. Its acceptance holds OS4 in full, so 1.0 has the compositor
@@ -176,6 +182,6 @@ At 1.0 the hardware matrix runs again, on the own compositor, as its acceptance 
 Only a decision record changes the scope of 1.0, and only a decision record changes its order
 or its release points: [ADR-0105](../decisions/0105-releases-before-1-0.md) set four
 releases, [ADR-0115](../decisions/0115-zero-nine-in-one-week.md) cut them to two, and [ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) and [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md) added 0.10, the third
-of section 4. A pull request that adds, removes or moves a
+of section 4, and [ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md) added 0.11, the fourth. A pull request that adds, removes or moves a
 row of sections 2 or 3 names the record that decided it; a pull request that only turns a
 "to add" into an existing check, or corrects a path, needs none.
