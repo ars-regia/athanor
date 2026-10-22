@@ -158,7 +158,7 @@ impl Trust {
     }
 
     pub fn sheet(&self) -> Sheet {
-        shield::sheet(&self.read.borrow())
+        shield::sheet(&self.read.borrow(), now())
     }
 
     pub fn restart_to_update_offered(&self) -> bool {
@@ -170,7 +170,7 @@ impl Trust {
     }
 
     pub fn postpone_offered(&self) -> bool {
-        shield::postpone_offered(&self.read.borrow())
+        shield::postpone_offered(&self.read.borrow(), now())
     }
 
     pub fn withdrawn(&self, request: Request) -> Refusal {
