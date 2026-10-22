@@ -503,7 +503,7 @@ clock_ahead() {
 # timesyncd saves its clock file when it stops, with the time of the moved clock: touched to the
 # restored time, so that no later boot starts seven days ahead.
 clock_restore() {
-  local now present
+  local now present mtime
   [[ -n $ACC_CLOCK_MOVED ]] || return 0
   now=$(date +%s)
   guest_ssh "sudo date -s @$now" > /dev/null || return 1
@@ -513,7 +513,8 @@ clock_restore() {
   case $present in
     0)
       guest_ssh "sudo touch -d @$now /var/lib/systemd/timesync/clock" || return 1
-      [[ $(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) -le $(($(date +%s) + 60)) ]] || return 1
+      mtime=$(guest_ssh stat -c %Y /var/lib/systemd/timesync/clock) || return 1
+      [[ $mtime =~ ^[0-9]+$ && $mtime -le $(($(date +%s) + 60)) ]] || return 1
       ;;
     1) ;;
     *) return 1 ;;
