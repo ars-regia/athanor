@@ -438,6 +438,10 @@ pub fn at_shutdown<T: Tools>(ctx: &Context<'_, T>) -> Result<(), Failure> {
     let Some(staged) = status.staged.as_ref().filter(|staged| staged.download_only && !status.rollback_queued) else {
         return Ok(());
     };
+    // The check's own gates: a held digest, or one not newer than the booted build, stays locked.
+    if local_update(ctx, &status)? != UpdateState::Downloaded {
+        return Ok(());
+    }
     let policy = crate::policy::in_force(&ctx.policy);
     if !matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. }) {
         return Ok(());
@@ -1690,6 +1694,18 @@ pub(crate) mod tests {
         tools.status.borrow_mut().rollback_queued = true;
         at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
         assert!(tools.calls.borrow().is_empty() && locked(&tools), "a queued return to the previous deployment holds it");
+    }
+
+    #[test]
+    fn shutdown_unlocks_nothing_the_check_would_not_offer() {
+        let (machine, tools) = staged_for_shutdown("shutdown-held", security(), &open_lineage(NOW, true));
+        machine.store.set_held(&attested()).expect("held");
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools), "a held digest stays locked");
+        let (machine, tools) = staged_for_shutdown("shutdown-older", security(), &open_lineage(NOW, true));
+        tools.status.borrow_mut().booted.build_time = 2000;
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools), "a digest not newer than the booted build stays locked");
     }
 
     #[test]
