@@ -56,6 +56,8 @@ fn server_absent(err: &zbus::Error) -> bool {
     }
 }
 
+// ponytail: a refused request is logged, not shown. Add a notification for it once UT13 words
+// a refusal text (Task 10's `refusal_words` in the shield is the model).
 async fn request(system: &Connection, request: Request) {
     let method = match request {
         Request::Apply => "Apply",
