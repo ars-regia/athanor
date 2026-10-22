@@ -81,15 +81,30 @@ UNMET=(cosmic-osd.service cosmic-settings-daemon.service athanor-control-center-
 STAGE=
 WORK=$(mktemp -d)
 # What a stage changed in the guest and must put back, even when it fails.
-KEYMAP_SAVED='' LINGER_SET='' FAVORITES_SAVED=''
+KEYMAP_SAVED='' LINGER_SET='' FAVORITES_SAVED='' USR_STRIPPED=''
 # The second at which broken_preview's sign-in started, for the journal reads after it.
 BROKEN_SINCE=
+# Every restore is tried, whatever failed before it, and each one that fails is named.
 finish() {
+    set +e
     rm -rf "$WORK"
-    guest_ssh "sudo rm -f $CONFIG/systemd/user/$COMPOSITOR.d/$DROP_IN $CONFIG/systemd/user/$GATE.d/$DROP_IN"
-    [[ -z $KEYMAP_SAVED ]] || guest_ssh "sudo localectl set-x11-keymap $KEYMAP_SAVED"
-    [[ -z $LINGER_SET ]] || guest_ssh sudo loginctl disable-linger "$USER_NAME"
-    [[ -z $FAVORITES_SAVED ]] || in_session mv -f "$FAVORITES.preview-acceptance" "$FAVORITES"
+    guest_ssh "sudo rm -f $CONFIG/systemd/user/$COMPOSITOR.d/$DROP_IN $CONFIG/systemd/user/$GATE.d/$DROP_IN" ||
+        echo "NOT RESTORED: the drop-ins in $CONFIG/systemd/user are still there"
+    if user_up; then
+        in_session systemctl --user daemon-reload || echo "NOT RESTORED: $USER_NAME's user manager did not reload"
+    fi
+    if [[ -n $KEYMAP_SAVED ]]; then
+        guest_ssh "sudo localectl set-x11-keymap $KEYMAP_SAVED" ||
+            echo "NOT RESTORED: the system keyboard; set it back with localectl set-x11-keymap $KEYMAP_SAVED"
+    fi
+    if [[ -n $LINGER_SET ]]; then
+        guest_ssh sudo loginctl disable-linger "$USER_NAME" || echo "NOT RESTORED: lingering is still enabled for $USER_NAME"
+    fi
+    if [[ -n $FAVORITES_SAVED ]]; then
+        in_session mv -f "$FAVORITES.preview-acceptance" "$FAVORITES" ||
+            echo "NOT RESTORED: $FAVORITES; the original is $FAVORITES.preview-acceptance"
+    fi
+    [[ -z $USR_STRIPPED ]] || echo "NOT RESTORED: /usr stays without the compositor until the guest reboots"
 }
 trap finish EXIT
 
@@ -463,6 +478,7 @@ stage_absent() {
     local tree since boot
     # shellcheck disable=SC2016 # expanded by the guest's shell
     guest_ssh '[ "$(findmnt -no FSTYPE /usr)" = overlay ] || sudo bootc usr-overlay'
+    USR_STRIPPED=1
     guest_ssh sudo rm -f "$SCRIPT" /usr/bin/athanor-compositor /usr/lib/systemd/user/$COMPOSITOR
     guest_ssh sudo systemctl restart greetd
     wait_until 60 greeter_up || fail "no greeter 60 s after restarting greetd"
@@ -483,6 +499,7 @@ stage_absent() {
     wait_until 180 guest_ssh "[ \"\$(cat /proc/sys/kernel/random/boot_id)\" != $boot ]" ||
         fail "the guest did not answer from a new boot 180 s after the reboot"
     guest_ssh test -x "$SCRIPT" || fail "$SCRIPT is still missing after the reboot"
+    USR_STRIPPED=''
     push_probe
 }
 
