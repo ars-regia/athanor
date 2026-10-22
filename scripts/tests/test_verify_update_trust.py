@@ -110,6 +110,30 @@ class UpdateTrust(unittest.TestCase):
             "--out /usr/share/athanor/containers --link-etc /etc\nRUN systemctl preset-all\n")
         self.assertEqual(verify.image_policy_problems(self.root), ["system/keys/leak.key: only *.pub files belong under system/keys"])
 
+    def test_only_the_tier0_base_config_install_skips_the_signature(self):
+        system = self.root / "system"
+        (system / "keys").mkdir(parents=True)
+        (system / "keys/athanor-image-1.pub").write_text("-----BEGIN PUBLIC KEY-----\n")
+        policy = ("ARG IMAGE_REGISTRY\nCOPY system/keys/ /usr/share/athanor/keys/\n"
+                  "RUN /usr/libexec/athanor-update/render-policy --link-etc /etc\nRUN systemctl preset-all\n")
+        tier0 = ('RUN BASE_CONFIG=$(find /tmp/tier0-repo -name "athanor-base-config*.rpm") && \\\n    '
+                 + verify.TIER0_DIGEST_INSTALL + "\n")
+        for text, expected in (
+            (tier0, []),
+            (tier0.replace("/tmp/tier0-repo", "/tmp/elsewhere"), ["system/Containerfile:2"]),
+            ("RUN rpm -Uvh --nosignature x.rpm\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --nogpgcheck x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --no-gpgchecks x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=gpgcheck=no x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=gpgcheck=off x\n", ["system/Containerfile:1"]),
+            ("RUN echo '%_pkgverify_level none' > /etc/rpm/macros.x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=localpkg_gpgcheck=0 ./x.rpm\n", ["system/Containerfile:1"]),
+        ):
+            with self.subTest(text=text):
+                (system / "Containerfile").write_text(text + policy)
+                found = verify.image_policy_problems(self.root)
+                self.assertEqual([p.split(": ")[0] for p in found], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

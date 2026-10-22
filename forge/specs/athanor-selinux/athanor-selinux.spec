@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -11,8 +11,7 @@ Source2:        athanor_nix_daemon.cil
 Source3:        athanor_nvidia_modules_load.te
 Source4:        athanor_bootc_install.te
 Source5:        athanor_systemd_pstore.te
-Source6:        athanor_pcscd_cgroup.te
-Source7:        athanor_powerprofiles_passwd.te
+Source6:        athanor_powerprofiles_passwd.te
 
 BuildArch:      noarch
 BuildRequires:  checkpolicy
@@ -21,14 +20,14 @@ BuildRequires:  checkpolicy
 Custom SELinux Type Enforcement policies for Athanor OS.
 Includes mitigations for bootupd, the scx eBPF schedulers and the NVIDIA driver's
 capability probes at module load, bootc's install_t from system services, the
-directories systemd-pstore creates for a crash, pcscd's search of the cgroup tree,
+directories systemd-pstore creates for a crash,
 power-profiles-daemon's read of /etc/passwd, and
 the Nix policy: types for the store, its state and the daemon socket, a confined
 nix-daemon domain and a builder domain.
 
 %prep
 %setup -q -c -T
-cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} %{SOURCE5} %{SOURCE6} %{SOURCE7} .
+cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} %{SOURCE5} %{SOURCE6} .
 
 %build
 # checkmodule compiles each .te into a CIL module (the require block resolves
@@ -36,7 +35,7 @@ cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} %{SOURCE5} %{SOURCE6} 
 # semodule_package step: `semodule -i module.cil` loads it as it is.
 # athanor_nix_daemon is written in CIL directly, because it declares file
 # contexts, which a .te compiled by checkmodule cannot carry.
-for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load athanor_bootc_install athanor_systemd_pstore athanor_pcscd_cgroup athanor_powerprofiles_passwd; do
+for module in bootupd_lsblk athanor_scx athanor_nvidia_modules_load athanor_bootc_install athanor_systemd_pstore athanor_powerprofiles_passwd; do
   checkmodule -M -m -C -o "${module}.cil" "${module}.te"
 done
 
@@ -47,7 +46,6 @@ install -D -m 0644 athanor_nix_daemon.cil %{buildroot}%{_datadir}/selinux/packag
 install -D -m 0644 athanor_nvidia_modules_load.cil %{buildroot}%{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 install -D -m 0644 athanor_bootc_install.cil %{buildroot}%{_datadir}/selinux/packages/athanor_bootc_install.cil
 install -D -m 0644 athanor_systemd_pstore.cil %{buildroot}%{_datadir}/selinux/packages/athanor_systemd_pstore.cil
-install -D -m 0644 athanor_pcscd_cgroup.cil %{buildroot}%{_datadir}/selinux/packages/athanor_pcscd_cgroup.cil
 install -D -m 0644 athanor_powerprofiles_passwd.cil %{buildroot}%{_datadir}/selinux/packages/athanor_powerprofiles_passwd.cil
 
 %files
@@ -57,10 +55,14 @@ install -D -m 0644 athanor_powerprofiles_passwd.cil %{buildroot}%{_datadir}/seli
 %{_datadir}/selinux/packages/athanor_nvidia_modules_load.cil
 %{_datadir}/selinux/packages/athanor_bootc_install.cil
 %{_datadir}/selinux/packages/athanor_systemd_pstore.cil
-%{_datadir}/selinux/packages/athanor_pcscd_cgroup.cil
 %{_datadir}/selinux/packages/athanor_powerprofiles_passwd.cil
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 1.0-15
+- Drop athanor_pcscd_cgroup: Fedora 45's policy grants pcscd_t the search of cgroup_t
+  directories itself (selinux-policy aaf559c0; allow pcscd_t cgroup_t:dir { getattr open
+  search } in 45.20 and 45.21), so the module the image base lacked in 43.10 is no longer needed.
+
 * Sun Oct 18 2026 Athanor Forge <forge@athanor.os> - 1.0-14
 - Add athanor_powerprofiles_passwd: let powerprofiles_t read passwd_file_t, the read part
   of auth_read_passwd. power-profiles-daemon reads /etc/passwd at every boot of a machine

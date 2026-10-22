@@ -867,10 +867,10 @@ def check_installer():
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
 
-# La sintassi che l'Anaconda spedito sull'ISO sa leggere. L'ISO è Fedora 43: alzalo
-# insieme alla base, non oltre, perché una direttiva introdotta dopo passerebbe qui
-# e fallirebbe sul supporto reale.
-KICKSTART_SYNTAX = "F43"
+# The syntax the Anaconda shipped on the ISO reads. The ISO is Fedora 45: raise it
+# with the base and no further, because a directive introduced later would pass here
+# and fail on the real media.
+KICKSTART_SYNTAX = "F45"
 
 
 # The kickstarts that live inside another file: bootc-image-builder's TOML carries the ISO's.
@@ -988,25 +988,36 @@ def check_install_channel():
 # --------------------------------------------------------------------------- #
 
 OS_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/os-release"
+FEDORA_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/fedora-release"
 
 
 def os_release_problems(root=None):
-    """Every non-empty line of the shipped os-release is KEY=VALUE.
+    """Every non-empty line of the shipped os-release is KEY=VALUE, and fedora-release names the
+    release of its VERSION_ID.
 
     os-release(5) allows comment lines, but bootc-image-builder does not: it stops the ISO build
-    with "readOSRelease: invalid input" on any non-empty line without "=".
+    with "readOSRelease: invalid input" on any non-empty line without "=". fedora-release was left
+    at 43 when os-release moved to 45.
     """
     root = root or ROOT
     try:
         text = read(root / OS_RELEASE)
+        release = read(root / FEDORA_RELEASE)
     except OSError as err:
-        return [f"{OS_RELEASE}: cannot read ({err})"]
-    return [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
-            for number, line in enumerate(text.splitlines(), 1)
-            if line.strip() and "=" not in line]
+        return [f"cannot read ({err})"]
+    out = [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+           for number, line in enumerate(text.splitlines(), 1)
+           if line.strip() and "=" not in line]
+    version = next((line.split("=", 1)[1].strip().strip('"') for line in text.splitlines()
+                    if line.startswith("VERSION_ID=")), None)
+    named = re.search(r" release (\S+) ", release)
+    if not named or named.group(1) != version:
+        out.append(f"{FEDORA_RELEASE}: names release {named.group(1) if named else 'none'}, "
+                   f"os-release VERSION_ID is {version}")
+    return out
 
 
-@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires")
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires, and fedora-release names its VERSION_ID")
 def check_os_release():
     r = Result()
     for problem in os_release_problems():
@@ -1404,6 +1415,12 @@ def update_trust_problems(root=None):
     return problems
 
 
+# The one RPM signature override of the image build: athanor-base-config from the digest-pinned
+# tier 0 image, at rpm's digest level (UD44: the forge's RPMs are not signed).
+TIER0_DIGEST_INSTALL = "rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps \"$BASE_CONFIG\"; \\"
+SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--no-?gpgchecks?|gpgcheck=(0|no|off|false)", re.I)
+
+
 def image_policy_problems(root=None):
     """system/Containerfile puts the policy in force and system/keys holds public keys only."""
     root = root or ROOT
@@ -1422,6 +1439,11 @@ def image_policy_problems(root=None):
     for key in keys:
         if key.suffix != ".pub":
             problems.append(f"system/keys/{key.name}: only *.pub files belong under system/keys")
+    for number, line in enumerate(containerfile.splitlines(), 1):
+        if SIGNATURE_OVERRIDE.search(line) and (line.strip() != TIER0_DIGEST_INSTALL
+                                                or "BASE_CONFIG=$(find /tmp/tier0-repo " not in containerfile):
+            problems.append(f"system/Containerfile:{number}: overrides RPM signature checking; only "
+                            "athanor-base-config from the tier 0 image installs at the digest level (UD44)")
     return problems
 
 

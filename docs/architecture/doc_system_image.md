@@ -1,6 +1,6 @@
 # System image: base and GPU variants
 
-Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
+Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`; S1 revised for the Fedora 45 base (ADR-0078) on 2026-10-21**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
 
 ## 1. Context
 
@@ -29,10 +29,10 @@ The base the image used until S1, `ghcr.io/hr-mes/ermete-base-nvidia:latest`, wa
 
 ## 2. Decisions
 
-**S1. Base image.** The image starts from `quay.io/fedora-ostree-desktops/base-atomic:43`, pinned by digest.
+**S1. Base image.** The image starts from `quay.io/fedora-ostree-desktops/base-atomic:45`, pinned by digest (`:43` until the rebase of ADR-0078).
 
-- **Who publishes it:** the Fedora Atomic Desktops SIG, as the common base of Silverblue and Kinoite. It is rebuilt daily (`43.20260916.0` at the time of writing).
-- **What it is:** a bootc image (`containers.bootc=1`, `ostree.bootable=true`). It shares the bottom layer of `fedora-bootc:43` (same `ostree.final-diffid`) and adds the desktop plumbing: NetworkManager with Wi-Fi and WWAN, pipewire, bluez, firmware, CUPS, ibus, Mesa, flatpak and Xwayland.
+- **Who publishes it:** the Fedora Atomic Desktops SIG, as the common base of Silverblue and Kinoite. It is rebuilt daily (`43.20260916.0` when this document was approved, `45.20261021.0` when the base moved to Fedora 45).
+- **What it is:** a bootc image (`containers.bootc=1`, `ostree.bootable=true`). It shares the bottom layer of `fedora-bootc:45` (same `ostree.final-diffid`, checked again on 2026-10-21) and adds the desktop plumbing: NetworkManager with Wi-Fi and WWAN, pipewire, bluez, firmware, CUPS, ibus, Mesa, flatpak and Xwayland.
 - **What it replaces:** `ermete-base-nvidia`. The additions that base made become declared, reviewed content of this repository:
   - repositories, as pinned release packages with vendored GPG keys;
   - codecs: Cisco openh264 from Fedora's `fedora-cisco-openh264` repository replaces the `noopenh264` stub of the base;
@@ -76,7 +76,7 @@ The tier packages, the upstream packages, the signed kernel, the initramfs and t
 **S5. `athanor-system-nvidia-legacy`.** The same structure, with three differences:
 
 - the signed legacy modules come from `azoth-nvidia:<kernel-nvr>-legacy`;
-- the userspace is RPM Fusion's `xorg-x11-drv-nvidia` family at exactly `NVIDIA_LEGACY_VERSION`, including `xorg-x11-drv-nvidia-power` for suspend and resume, because negativo17 publishes no 580 for Fedora 43;
+- the userspace is RPM Fusion's `xorg-x11-drv-nvidia` family at exactly `NVIDIA_LEGACY_VERSION`, including `xorg-x11-drv-nvidia-power` for suspend and resume, because negativo17 publishes no 580 for Fedora 43 or 45;
 - no GSP firmware is needed.
 
 The shim provides whatever kernel-module capability those packages require; the implementation plan reads it from their `Requires` before building the shim.

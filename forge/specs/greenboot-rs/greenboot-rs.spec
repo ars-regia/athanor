@@ -6,14 +6,14 @@
 # downstream changes are not carried; License, Requires, the install steps and the file lists
 # were copied from Fedora's spec, so a bump diffs them by hand. Same Name and subpackages so
 # that they replace Fedora's build instead of sitting beside it (like forge/specs/cosmic-comp).
-# The release spells out Fedora's, so that 0.16.4-0.fc43.athanor1 sorts above 0.16.4-0.fc43
-# and below 0.16.4-1.fc43: the Nix builder defines no %%dist.
-%global fedora_release 0.fc43
+# The release spells out Fedora's, so that 0.16.4-0.fc45.athanor1 sorts above 0.16.4-0.fc45
+# and below 0.16.4-1.fc45: the Nix builder defines no %%dist.
+%global fedora_release 0.fc45
 %global pkgname greenboot
 
 Name:           greenboot-rs
 Version:        0.16.4
-Release:        %{fedora_release}.athanor3
+Release:        %{fedora_release}.athanor1
 Summary:        Generic Health Check Framework for systemd
 # Fedora's expression, from the crates it links statically.
 License:        BSD-3-Clause AND ISC AND MIT AND Unicode-DFS-2016 AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND (Unlicense OR MIT)
@@ -154,6 +154,9 @@ fi
 %{_unitdir}/greenboot-healthcheck.service.d/10-network-online.conf
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc45.athanor1
+- Fedora's greenboot-rs 0.16.4-0.fc45, for the Fedora 45 base; the three patches are unchanged.
+
 * Fri Oct 16 2026 Athanor Forge <forge@athanor.os> - 0.16.4-0.fc43.athanor3
 - Do not take a rollback made on purpose for a GRUB fallback: when the health check of a new
   deployment did not finish before `bootc rollback`, the next boot was taken for a fallback and

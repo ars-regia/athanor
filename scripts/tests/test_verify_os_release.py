@@ -18,6 +18,7 @@ class OsRelease(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         self.path = self.root / verify.OS_RELEASE
         self.path.parent.mkdir(parents=True)
+        (self.root / verify.FEDORA_RELEASE).write_text("Athanor OS release 43 (Forty Three)\n")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -30,7 +31,7 @@ class OsRelease(unittest.TestCase):
         self.assertEqual(verify.os_release_problems(), [])
 
     def test_key_value_lines_and_blank_lines_pass(self):
-        self.assertEqual(self.problems('NAME="Athanor OS"\n\nID=athanor\n'), [])
+        self.assertEqual(self.problems('NAME="Athanor OS"\n\nID=athanor\nVERSION_ID=43\n'), [])
 
     def test_a_comment_line_fails(self):
         # bootc-image-builder rejects it with "readOSRelease: invalid input".
@@ -41,8 +42,13 @@ class OsRelease(unittest.TestCase):
             ],
         )
 
+    def test_a_fedora_release_of_another_version_fails(self):
+        self.assertEqual(
+            self.problems("ID=athanor\nVERSION_ID=45\n"),
+            [f"{verify.FEDORA_RELEASE}: names release 43, os-release VERSION_ID is 45"],
+        )
+
     def test_a_missing_file_fails(self):
-        self.path.parent.rmdir()
         self.assertEqual(len(verify.os_release_problems(self.root)), 1)
 
 

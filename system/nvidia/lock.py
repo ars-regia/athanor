@@ -64,7 +64,7 @@ CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
 BRANCHES = {
     "open": {
         "primary": "nvidia-driver",
-        "baseurl": "https://negativo17.org/repos/nvidia/fedora-43/x86_64/",
+        "baseurl": "https://negativo17.org/repos/nvidia/fedora-45/x86_64/",
         "packages": [
             "nvidia-driver", "nvidia-driver-common", "nvidia-driver-cuda", "nvidia-driver-cuda-libs",
             "nvidia-driver-libs", "nvidia-kmod-common", "nvidia-modprobe", "nvidia-persistenced",
@@ -72,6 +72,10 @@ BRANCHES = {
         # nvidia-kmod-common requires (nvidia-driver-selinux if selinux-policy-targeted).
         "companions": ["nvidia-driver-selinux"],
     },
+    # Still Fedora 43: on 2026-10-21 RPM Fusion's updates/45 has no x86_64 metadata yet, and its
+    # Fedora 45 tree names the 580 branch xorg-x11-drv-nvidia-580xx and nvidia-settings-580xx,
+    # with nvidia-modprobe and nvidia-persistenced only at 615. Moving this set changes the
+    # package names here, in gate.sh and in the image (Fedora 45 rebase plan, task 7, Q5).
     "legacy": {
         "primary": "xorg-x11-drv-nvidia",
         "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/",

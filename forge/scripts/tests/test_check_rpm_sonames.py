@@ -46,6 +46,10 @@ class CheckRpmSonamesTest(unittest.TestCase):
         )
         (self.dir / "repo").write_text(
             "libsqlite3.so.0()(64bit)\nlibdisplay-info.so.2()(64bit)\n"
+            # Fedora 45's openssl3-libs compat package provides OpenSSL 3, and Fedora's
+            # openssl-libs OpenSSL 4.
+            "libssl.so.3()(64bit)\nlibcrypto.so.3()(64bit)\nlibcrypto.so.3(OPENSSL_3.0.0)(64bit)\n"
+            "libssl.so.4()(64bit)\nlibcrypto.so.4()(64bit)\n"
         )
 
     def rpm(self, name, requires, provides=()):
@@ -109,6 +113,20 @@ class CheckRpmSonamesTest(unittest.TestCase):
         app = self.rpm("athanor-app", ["libsqlite3.so.0()(64bit)"])
         self.assertNotEqual(0, self.check(app, STUB_QUERY="1").returncode)
         self.assertNotEqual(0, self.check(app, STUB_MAKECACHE="1").returncode)
+
+    def test_openssl_3_fails_even_when_a_repository_provides_it(self):
+        # M3: the image carries OpenSSL 4 only, and openssl3-libs must not reach it.
+        ssl = self.rpm("athanor-ssl", ["libssl.so.3()(64bit)"])
+        crypto = self.rpm("athanor-crypto", ["libcrypto.so.3(OPENSSL_3.0.0)(64bit)"])
+        result = self.check(ssl, crypto)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("athanor-ssl.rpm requires libssl.so.3()(64bit)", result.stderr)
+        self.assertIn("athanor-crypto.rpm requires libcrypto.so.3(OPENSSL_3.0.0)(64bit)", result.stderr)
+        self.assertIn("OpenSSL 3", result.stderr)
+
+    def test_openssl_4_passes(self):
+        app = self.rpm("athanor-app", ["libssl.so.4()(64bit)", "libcrypto.so.4()(64bit)"])
+        self.assertEqual(0, self.check(app).returncode)
 
     def test_unversioned_sonames_are_left_to_check_sonames(self):
         app = self.rpm("athanor-app", ["libsqlite3.so()(64bit)"])

@@ -2,16 +2,16 @@
 # archive with three patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
-# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
-# above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
-%global fedora_release 2.fc43
+# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc45.athanor1 sorts
+# above 1.8.0-1.fc45 and below 1.8.0-2.fc45: the Nix builder defines no %%dist.
+%global fedora_release 2.fc45
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
 %global commit 41497b42d9744d9963c4c6d17e8add49489b45ee
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
 Version:        1.10.0
-Release:        %{fedora_release}.athanor2
+Release:        %{fedora_release}.athanor1
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
@@ -63,6 +63,9 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc45.athanor1
+- Fedora's cosmic-comp 1.10.0-2.fc45.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor2
 - Add --keep-shortcuts: with a command on the command line cosmic-comp ran as a kiosk and
   loaded no key bindings, so the desktop session had no shortcuts, volume keys included (#144).

@@ -35,13 +35,13 @@
         # stanno nei dev output. closePropagation segue propagatedBuildInputs come fa
         # stdenv, così le catene Requires dei .pc (gtk4 → pango → harfbuzz → …) sono
         # complete e pkg-config le risolve da /lib/pkgconfig (PKG_CONFIG_PATH in Env).
-        # libdisplay-info alla versione della rootfs (Fedora 43: 0.2.0, soname .so.2):
-        # nixpkgs ha la 0.4.0, che il crate libdisplay-info-sys 0.3 di niri rifiuta
-        # (< 0.4.0) e che sulla rootfs non esisterebbe. Riusa il generic.nix di nixpkgs.
+        # libdisplay-info at the version of the rootfs (Fedora 45: 0.3.0, soname .so.3 only):
+        # nixpkgs has 0.4.0, which the libdisplay-info-sys 0.3 crate refuses (< 0.4.0) and
+        # which the rootfs does not carry. It reuses the generic.nix of nixpkgs.
         libdisplay-info-target = pkgs.callPackage
           (import "${pkgs.path}/pkgs/by-name/li/libdisplay-info/generic.nix" {
-            version = "0.2.0";
-            hash = "sha256-6xmWBrPHghjok43eIDGeshpUEQTuwWLXNHg7CnBUt3Q=";
+            version = "0.3.0";
+            hash = "sha256-nXf2KGovNKvcchlHlzKBkAOeySMJXgxMpbi5z9gLrdc=";
           }) { };
         # sqlite with the soname of the rootfs. nixpkgs builds it with autosetup's default,
         # which sets no SONAME: a binary linked against it records the file name
