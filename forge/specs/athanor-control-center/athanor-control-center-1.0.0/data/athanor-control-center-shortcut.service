@@ -7,6 +7,10 @@ Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture
 # and exits before GTK and before the panel claims its bus name.
 After=graphical-session.target athanor-desktop.service
 PartOf=graphical-session.target
+# Not in the preview session on the own compositor (doc_session.md, SN15), whose script alone
+# sets ATHANOR_PREVIEW_SESSION in the user manager: Super+C goes into cosmic-comp's shortcuts,
+# which the own compositor does not read (SN16, gap 7).
+ConditionEnvironment=!ATHANOR_PREVIEW_SESSION
 
 [Service]
 Type=oneshot

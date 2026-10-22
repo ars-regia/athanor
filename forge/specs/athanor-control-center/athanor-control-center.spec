@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -58,6 +58,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- athanor-control-center-shortcut.service gains ConditionEnvironment=!ATHANOR_PREVIEW_SESSION:
+  the preview session on the own compositor does not read cosmic-comp's shortcuts
+  (doc_session.md, SN15).
+
 * Sun Oct 18 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - The hidden surface draws one cleared pixel, so GTK commits a transparent frame: the
   closed control center no longer stays on screen.

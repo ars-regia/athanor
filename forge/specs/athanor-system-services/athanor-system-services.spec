@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        30%{?dist}
+Release:        31%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -45,6 +45,11 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.1-31
+- cosmic-osd.service and cosmic-settings-daemon.service gain
+  ConditionEnvironment=!ATHANOR_PREVIEW_SESSION: neither starts in the preview session on
+  the own compositor (doc_session.md, SN15).
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-30
 - athanor-skel-sync.service: a failed copy of /etc/skel is logged and fails the unit
   (the `2>/dev/null` that hid it is gone), ReadWritePaths=%h lets it write the home

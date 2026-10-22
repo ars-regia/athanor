@@ -170,6 +170,17 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   The list is read from the AT-SPI tree, so it needs the greeter on greetd's accessibility
   bus; the screenshots in `.scratch/greeter-acceptance/` are the only check of what is drawn.
   `cleanup` removes the accounts and the settings the stages made, and is not part of a run.
+- `preview-session-acceptance.sh [stage...]` checks items 9 to 15 of `doc_session.md`
+  section 5 (the preview session on `athanor-compositor`, C1 task 9a) and prints the answers
+  to section 4, questions 10 and 11. It signs a test account, `pia`, in at the greeter
+  through `keyboard_type.py` and `greeter_probe.py`, checking the preview in the session
+  menu with the keyboard; `preview_window.py` is the GTK4 field item 14 types into and the
+  window question 11 activates. `kill`, `exit`, `gate` and `ready` break the session with
+  SIGKILL or a drop-in in the account's `~/.config/systemd/user` and time the greeter's
+  return; `keyboard` sets the system keyboard and puts it back; `linger` enables lingering
+  and disables it; `absent` removes the compositor's files under `bootc usr-overlay` and
+  reboots. `grants` fails while the compositor's log ignores `RUST_LOG`. `cleanup` removes
+  the account and is not part of a run.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs

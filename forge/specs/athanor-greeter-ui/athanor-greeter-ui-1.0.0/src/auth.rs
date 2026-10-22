@@ -112,6 +112,47 @@ pub fn session_command() -> String {
     first_installed(&SESSION_COMMAND_PATHS, SESSION_COMMAND_FALLBACK).to_string()
 }
 
+/// The preview session on Athanor's own compositor (doc_session.md, SN14 and SN15): its
+/// script, which the compositor's package installs.
+const PREVIEW_SESSION_COMMAND: &str = "/usr/bin/athanor-compositor-session";
+
+/// A session the greeter offers (doc_session.md, SN14). Both entries are in this code: no
+/// file another package drops adds a login path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Session {
+    /// "Athanor", `athanor-session` on cosmic-comp: checked at every start of the greeter,
+    /// which writes no choice anywhere.
+    #[default]
+    Default,
+    /// "Athanor on the new compositor (preview)".
+    Preview,
+}
+
+impl Session {
+    /// What StartSession's `cmd` holds for this session, and nothing more.
+    pub fn command(self) -> String {
+        match self {
+            Session::Default => session_command(),
+            Session::Preview => PREVIEW_SESSION_COMMAND.to_string(),
+        }
+    }
+}
+
+/// The sessions the greeter offers, the default first: the preview only where its script
+/// is installed. With one, the greeter shows no session menu.
+pub fn sessions_offered() -> Vec<Session> {
+    sessions_with(PREVIEW_SESSION_COMMAND)
+}
+
+/// `sessions_offered` with the preview's script at `preview`, so that a test owns the tree.
+fn sessions_with(preview: &str) -> Vec<Session> {
+    let mut sessions = vec![Session::Default];
+    if std::path::Path::new(preview).exists() {
+        sessions.push(Session::Preview);
+    }
+    sessions
+}
+
 /// A question PAM puts, through greetd, to the person at the greeter, in PAM's own words.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Prompt {
@@ -133,6 +174,9 @@ pub trait Conversation {
     fn error(&self, text: &str);
     /// Puts `prompt` to the person and waits for the answer; None when none will come.
     fn ask(&self, prompt: Prompt) -> impl std::future::Future<Output = Option<Zeroizing<String>>>;
+    /// The command of the session the person has checked, read once PAM has accepted, when
+    /// StartSession is sent: a change during the conversation does not cancel it (SN14).
+    fn session_command(&self) -> String;
 }
 
 /// The most messages one login answers before the greeter gives up on it.
@@ -187,8 +231,8 @@ async fn ask_and_answer<C: Conversation>(
 }
 
 /// One login over an open greetd connection: creates the session for `username`, answers
-/// PAM's messages by their type and never by their text, and starts `session_cmd` once
-/// greetd accepts. `password` is what was typed on an account's card; "Other user" has
+/// PAM's messages by their type and never by their text, and starts the person's checked
+/// session once greetd accepts. `password` is what was typed on an account's card; "Other user" has
 /// none, and PAM's first secret question is put to the person.
 ///
 /// A login that fails cancels its session. greetd 0.10 cancels nothing on its own, not on
@@ -199,10 +243,9 @@ async fn converse<C: Conversation>(
     stream: &mut UnixStream,
     username: &str,
     password: Option<&str>,
-    session_cmd: String,
     person: &C,
 ) -> Result<Outcome, String> {
-    let outcome = exchange(stream, username, password, session_cmd, person).await;
+    let outcome = exchange(stream, username, password, person).await;
     if outcome.is_err() {
         // greetd answers a cancel with no session under configuration with success, so
         // this is safe whichever step failed.
@@ -229,7 +272,6 @@ async fn exchange<C: Conversation>(
     stream: &mut UnixStream,
     username: &str,
     password: Option<&str>,
-    session_cmd: String,
     person: &C,
 ) -> Result<Outcome, String> {
     let mut resp = send_request(
@@ -281,7 +323,7 @@ async fn exchange<C: Conversation>(
                 // The password goes to greetd and nowhere else: PAM, run by greetd for the
                 // session it is about to start, is what unlocks the keyring.
                 let req = Request::StartSession {
-                    cmd: vec![session_cmd],
+                    cmd: vec![person.session_command()],
                     env: vec![
                         format!("XDG_SESSION_TYPE={}", SESSION_TYPE),
                         "XDG_CURRENT_DESKTOP=Athanor".to_string(),
@@ -334,7 +376,7 @@ pub async fn authenticate_interactive<C: Conversation>(
     }
 
     let mut stream = UnixStream::connect(path).map_err(|e| e.to_string())?;
-    converse(&mut stream, username, password, session_command(), person).await
+    converse(&mut stream, username, password, person).await
 }
 
 #[cfg(test)]
@@ -449,6 +491,37 @@ mod tests {
         std::fs::remove_dir_all(&dir).expect("cleaning up");
     }
 
+    #[test]
+    fn the_preview_is_offered_only_where_its_script_is_installed() {
+        let dir = scratch("preview");
+        let script = dir
+            .join("athanor-compositor-session")
+            .to_str()
+            .expect("utf-8 path")
+            .to_string();
+        assert_eq!(
+            sessions_with(&script),
+            [Session::Default],
+            "without the script there is one session and no menu"
+        );
+        std::fs::write(&script, b"").expect("the script");
+        assert_eq!(
+            sessions_with(&script),
+            [Session::Default, Session::Preview],
+            "with it the menu offers both, the default first"
+        );
+        assert_eq!(
+            Session::default(),
+            Session::Default,
+            "the default is checked at every start"
+        );
+        assert_eq!(
+            Session::Preview.command(),
+            "/usr/bin/athanor-compositor-session"
+        );
+        std::fs::remove_dir_all(&dir).expect("cleaning up");
+    }
+
     /// The password typed on the card in the conversation tests.
     const PASSWORD: &str = "correct horse battery staple";
 
@@ -499,6 +572,9 @@ mod tests {
         progress: std::cell::RefCell<Vec<String>>,
         infos: std::cell::RefCell<Vec<String>>,
         errors: std::cell::RefCell<Vec<String>>,
+        /// The checked session; the person checks the preview while asked, when set.
+        session: std::cell::Cell<Session>,
+        preview_when_asked: bool,
     }
 
     impl Person {
@@ -525,8 +601,18 @@ mod tests {
             prompt: Prompt,
         ) -> impl std::future::Future<Output = Option<Zeroizing<String>>> {
             self.asked.borrow_mut().push(prompt);
+            if self.preview_when_asked {
+                self.session.set(Session::Preview);
+            }
             let answer = self.answers.borrow_mut().pop_front();
             std::future::ready(answer.map(|answer| Zeroizing::new(answer.to_string())))
+        }
+        fn session_command(&self) -> String {
+            match self.session.get() {
+                // The default's path depends on the machine the test runs on.
+                Session::Default => SESSION_COMMAND_FALLBACK.to_string(),
+                preview => preview.command(),
+            }
         }
     }
 
@@ -567,13 +653,7 @@ mod tests {
             .expect("a runtime");
         let mut result = Err("no attempt".to_string());
         for (username, password) in attempts {
-            result = runtime.block_on(converse(
-                &mut greeter,
-                username,
-                *password,
-                "athanor-session".to_string(),
-                person,
-            ));
+            result = runtime.block_on(converse(&mut greeter, username, *password, person));
         }
         drop(greeter);
         (result, greetd.join().expect("the fake greetd"))
@@ -633,6 +713,70 @@ mod tests {
             ["There were 2 failed login attempts"]
         );
         assert!(person.asked.borrow().is_empty(), "nothing is asked twice");
+    }
+
+    /// The StartSession the fake greetd received.
+    fn start_session(requests: &[serde_json::Value]) -> &serde_json::Value {
+        requests
+            .iter()
+            .find(|request| request["type"] == "start_session")
+            .expect("a StartSession")
+    }
+
+    #[test]
+    fn each_session_sends_its_own_command_and_the_same_environment() {
+        let mut sent = Vec::new();
+        for session in [Session::Default, Session::Preview] {
+            let person = Person {
+                session: std::cell::Cell::new(session),
+                ..Person::default()
+            };
+            let (result, requests) = login(
+                vec![
+                    message(AuthMessageType::Secret, "Password: "),
+                    Response::Success,
+                    Response::Success,
+                ],
+                &person,
+            );
+            assert_eq!(result, Ok(Outcome::SignedIn));
+            let start = start_session(&requests);
+            sent.push((start["cmd"].clone(), start["env"].clone()));
+        }
+        assert_eq!(sent[0].0, serde_json::json!(["athanor-session"]));
+        assert_eq!(
+            sent[1].0,
+            serde_json::json!(["/usr/bin/athanor-compositor-session"])
+        );
+        assert_eq!(sent[0].1, sent[1].1, "the environment is the same for both");
+    }
+
+    #[test]
+    fn the_session_checked_during_the_conversation_is_the_one_started() {
+        let person = Person {
+            preview_when_asked: true,
+            ..Person::answering(&["493021"])
+        };
+        let (result, requests) = login(
+            vec![
+                message(AuthMessageType::Secret, "Password: "),
+                message(AuthMessageType::Visible, "Verification code: "),
+                Response::Success,
+                Response::Success,
+            ],
+            &person,
+        );
+        assert_eq!(result, Ok(Outcome::SignedIn));
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request["type"] == "cancel_session"),
+            "a change of session does not cancel the conversation"
+        );
+        assert_eq!(
+            start_session(&requests)["cmd"],
+            serde_json::json!(["/usr/bin/athanor-compositor-session"])
+        );
     }
 
     #[test]
