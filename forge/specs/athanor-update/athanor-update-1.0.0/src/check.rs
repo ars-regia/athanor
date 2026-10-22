@@ -1845,8 +1845,10 @@ pub(crate) mod tests {
     /// Row 7 of docs/operations/release-1.0.md, with throwaway keys derived here from a label:
     /// no key material of the project is read. Covered: a key the policy names at the check
     /// (doc_update_trust.md UT2, UT5), both keys of a rotation (UT3), and a key removed from the
-    /// policy, the only withdrawal of trust UT2 defines while the key hierarchy does not exist
-    /// (UT2, UT3). Not covered: a key past its not-after date and a key revoked by the root.
+    /// policy, the withdrawal of trust a rotation relies on (UT2, UT3). The other one UT2
+    /// defines, the out-of-band `athanor-update recover-key` (acceptance item 10), is covered by
+    /// the dev-VM stage `recover`. Not covered: a key past its not-after date and a key revoked
+    /// by the root.
     /// UT2 leaves where those are read and what state they give to "the revision that builds
     /// it" (ADR-0113), so a case would guess the format; the gap is written down in
     /// docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md.
