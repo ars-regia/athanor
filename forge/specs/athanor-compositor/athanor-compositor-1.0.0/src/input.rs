@@ -1,71 +1,142 @@
 //! Input from the backend to the seat: keys to the focused surface, the pointer to the surface
 //! under it, a click focuses the window it lands on, or the layer surface that asks for the
-//! keyboard on demand.
+//! keyboard on demand. The compositor keeps two kinds of key for itself, which no client sees:
+//! the escape key, Super+Escape, takes the keyboard back from an exclusive layer surface while
+//! one holds it (C1 task 8), and Ctrl+Alt+F1 to F12 switch to another virtual terminal on a
+//! console.
 
 use crate::state::{State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    PointerMotionEvent,
 };
-use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::{FilterResult, Keycode, Keysym, ModifiersState};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
-    /// asks for the keyboard on demand.
+    /// asks for the keyboard on demand. A click on a layer surface that takes the keyboard, of a
+    /// client the escape key took the keyboard from, gives its exclusive surfaces the keyboard
+    /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
-        match self.under(location) {
+        let under = self.under(location);
+        if let Some((Under::Layer(layer), _)) = &under {
+            if layer.can_receive_keyboard_focus() {
+                if let Some(client) = layer.wl_surface().client() {
+                    self.escaped.retain(|escaped| *escaped != client.id());
+                }
+            }
+        }
+        match under {
             Some((Under::Window(window), _)) => self.focus(&window),
             Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
             None => {}
         }
     }
 
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
-        self.activity();
-        match event {
-            InputEvent::Keyboard { event, .. } => {
-                let Some(keyboard) = self.seat.get_keyboard() else {
-                    return;
-                };
-                let serial = SERIAL_COUNTER.next_serial();
+    /// A key pressed or released: to the focused surface, unless the compositor keeps it.
+    pub fn key_input(&mut self, code: Keycode, key_state: KeyState, time: InputTime) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        let to = keyboard
+            .current_focus()
+            .and_then(|surface| surface.client());
+        let filtered = keyboard.input(
+            self,
+            code,
+            key_state,
+            serial,
+            time,
+            |state, modifiers, handle| match key_state {
+                KeyState::Pressed => match kept(
+                    modifiers,
+                    handle.modified_sym(),
+                    state.lock.is_none() && state.exclusive_layer().is_some(),
+                ) {
+                    Some(kept) => {
+                        state.kept_keys.push(code);
+                        FilterResult::Intercept(Some(kept))
+                    }
+                    None => FilterResult::Forward,
+                },
+                // The release of a kept press is kept: the client never saw the key go down.
+                KeyState::Released => match state.kept_keys.iter().position(|k| *k == code) {
+                    Some(at) => {
+                        state.kept_keys.swap_remove(at);
+                        FilterResult::Intercept(None)
+                    }
+                    None => FilterResult::Forward,
+                },
+            },
+        );
+        match filtered {
+            // Sent to the client: a popup's grab may name its serial.
+            None => {
                 self.last_input_serial = Some(serial);
-                let to = keyboard
-                    .current_focus()
-                    .and_then(|surface| surface.client());
                 let sent = to.map(|client| (serial, client.id()));
-                match event.state() {
+                match key_state {
                     KeyState::Pressed => self.grab_serials.key_press = sent,
                     KeyState::Released => self.grab_serials.key_release = sent,
                 }
-                keyboard.input::<(), _>(
-                    self,
-                    event.key_code(),
-                    event.state(),
-                    serial,
-                    Event::time(&event),
-                    |_, _, _| FilterResult::Forward,
-                );
+            }
+            Some(Some(Kept::Escape)) => self.escape_exclusive(),
+            Some(Some(Kept::Vt(vt))) => self.switch_vt(vt),
+            Some(None) => {}
+        }
+    }
+
+    /// Moves the pointer to `location` and gives it to the surface under it.
+    fn pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let under = self.surface_under(location);
+        pointer.motion(
+            self,
+            under,
+            &MotionEvent {
+                location,
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    /// Input from the backend; it may change what is on screen, the pointer or the stacking.
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+        self.activity();
+        self.request_redraw();
+        match event {
+            InputEvent::Keyboard { event, .. } => {
+                self.key_input(event.key_code(), event.state(), Event::time(&event));
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let (Some(area), Some(pointer)) = (self.output_area(), self.seat.get_pointer())
-                else {
+                let Some(area) = self.output_area() else {
                     return;
                 };
                 let location = event.position_transformed(area.size) + area.loc.to_f64();
-                let under = self.surface_under(location);
-                pointer.motion(
-                    self,
-                    under,
-                    &MotionEvent {
-                        location,
-                        serial: SERIAL_COUNTER.next_serial(),
-                        time: event.time(),
-                    },
-                );
-                pointer.frame(self);
+                self.pointer_to(location, event.time());
+            }
+            // A mouse or a touchpad on a console: moved by its delta, kept on the outputs.
+            InputEvent::PointerMotion { event, .. } => {
+                let Some(pointer) = self.seat.get_pointer() else {
+                    return;
+                };
+                let outputs: Vec<Rectangle<i32, Logical>> = self
+                    .space
+                    .outputs()
+                    .filter_map(|output| self.space.output_geometry(output))
+                    .collect();
+                let from = pointer.current_location();
+                if let Some(location) = confine(&outputs, from, from + event.delta()) {
+                    self.pointer_to(location, event.time());
+                }
             }
             InputEvent::PointerButton { event, .. } => {
                 let Some(pointer) = self.seat.get_pointer() else {
@@ -119,5 +190,134 @@ impl State {
             }
             _ => {}
         }
+    }
+}
+
+/// A key the compositor keeps for itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Kept {
+    /// Super+Escape: the keyboard back from an exclusive layer surface.
+    Escape,
+    /// Ctrl+Alt+F1 to F12, which the keymap turns into XF86Switch_VT_1 to 12.
+    Vt(i32),
+}
+
+/// Whether the compositor keeps `sym`, pressed with `modifiers`. The escape key only while
+/// `escapable`, while an exclusive surface holds the keyboard and the session is not locked:
+/// otherwise Super+Escape is the client's.
+fn kept(modifiers: &ModifiersState, sym: Keysym, escapable: bool) -> Option<Kept> {
+    if sym == Keysym::Escape {
+        return (escapable && modifiers.logo).then_some(Kept::Escape);
+    }
+    if !(modifiers.ctrl && modifiers.alt) {
+        return None;
+    }
+    let vt = sym.raw().checked_sub(Keysym::XF86_Switch_VT_1.raw())?;
+    (vt < 12).then(|| Kept::Vt(vt as i32 + 1))
+}
+
+/// Where a relative motion from `from` to `to` leaves the pointer: at `to` when an output of
+/// `outputs` shows it, else at the edge of the output it is on (the first one when on none),
+/// so that it neither leaves the outputs nor enters a gap between two of different sizes.
+fn confine(
+    outputs: &[Rectangle<i32, Logical>],
+    from: Point<f64, Logical>,
+    to: Point<f64, Logical>,
+) -> Option<Point<f64, Logical>> {
+    if outputs.iter().any(|area| area.to_f64().contains(to)) {
+        return Some(to);
+    }
+    let area = outputs
+        .iter()
+        .find(|area| area.to_f64().contains(from))
+        .or_else(|| outputs.first())?;
+    let (min, max) = (area.loc.to_f64(), (area.loc + area.size).to_f64());
+    Some(Point::from((
+        to.x.clamp(min.x, max.x - 1.0),
+        to.y.clamp(min.y, max.y - 1.0),
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{confine, kept, Kept};
+    use smithay::input::keyboard::{Keysym, ModifiersState};
+    use smithay::utils::{Logical, Point, Rectangle};
+
+    #[test]
+    fn the_compositor_keeps_its_escape_and_the_terminal_switches() {
+        let logo = ModifiersState {
+            logo: true,
+            ..ModifiersState::default()
+        };
+        let ctrl_alt = ModifiersState {
+            ctrl: true,
+            alt: true,
+            ..ModifiersState::default()
+        };
+        assert_eq!(kept(&logo, Keysym::Escape, true), Some(Kept::Escape));
+        assert_eq!(
+            kept(&logo, Keysym::Escape, false),
+            None,
+            "with no exclusive surface holding the keyboard, or locked, it is the client's"
+        );
+        assert_eq!(kept(&ModifiersState::default(), Keysym::Escape, true), None);
+        assert_eq!(
+            kept(&ctrl_alt, Keysym::Escape, true),
+            None,
+            "Ctrl+Alt+Escape is the client's"
+        );
+        assert_eq!(
+            kept(&ctrl_alt, Keysym::XF86_Switch_VT_1, true),
+            Some(Kept::Vt(1))
+        );
+        assert_eq!(
+            kept(&ctrl_alt, Keysym::XF86_Switch_VT_12, false),
+            Some(Kept::Vt(12))
+        );
+        assert_eq!(
+            kept(&ModifiersState::default(), Keysym::XF86_Switch_VT_1, true),
+            None,
+            "a switch the keymap sends without Ctrl+Alt switches nothing"
+        );
+        assert_eq!(
+            kept(
+                &ctrl_alt,
+                Keysym::from(Keysym::XF86_Switch_VT_12.raw() + 1),
+                true
+            ),
+            None
+        );
+        assert_eq!(kept(&ctrl_alt, Keysym::a, true), None);
+    }
+
+    #[test]
+    fn the_pointer_moves_across_the_outputs_and_stays_on_them() {
+        // 1000x800 at the origin, 600x400 to its right.
+        let outputs: [Rectangle<i32, Logical>; 2] = [
+            Rectangle::new((0, 0).into(), (1000, 800).into()),
+            Rectangle::new((1000, 0).into(), (600, 400).into()),
+        ];
+        let at = |x: f64, y: f64| Point::<f64, Logical>::from((x, y));
+        assert_eq!(
+            confine(&outputs, at(990.0, 100.0), at(1100.0, 100.0)),
+            Some(at(1100.0, 100.0)),
+            "onto the second output"
+        );
+        assert_eq!(
+            confine(&outputs, at(1100.0, 100.0), at(1700.0, 100.0)),
+            Some(at(1599.0, 100.0)),
+            "not past its right edge"
+        );
+        assert_eq!(
+            confine(&outputs, at(1100.0, 390.0), at(1100.0, 600.0)),
+            Some(at(1100.0, 399.0)),
+            "not into the gap below the smaller output"
+        );
+        assert_eq!(
+            confine(&outputs, at(10.0, 10.0), at(-50.0, -50.0)),
+            Some(at(0.0, 0.0))
+        );
+        assert_eq!(confine(&[], at(0.0, 0.0), at(1.0, 1.0)), None, "no output");
     }
 }

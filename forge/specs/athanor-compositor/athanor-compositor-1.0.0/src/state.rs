@@ -5,6 +5,7 @@ use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Privilege, Proc, Process};
 use crate::lock::Lock;
+use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
 use crate::Error;
@@ -18,6 +19,7 @@ use smithay::backend::renderer::element::surface::{
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Kind, RenderElementStates,
 };
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::{ImportAll, ImportDma, Renderer, Texture};
 use smithay::desktop::space::render_output;
 use smithay::desktop::utils::{
@@ -28,19 +30,24 @@ use smithay::desktop::utils::{
 use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
 };
+use smithay::input::keyboard::Keycode;
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
-use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::backend::{
+    ClientData, ClientId, DisconnectReason, GlobalId,
+};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
-use smithay::wayland::compositor::{CompositorClientState, CompositorState, SurfaceData};
+use smithay::wayland::compositor::{
+    CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
+};
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
@@ -70,6 +77,9 @@ use std::time::Duration;
 /// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
 /// colour the desktop's hearth wallpaper starts from (system/athanor-style/calmo/tokens.toml).
 // ponytail: dark always; the session's light or dark theme when the compositor reads appearance.
+/// A surface on no output, or shown on another one, still gets a frame callback this often.
+pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
+
 pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
 
 /// What draws the outputs.
@@ -78,6 +88,8 @@ pub enum Backend {
     Nested(Box<Nested>),
     /// Virtual outputs drawn off screen.
     Headless(Box<Headless>),
+    /// The monitors of a GPU, through DRM and KMS, in a session of the seat (C1 task 8).
+    Drm(Box<Drm>),
 }
 
 pub struct State {
@@ -91,6 +103,12 @@ pub struct State {
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
+    /// The keys whose press the compositor kept for itself: their release is kept as well.
+    pub kept_keys: Vec<Keycode>,
+    /// The clients the user took the keyboard back from with the escape key: their exclusive
+    /// layer surfaces hold it again only after a click on one of their surfaces
+    /// (`escape_exclusive`).
+    pub escaped: Vec<ClientId>,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -175,11 +193,8 @@ impl State {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
-        // or overlay layer (`layer_commit`).
-        // ponytail: no escape from exclusive keyboard focus: a granted client's 1x1 transparent
-        // exclusive overlay surface holds the keyboard for as long as it lives, acceptable only
-        // while the compositor runs nested or headless. C1 task 8, the DRM backend, adds the
-        // escape: the compositor does not run on a console (task 9) without it.
+        // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
+        // exclusive surface of a granted client (`escape_exclusive`).
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
@@ -229,6 +244,8 @@ impl State {
             popups: PopupManager::default(),
             seat,
             last_input_serial: None,
+            kept_keys: Vec::new(),
+            escaped: Vec::new(),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -310,6 +327,65 @@ impl State {
         self.space.map_output(output, (x, 0));
     }
 
+    /// An output that goes: its layer surfaces are closed, and the windows no output left shows
+    /// are centred on the first one, where the user can reach them.
+    pub fn remove_output(&mut self, output: &Output) {
+        self.close_layers(output);
+        self.space.unmap_output(output);
+        let outputs: Vec<Rectangle<i32, Logical>> = self
+            .space
+            .outputs()
+            .filter_map(|output| self.space.output_geometry(output))
+            .collect();
+        let stranded: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|window| {
+                self.space
+                    .element_geometry(window)
+                    .is_some_and(|area| !outputs.iter().any(|output| output.overlaps(area)))
+            })
+            .cloned()
+            .collect();
+        if let Some(area) = self.window_area() {
+            for window in stranded {
+                let at = centred(area, window.geometry());
+                self.space.relocate_element(&window, at);
+            }
+        }
+        self.space.refresh();
+    }
+
+    /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
+    /// callbacks are sent at the throttle of `frame_done`.
+    pub fn frame_callbacks_waiting(&self) -> bool {
+        let mut waiting = false;
+        let mut check = |_: &WlSurface, states: &SurfaceData| {
+            let mapped = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .is_some_and(|data| data.lock().is_ok_and(|data| data.buffer().is_some()));
+            let mut attributes = states.cached_state.get::<SurfaceAttributes>();
+            waiting |= mapped && !attributes.current().frame_callbacks.is_empty();
+        };
+        for window in self.space.elements() {
+            window.with_surfaces(&mut check);
+        }
+        for output in self.space.outputs() {
+            for layer in layer_map_for_output(output).layers() {
+                layer.with_surfaces(&mut check);
+            }
+        }
+        if let Some(lock) = &self.lock {
+            for output in self.space.outputs() {
+                if let Some(surface) = lock.surface_on(output) {
+                    with_surfaces_surface_tree(surface, &mut check);
+                }
+            }
+        }
+        waiting
+    }
+
     /// The area of the first output: where the pointer moves.
     pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
         self.space
@@ -346,6 +422,7 @@ impl State {
                 nested.backend.renderer().import_dmabuf(dmabuf, None)?;
             }
             Backend::Headless(headless) => headless.import_dmabuf(dmabuf)?,
+            Backend::Drm(drm) => drm.import_dmabuf(dmabuf)?,
         }
         Ok(())
     }
@@ -387,33 +464,14 @@ impl State {
             with_surfaces_surface_tree(surface, scanout);
         }
         if damaged {
-            let mut feedback = OutputPresentationFeedback::new(output);
-            let flags = |surface: &WlSurface, _: &SurfaceData| {
-                surface_presentation_feedback_flags_from_states(surface, None, states)
-            };
-            for window in self.space.elements() {
-                window.take_presentation_feedback(
-                    &mut feedback,
-                    surface_primary_scanout_output,
-                    flags,
-                );
-            }
-            for layer in &layers {
-                layer.take_presentation_feedback(
-                    &mut feedback,
-                    surface_primary_scanout_output,
-                    flags,
-                );
-            }
-            feedback.presented(
+            self.presentation_feedback(output, states).presented(
                 frame_target,
                 Refresh::fixed(period),
                 0,
                 wp_presentation_feedback::Kind::Vsync,
             );
         }
-        // A surface on no output yet, or shown on another one, still gets a frame each second.
-        let throttle = Some(Duration::from_secs(1));
+        let throttle = Some(FRAME_THROTTLE);
         for window in self.space.elements() {
             window.send_frame(
                 output,
@@ -439,6 +497,29 @@ impl State {
                 surface_primary_scanout_output,
             );
         }
+    }
+
+    /// The presentation feedback the surfaces shown on `output` asked for, to be answered when
+    /// the frame drawn with `states` is presented; after `frame_done`, which says where each
+    /// surface is shown.
+    pub fn presentation_feedback(
+        &self,
+        output: &Output,
+        states: &RenderElementStates,
+    ) -> OutputPresentationFeedback {
+        let mut feedback = OutputPresentationFeedback::new(output);
+        let flags = |surface: &WlSurface, _: &SurfaceData| {
+            surface_presentation_feedback_flags_from_states(surface, None, states)
+        };
+        for window in self.space.elements() {
+            window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+        // Collected, as in `frame_done`.
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        for layer in &layers {
+            layer.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+        feedback
     }
 
     /// What is under `pos`, with its origin in the space, in the order the outputs are drawn
@@ -589,7 +670,10 @@ pub fn new_output(
             serial_number: String::new(),
         },
     );
-    output.create_global::<State>(dh);
+    let global = output.create_global::<State>(dh);
+    output
+        .user_data()
+        .insert_if_missing(|| OutputGlobal(global));
     let mode = Mode { size, refresh };
     output.change_current_state(
         Some(mode),
@@ -600,6 +684,9 @@ pub fn new_output(
     output.set_preferred(mode);
     output
 }
+
+/// The global of an output, kept in its user data: removed with the output.
+pub struct OutputGlobal(pub GlobalId);
 
 /// Dispatches the clients' requests. The callback owns the display: it dispatches without the
 /// unsafe access a source holding it would need.
@@ -614,6 +701,8 @@ fn dispatch_clients(
             Generic::new(fd, Interest::READ, smithay::reexports::calloop::Mode::Level),
             move |_, _, state| {
                 display.dispatch_clients(state)?;
+                // A request may change what is on screen: a surface destroyed, a lock taken.
+                state.request_redraw();
                 if let Err(error) = state.display_handle.flush_clients() {
                     tracing::warn!(%error, "the clients could not be flushed");
                 }
@@ -635,6 +724,7 @@ fn release_held_on_disconnection(
         .insert_source(gone, |event, _, state| {
             if let channel::Event::Msg(client) = event {
                 state.release_held(&client);
+                state.escaped.retain(|escaped| *escaped != client);
             }
         })
         .map_err(|e| e.error)?;
@@ -692,6 +782,16 @@ impl ClientData for ClientState {
             tracing::warn!(%error, "a client's disconnection reached no event loop");
         }
     }
+}
+
+/// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
+pub fn centred(
+    area: Rectangle<i32, Logical>,
+    geometry: Rectangle<i32, Logical>,
+) -> Point<i32, Logical> {
+    let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
+    let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
+    (x, y).into()
 }
 
 /// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of

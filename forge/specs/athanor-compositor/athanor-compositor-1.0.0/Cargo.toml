@@ -8,7 +8,10 @@ description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milest
 
 [dependencies]
 # The revision and its date are in README.md; deny.toml admits this URL and no other git source.
-smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
+smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
+# The DRM backend's connector scan, from the same repository and revision; without
+# libdisplay-info, so an output is named by its connector only.
+smithay-drm-extras = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false }
 libc = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

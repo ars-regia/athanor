@@ -123,9 +123,8 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
   security context. Revision 2 decides both.
 - Input-method, virtual keyboard and pointer, data control and the private interface are not
   offered yet; each joins the allow-list's interfaces when it is.
-- A granted client's exclusive overlay surface keeps the keyboard while it lives, with no escape
-  for the user. Task 8 of the C1 plan, the DRM backend, adds the escape: the compositor does not
-  run on a console (task 9) without it.
+- A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape
+  for the user, until task 8 added one (below).
 - The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
   `rig.sh compositor-globals` checks that `wayland-info`, outside any unit, is refused the
   privileged globals; the grant itself is checked by the fixture only, with the executable and
@@ -143,3 +142,66 @@ parent does not pace the next one: the compositor waits a frame period before it
 after `--idle`, and checks only that they stay up. The bar and the dock run outside their units
 and the image ships no allow-list, so their top-layer surfaces are closed: the soak shows that
 they connect and stay up, not that they are drawn.
+
+Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
+session of the seat, it opens the seat's primary GPU through libseat, draws each connected
+monitor at its preferred mode through GBM and GLES, and reads the input devices through
+libinput.
+
+```
+athanor-compositor --drm
+```
+
+It offers `linux-dmabuf` with feedback naming the render node and, when the GPU can wait on a
+syncobj, `linux-drm-syncobj-v1`. A monitor plugged in gets an output and its `wl_output`; one
+unplugged loses them, and its layer surfaces are closed. When the session is paused (another
+virtual terminal) it stops drawing, and when it resumes it takes the devices back, scans the
+monitors again and draws every output. An output draws only when something may have changed (a
+client's request or commit, input, a monitor plugged in or out, the lock), at most once a
+refresh, paced by its vblank, with presentation feedback from the hardware clock; idle, it does
+not draw at all, and a surface no output shows still gets its frame callback once a second. The
+lock is confirmed only once every output has presented a frame drawn locked: a frame that could
+not be drawn, queued or presented is drawn whole again, and a draw with nothing new does not
+count. The frame-time report of task 2 runs here too. A monitor that goes moves the windows only it showed
+onto the first output, centred; the pointer moves across every output and stays on them.
+Started with a monitor plugged in that cannot be set up, and no other, the compositor ends with
+an error rather than show nothing; a monitor that cannot be set up later is logged as an error
+and tried again when it is plugged in again.
+
+The compositor keeps two kinds of key, which no client sees: Ctrl+Alt+F1 to F12 switch the
+virtual terminal, and **Super+Escape takes the keyboard back** from the exclusive top or overlay
+surface that holds it, and from that surface's popup grab, to the next exclusive surface or the
+top window. A client granted the top layers can map a transparent exclusive surface that never
+ends; the user still gets the keyboard back. The escape holds for the client, not the surface:
+none of its exclusive surfaces, mapped again or new, takes the keyboard until the user clicks on
+one of its layer surfaces that takes the keyboard (not on its windows, nor on a surface that
+takes none), or it disconnects. Super+Escape is kept only while an exclusive surface
+holds the keyboard and the session is not locked; otherwise the focused client receives it, and
+the lock keeps the keyboard. The release of a kept key is kept too.
+`task8_the_escape_key_takes_the_keyboard_back_from_an_exclusive_surface` (`src/fixture.rs`)
+shows it, with a popup grab, a surface mapped again and a new one, and the lock. The key follows
+GNOME's convention for restoring shortcuts a client inhibits (Ctrl+Alt+Escape is xkill on
+KDE), as the maintainer decided on 2026-10-21; the specification names no such key yet, and
+revision 2 of `doc_own_stack.md` records it.
+
+Checked in the development VM (virtio-gpu with virgl, KMS, 2 heads, the second disconnected),
+over SSH: the compositor runs as the VM's user in a session of its own on VT 8, started with
+`systemd-run --uid=<user> -p PAMName=login -p TTYPath=/dev/tty8 -p StandardInput=tty`, the
+login PAM stack unchanged (VT 8, past the gettys logind starts on VTs 1 to 6). It logs its
+lines under the session's scope, not the unit: `journalctl _PID=<pid>`. Seen there: the GPU and
+`linux-drm-syncobj-v1`; `gtk_animation.py` drawing through dmabuf; the second head forced on and
+off through its connector's sysfs `status`, with a `change` uevent written to the card (forcing
+the status sends none), plugged in at 1024x768 and unplugged; `chvt 1` and `chvt 8` pausing and
+resuming it, with the client still drawing after; Ctrl+Alt+F1 typed through QEMU's monitor
+switching to VT 1. The frame-time report counted 0 draws in each 10 s with no client, and again
+after the client ended, where the backend drew about 725 before it drew only when asked; with
+`gtk_animation.py` committing about 46 frames a second, 322 to 548 draws in each 10 s.
+
+What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
+
+- 8-bit colour formats only; a monitor that needs deep colour gets 8 bits.
+- The pointer is a solid square, not the cursor surface a client sets: task 9 draws cursors.
+- The primary GPU only; a second GPU, and its monitors, are not used.
+- A monitor whose modes change keeps the mode it has.
+- A change redraws every output, not only those it shows on: a second monitor draws empty frames
+  while the first animates.

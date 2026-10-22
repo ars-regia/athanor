@@ -1,6 +1,6 @@
 //! athanor-compositor: Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone
-//! C1). It runs nested, on the winit backend, in a parent compositor, or headless, on virtual
-//! outputs drawn off screen (OS6).
+//! C1). It runs nested, on the winit backend, in a parent compositor, headless, on virtual
+//! outputs drawn off screen (OS6), or on the monitors of the seat's GPU through DRM and KMS.
 
 // One function writes a client's wl_shm buffer through a raw pointer (`capture::copy_into`);
 // one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
@@ -14,6 +14,7 @@ mod input;
 mod layer;
 mod lock;
 mod state;
+mod udev;
 mod winit;
 mod workspace;
 
@@ -27,7 +28,8 @@ use std::process::ExitCode;
 pub type Error = Box<dyn std::error::Error>;
 
 const USAGE: &str = "usage: athanor-compositor [--scale <factor>]\n       \
-    athanor-compositor --headless [--render-node <path>] [--output <width>x<height>[@<scale>]]...";
+    athanor-compositor --headless [--render-node <path>] [--output <width>x<height>[@<scale>]]...\n       \
+    athanor-compositor --drm";
 
 /// How the compositor runs, from its arguments.
 #[derive(Debug, PartialEq)]
@@ -39,6 +41,8 @@ enum Options {
         node: Option<PathBuf>,
         outputs: Vec<VirtualOutput>,
     },
+    /// On the monitors of the seat's primary GPU, in a session of the seat.
+    Drm,
 }
 
 /// A scale from 1 to 4.
@@ -73,7 +77,8 @@ fn virtual_output(value: &str) -> Result<VirtualOutput, Error> {
 }
 
 fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
-    let (mut headless, mut scale, mut node, mut outputs) = (false, None, None, Vec::new());
+    let (mut headless, mut drm, mut scale, mut node, mut outputs) =
+        (false, false, None, None, Vec::new());
     while let Some(arg) = args.next() {
         let mut value = || {
             args.next()
@@ -81,6 +86,7 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
         };
         match arg.as_str() {
             "--headless" => headless = true,
+            "--drm" => drm = true,
             "--scale" => scale = Some(factor(&value()?)?),
             "--render-node" => node = Some(PathBuf::from(value()?)),
             "--output" => outputs.push(virtual_output(&value()?)?),
@@ -88,10 +94,11 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
         }
     }
     match (headless, scale) {
-        (false, scale) if node.is_none() && outputs.is_empty() => Ok(Options::Nested {
+        (false, None) if drm && node.is_none() && outputs.is_empty() => Ok(Options::Drm),
+        (false, scale) if !drm && node.is_none() && outputs.is_empty() => Ok(Options::Nested {
             scale: scale.unwrap_or(1.0),
         }),
-        (true, None) => {
+        (true, None) if !drm => {
             if outputs.is_empty() {
                 outputs.push(VirtualOutput {
                     width: 1920,
@@ -102,7 +109,8 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
             Ok(Options::Headless { node, outputs })
         }
         _ => Err(format!(
-            "--scale is for the nested compositor, --render-node and --output for --headless\n{USAGE}"
+            "--scale is for the nested compositor, --render-node and --output for --headless, \
+             --drm takes no other option\n{USAGE}"
         )
         .into()),
     }
@@ -117,6 +125,7 @@ fn run() -> Result<(), Error> {
         Options::Headless { node, outputs } => {
             headless::start(&mut event_loop, display, node.as_deref(), outputs)?
         }
+        Options::Drm => udev::start(&mut event_loop, display)?,
     };
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
@@ -199,5 +208,18 @@ mod tests {
         assert!(parse(&["--headless", "--scale", "2"]).is_err());
         assert!(parse(&["--output", "800x600"]).is_err());
         assert!(parse(&["--render-node", "/dev/dri/renderD128"]).is_err());
+    }
+
+    #[test]
+    fn drm_takes_no_other_option() {
+        assert_eq!(parse(&["--drm"]), Ok(Options::Drm));
+        for other in [
+            &["--drm", "--headless"][..],
+            &["--drm", "--scale", "2"],
+            &["--drm", "--output", "800x600"],
+            &["--drm", "--render-node", "/dev/dri/renderD128"],
+        ] {
+            assert!(parse(other).is_err(), "{other:?}");
+        }
     }
 }
