@@ -360,6 +360,12 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     if status.staged.as_ref().is_some_and(|staged| staged.download_only && staged.digest == candidate.digest) {
         return if security { settled_security(settle_security(ctx, status, lineage, automatic), None) } else { (UpdateState::Downloaded, None) };
     }
+    // UT13: a security digest that waits, unlocked or postponed, is not replaced by a feature
+    // digest. The state stays the one the staged digest has (a failed unlock is retried); the
+    // feature digest is offered at the first check after the security digest is applied.
+    if !security && status.staged.as_ref().is_some_and(|staged| matches!(stored_class(ctx, policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. })) {
+        return settled_security(settle_security(ctx, status, lineage, automatic), None);
+    }
     // UT12 holds a feature update on a metered connection; a security update downloads, unless
     // the opt-out holds it too (UT13).
     if ctx.tools.metered() && !(security && automatic) {
@@ -1454,6 +1460,28 @@ pub(crate) mod tests {
         assert!(tools.called("download") && !tools.called("apply_downloaded"));
         assert_eq!(state.postpone, lineage.published());
         assert_eq!(machine.store.lineage().expect("stored"), lineage, "first_notice_at does not move");
+    }
+
+    #[test]
+    fn a_feature_digest_does_not_replace_a_staged_security_digest() {
+        // UT13 (2026-10-22): S1 waits postponed, then F2 is published.
+        for (name, postponed) in [("keep-postponed", true), ("keep-unlocked", false)] {
+            let (machine, tools) = offered_attested(name, Some(security()));
+            let lineage = open_lineage(NOW - 86_400, postponed);
+            machine.store.set_lineage(&lineage).expect("write");
+            stage(&tools);
+            store_attestation(&machine, &tools);
+            if !postponed {
+                tools.status.borrow_mut().staged.as_mut().expect("staged").download_only = false;
+            }
+            let before = run(&machine.ctx(&tools, NOW), true).expect("offline");
+            let tools = tools.offering(&digest(5), 3000);
+            let state = run(&machine.ctx(&tools, NOW + 60), false).expect("check");
+            assert!(!tools.called("download"), "{name}: {:?}", tools.calls.borrow());
+            assert_eq!((state.update, state.last_error, state.downloaded.as_ref().map(|d| d.digest.clone())), (before.update, ErrorCode::None, Some(attested())), "{name}");
+            assert_eq!(state.postpone, before.postpone, "{name}");
+            assert_eq!(machine.store.lineage().expect("stored"), lineage, "{name}: the lineage does not move");
+        }
     }
 
     #[test]
