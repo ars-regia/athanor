@@ -221,8 +221,9 @@ SSH, driven by a script:
   `118c3a7df459829ce79033033700bd66f2c11ddfcb06bd6c522ae60c94866551`.
 - **Session.** A system unit with `PAMName=login` on `/dev/tty3` opened logind session 449, and
   the compositor ran in it with `--drm`, on `seat0` by its own log. The script then switched to
-  tty3 with `chvt 3`, so the compositor may have started before its session was the active one (T9-2).
-  The script's check of the session read the wrong one and shows nothing about session 449.
+  tty3 with `chvt 3`. The script's check of the session read the wrong one (its `awk` matched
+  the leader's PID column, not the TTY) and shows nothing about session 449; a reproduction with
+  the same start order found the session active and every device granted (T9-2).
   cosmic-comp's session on tty1 stayed alive throughout, in the background.
 - **Allow-list.** The README's hand-written list under `bootc usr-overlay`, plus one line per
   planned `grim` capture. The shipped list has no line for the dock (#683), so this run does not
@@ -250,7 +251,7 @@ SSH, driven by a script:
 
 | Machine | Event | Outcome | Log lines |
 | --- | --- | --- | --- |
-| Laptop | one suspend and resume, by `rtcwake -m mem -s 60` (22:54:17 to 22:55:19 CEST) rather than the README's `systemctl suspend` and the power button, so logind's sleep signal was not exercised | the compositor, the bar and the dock were still running 20 s after the resume, and the compositor logged no warning or error. The output drew 2 and 2 times in the two reports wholly after the resume; the report that spans the suspend (11 draws) cannot be split. The input devices appeared only now (T9-2). | `log/compositor-2026-10-22-2154.log` from 20:55:19Z; `log/events.txt` |
+| Laptop | one suspend and resume, by `rtcwake -m mem -s 60` (22:54:17 to 22:55:19 CEST) rather than the README's `systemctl suspend` and the power button, so logind's sleep signal was not exercised | the compositor, the bar and the dock were still running 20 s after the resume, and the compositor logged no warning or error. The output drew 2 and 2 times in the two reports wholly after the resume; the report that spans the suspend (11 draws) cannot be split. The nine input devices were logged only now (T9-2). | `log/compositor-2026-10-22-2154.log` from 20:55:19Z; `log/events.txt` |
 | Laptop | the only output unplugged and plugged back | the panel cannot be unplugged, so `card1-eDP-1/status` was forced `off` for 10 s and back to `detect`; udev reported the change. The compositor logged "a monitor was unplugged" and "a monitor was plugged in" at 1920x1080, then drew again (5 draws, longest 2.85 ms); the units stayed active. With one output, moving windows to the remaining output was not tested. | `log/compositor-2026-10-22-2154.log` at 20:55:40Z and 20:55:50Z |
 | Laptop | switch to a text console and back | not run: it needs someone at the console | |
 | Both | Super+Escape with the bar, dock and a terminal | not run on the laptop, for the same reason; the desktop has not run | |
@@ -265,13 +266,13 @@ bus (#604). The desktop gets one hour of three-output use only.
 | Id | Machine | Defect | Log lines | Revision 2 item |
 | --- | --- | --- | --- | --- |
 | T9-1 | Laptop | `grim` cannot capture an output: "compositor doesn't support the screen capture protocol". The compositor offers capture of windows only (section 4) and no output capture source, which explains the message; the compositor's log has no line about the request, so a refused grant cannot be ruled out. Either way no screenshot of the session exists and a screenshot tool does not work under it. | journal, `c1-grim-start.service` at 21:54:15 CEST | 11: an output capture source, behind an allow-list line of its own |
-| T9-2 | Laptop | No input device for the first hour. libinput was initialised at 19:54:03Z and added no device until 20:55:19Z, just after the resume, when it added nine at once. The cause is not established. The compositor's `pause()` and `resume()` log "the session is paused" and "the session resumes" (`udev.rs:304`, `udev.rs:315`), and neither line is in the log, so the compositor never handled a pause or an activation: `rtcwake` bypasses logind, and the devices most likely came back with udev re-adding them after the resume. One hypothesis is that the compositor started before its session was the active one (the script ran `chvt 3` after the start, and the drm master warning below); the missing activation line does not confirm it. | `log/compositor-2026-10-22-2154.log` at 19:54:03Z and 20:55:19Z | 13: find why, and require the compositor to have its input devices whenever its session is active |
+| T9-2 | Laptop | No input device logged for the first hour. libinput was initialised at 19:54:03Z and logged no device until 20:55:19Z, just after the resume, when it logged nine at once. The devices were open all along. A reproduction on the laptop with the same start order found the session active and every device granted by logind. libinput queues a "device added" event for each device it opens on taking the seat, and the queue does not make its file descriptor readable. smithay's backend reads libinput only when that descriptor is readable, so the events waited for the first key, a hot-plug or, here, the wake-up's uevents. A uinput device plugged in during the reproduction released the nine at once in the same way. `rtcwake` does not touch the logind session, so `pause()` and `resume()` rightly never ran. The same queue follows a pause and a resume. Whether a key reached a client in that hour is not recorded: nobody typed. Fixed by having the compositor hand its input handler what libinput queued, at the start, after a pause and after a resume (`State::take_queued_input`). | `log/compositor-2026-10-22-2154.log` at 19:54:03Z and 20:55:19Z | 13: closed by the fix; the laptop's next console run checks the start's log |
 
 Two warnings from smithay were met; neither stopped drawing:
 
 - **"Unable to become drm master, assuming unprivileged mode"**, once at 19:54:02Z, the same
-  second in which cosmic-comp on tty1 lost the device. It fits the start order in T9-2's hypothesis. The
-  compositor set the mode 1.5 s later and drew for the hour.
+  second in which cosmic-comp on tty1 lost the device: the switch to tty3 was still under way
+  when the compositor opened the GPU. The compositor set the mode 1.5 s later and drew for the hour.
 - **"Failed to destroy old mode property blob"**, at each modeset (19:54:04Z and 20:55:50Z).
 
 ## 8. NVIDIA defects
@@ -361,12 +362,12 @@ Each item names the finding that makes it necessary.
     a consumer named in `c1-protocols.md` section 4 and needs a decision on its privilege.
 13. **Supervision and the session.** Findings: README, task 8, and T9-2 (section 7.3). Nothing
     supervises the compositor; under greetd its exit ends the session and brings the greeter back.
-    Revision 2 states that as the design or adds a supervisor. On the laptop the compositor ran for
-    an hour without input devices, for a cause not yet found; revision 2 requires the input devices
-    whenever the session is active, with a test that starts the compositor on an inactive session.
+    Revision 2 states that as the design or adds a supervisor. T9-2 was a log that waited for
+    libinput's queue, not a session without devices, and is fixed; revision 2 keeps the start's
+    device lines among what a console run checks.
 14. **Hardware evidence for the acceptance.** Findings: sections 6 to 8. The laptop has an
     unattended hour on a console, a suspend and resume and an output unplugged (section 7); nobody
-    has looked at the screen, input was missing for that hour (T9-2), the text console switch and
+    has looked at the screen or typed (T9-2), the text console switch and
     Super+Escape have not run, and the NVIDIA desktop and its explicit-sync path are unrecorded. The
     acceptance of revision 2 must require a recorded run on a console on each machine with frame
     times of section 6's form, and, on the laptop, one suspend and resume and one output unplugged
