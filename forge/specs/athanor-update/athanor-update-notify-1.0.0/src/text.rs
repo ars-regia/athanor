@@ -102,7 +102,9 @@ mod tests {
         }
         assert_eq!(it.postpone, "Rimanda");
         assert!(it.postponed_until.contains("{time}") && en.postponed_until.contains("{time}"));
-        let (english, italian) = (en.time(1_790_604_800), it.time(1_790_604_800));
-        assert!(english.starts_with("28 September, ") && italian.starts_with("28 settembre, "), "{english} / {italian}");
+        // Local time: the day and hour depend on the zone, the month and the shape do not.
+        let local = chrono::DateTime::from_timestamp(1_790_604_800, 0).expect("in range").with_timezone(&chrono::Local);
+        let (day, hour) = (local.day(), local.format("%H:%M"));
+        assert_eq!((en.time(1_790_604_800), it.time(1_790_604_800)), (format!("{day} September, {hour}"), format!("{day} settembre, {hour}")));
     }
 }
