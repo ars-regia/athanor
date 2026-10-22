@@ -14,8 +14,8 @@
 #   v6   2026-09-19  1 and 2       2            after the recovery it is "signed with the old key"
 #   v7   2026-09-20  3             3            the recovery target
 #   bad  2026-09-21  3             3            v7 whose greetd.service runs /usr/bin/false (stage greenboot)
-# The security-class images of UT13 (stages security, postpone, optout, class, securitygreenboot) all
-# ship key 1 and are signed with it. They are built on 2026-09-15, after v2, from 11:00 to 19:00, so that
+# The security-class images of UT13 (stages security, postpone, optout, class, securitygreenboot, featurehold) all
+# ship key 1 and are signed with it. They are built on 2026-09-15, after v2, from 11:00 to 22:00, so that
 # the build time of none passes v3 and the stages after them still read their images as newer than what
 # the guest booted. The release attestation of each is a throwaway one (PB4b, ADR-0127), made with
 # `cosign attest` and key acc-1 beside the image signature.
@@ -28,6 +28,9 @@
 #   vsec-bad 17:00  security, signed with key `other`: a signature the policy does not trust (stage class)
 #   vsec-noclass 18:00  an attestation signed by key 1 whose predicate has no class field (stage class)
 #   vsec-gb 19:00  security, greetd.service runs /usr/bin/false (stage securitygreenboot)
+#   vsec6 20:00  security  CVE-2026-1008  stage featurehold, the digest that waits
+#   vsec7 21:00  security  CVE-2026-1009  stage featurehold, published while vsec6 is postponed, then applied
+#   v9    22:00  feature   (none)         stage featurehold, newer than both, held back until vsec7 is applied
 # Usage: images.sh     (needs podman, skopeo, jq, curl; `nix` for the cosign 3 bundle of v3b and the attestations)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
@@ -138,6 +141,9 @@ build v8 2026-09-15T16:00:00Z acc-1; sign v8 acc-1; attest v8 acc-1 feature
 build vsec-bad 2026-09-15T17:00:00Z acc-1; sign vsec-bad acc-1; attest vsec-bad other security CVE-2026-1006
 build vsec-noclass 2026-09-15T18:00:00Z acc-1; sign vsec-noclass acc-1; attest vsec-noclass acc-1 none
 build vsec-gb 2026-09-15T19:00:00Z acc-1; sign vsec-gb acc-1; attest vsec-gb acc-1 security CVE-2026-1007
+build vsec6 2026-09-15T20:00:00Z acc-1; sign vsec6 acc-1; attest vsec6 acc-1 security CVE-2026-1008
+build vsec7 2026-09-15T21:00:00Z acc-1; sign vsec7 acc-1; attest vsec7 acc-1 security CVE-2026-1009
+build v9 2026-09-15T22:00:00Z acc-1; sign v9 acc-1; attest v9 acc-1 feature
 
 # v2 goes the pipeline's way: three repositories, the digests file, sign-images.sh.
 build v2 2026-09-15 acc-1

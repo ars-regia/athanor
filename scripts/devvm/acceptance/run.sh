@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The acceptance of docs/architecture/doc_update_trust.md, section 6, items 1 to 19, on the
+# The acceptance of docs/architecture/doc_update_trust.md, section 6, items 1 to 20, on the
 # development VM, against the registry and keys of images.sh. Repeatable: `reset.sh` first.
 # Every bootc call is made by the units themselves (item 14): this script only starts units
 # and calls the bus. Usage: run.sh [START_AT]   (a stage name below; default: the first)
@@ -8,7 +8,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 guard_no_ci
-STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot refuse older goback rotate recover console greenboot podman probes report)
+STAGES=(install migrate metered download sessions apply security postpone optout class securitygreenboot featurehold refuse older goback rotate recover console greenboot podman probes report)
 start=${1:-install}
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
@@ -21,6 +21,7 @@ stage_install() { # the machine starts from v1, on a reference that verifies not
   [[ $(marker) == v1 ]] || die "the guest did not boot v1"
 }
 
+staged_digest() { guest_ssh sudo bootc status --format json | jq -r '.status.staged.image.imageDigest // empty'; }
 staged_signature() { guest_ssh sudo bootc status --format json | jq -r '.status.staged.image.image.signature // empty'; }
 
 stage_migrate() { # items 7 and 8
@@ -469,8 +470,8 @@ stage_greenboot() { # recovery item 7
 }
 
 
-# --- UT13: security-class updates (doc_update_trust.md section 6, items 16 to 19) ---
-# They run after `apply`, on v2, over the images vsec1 to vsec5, v8, vsec-bad, vsec-noclass and vsec-gb
+# --- UT13: security-class updates (doc_update_trust.md section 6, items 16 to 20) ---
+# They run after `apply`, on v2, over the images vsec1 to vsec7, v8, v9, vsec-bad, vsec-noclass and vsec-gb
 # of images.sh (all built on 2026-09-15, so the stages after them still find their images newer than
 # the newest build the guest booted), and end on v2 again, where the stages after them expect it.
 
@@ -755,6 +756,67 @@ stage_securitygreenboot() { # item 19
   guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
   reboot_guest
   [[ $(marker) == v2 ]] || die "FAIL  the guest did not return to v2 after the security stages: it boots $(marker)"
+}
+
+stage_featurehold() { # item 20
+  local d6 d7 d9 first
+  [[ $(marker) == v2 ]] || die "stage featurehold follows securitygreenboot: the guest boots $(marker), expected v2"
+  d6=$(image_digest vsec6)
+  d7=$(image_digest vsec7)
+  d9=$(image_digest v9)
+  quiesce_checks
+  point_stable vsec6
+  check_now
+  expect "20: a security digest is unlocked" .update will-apply-at-next-shutdown
+  [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: vsec6 is not the staged digest"
+  # Unlocked: a newer feature digest is not downloaded over it.
+  point_stable v9
+  for n in 1 2; do
+    check_now
+    expect "20: check $n with a newer feature digest published leaves the unlocked security digest" .update will-apply-at-next-shutdown
+    [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the unlocked security digest: staged $(staged_digest)"
+    deployment_unlocked || die "FAIL  20: the unlocked security digest was locked again"
+  done
+  # Postponed: the state the guard of `online_update` reads as `downloaded`.
+  first=$(state .postpone.first_notice_at)
+  expect_reply "20: Postpone() as the active user" "$(call_active Postpone)"
+  expect "20: the security digest is postponed" .postpone.postponed true
+  check_now
+  expect "20: a postponed security digest stays the state with a newer feature digest published" .update downloaded
+  expect "20: with no error" .last_error none
+  [[ $(staged_digest) == "$d6" ]] || die "FAIL  20: the feature digest replaced the postponed security digest: staged $(staged_digest)"
+  deployment_locked || die "FAIL  20: the postponed deployment was unlocked"
+  expect "20: and the lineage still describes the staged digest" .postpone.postponed true
+  # A newer security digest replaces it and inherits the lineage.
+  point_stable vsec7
+  check_now
+  [[ $(staged_digest) == "$d7" ]] || die "FAIL  20: a newer security digest did not replace the staged one: staged $(staged_digest)"
+  expect "20: the newer security digest is staged and still postponed" .postpone.postponed true
+  expect "20: inheriting the lineage's first notice" .postpone.first_notice_at "$first"
+  deployment_locked || die "FAIL  20: the replacing digest was unlocked during the postpone"
+  point_stable v9
+  check_now
+  [[ $(staged_digest) == "$d7" ]] || die "FAIL  20: the feature digest replaced the newer security digest: staged $(staged_digest)"
+  pass "20: the feature digest is not staged while a security digest waits"
+  # The seven days pass, as in stage postpone; vsec7 is applied.
+  trap 'clock_restore' EXIT
+  clock_ahead
+  power_cycle
+  clock_restore
+  trap - EXIT
+  [[ $(marker) == vsec7 ]] || die "FAIL  20: the shutdown after seven days booted $(marker), expected vsec7"
+  quiesce_checks
+  expect_applied "20: the security digest is applied" "$d7"
+  check_now
+  expect "20: at the next check the feature digest waits for a confirmation" .update downloaded
+  [[ $(staged_digest) == "$d9" ]] || die "FAIL  20: the feature digest is not staged after the security digest is applied: staged $(staged_digest)"
+  deployment_locked || die "FAIL  20: the feature digest was unlocked"
+  expect "20: and opens no lineage" .postpone null
+  # As stage securitygreenboot ends: the stages after these expect v2.
+  point_stable v2
+  guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
+  reboot_guest
+  [[ $(marker) == v2 ]] || die "FAIL  the guest did not return to v2 after stage featurehold: it boots $(marker)"
 }
 
 stage_podman() { # item 15
