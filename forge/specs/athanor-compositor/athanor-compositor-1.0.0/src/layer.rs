@@ -3,12 +3,12 @@
 //! placed in what the zones leave (`State::window_area`). The keyboard follows each surface's
 //! `keyboard_interactivity`, as register row 1 of CO3 asks: an exclusive surface on the top or
 //! overlay layer holds the keyboard while it is mapped, an on-demand one takes it when clicked,
-//! and one with none never has it. A lock takes the keyboard from an exclusive
-//! surface (`escape_exclusive_holder`), and the layers of an output that goes are closed
+//! and one with none never has it. Super+Escape takes the keyboard from an exclusive
+//! surface (`escape_exclusive`), and the layers of an output that goes are closed
 //! (`close_layers`).
 
 use crate::identity::Privilege;
-use crate::state::{granted, State};
+use crate::state::{granted, identity_of, State};
 use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, LayerSurface, WindowSurfaceType,
@@ -178,24 +178,38 @@ impl State {
         })
     }
 
-    /// The session locks: the client whose exclusive top or overlay surface holds the keyboard is
-    /// marked as escaped, since the lock takes the keyboard from it. The escape holds for the
-    /// client, not the surface: no exclusive surface of it, remapped or new, takes the keyboard
-    /// after the unlock until the user clicks on one of the client's layer surfaces that takes
-    /// the keyboard (`click_focus`) or the client disconnects. A transparent exclusive surface
-    /// that never ends cannot keep the keyboard from the user for longer than the lock.
-    pub fn escape_exclusive_holder(&mut self) {
-        let Some(client) = self
-            .exclusive_layer()
-            .and_then(|surface| surface.client())
-            .map(|client| client.id())
-        else {
+    /// Super+Escape: the keyboard back from the surface that holds it exclusively, and from its
+    /// popup's grab, to the next exclusive surface or the top window, at the press, whether or
+    /// not a lock client takes the lock that follows. A client granted the top layers can map a
+    /// transparent exclusive surface that never ends; the user still gets the keyboard back.
+    /// The escape holds for the identity the grant went to (executable and unit), not for the
+    /// connection or the surface: no exclusive surface of it, on any connection, remapped or
+    /// new, takes the keyboard until the user clicks on one of its layer surfaces that takes
+    /// the keyboard (`click_focus`) or its last connection is gone.
+    pub fn escape_exclusive(&mut self) {
+        let Some(surface) = self.exclusive_layer() else {
             return;
         };
-        if !self.escaped.contains(&client) {
-            tracing::info!("the lock took the keyboard from an exclusive surface");
-            self.escaped.push(client);
+        tracing::info!("Super+Escape took the keyboard back from an exclusive surface");
+        if let Some(identity) = surface.client().and_then(|client| identity_of(&client)) {
+            if !self.escaped.contains(&identity) {
+                self.escaped.push(identity);
+            }
         }
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            if keyboard.is_grabbed() {
+                keyboard.unset_grab(self);
+            }
+        }
+        self.focus_top();
+    }
+
+    /// An identity no connection is left of is no longer escaped.
+    pub fn forget_gone_identities(&mut self) {
+        let Ok(live) = self.live_identities.lock() else {
+            return;
+        };
+        self.escaped.retain(|escaped| live.contains(escaped));
     }
 
     /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
@@ -212,11 +226,12 @@ impl State {
         }
     }
 
-    /// Whether the lock took the keyboard from the client of `surface`.
+    /// Whether Super+Escape took the keyboard from the client of `surface`.
     pub fn escaped(&self, surface: &WlSurface) -> bool {
         surface
             .client()
-            .is_some_and(|client| self.escaped.contains(&client.id()))
+            .and_then(|client| identity_of(&client))
+            .is_some_and(|identity| self.escaped.contains(&identity))
     }
 
     /// Whether `surface` can hold the keyboard: a window can, and a layer surface unless its

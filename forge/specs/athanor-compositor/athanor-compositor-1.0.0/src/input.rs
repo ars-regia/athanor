@@ -4,7 +4,7 @@
 //! Super+Escape locks the session (C1 task 8, doc_lock_and_prompts.md LP5), and Ctrl+Alt+F1 to
 //! F12 switch to another virtual terminal on a console.
 
-use crate::state::{State, Under};
+use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
@@ -18,14 +18,14 @@ use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
     /// asks for the keyboard on demand. A click on a layer surface that takes the keyboard, of a
-    /// client the lock took the keyboard from, gives its exclusive surfaces the keyboard
+    /// identity Super+Escape took the keyboard from, gives its exclusive surfaces the keyboard
     /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
         let under = self.under(location);
         if let Some((Under::Layer(layer), _)) = &under {
             if layer.can_receive_keyboard_focus() {
-                if let Some(client) = layer.wl_surface().client() {
-                    self.escaped.retain(|escaped| *escaped != client.id());
+                if let Some(identity) = layer.wl_surface().client().and_then(|c| identity_of(&c)) {
+                    self.escaped.retain(|escaped| *escaped != identity);
                 }
             }
         }

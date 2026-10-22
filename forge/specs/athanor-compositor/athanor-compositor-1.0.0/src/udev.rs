@@ -34,6 +34,7 @@ use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{primary_gpu, UdevBackend, UdevEvent};
 use smithay::backend::SwapBuffersError;
+use smithay::desktop::layer_map_for_output;
 use smithay::desktop::space::{space_render_elements, SpaceRenderElements};
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::desktop::Window;
@@ -89,6 +90,8 @@ pub struct Drm {
     heads: Heads,
     scanner: DrmScanner,
     outputs: HashMap<crtc::Handle, Head>,
+    /// The monitors that could not be set up, with the modes and the CRTC they failed with.
+    failed: HashMap<connector::Handle, (connector::Info, crtc::Handle)>,
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
     pointer: SolidColorBuffer,
@@ -172,6 +175,7 @@ pub fn start(
         heads,
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
+        failed: HashMap::new(),
         nvidia,
         pointer: SolidColorBuffer::new((POINTER_SIDE, POINTER_SIDE), [0.9, 0.9, 0.9, 1.0]),
     };
@@ -310,7 +314,7 @@ impl State {
         };
         tracing::info!("the session resumes");
         // A session with no input, or with a GPU it cannot use, is dead and shows nothing wrong:
-        // the compositor ends with an error and its supervisor starts it again.
+        // the compositor ends with an error; under greetd the session ends and the greeter returns.
         if drm.libinput.resume().is_err() {
             self.fail("libinput could not take the input devices back".into());
             return;
@@ -403,119 +407,184 @@ impl State {
     }
 
     /// The monitors the scanner holds plugged in that no output shows: one that had no CRTC to
-    /// drive it when it was plugged in, a CRTC another monitor's unplugging freed since, or one
-    /// that could not be set up. Each is tried again at every scan.
+    /// drive it when it was plugged in and has one since, or one that could not be set up and
+    /// whose modes or CRTC are not what failed (`connected` skips those).
     fn retry_dark_monitors(&mut self) {
-        let Backend::Drm(drm) = &self.backend else {
+        let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
+        let plugged = |info: &connector::Info| info.state() == connector::State::Connected;
+        let connectors = drm.scanner.connectors();
+        drm.failed
+            .retain(|handle, _| connectors.get(handle).is_some_and(plugged));
         let dark: Vec<(connector::Info, crtc::Handle)> = drm
             .scanner
             .crtcs()
-            .filter(|(info, crtc)| {
-                info.state() == connector::State::Connected && !drm.outputs.contains_key(crtc)
-            })
+            .filter(|(info, crtc)| plugged(info) && !drm.outputs.contains_key(crtc))
             .map(|(info, crtc)| (info.clone(), crtc))
             .collect();
-        let unassigned: Vec<connector::Info> = drm
-            .scanner
-            .connectors()
-            .values()
-            .filter(|info| {
-                info.state() == connector::State::Connected
-                    && drm.scanner.crtc_for_connector(&info.handle()).is_none()
-            })
-            .cloned()
-            .collect();
-        for info in unassigned {
-            tracing::warn!(
-                connector = ?info.handle(),
-                "a monitor is plugged in with no CRTC left to drive it"
-            );
+        for info in drm.scanner.connectors().values() {
+            if plugged(info) && drm.scanner.crtc_for_connector(&info.handle()).is_none() {
+                tracing::debug!(
+                    connector = ?info.handle(),
+                    "a monitor is plugged in with no CRTC left to drive it"
+                );
+            }
         }
         for (info, crtc) in dark {
             self.connected(&info, crtc);
         }
     }
 
-    /// The modes of the monitor on `connector`, driven by `crtc`, changed: set up again in its
-    /// preferred mode when its output shows another, set up when it has no output.
+    /// The modes of the monitor on `connector`, driven by `crtc`, changed: set up when it has no
+    /// output; else its output goes to the preferred mode when it shows another. The new mode is
+    /// tried first, and when the GPU refuses it the output keeps the mode it has.
     fn changed(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
-        let Backend::Drm(drm) = &self.backend else {
+        let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
-        let Some(head) = drm.outputs.get(&crtc) else {
+        let Some(head) = drm.outputs.get_mut(&crtc) else {
             return self.connected(connector, crtc);
         };
-        let wanted = preferred_mode(connector).map(Mode::from);
-        if wanted.is_some() && wanted != head.output.current_mode() {
-            self.disconnected(connector, crtc);
-            self.connected(connector, crtc);
+        let Some(wanted) = preferred_mode(connector) else {
+            return;
+        };
+        let wl_mode = Mode::from(wanted);
+        if head.output.current_mode() == Some(wl_mode) {
+            return;
         }
+        let used = match gles(&mut drm.gpus, &drm.render_node) {
+            Ok(renderer) => head
+                .drm_output
+                .use_mode::<_, Element>(wanted, renderer, &DrmOutputRenderElements::default())
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        if let Err(error) = used {
+            tracing::warn!(%error, output = head.output.name(), "the new mode was refused: the output keeps its own");
+            return;
+        }
+        let output = head.output.clone();
+        tracing::info!(
+            output = output.name(),
+            size = ?wl_mode.size,
+            refresh_mhz = wl_mode.refresh,
+            "a monitor changed mode"
+        );
+        output.change_current_state(Some(wl_mode), None, None, None);
+        output.set_preferred(wl_mode);
+        layer_map_for_output(&output).arrange();
+        self.arrange_outputs();
+        self.request_redraw();
+    }
+
+    /// The outputs side by side again, in the order they were, after one changed size.
+    fn arrange_outputs(&mut self) {
+        let mut outputs: Vec<(i32, Output)> = self
+            .space
+            .outputs()
+            .map(|output| {
+                let x = self
+                    .space
+                    .output_geometry(output)
+                    .map_or(0, |area| area.loc.x);
+                (x, output.clone())
+            })
+            .collect();
+        outputs.sort_by_key(|(x, _)| *x);
+        let mut x = 0;
+        for (_, output) in outputs {
+            self.space.map_output(&output, (x, 0));
+            x += self
+                .space
+                .output_geometry(&output)
+                .map_or(0, |area| area.size.w);
+        }
+        self.space.refresh();
     }
 
     /// A monitor plugged in on `connector`, driven by `crtc`: an output in its preferred mode,
-    /// to the right of the others.
+    /// to the right of the others. One that could not be set up is remembered with the modes and
+    /// the CRTC it failed with, and is tried again only when either changes.
     fn connected(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
+        if drm.outputs.contains_key(&crtc) {
+            return;
+        }
+        let failed_with = (connector.clone(), crtc);
+        if drm.failed.get(&connector.handle()) == Some(&failed_with) {
+            tracing::debug!(connector = ?connector.handle(), "a monitor that failed is not tried again as it was");
+            return;
+        }
         let name = format!(
             "{}-{}",
             connector.interface().as_str(),
             connector.interface_id()
         );
-        let Some(mode) = preferred_mode(connector) else {
-            tracing::warn!(output = name, "a monitor has no mode");
-            return;
+        match self.set_up(connector, crtc, &name) {
+            Ok(()) => {
+                if let Backend::Drm(drm) = &mut self.backend {
+                    drm.failed.remove(&connector.handle());
+                }
+            }
+            Err(error) => {
+                // Tried again when its modes or its CRTC change (`retry_dark_monitors`); at start,
+                // the compositor ends if no monitor could be set up (`start`).
+                tracing::error!(%error, output = name, "a monitor could not be set up");
+                if let Backend::Drm(drm) = &mut self.backend {
+                    drm.failed.insert(connector.handle(), failed_with);
+                }
+            }
+        }
+    }
+
+    /// The output of `connector` on `crtc`, in the preferred mode. Its global is created only
+    /// once the GPU has accepted the mode, so a monitor that cannot be set up is never seen by a
+    /// client.
+    fn set_up(
+        &mut self,
+        connector: &connector::Info,
+        crtc: crtc::Handle,
+        name: &str,
+    ) -> Result<(), String> {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return Ok(());
         };
+        let mode = preferred_mode(connector).ok_or("the monitor has no mode")?;
         let wl_mode = Mode::from(mode);
-        let output = crate::state::new_output(
-            &self.display_handle,
-            &name,
+        let output = crate::state::build_output(
+            name,
             "DRM",
             wl_mode.size,
             wl_mode.refresh,
             Transform::Normal,
             1.0,
         );
-        let mut planes = match drm.heads.device().planes(&crtc) {
-            Ok(planes) => planes,
-            Err(error) => {
-                tracing::warn!(%error, output = name, "the planes of a CRTC could not be read");
-                remove_global(&self.display_handle, &output);
-                return;
-            }
-        };
+        let mut planes = drm
+            .heads
+            .device()
+            .planes(&crtc)
+            .map_err(|error| format!("the planes of the CRTC could not be read: {error}"))?;
         if drm.nvidia {
             planes.overlay.clear();
         }
-        let initialized = match gles(&mut drm.gpus, &drm.render_node) {
-            Ok(renderer) => drm
-                .heads
-                .lock()
-                .initialize_output::<_, Element>(
-                    crtc,
-                    mode,
-                    &[connector.handle()],
-                    &output,
-                    Some(planes),
-                    renderer,
-                    &DrmOutputRenderElements::default(),
-                )
-                .map_err(|error| error.to_string()),
-            Err(error) => Err(error.to_string()),
-        };
-        let drm_output = match initialized {
-            Ok(drm_output) => drm_output,
-            Err(error) => {
-                // Tried again at the next scan (`retry_dark_monitors`); at start, the
-                // compositor ends if no monitor could be set up (`start`).
-                tracing::error!(%error, output = name, "a monitor could not be set up");
-                remove_global(&self.display_handle, &output);
-                return;
-            }
-        };
+        let renderer = gles(&mut drm.gpus, &drm.render_node).map_err(|error| error.to_string())?;
+        let drm_output = drm
+            .heads
+            .lock()
+            .initialize_output::<_, Element>(
+                crtc,
+                mode,
+                &[connector.handle()],
+                &output,
+                Some(planes),
+                renderer,
+                &DrmOutputRenderElements::default(),
+            )
+            .map_err(|error| error.to_string())?;
+        crate::state::publish_output(&self.display_handle, &output);
         tracing::info!(
             output = name,
             size = ?wl_mode.size,
@@ -537,6 +606,7 @@ impl State {
         );
         self.map_output(&output);
         self.schedule(crtc, Duration::ZERO);
+        Ok(())
     }
 
     /// The monitor driven by `crtc` unplugged: its output goes, with its global and its layer
@@ -545,6 +615,7 @@ impl State {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
+        drm.failed.remove(&connector.handle());
         let Some(head) = drm.outputs.remove(&crtc) else {
             return;
         };

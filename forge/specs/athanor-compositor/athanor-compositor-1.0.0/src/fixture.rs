@@ -1443,16 +1443,18 @@ fn shell_keys(run: &mut Running, steps: &mpsc::Sender<Step>) -> Vec<u32> {
     got.into_inner().expect("the keys")
 }
 
-/// The key the compositor keeps for itself (C1 task 8): Super+Escape asks for the lock, and the
-/// client never sees the Escape. The lock takes the keyboard from a granted client's exclusive
-/// surface, and ends its popup's grab; the client is then escaped: its surface committing again,
-/// as a bar does each frame, mapped again, or a new one, does not take the keyboard back after
-/// the unlock. A click on a layer surface of the client that takes the keyboard gives it back;
-/// one on its window, or on its bar, which takes none, does not. With no exclusive surface the
-/// key asks for the lock all the same and is not the window's; while the session is locked it
-/// is the lock surface's, and asks for nothing. Super+Shift+Escape is the window's.
+/// The key the compositor keeps for itself (C1 task 8): Super+Escape takes the keyboard back at
+/// the press from a granted client's exclusive surface, and ends its popup's grab, with no lock
+/// client to take the lock, and asks for the lock; the client never sees the Escape. The escape
+/// holds for the identity the grant went to: its surface committing again, as a bar does each
+/// frame, mapped again, a new one, or one of a second connection does not take the keyboard
+/// back. A click on a layer surface of the client that takes the keyboard gives it back; one on
+/// its window, or on its bar, which takes none, does not. With no exclusive surface the key asks
+/// for the lock all the same and is not the window's; while the session is locked it is the lock
+/// surface's, and asks for nothing. Super+Shift+Escape is the window's. A lock alone escapes
+/// nobody.
 #[test]
-fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_surface() {
+fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let mut run = Running::start(None);
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     run.until("the window has the keyboard", |state| {
@@ -1494,20 +1496,52 @@ fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_su
     let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
     chord(&mut run.state, &ESCAPE_CHORD);
     assert_eq!(run.state.lock_requests, 1, "Super+Escape asks for the lock");
-    assert!(
-        shell_has_it(&run.state),
-        "the request alone takes nothing: the lock does"
+    // No lock client runs, as in a session with none, or logind failed: the keyboard is back at
+    // the press, and the popup's grab is over.
+    assert_eq!(
+        focus(&run.state),
+        window,
+        "the press takes the keyboard back"
     );
+    assert!(!keyboard.is_grabbed(), "the press ends the popup's grab");
+    assert_eq!(
+        run.state.escaped.len(),
+        1,
+        "the identity whose surface held the keyboard is escaped"
+    );
+    // A second connection of the same identity maps an exclusive surface: it does not take the
+    // keyboard either.
+    {
+        let mut second = Local::connect(&mut run, None);
+        let compositor: wl_compositor::WlCompositor = second.bind(4);
+        let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = second.bind(4);
+        let qh = second.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = layer_shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "second".into(),
+            &qh,
+            (),
+        );
+        layer.set_size(100, 100);
+        layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+        assert!(second.answer(&mut run, &surface), "the surface is mapped");
+        assert!(
+            run.state.exclusive_layer().is_none(),
+            "a second connection of an escaped identity holds no exclusive surface"
+        );
+        assert_eq!(focus(&run.state), window, "and does not take the keyboard");
+    }
+    run.until("the second connection is gone", |state| {
+        state.escaped.len() == 1
+    });
+    // A lock client takes the lock that follows: it changes nothing for the escape.
     let mut local = Local::connect(&mut run, None);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
     let lock = locks.lock(&local.queue.handle(), ());
     local.pump(&mut run, "the session is locked", |client, _| client.locked);
-    assert!(!keyboard.is_grabbed(), "the lock ends the popup's grab");
-    assert_eq!(
-        run.state.escaped,
-        std::slice::from_ref(&shell_id),
-        "the client whose surface held the keyboard is escaped"
-    );
     lock.unlock_and_destroy();
     local.pump(
         &mut run,
@@ -1629,8 +1663,8 @@ fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_su
             + Point::from((f64::from(area.size.w) / 2.0, f64::from(area.size.h) / 2.0));
         run.state.click_focus(centre);
         assert_eq!(
-            run.state.escaped,
-            std::slice::from_ref(&shell_id),
+            run.state.escaped.len(),
+            1,
             "a click on {what} keeps the escape"
         );
     }
@@ -1645,7 +1679,8 @@ fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_su
     );
 
     // Locked, the key is the lock surface's and asks for nothing. The exclusive surface held the
-    // keyboard when the lock was taken, so the client is escaped again at the unlock.
+    // keyboard when the lock was taken and nobody pressed the key: it has it again at the
+    // unlock.
     let mut local = Local::connect(&mut run, None);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = local.bind(1);
     let lock = locks.lock(&local.queue.handle(), ());
@@ -1656,16 +1691,12 @@ fn task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_su
         run.state.lock_requests, requests,
         "the key asks for nothing while locked"
     );
-    assert_eq!(
-        run.state.escaped,
-        std::slice::from_ref(&shell_id),
-        "the lock took the keyboard from the exclusive surface"
-    );
+    assert!(run.state.escaped.is_empty(), "a lock alone escapes nobody");
     lock.unlock_and_destroy();
     local.pump(
         &mut run,
-        "the unlock gives a window the keyboard",
-        |_, state| focus(state).is_some() && state.exclusive_layer().is_none(),
+        "the unlock gives the exclusive surface the keyboard",
+        |_, state| shell_has_it(state),
     );
     assert!(
         !shell_keys(&mut run, &steps).contains(&ESCAPE_CHORD[1]),

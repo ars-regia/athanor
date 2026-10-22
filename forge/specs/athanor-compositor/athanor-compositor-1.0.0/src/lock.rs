@@ -13,6 +13,8 @@ use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 /// A locked session: the client's lock, its confirmation until the outputs have been drawn
 /// locked, and the lock surface of each output.
@@ -47,7 +49,6 @@ impl SessionLockHandler for State {
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();
-        self.escape_exclusive_holder();
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.unset_grab(self);
         }
@@ -140,17 +141,29 @@ impl State {
     }
 }
 
+/// A request to logind is in flight: a press meanwhile escapes locally and asks no more.
+static REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+/// How long logind has to answer `Lock`.
+const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl State {
-    /// Super+Escape: the user asks to lock the session. On a console the compositor asks logind
-    /// to lock its session, as `loginctl lock-session` does, and the session's lock client
-    /// reacts to logind's `Lock` signal and nothing else (doc_lock_and_prompts.md LP4); the lock
-    /// itself reaches `SessionLockHandler::lock`. Nested or headless there is no logind session
-    /// of the compositor's own, and the request is only counted. A lock the user asks for is
-    /// never refused.
+    /// Super+Escape: the keyboard leaves an exclusive surface at the press (`escape_exclusive`),
+    /// whether or not a lock client ever takes the lock, and the user asks to lock the session.
+    /// On a console the compositor asks logind to lock its session, as `loginctl lock-session`
+    /// does, and the session's lock client reacts to logind's `Lock` signal and nothing else
+    /// (doc_lock_and_prompts.md LP4); the lock itself reaches `SessionLockHandler::lock`.
+    /// Nested or headless there is no logind session of the compositor's own, and the request is
+    /// only counted. A lock the user asks for is never refused.
     pub fn request_lock(&mut self) {
         self.lock_requests += 1;
+        self.escape_exclusive();
         if !matches!(self.backend, Backend::Drm(_)) {
             tracing::info!("a lock was asked for; only a console session has a logind to ask");
+            return;
+        }
+        if REQUEST_IN_FLIGHT.swap(true, Ordering::SeqCst) {
+            tracing::debug!("a lock request is in flight; not asked again");
             return;
         }
         // On its own thread: the call waits for logind, and the loop draws meanwhile.
@@ -160,8 +173,10 @@ impl State {
                 if let Err(error) = lock_session() {
                     tracing::error!(%error, "logind did not lock the session");
                 }
+                REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
             });
         if let Err(error) = spawned {
+            REQUEST_IN_FLIGHT.store(false, Ordering::SeqCst);
             tracing::error!(%error, "the lock request could not be started");
         }
     }
@@ -170,12 +185,15 @@ impl State {
 /// `org.freedesktop.login1.Session.Lock` on the compositor's own session (`session/auto` is the
 /// session of the caller), which is what `loginctl lock-session` calls.
 fn lock_session() -> Result<(), zbus::Error> {
-    zbus::blocking::Connection::system()?.call_method(
-        Some("org.freedesktop.login1"),
-        "/org/freedesktop/login1/session/auto",
-        Some("org.freedesktop.login1.Session"),
-        "Lock",
-        &(),
-    )?;
+    zbus::blocking::connection::Builder::system()?
+        .method_timeout(LOCK_TIMEOUT)
+        .build()?
+        .call_method(
+            Some("org.freedesktop.login1"),
+            "/org/freedesktop/login1/session/auto",
+            Some("org.freedesktop.login1.Session"),
+            "Lock",
+            &(),
+        )?;
     Ok(())
 }

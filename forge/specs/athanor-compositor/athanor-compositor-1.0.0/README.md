@@ -169,26 +169,34 @@ an error rather than show nothing; a monitor that cannot be set up later is logg
 and tried again at the next scan of the connectors.
 
 The compositor keeps two kinds of key, which no client sees: Ctrl+Alt+F1 to F12 switch the
-virtual terminal, and **Super+Escape locks the session** (`doc_lock_and_prompts.md` LP5), with
-Super alone: Super+Alt+Escape and Super+Shift+Escape are the client's. The compositor asks logind
-to lock its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what
-`loginctl lock-session` calls, on its own thread); the lock client reacts to logind's `Lock`
-signal (LP4). A lock the user asks for is never refused, whatever holds the keyboard. The lock
-takes the keyboard from an exclusive top or overlay surface and ends its popup grab, and marks
-the client as escaped: none of its exclusive surfaces, mapped again or new, takes the keyboard
-after the unlock until the user clicks on one of its layer surfaces that takes the keyboard (not
-on its windows, nor on a surface that takes none), or it disconnects. Locked, the key is the
-lock surface's like any other. The release of a kept key is kept too, and a pause of the session
+virtual terminal, and **Super+Escape takes the keyboard back and locks the session**
+(`doc_lock_and_prompts.md` LP5), with Super alone: Super+Alt+Escape and Super+Shift+Escape are
+the client's. At the press, whatever follows, the keyboard leaves the exclusive top or overlay
+surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
+top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
+its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what `loginctl
+lock-session` calls, on its own thread, one request in flight at a time, with a timeout of five
+seconds); the lock client reacts to logind's `Lock` signal (LP4). A lock the user asks for is
+never refused. The escape holds for the identity the grant went to (executable and unit), not for
+the connection: none of its exclusive surfaces, on any connection, mapped again or new, takes the
+keyboard until the user clicks on one of its layer surfaces that takes the keyboard (not on its
+windows, nor on a surface that takes none), or its last connection is gone. A lock taken by
+anyone else (idle, before sleep, an administrator's) escapes nobody. Locked, the key is the lock
+surface's like any other. The release of a kept key is kept too, and a pause of the session
 forgets the keys kept before it.
-`task8_super_escape_locks_and_the_lock_takes_the_keyboard_from_an_exclusive_surface`
-(`src/fixture.rs`) shows it, with a popup grab, a surface mapped again and a new one; nested or
-headless there is no logind session of the compositor's own, and the request is only counted.
+`task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock` (`src/fixture.rs`) shows it,
+with a popup grab, no lock client, a surface mapped again, a new one and a second connection;
+nested or headless there is no logind session of the compositor's own, and the request is only
+counted.
 
 A session that comes back from another terminal with no input devices, or with a GPU it cannot
 take back, and the removal of the GPU the compositor draws on, end the compositor with an
-error; there is no dead session left to look alive. A monitor whose modes change is set up
-again in its preferred mode, and one that had no CRTC or could not be set up is tried again at
-each scan of the connectors.
+error; there is no dead session left to look alive. Nothing supervises the compositor (the
+checks above start it with `systemd-run`): under greetd its exit ends the session and brings the
+greeter back. A monitor whose modes change goes to its new preferred mode when the GPU accepts
+it, and keeps the mode it has when it does not. A monitor that had no CRTC, or that could not be
+set up, is remembered with the modes and the CRTC it failed with and tried again only when either
+changes; its output is offered to the clients only once it works.
 
 Checked in the development VM (virtio-gpu with virgl, KMS, 2 heads, the second disconnected),
 over SSH: the compositor runs as the VM's user in a session of its own on VT 8, started with

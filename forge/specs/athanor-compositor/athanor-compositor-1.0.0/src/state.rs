@@ -3,7 +3,7 @@
 
 use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
-use crate::identity::{AllowList, Privilege, Proc, Process};
+use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::lock::Lock;
 use crate::udev::Drm;
 use crate::winit::Nested;
@@ -71,7 +71,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
@@ -105,10 +105,11 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
-    /// The clients whose exclusive layer surface held the keyboard when the session locked:
-    /// their exclusive layer surfaces hold it again only after a click on one of their
-    /// surfaces (`escape_exclusive_holder`).
-    pub escaped: Vec<ClientId>,
+    /// The identities (executable and unit, as the grants go) whose exclusive layer surface
+    /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
+    /// on any connection, hold it again only after a click on one of their surfaces, or when
+    /// the last connection of the identity is gone (`escape_exclusive`).
+    pub escaped: Vec<Identity>,
     /// The locks the user asked for with Super+Escape (`request_lock`).
     pub lock_requests: u64,
     /// Why the compositor must end with an error: set by `fail`, read by `main` once the loop
@@ -135,6 +136,8 @@ pub struct State {
     pub next_held: u64,
     /// Given to each client's `ClientState`, which sends its id on disconnection.
     pub client_gone: channel::Sender<ClientId>,
+    /// The identity of each connection that lives, once per connection (`forget_gone_identities`).
+    pub live_identities: Arc<Mutex<Vec<Identity>>>,
 
     pub foreign_toplevel_state: ForeignToplevelListState,
     pub toplevel_capture_state: ToplevelCaptureSourceState,
@@ -199,7 +202,7 @@ impl State {
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
         // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
-        // exclusive surface of a granted client (`escape_exclusive_holder`).
+        // exclusive surface of a granted client (`escape_exclusive`).
         let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
@@ -268,6 +271,7 @@ impl State {
             held: Vec::new(),
             next_held: 0,
             client_gone,
+            live_identities: Arc::default(),
             foreign_toplevel_state,
             toplevel_capture_state,
             image_copy_capture_state,
@@ -297,8 +301,8 @@ impl State {
         stream: &UnixStream,
         context: Option<SecurityContext>,
     ) -> Arc<ClientState> {
-        let grants = match &context {
-            Some(_) => Vec::new(),
+        let (identity, grants) = match &context {
+            Some(_) => (None, Vec::new()),
             None => match crate::identity::identify(
                 stream.as_fd(),
                 self.process.as_ref(),
@@ -306,19 +310,24 @@ impl State {
             ) {
                 Ok((identity, grants)) => {
                     tracing::debug!(?identity, ?grants, "a client connected");
-                    grants
+                    (Some(identity), grants)
                 }
                 Err(error) => {
                     tracing::warn!(%error, "a client's identity cannot be read: no privileged global");
-                    Vec::new()
+                    (None, Vec::new())
                 }
             },
         };
+        if let (Some(identity), Ok(mut live)) = (&identity, self.live_identities.lock()) {
+            live.push(identity.clone());
+        }
         Arc::new(ClientState {
+            live: self.live_identities.clone(),
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             security_context: context,
             grants,
+            identity,
         })
     }
 
@@ -667,6 +676,21 @@ pub fn new_output(
     transform: Transform,
     scale: f64,
 ) -> Output {
+    let output = build_output(name, model, size, refresh, transform, scale);
+    publish_output(dh, &output);
+    output
+}
+
+/// An output with no global yet (`publish_output`): for a backend that learns whether the
+/// monitor works only after it has the output.
+pub fn build_output(
+    name: &str,
+    model: &str,
+    size: Size<i32, Physical>,
+    refresh: i32,
+    transform: Transform,
+    scale: f64,
+) -> Output {
     let output = Output::new(
         name.into(),
         PhysicalProperties {
@@ -677,10 +701,6 @@ pub fn new_output(
             serial_number: String::new(),
         },
     );
-    let global = output.create_global::<State>(dh);
-    output
-        .user_data()
-        .insert_if_missing(|| OutputGlobal(global));
     let mode = Mode { size, refresh };
     output.change_current_state(
         Some(mode),
@@ -690,6 +710,14 @@ pub fn new_output(
     );
     output.set_preferred(mode);
     output
+}
+
+/// Offers `output` to the clients; the global is kept in its user data.
+pub fn publish_output(dh: &DisplayHandle, output: &Output) {
+    let global = output.create_global::<State>(dh);
+    output
+        .user_data()
+        .insert_if_missing(|| OutputGlobal(global));
 }
 
 /// The global of an output, kept in its user data: removed with the output.
@@ -731,7 +759,7 @@ fn release_held_on_disconnection(
         .insert_source(gone, |event, _, state| {
             if let channel::Event::Msg(client) = event {
                 state.release_held(&client);
-                state.escaped.retain(|escaped| *escaped != client);
+                state.forget_gone_identities();
             }
         })
         .map_err(|e| e.error)?;
@@ -757,10 +785,20 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     gone: channel::Sender<ClientId>,
+    live: Arc<Mutex<Vec<Identity>>>,
     /// The security context the client connected through, if any (a sandboxed application).
     pub security_context: Option<SecurityContext>,
     /// The privileged globals granted when it connected.
     grants: Vec<Privilege>,
+    /// What the grants were decided on, when the process could be read.
+    identity: Option<Identity>,
+}
+
+/// The identity `client` connected with, when it could be read.
+pub fn identity_of(client: &Client) -> Option<Identity> {
+    client
+        .get_data::<ClientState>()
+        .and_then(|data| data.identity.clone())
 }
 
 /// Whether `client` was granted `privilege` when it connected.
@@ -785,6 +823,11 @@ impl ClientData for ClientState {
             tracing::info!(?client_id, %error, "a client was disconnected");
         }
         // The receiver lives as long as the event loop: an error means the compositor is ending.
+        if let (Some(identity), Ok(mut live)) = (&self.identity, self.live.lock()) {
+            if let Some(at) = live.iter().position(|live| live == identity) {
+                live.swap_remove(at);
+            }
+        }
         if let Err(error) = self.gone.send(client_id) {
             tracing::warn!(%error, "a client's disconnection reached no event loop");
         }
