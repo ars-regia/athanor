@@ -48,7 +48,7 @@ file, which counts every line, blank and comment lines included. Run on 2026-10-
 Test counts by file come from `rg -c '#\[test\]'`: 28 in `fixture.rs`, 12 in `identity.rs`, 4 in
 `udev.rs`, 3 in `main.rs`, 2 each in `state.rs` and `input.rs`, 1 each in `handlers.rs`,
 `lock.rs` and `headless.rs`: 54 attributes, of which the task 8 pull request reports 52 passed
-and 2 ignored (#679; one needs a render node, `headless_on_a_render_node` at `fixture.rs:890`; the helper at `identity.rs:521` is run as a subprocess by `read_a_peer_that_exits` and is not a test of its own). The count of a `wc -l` is an upper
+and 2 ignored (#679; one needs a render node, `headless_on_a_render_node` at `fixture.rs:890`; the other is the ignored `#[test]` at `identity.rs:521`, run as a subprocess by `read_a_peer_that_exits`). The count of a `wc -l` is an upper
 bound on code: a re-count with `tokei` (code, comments, blanks apart) is left to a machine that
 has it.
 
@@ -170,7 +170,7 @@ Limits, all from the README; each is for revision 2 to decide:
    #656). A real image has not run it: the image ships no allow-list and no compositor.
 5. **`ext-workspace-v1` is not among OS4's privileged protocols**: if workspace switching is added,
    every unconfined client could switch workspaces: a design risk, not a present one, since no
-   workspace capability is offered today (`workspace.rs:94-95, 119, 138`) and no request changes
+   workspace capability is offered today (`workspace.rs:74` `GroupCapabilities::empty()`, `:84` `WorkspaceCapabilities::empty()`, `:113` commit applies nothing, `:144` `create_workspace` is not a capability) and no request changes
    state. The bottom and background layers stay offered inside a security context.
 6. **Not offered yet**: input method, virtual keyboard and pointer, data control and the private
    interface; each joins the allow-list's interfaces when it is.
@@ -219,10 +219,14 @@ section of the crate's README, which PR #684 (branch `c1/t9-console`) adds and t
 
 | Machine | Event | Outcome | Log lines |
 | --- | --- | --- | --- |
-| NVIDIA desktop | one suspend and resume | | |
-| NVIDIA desktop | one output unplugged and plugged | | |
+| Laptop | one suspend and resume | | |
+| Laptop | one output unplugged and plugged | | |
 | Laptop | switch to a text console and back | | |
 | Both | Super+Escape with the bar, dock and a terminal | | |
+
+Suspend and resume and output unplugging are not run on the NVIDIA desktop: the maintainer decided on
+2026-10-22 that they run on the laptop only, because on the desktop they make the GPU fall off the
+bus (#604). The desktop gets one hour of three-output use only.
 
 **7.3 Defects found in the sessions** (each with its log lines)
 
@@ -239,7 +243,7 @@ backend: only headless (task 2), nested (task 6) and the VM (task 8) have run.
 | --- | --- | --- | --- |
 | Idle redraw loop: a nested redraw that drew nothing asked for the next one at once and kept a core busy, 1,350,007 draws per 10 s | nested on NVIDIA's EGL | fixed in #646 (a frame-period timer, one pending at a time); after the fix, 598 to 600 draws per report | #646 |
 | One report stalled for a second, the compositor and the client together, at 18:34:58 in the one-hour soak | nested in cosmic-comp | cause inferred, not traced: cosmic-comp's throttle of a covered surface. No repository source states the throttling: it is an inference from the stall alone (README line on this compositor's own 1 Hz callbacks for an unshown surface concerns the DRM backend, not cosmic-comp) | #646 |
-| Headless on NVIDIA's render node, with `linux-drm-syncobj-v1` and a Vulkan client (`vkcube --wsi wayland`), ten minutes | task 2 check | not recorded: #586 reports the 600 s soak on the desktop on Pixman and llvmpipe, and `headless_on_a_render_node` is `#[ignore]`d; no run on NVIDIA's node with explicit sync is in the merged pull requests | #586, `src/fixture.rs:888` |
+| Headless on NVIDIA's render node, with `linux-drm-syncobj-v1` and a Vulkan client (`vkcube --wsi wayland`), ten minutes | task 2 check | not recorded: #586 reports the 600 s soak on the desktop on Pixman and llvmpipe, and `headless_on_a_render_node` is `#[ignore]`d; no run on NVIDIA's node with explicit sync is in the merged pull requests | #586, `src/fixture.rs:890` |
 | Explicit sync on NVIDIA | review focus 4 of the plan | negotiated state not recorded; the log is meant to name the syncobj path or its absence, and no NVIDIA log is in the pull requests | plan, Review Focus |
 | The bar's and dock's top-layer surfaces were closed during the one-hour run, so no shell surface was drawn on NVIDIA | nested | by design (no allow-list in the rig); drawing them is task 9 | #646 |
 
@@ -319,9 +323,9 @@ Each item names the finding that makes it necessary.
     adds a supervisor.
 14. **Hardware evidence for the acceptance.** Findings: sections 6 to 8. No frame time has been
     measured on a monitor, none on the laptop, and NVIDIA's explicit-sync path is unrecorded. The
-    acceptance of revision 2 must require, per machine class, a recorded run on a console, with
-    frame times of section 6's form, one suspend and resume, one output unplugged and plugged,
-    and the logs; it is filled from section 7 once task 9 has run.
+    acceptance of revision 2 must require a recorded run on a console on each machine with frame
+    times of section 6's form, and, on the laptop, one suspend and resume and one output unplugged
+    and plugged (not on the NVIDIA desktop, #604), with the logs; it is filled from section 7 once task 9 has run.
 15. **The acceptance itself.** `doc_own_stack.md` leaves the acceptance to revision 2 (section 6,
     step 4): every surface 1.0 carries on the compositor, as a recorded run. This spike supplies
     the instruments (the fixture, the rig scenes, the frame-time report, the identity tests); the
