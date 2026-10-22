@@ -329,6 +329,10 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     if ctx.tools.metered() && !(security && automatic) {
         return (UpdateState::Available, None);
     }
+    // Residual: the class is the candidate's, but `bootc upgrade --download-only` takes what
+    // the tag names when it runs and cannot be given a digest (`bootc switch` to a digest
+    // would pin the origin). A tag moved in between can download a feature digest on a
+    // metered link. The unlock below stays bound to `staged == candidate`.
     match ctx.tools.download() {
         Err(failure) if failure.code == ErrorCode::Policy => refused(ctx.store, &candidate.digest, failure),
         Err(failure) => (UpdateState::Available, Some(failure)),
