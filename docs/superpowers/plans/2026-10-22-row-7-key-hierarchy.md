@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task; the tasks are sequential and most stop at a maintainer checkpoint. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Row 7 of `docs/operations/release-1.0.md`, in release 0.10 "base" (ADR-0123 item 2): the key hierarchy for the image key and the MOK interim key set with a not-after date and revocation (ADR-0103 D5), with the close of the image key rotation (`doc_pipeline.md` PB5b) and the key ceremony of key 2. The row's check, `cargo test -p athanor-update` cases for an expired and a revoked key, exists when this plan is done.
+**Goal:** Row 7 of `docs/operations/release-1.0.md`, in release 0.10 "base" (ADR-0123 item 2): the key hierarchy for the image key and the MOK interim key set with a not-after date and revocation (ADR-0103 D5), with the close of the image key rotation (`doc_pipeline.md` PB5b) and the key ceremony of the keys the hierarchy adds (key 2 already exists). The row's check, `cargo test -p athanor-update` cases for an expired and a revoked key, exists when this plan is done.
 
 **Architecture:** Nothing in this plan designs cryptography. ADR-0103 D5 and `doc_update_trust.md` UT2 state what the hierarchy is: an offline root, kept in the custody kit of ADR-0084, signs a short-lived online signing key with a not-after date and a timestamp; machines pin the root, not the online key; the root revokes an online key, and a machine stops trusting one at its not-after date at the latest; for the Machine Owner Key the interim is a signed key set with a not-after date and revocation; the out-of-band recovery of UT2 (`forge/specs/athanor-update/RECOVERY.md`) stays the path for a compromised root. UT2 leaves the mechanism to "the revision that builds it", which specifies how the policy of UT3 and the service read it, with acceptance cases for an expired and a revoked key (ADR-0113, ADR-0115 item 6). Task 1 writes that revision; every later task takes its formats and states from it.
 
@@ -20,7 +20,7 @@
 - No `|| true`, no `continue-on-error`, no `2>/dev/null` that hides an error; no new `unwrap()`, `expect()` or `panic!` outside tests (`verify.py panics`).
 - Docs under `docs/`, `scripts/verify.py` and `forge/config/packages.json` change only through an exact-match replacement script, then `git diff --numstat`.
 - Builds at most 4 CPU threads (`taskset -c 0-3 cargo test -j 4`), cargo targets under `/var/tmp`, and only with at least 6 GiB of `MemAvailable`; one VM at a time.
-- Release timing (ADR-0123 item 4): the rebase to Fedora 45 does not wait for row 7. If row 7 is not ready at the Fedora 44 decision point of ADR-0078, 2026-11-16 (`docs/superpowers/plans/2026-10-18-fedora-45-rebase.md`, M5), 0.10 ships without it and a pull request naming ADR-0123 moves row 7 to the release that follows. "Ready" means Tasks 1 to 7 merged and the dev-VM acceptance of Task 7 green on the 0.10 build.
+- Release timing (ADR-0123 item 4): the rebase to Fedora 45 does not wait for row 7. If row 7 is not ready at the Fedora 44 decision point of ADR-0078, 2026-11-16 (`docs/superpowers/plans/2026-10-18-fedora-45-rebase.md`, M5), 0.10 ships without it and a pull request naming ADR-0123 moves row 7 to the release that follows. Row 7 ships with key 2: "0.10 is the key-2 release on `:stable`" (ADR-0123 item 2), and "0.10 carries key 2 [...] If row 7 leaves 0.10, key 2 moves with it" (`docs/operations/release-1.0.md` section 4.2). No record defines "ready"; *proposal for the maintainer:* row 7 is ready when Tasks 1 to 8 are done, Task 9 steps 1 to 4 are merged, and the dev-VM acceptance of Task 7 is green on the 0.10 candidate, so that the 0.10 release run itself (Task 9 step 5) signs with key 2.
 
 ## State on 2026-10-22
 
@@ -29,6 +29,7 @@
   - during a rotation either key in the policy verifies: UT3;
   - a key removed from the policy verifies nothing it signed before (`verified` false, reason `key-not-in-policy`; the attestation reads as feature class): UT2, UT3. This is the only withdrawal of trust UT2 defines while the hierarchy does not exist.
 - Not written: a key past its not-after date, and a key revoked by the root. See the next section.
+- Key 2 exists: it was generated into the KC2 backup, `signing-images` holds it as SEC3 and SEC4, and its public half is committed as `system/keys/athanor-image-2.pub` (`docs/operations/secrets.md` section 4.1 step 1; `git ls-files system/keys`). It is used as it is and never regenerated.
 
 ## Gap in UT2
 
@@ -70,13 +71,15 @@ UT2 and ADR-0103 D5: the hierarchy depends on the LUKS2 backup of the keys.
 - [ ] **Step 2: Record** the date in the private custody log (KC7). Nothing is committed.
 - **Check:** the maintainer states in the conversation that KC7 passed on both drives. Task 3 does not start without it.
 
-### Task 3: Key ceremony for key 2 and, if Task 1 says so, the offline root (maintainer only: keys, signing)
+### Task 3: Key ceremony for the offline root and the first online key (maintainer only: keys, signing)
 
-- [ ] **Step 1: Maintainer checkpoint.** Name what is generated, from Task 1's text: key 2 as `secrets.md` section 4.1 step 1 describes it, and the offline root and the first online key if the amendment makes them separate keys. Stop until approved.
-- [ ] **Step 2: Maintainer, offline.** Generate on tmpfs with the preamble of `secrets.md` section 1.4 and follow KC3 in order: write each key to both drives, close, unplug, reopen with the passphrase, compare by SHA-256; derive each public key (`cosign public-key --key <file>` with `COSIGN_PASSWORD`) and compare it with the file to be committed; sign and verify a test blob. Only then `gh secret set COSIGN_PRIVATE_KEY --env signing-images --repo ars-regia/athanor < <file>` and `gh secret set COSIGN_PASSWORD --env signing-images --repo ars-regia/athanor`; then shred the plaintext. The root's private half is never uploaded (UT2: offline root).
+Key 2 is used as it is and never regenerated (`secrets.md` section 4.1 step 1). What is new is what Task 1 and open question 1 decide: expected, the offline root and the first online key.
+
+- [ ] **Step 1: Maintainer checkpoint.** Name what is generated, from Task 1's text and the answer to open question 1, and the role key 2 takes. Stop until approved.
+- [ ] **Step 2: Maintainer, offline.** Generate on tmpfs with the preamble of `secrets.md` section 1.4 and follow KC3 in order: write each key to both drives, close, unplug, reopen with the passphrase, compare by SHA-256; derive each public key (`cosign public-key --key <file>` with `COSIGN_PASSWORD`) and compare it with the file to be committed; sign and verify a test blob. Only then, and only for a new key that Task 1 says signs in CI, `gh secret set COSIGN_PRIVATE_KEY --env signing-images --repo ars-regia/athanor < <file>` and `gh secret set COSIGN_PASSWORD --env signing-images --repo ars-regia/athanor`; then shred the plaintext. If key 2 stays the signing key, nothing is uploaded. The root's private half is never uploaded (UT2: offline root).
 - [ ] **Step 3: Maintainer.** Record the fingerprints in the KC7 inventory, and renew the sealed letter of KC8 if a drive moved.
-- [ ] **Step 4: Commit** the public halves only, in the place Task 1 names (`system/keys/` today), as `feat(keys): add image key 2 (secrets.md 4.1 step 1)`, or with the root's name if Task 1 adds one. The maintainer commits or names the files; the agent does not open them.
-- **Check:** `gh api repos/ars-regia/athanor/environments/signing-images/secrets --jq '.secrets[].name'` lists `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`; `python3 -B -m unittest discover -s forge/specs/athanor-update/tests` (`test_render_policy.py`) and `python3 scripts/verify.py shipped` pass with the new public files.
+- [ ] **Step 4: Commit** the public halves only, in the place Task 1 names (`system/keys/` today), as `feat(keys): add the image key root (UT2)`, with the names Task 1 gives. The maintainer commits or names the files; the agent does not open them.
+- **Check:** `gh api repos/ars-regia/athanor/environments/signing-images/secrets --jq '.secrets[].name'` lists `COSIGN_PRIVATE_KEY` and `COSIGN_PASSWORD`; `python3 -B -m unittest discover -s forge/specs/athanor-update/tests` (`test_render_policy.py`) and `python3 scripts/verify.py shipped` pass with the new public files; key 2's fingerprint in the KC7 inventory is unchanged.
 
 ### Task 4: Read the not-after date and the revocation in `athanor-update` (maintainer checkpoint: verification path)
 
@@ -144,9 +147,9 @@ ADR-0123 item 2: 0.10 is the key-2 release on `:stable`.
 
 ## Open questions for the maintainer
 
-1. **What is key 2 in the hierarchy?** `secrets.md` 4.1 makes key 2 a plain cosign key in `signing-images`, listed in `keyPaths`. UT2 has machines pin an offline root and trust short-lived online keys under it. Is key 2 the root, the first online key, or a plain key that the hierarchy replaces later?
+1. **What role does key 2 take in the hierarchy?** Key 2 exists and is not regenerated: `secrets.md` 4.1 makes it a plain cosign key in `signing-images`, listed in `keyPaths`. UT2 has machines pin an offline root and trust short-lived online keys under it. Is key 2 the root, the first online key, or a plain key that the hierarchy replaces later?
 2. **Which release is the transitional one** (signed with key 1, shipping key 2 and the root)? If it is 0.9 and its policy names key 2 only as a plain key, 0.10 can be verified by 0.9 machines only if key 2 itself signs it, and a root-pinned check takes effect from the release after the one that ships the root. Does ADR-0123's "0.10 is the key-2 release" hold with the hierarchy enforced in 0.10, or in 1.0?
 3. **The six points of "Gap in UT2"**: where the not-after date and the revocation are read, which clock decides, the reason and error code of each outcome, whether the containers/image download gate or only `athanor-update` enforces them, and the MOK key set's signer, format and reader.
 4. **How long is "short-lived"** for the online key, and who renews it, at what cadence, given that only the maintainer can touch the offline root (KC1) and `signing-images` has no reviewer from step 3 on?
 5. **The LUKS2 backup** (Task 2): is it made and checked under KC7?
-6. **Row 7 at the decision point:** if Task 1 is not approved by a date you set before 2026-11-16, does the PR that moves row 7 out of 0.10 (ADR-0123 item 4) also move Tasks 8 to 10, so that 0.10 stays signed with key 1?
+6. **Row 7 at the decision point:** if Task 1 is not approved by a date you set before 2026-11-16, the PR that moves row 7 out of 0.10 (ADR-0123 item 4) moves key 2 with it (`release-1.0.md` section 4.2), so 0.10 stays signed with key 1. Can the transitional release of Task 8 still be 0.10, or does it move too? And is the proposed definition of "ready" under Global Constraints accepted?

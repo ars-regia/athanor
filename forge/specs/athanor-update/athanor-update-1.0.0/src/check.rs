@@ -1842,140 +1842,140 @@ pub(crate) mod tests {
         assert!(tools.calls.borrow().is_empty() && locked(&tools));
     }
 
-/// Row 7 of docs/operations/release-1.0.md, with throwaway keys derived here from a label:
-/// no key material of the project is read. Covered: a key the policy names at the check
-/// (doc_update_trust.md UT2, UT5), both keys of a rotation (UT3), and a key removed from the
-/// policy, the only withdrawal of trust UT2 defines while the key hierarchy does not exist
-/// (UT2, UT3). Not covered: a key past its not-after date and a key revoked by the root.
-/// UT2 leaves where those are read and what state they give to "the revision that builds
-/// it" (ADR-0113), so a case would guess the format; the gap is written down in
-/// docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md.
-mod key_lifecycle {
-    use super::*;
-    use base64::Engine as _;
-    use p256::ecdsa::signature::Signer as _;
-    use p256::ecdsa::{Signature, SigningKey};
-    use p256::pkcs8::{EncodePublicKey as _, LineEnding};
-    use sha2::{Digest as _, Sha256};
+    /// Row 7 of docs/operations/release-1.0.md, with throwaway keys derived here from a label:
+    /// no key material of the project is read. Covered: a key the policy names at the check
+    /// (doc_update_trust.md UT2, UT5), both keys of a rotation (UT3), and a key removed from the
+    /// policy, the only withdrawal of trust UT2 defines while the key hierarchy does not exist
+    /// (UT2, UT3). Not covered: a key past its not-after date and a key revoked by the root.
+    /// UT2 leaves where those are read and what state they give to "the revision that builds
+    /// it" (ADR-0113), so a case would guess the format; the gap is written down in
+    /// docs/superpowers/plans/2026-10-22-row-7-key-hierarchy.md.
+    mod key_lifecycle {
+        use super::*;
+        use base64::Engine as _;
+        use p256::ecdsa::signature::Signer as _;
+        use p256::ecdsa::{Signature, SigningKey};
+        use p256::pkcs8::{EncodePublicKey as _, LineEnding};
+        use sha2::{Digest as _, Sha256};
 
-    /// The P-256 key whose scalar is the SHA-256 of `label`, and the path of its public half,
-    /// written outside the machine's root so that `Machine::new` does not remove it.
-    fn throwaway(test: &str, label: &str) -> (SigningKey, String) {
-        let key =
-            SigningKey::from_slice(&Sha256::digest(label.as_bytes())).expect("a scalar in range");
-        let dir =
-            std::env::temp_dir().join(format!("athanor-update-keys-{}-{test}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let path = dir.join(format!("{label}.pub"));
-        let pem = p256::PublicKey::from(key.verifying_key())
-            .to_public_key_pem(LineEnding::LF)
-            .expect("pem");
-        std::fs::write(&path, pem).expect("write");
-        (key, path.display().to_string())
-    }
-
-    fn der(key: &SigningKey, bytes: &[u8]) -> String {
-        let signature: Signature = key.sign(bytes);
-        base64::engine::general_purpose::STANDARD.encode(signature.to_der())
-    }
-
-    /// A one-layer object as `skopeo copy … dir:` stores it: the blob under its digest and a manifest.
-    fn object(dest: &Path, media_type: &str, blob: &[u8], annotations: &serde_json::Value) {
-        std::fs::create_dir_all(dest).expect("mkdir");
-        let hex = hex::encode(Sha256::digest(blob));
-        std::fs::write(dest.join(&hex), blob).expect("write");
-        let manifest = serde_json::json!({"layers": [{"mediaType": media_type, "digest": format!("sha256:{hex}"), "size": blob.len(), "annotations": annotations}]});
-        std::fs::write(dest.join("manifest.json"), manifest.to_string()).expect("write");
-    }
-
-    /// The simple-signing object of `digest` in REPO (UT2) and its release attestation of the
-    /// security class (UT13), both signed with `key`, stored as the check stores them (UT5).
-    fn sign_and_attest(machine: &Machine, key: &SigningKey, digest: &str) {
-        let payload = serde_json::json!({"critical": {"identity": {"docker-reference": format!("{REPO}:stable")}, "image": {"docker-manifest-digest": digest}, "type": sigobj::PAYLOAD_TYPE}}).to_string();
-        let annotation =
-            serde_json::json!({sigobj::SIGNATURE_ANNOTATION: der(key, payload.as_bytes())});
-        object(
-            &machine.store.signature_dir(digest).expect("digest"),
-            sigobj::LAYER_MEDIA_TYPE,
-            payload.as_bytes(),
-            &annotation,
-        );
-
-        let hex = digest.strip_prefix("sha256:").expect("a sha256 digest");
-        let statement = serde_json::json!({"_type": attestation::STATEMENT_TYPES[1], "subject": [{"name": REPO, "digest": {"sha256": hex}}], "predicateType": attestation::PREDICATE_TYPE, "predicate": {"class": "security", "advisories": ["FEDORA-2026-0001"]}}).to_string();
-        let pae = format!(
-            "DSSEv1 {} {} {} {statement}",
-            attestation::PAYLOAD_TYPE.len(),
-            attestation::PAYLOAD_TYPE,
-            statement.len()
-        );
-        let envelope = serde_json::json!({"payloadType": attestation::PAYLOAD_TYPE, "payload": base64::engine::general_purpose::STANDARD.encode(&statement), "signatures": [{"sig": der(key, pae.as_bytes())}]}).to_string();
-        object(
-            &machine.store.attestation_dir(digest).expect("digest"),
-            attestation::LAYER_MEDIA_TYPE,
-            envelope.as_bytes(),
-            &serde_json::json!({}),
-        );
-    }
-
-    /// SIGNED booted, signed and attested with `signer`, on a machine whose policy names the
-    /// keys `trusted` for REPO: whether it reads verified, why, and the class of its attestation.
-    fn verdict(test: &str, signer: &str, trusted: &[&str]) -> (bool, Reason, Class) {
-        let paths: Vec<String> = trusted
-            .iter()
-            .map(|label| throwaway(test, label).1)
-            .collect();
-        let machine = Machine::new(test, &paths.iter().map(String::as_str).collect::<Vec<_>>());
-        sign_and_attest(&machine, &throwaway(test, signer).0, SIGNED);
-        let tools = Fake::booted(deployed(SIGNED, 1000));
-        let ctx = machine.ctx(&tools, 5000);
-        let state = run(&ctx, true).expect("offline");
-        let class = stored_class(
-            &ctx,
-            &crate::policy::in_force(&machine.policy),
-            REPO,
-            SIGNED,
-        );
-        (state.verified.value, state.verified.reason, class)
-    }
-
-    fn security() -> Class {
-        Class::Security {
-            advisories: vec!["FEDORA-2026-0001".into()],
+        /// The P-256 key whose scalar is the SHA-256 of `label`, and the path of its public half,
+        /// written outside the machine's root so that `Machine::new` does not remove it.
+        fn throwaway(test: &str, label: &str) -> (SigningKey, String) {
+            let key =
+                SigningKey::from_slice(&Sha256::digest(label.as_bytes())).expect("a scalar in range");
+            let dir =
+                std::env::temp_dir().join(format!("athanor-update-keys-{}-{test}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("mkdir");
+            let path = dir.join(format!("{label}.pub"));
+            let pem = p256::PublicKey::from(key.verifying_key())
+                .to_public_key_pem(LineEnding::LF)
+                .expect("pem");
+            std::fs::write(&path, pem).expect("write");
+            (key, path.display().to_string())
         }
-    }
 
-    #[test]
-    fn ut2_a_key_the_policy_names_at_the_check_verifies_the_image_and_its_attestation() {
-        assert_eq!(
-            verdict("row7-in-force", "key-1", &["key-1"]),
-            (true, Reason::Signature, security())
-        );
-    }
+        fn der(key: &SigningKey, bytes: &[u8]) -> String {
+            let signature: Signature = key.sign(bytes);
+            base64::engine::general_purpose::STANDARD.encode(signature.to_der())
+        }
 
-    #[test]
-    fn ut3_during_a_rotation_either_key_in_force_verifies() {
-        for signer in ["key-1", "key-2"] {
+        /// A one-layer object as `skopeo copy … dir:` stores it: the blob under its digest and a manifest.
+        fn object(dest: &Path, media_type: &str, blob: &[u8], annotations: &serde_json::Value) {
+            std::fs::create_dir_all(dest).expect("mkdir");
+            let hex = hex::encode(Sha256::digest(blob));
+            std::fs::write(dest.join(&hex), blob).expect("write");
+            let manifest = serde_json::json!({"layers": [{"mediaType": media_type, "digest": format!("sha256:{hex}"), "size": blob.len(), "annotations": annotations}]});
+            std::fs::write(dest.join("manifest.json"), manifest.to_string()).expect("write");
+        }
+
+        /// The simple-signing object of `digest` in REPO (UT2) and its release attestation of the
+        /// security class (UT13), both signed with `key`, stored as the check stores them (UT5).
+        fn sign_and_attest(machine: &Machine, key: &SigningKey, digest: &str) {
+            let payload = serde_json::json!({"critical": {"identity": {"docker-reference": format!("{REPO}:stable")}, "image": {"docker-manifest-digest": digest}, "type": sigobj::PAYLOAD_TYPE}}).to_string();
+            let annotation =
+                serde_json::json!({sigobj::SIGNATURE_ANNOTATION: der(key, payload.as_bytes())});
+            object(
+                &machine.store.signature_dir(digest).expect("digest"),
+                sigobj::LAYER_MEDIA_TYPE,
+                payload.as_bytes(),
+                &annotation,
+            );
+
+            let hex = digest.strip_prefix("sha256:").expect("a sha256 digest");
+            let statement = serde_json::json!({"_type": attestation::STATEMENT_TYPES[1], "subject": [{"name": REPO, "digest": {"sha256": hex}}], "predicateType": attestation::PREDICATE_TYPE, "predicate": {"class": "security", "advisories": ["FEDORA-2026-0001"]}}).to_string();
+            let pae = format!(
+                "DSSEv1 {} {} {} {statement}",
+                attestation::PAYLOAD_TYPE.len(),
+                attestation::PAYLOAD_TYPE,
+                statement.len()
+            );
+            let envelope = serde_json::json!({"payloadType": attestation::PAYLOAD_TYPE, "payload": base64::engine::general_purpose::STANDARD.encode(&statement), "signatures": [{"sig": der(key, pae.as_bytes())}]}).to_string();
+            object(
+                &machine.store.attestation_dir(digest).expect("digest"),
+                attestation::LAYER_MEDIA_TYPE,
+                envelope.as_bytes(),
+                &serde_json::json!({}),
+            );
+        }
+
+        /// SIGNED booted, signed and attested with `signer`, on a machine whose policy names the
+        /// keys `trusted` for REPO: whether it reads verified, why, and the class of its attestation.
+        fn verdict(test: &str, signer: &str, trusted: &[&str]) -> (bool, Reason, Class) {
+            let paths: Vec<String> = trusted
+                .iter()
+                .map(|label| throwaway(test, label).1)
+                .collect();
+            let machine = Machine::new(test, &paths.iter().map(String::as_str).collect::<Vec<_>>());
+            sign_and_attest(&machine, &throwaway(test, signer).0, SIGNED);
+            let tools = Fake::booted(deployed(SIGNED, 1000));
+            let ctx = machine.ctx(&tools, 5000);
+            let state = run(&ctx, true).expect("offline");
+            let class = stored_class(
+                &ctx,
+                &crate::policy::in_force(&machine.policy),
+                REPO,
+                SIGNED,
+            );
+            (state.verified.value, state.verified.reason, class)
+        }
+
+        fn security() -> Class {
+            Class::Security {
+                advisories: vec!["FEDORA-2026-0001".into()],
+            }
+        }
+
+        #[test]
+        fn ut2_a_key_the_policy_names_at_the_check_verifies_the_image_and_its_attestation() {
             assert_eq!(
-                verdict(
-                    &format!("row7-rotation-{signer}"),
-                    signer,
-                    &["key-1", "key-2"]
-                ),
-                (true, Reason::Signature, security()),
-                "{signer}"
+                verdict("row7-in-force", "key-1", &["key-1"]),
+                (true, Reason::Signature, security())
+            );
+        }
+
+        #[test]
+        fn ut3_during_a_rotation_either_key_in_force_verifies() {
+            for signer in ["key-1", "key-2"] {
+                assert_eq!(
+                    verdict(
+                        &format!("row7-rotation-{signer}"),
+                        signer,
+                        &["key-1", "key-2"]
+                    ),
+                    (true, Reason::Signature, security()),
+                    "{signer}"
+                );
+            }
+        }
+
+        #[test]
+        fn ut2_a_key_removed_from_the_policy_verifies_nothing_it_signed_before() {
+            // UT3: key n leaves the policy one release after key n+1 signs. What key n signed
+            // is then no longer verified, and its attestation no longer gives the security class.
+            assert_eq!(
+                verdict("row7-removed", "key-1", &["key-2"]),
+                (false, Reason::KeyNotInPolicy, Class::Feature)
             );
         }
     }
-
-    #[test]
-    fn ut2_a_key_removed_from_the_policy_verifies_nothing_it_signed_before() {
-        // UT3: key n leaves the policy one release after key n+1 signs. What key n signed
-        // is then no longer verified, and its attestation no longer gives the security class.
-        assert_eq!(
-            verdict("row7-removed", "key-1", &["key-2"]),
-            (false, Reason::KeyNotInPolicy, Class::Feature)
-        );
-    }
-}
 }
