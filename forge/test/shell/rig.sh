@@ -436,6 +436,7 @@ build-image)
     fi
     ;;
 publish-image)
+    mkdir -p "$out"
     podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/rig-image.digest" "$local_image:rig" "docker://$registry/athanor-shell-rig:latest"
     echo "published $registry/athanor-shell-rig@$(cat "$out/rig-image.digest")"
