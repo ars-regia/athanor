@@ -13,6 +13,7 @@ mod identity;
 mod input;
 mod layer;
 mod lock;
+mod ready;
 mod state;
 mod udev;
 mod winit;
@@ -129,6 +130,7 @@ fn run() -> Result<(), Error> {
     };
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
+    ready::announce(&socket)?;
     event_loop.run(None, &mut state, |_| {})?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),
