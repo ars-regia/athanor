@@ -452,6 +452,43 @@ fn move_to_signed_copy<T: Tools>(ctx: &Context<'_, T>, status: &mut Status, cand
     settle(local_update(ctx, status), failure)
 }
 
+/// The evaluation at the shutdown that would apply (UT13; ADR-0127 point 13): a staged
+/// security digest whose postpone expired is unlocked, so this shutdown applies it. Nothing
+/// else: no state is published and no lineage changes. The lock is never waited for, so the
+/// shutdown is not delayed: a busy store leaves the deployment as it is, and the next boot's
+/// check unlocks it for the following shutdown.
+///
+/// # Errors
+/// `Storage` when the store is busy or its state unreadable; bootc's failure otherwise.
+pub fn at_shutdown<T: Tools>(ctx: &Context<'_, T>) -> Result<(), Failure> {
+    let storage = |what: &str, err: std::io::Error| {
+        tracing::error!(%err, "{what}; nothing is unlocked at this shutdown");
+        Failure { code: ErrorCode::Storage, host: None }
+    };
+    let _lock = ctx.store.try_lock().map_err(|err| storage("the update store is busy", err))?;
+    let lineage = ctx.store.lineage().map_err(|err| storage("cannot read the lineage of security updates", err))?;
+    if !lineage.expired(ctx.now) || !ctx.store.automatic_security_updates().map_err(|err| storage("cannot read the opt-out of automatic security updates", err))? {
+        return Ok(());
+    }
+    let status = ctx.tools.status()?;
+    let Some(staged) = status.staged.as_ref().filter(|staged| staged.download_only && !status.rollback_queued) else {
+        return Ok(());
+    };
+    // The check's own gates: a held digest, or one not newer than the booted build, stays locked.
+    if local_update(ctx, &status)? != UpdateState::Downloaded {
+        return Ok(());
+    }
+    // An unreadable record of the newest booted build makes the check unlock nothing; so here.
+    ctx.store.newest_booted().map_err(|err| storage("cannot read the record of the newest booted build", err))?;
+    let policy = crate::policy::in_force(&ctx.policy);
+    if !matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. }) {
+        return Ok(());
+    }
+    ctx.tools.apply_downloaded()?;
+    tracing::info!(digest = %staged.digest, "the postpone expired: the security update applies at this shutdown");
+    Ok(())
+}
+
 /// Runs one check and publishes the state. `offline` is the run at boot, before the
 /// network is up, and the run after a request: it verifies and publishes, nothing else.
 ///
@@ -1696,5 +1733,112 @@ pub(crate) mod tests {
                 assert_eq!(std::fs::read_to_string(machine.store.var.join(name)).expect("read"), text, "{name} is left as it is");
             }
         }
+    }
+
+    /// `attested()` is staged and locked, of `class` by its stored attestation, under `lineage`;
+    /// the calls of the setup are forgotten.
+    fn staged_for_shutdown(test: &str, class: Class, lineage: &Lineage) -> (Machine, Fake) {
+        let (machine, tools) = offered_attested(test, Some(class));
+        store_attestation(&machine, &tools);
+        stage(&tools);
+        machine.store.set_lineage(lineage).expect("write");
+        tools.calls.borrow_mut().clear();
+        (machine, tools)
+    }
+
+    fn locked(tools: &Fake) -> bool {
+        tools.status.borrow().staged.as_ref().is_some_and(|staged| staged.download_only)
+    }
+
+    #[test]
+    fn shutdown_unlocks_an_expired_postpone() {
+        let lineage = open_lineage(NOW, true);
+        let (machine, tools) = staged_for_shutdown("shutdown-expired", security(), &lineage);
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
+        assert!(!locked(&tools));
+        assert_eq!(machine.store.lineage().expect("stored"), lineage, "the lineage stays open until the digest boots");
+    }
+
+    #[test]
+    fn shutdown_leaves_an_unexpired_postpone_locked() {
+        let (machine, tools) = staged_for_shutdown("shutdown-unexpired", security(), &open_lineage(NOW, true));
+        at_shutdown(&machine.ctx(&tools, NOW + 604_799)).expect("evaluated");
+        assert!(tools.calls.borrow().is_empty() && locked(&tools));
+    }
+
+    #[test]
+    fn shutdown_never_touches_a_feature_digest() {
+        let (machine, tools) = staged_for_shutdown("shutdown-feature", Class::Feature, &open_lineage(NOW, true));
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(tools.calls.borrow().is_empty() && locked(&tools));
+    }
+
+    #[test]
+    fn shutdown_unlocks_nothing_the_opt_out_or_a_return_holds() {
+        let (machine, tools) = staged_for_shutdown("shutdown-opt-out", security(), &open_lineage(NOW, true));
+        machine.store.set_automatic_security_updates(false).expect("write");
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(tools.calls.borrow().is_empty() && locked(&tools), "the opt-out holds it");
+        let (machine, tools) = staged_for_shutdown("shutdown-rollback", security(), &open_lineage(NOW, true));
+        tools.status.borrow_mut().rollback_queued = true;
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(tools.calls.borrow().is_empty() && locked(&tools), "a queued return to the previous deployment holds it");
+    }
+
+    #[test]
+    fn shutdown_unlocks_nothing_the_check_would_not_offer() {
+        let (machine, tools) = staged_for_shutdown("shutdown-held", security(), &open_lineage(NOW, true));
+        machine.store.set_held(&attested()).expect("held");
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools), "a held digest stays locked");
+        let (machine, tools) = staged_for_shutdown("shutdown-older", security(), &open_lineage(NOW, true));
+        tools.status.borrow_mut().booted.build_time = 2000;
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools), "a digest not newer than the booted build stays locked");
+    }
+
+    #[test]
+    fn shutdown_unlocks_once_the_boots_run_out() {
+        let mut lineage = open_lineage(NOW, true);
+        lineage.open.as_mut().expect("open").boots_remaining = 0;
+        let (machine, tools) = staged_for_shutdown("shutdown-boots", security(), &lineage);
+        at_shutdown(&machine.ctx(&tools, NOW + 1)).expect("evaluated");
+        assert_eq!(*tools.calls.borrow(), ["apply_downloaded"]);
+        assert!(!locked(&tools));
+    }
+
+    #[test]
+    fn shutdown_with_an_unreadable_file_unlocks_nothing() {
+        for (name, text) in [("automatic-security-updates", "maybe\n"), ("lineage.json", "{"), ("newest-booted", "soon\n")] {
+            let (machine, tools) = staged_for_shutdown(&format!("shutdown-unreadable-{name}"), security(), &open_lineage(NOW, true));
+            std::fs::write(machine.store.var.join(name), text).expect("write");
+            let failure = at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect_err("unreadable");
+            assert_eq!(failure.code, ErrorCode::Storage, "{name}");
+            assert!(!tools.called("apply_downloaded") && locked(&tools), "{name}");
+            assert_eq!(std::fs::read_to_string(machine.store.var.join(name)).expect("read"), text, "{name} is left as it is");
+        }
+    }
+
+    #[test]
+    fn shutdown_unlocks_nothing_whose_attestation_no_longer_verifies() {
+        let (machine, tools) = staged_for_shutdown("shutdown-rotated", security(), &open_lineage(NOW, true));
+        // The key of the attestations was rotated since the check stored this one.
+        let policy = machine.root.join("usr/policy.json");
+        let text = std::fs::read_to_string(&policy).expect("read");
+        assert_eq!(text.matches("made/a.pub").count(), 1);
+        std::fs::write(&policy, text.replace("made/a.pub", "real/k1.pub")).expect("write");
+        at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect("evaluated");
+        assert!(!tools.called("apply_downloaded") && locked(&tools));
+    }
+
+    #[test]
+    fn shutdown_with_the_store_busy_changes_nothing() {
+        let _spawning = crate::goback::tests::SPAWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (machine, tools) = staged_for_shutdown("shutdown-busy", security(), &open_lineage(NOW, true));
+        let _held = machine.store.lock().expect("lock");
+        let failure = at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect_err("busy");
+        assert_eq!(failure.code, ErrorCode::Storage);
+        assert!(tools.calls.borrow().is_empty() && locked(&tools));
     }
 }

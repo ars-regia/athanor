@@ -1,12 +1,21 @@
 [Unit]
 Description=Publish the Athanor trust state at boot
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_update_trust.md
-After=systemd-tmpfiles-setup.service
+# Stops before ostree-finalize-staged.service, which applies the staged deployment at its stop:
+# an expired postpone is unlocked in time for this shutdown (UT13).
+After=systemd-tmpfiles-setup.service ostree-finalize-staged.service
 Before=display-manager.service greetd.service
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/bin/athanor-update check --offline
+ExecStop=/usr/bin/athanor-update shutdown
+# Residual: a failed ExecStart leaves the unit failed, and a failed unit runs no ExecStop. The
+# check fails only when bootc gives no status or the state cannot be published, and the failure
+# stays visible. The next boot's offline check unlocks an expired postpone for the shutdown
+# after it: at most one shutdown is lost.
+TimeoutStopSec=30
 PrivateNetwork=yes
 # Measured by spike U1 against a real `bootc upgrade --download-only` and a real
 # `--from-downloaded` (doc_update_trust.md, UT1). Do not add RestrictSUIDSGID (bootc fails on
