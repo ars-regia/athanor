@@ -40,6 +40,11 @@ applies to Claude Code only.
   `APPROVED` review by `hr-mes` whose `commit.oid` in `gh pr view <n> --json reviews` is the
   card's head sha and whose `submittedAt` is later than the card; Claude then merges with
   `athanor-agent gh pr merge <n> --squash --match-head-commit <full sha>`, never `--admin`.
+  A sync pull request that merges `iso-v0` into a rebase integration branch
+  (`chore(rebase): merge iso-v0 into rebase/<name>`) is merged with `--merge` in place of
+  `--squash`, under the same card and approval, so the integration branch keeps `iso-v0` as a
+  parent and the next sync conflicts only on real changes. *(maintainer decision, 2026-10-22:
+  the squash of #673 and #703 made each sync re-resolve about a hundred add/add conflicts)*
   An App pull request whose files are all under a path with no owner in `.github/CODEOWNERS`
   (ADR-0107: `docs/superpowers/plans/`, `docs/spikes/`) needs no approval: after the card
   and the reading above, Claude merges it the same way, and the card names the unowned path.
