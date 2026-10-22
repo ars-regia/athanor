@@ -723,8 +723,11 @@ impl Dock {
             let row = ui.add(list, Kind::Button(open));
             acts.push((row, MenuAct::Launch(info.clone())));
             // The file as it is now, not as the watch's debounce last read it: one small
-            // read, bounded by favorites::MAX_FILE_BYTES, per menu.
-            self.favorites.reload();
+            // read, bounded by favorites::MAX_FILE_BYTES, per menu. A change the watch has
+            // not brought yet redraws the row too, once the menu closes.
+            if self.favorites.reload() {
+                self.stale = true;
+            }
             if let Some(act) = pin_act(self.favorites.ids(), entry.desktop_id.clone()) {
                 let label = match act {
                     MenuAct::Unpin(_) => tr("Unpin from Dock"),
