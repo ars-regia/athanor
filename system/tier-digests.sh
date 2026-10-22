@@ -24,11 +24,12 @@
 # GITHUB_REPOSITORY (default https://github.com and ars-regia/athanor) run on a branch of
 # TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
-# trusted run accepts them. No other branch is trusted, rebase/* included: creating a branch is
-# not protected, and a tier signed there could be adopted by the next iso-v0 run. A
-# missing or foreign signature fails the check; any other failure of cosign (registry, Rekor,
-# TUF, network) is an error, never a missing signature. Needs skopeo, cosign and jq, and a
-# registry session when the tier images are private.
+# trusted run accepts them. No other branch is trusted, rebase/* included, but for the base of a
+# pull request below: creating a branch is not protected, and a tier signed there could be
+# adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
+# verify fail on it; any other failure of cosign (registry, Rekor, TUF, network) is an error,
+# never a missing signature. Needs skopeo, cosign and jq, and a registry session when the tier
+# images are private.
 #
 # resolve reads the tag `latest`, except in a pull request (GITHUB_BASE_REF set) into a branch
 # other than iso-v0 and main, such as a rebase integration branch (ADR-0125): there it reads the
@@ -56,42 +57,59 @@ resolve:1 | verify:1 | signed:2 | probe:2) ;;
 esac
 
 ISSUER=https://token.actions.githubusercontent.com
-workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/call-system-image.yml"
-# Owner, repository, host and branch names hold no regex metacharacter other than the dot.
-workflow=${workflow//./\\.}
-command -v cosign > /dev/null || die "cosign is not on PATH"
-read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main}"
-refs=''
-for ref in "${trusted[@]}"; do
-    [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || die "'$ref' of TIER_TRUSTED_REFS is not a branch name"
-    refs+="${refs:+|}${ref//./\\.}"
-done
-[[ -n $refs ]] || die "TIER_TRUSTED_REFS names no branch"
-# The run's own branch, when its name needs no escaping beyond the dot; any other name is left
-# out, which only makes the check stricter.
-own=${GITHUB_REF:-}
-own=${own#refs/heads/}
-if [[ ${GITHUB_REF:-} == refs/heads/* && $own =~ ^[A-Za-z0-9._/-]+$ ]]; then
-    refs+="|${own//./\\.}"
-elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
-    echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
+# Only these messages of cosign v3 make a reference unsigned, every other failure is an error:
+#   "no signatures found"                 no signature at all;
+#   "no matching CertificateIdentity" and
+#   "none of the expected identities"     a keyless signature by another identity;
+#   "no matching signatures: error verifying bundle: empty key"
+#                                         a signature in the cosign v2 format or by a key, which
+#                                         no keyless identity can match;
+#   "no matching signatures:" ending the line.
+# Each "no matching signatures" form is anchored to the end of the line: cosign appends a
+# transient cause (a Rekor lookup that failed) to the same prefix, and that is an error.
+# A match on any line counts: with a foreign signature beside a trusted one whose check failed
+# for a transient cause, the reference reads as unsigned. Publishing then only signs it again,
+# and resolve and verify fail on unsigned as on an error, so the match only names the cause
+# wrongly; any other verifier must not use it to tell "unsigned" from an error.
+UNVERIFIED='no signatures found|no matching CertificateIdentity|none of the expected identities matched|no matching signatures: *$|no matching signatures: error verifying bundle: empty key *$'
+
+# BASE: the base branch of a pull request into a branch other than iso-v0 and main, else empty.
+BASE=${GITHUB_BASE_REF:-}
+if [[ $BASE == iso-v0 || $BASE == main ]]; then
+    BASE=''
+elif [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    die "the base branch '$BASE' is not a branch name"
 fi
-TAG=latest
-base=${GITHUB_BASE_REF:-}
-if [[ -n $base && $base != iso-v0 && $base != main ]]; then
-    [[ $base =~ ^[A-Za-z0-9._/-]+$ ]] || die "the base branch '$base' is not a branch name"
-    refs+="|${base//./\\.}"
-    base=${base,,}
-    TAG=branch-${base//[^a-z0-9._-]/-}
-fi
-IDENTITY="^${workflow}@refs/heads/(${refs})\$"
-# cosign v3 reports a missing or foreign signature with these messages. "no matching
-# signatures" is anchored to the end of the line: cosign appends a transient cause (a Rekor
-# lookup that failed) to the same prefix, and that is an error, not a missing signature.
-UNVERIFIED='no signatures found|no matching signatures: *$|no matching CertificateIdentity'
+
+# trust: sets IDENTITY, the certificate identity regex of a trusted run.
+trust() {
+    local workflow ref own refs='' trusted
+    command -v cosign > /dev/null || die "cosign is not on PATH"
+    workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/call-system-image.yml"
+    # Owner, repository, host and branch names hold no regex metacharacter other than the dot.
+    workflow=${workflow//./\\.}
+    read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main}"
+    for ref in "${trusted[@]}"; do
+        [[ $ref =~ ^[A-Za-z0-9._/-]+$ ]] || die "'$ref' of TIER_TRUSTED_REFS is not a branch name"
+        refs+="${refs:+|}${ref//./\\.}"
+    done
+    [[ -n $refs ]] || die "TIER_TRUSTED_REFS names no branch"
+    # The run's own branch, when its name needs no escaping beyond the dot; any other name is
+    # left out, which only makes the check stricter.
+    own=${GITHUB_REF:-}
+    own=${own#refs/heads/}
+    if [[ ${GITHUB_REF:-} == refs/heads/* && $own =~ ^[A-Za-z0-9._/-]+$ ]]; then
+        refs+="|${own//./\\.}"
+    elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
+        echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
+    fi
+    [[ -z $BASE ]] || refs+="|${BASE//./\\.}"
+    IDENTITY="^${workflow}@refs/heads/(${refs})\$"
+}
 
 probe() {
     local err status=0 rc=0
+    trust
     err=$(mktemp)
     cosign verify --certificate-identity-regexp "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$1" > /dev/null 2> "$err" || status=$?
     if [[ $status -eq 0 ]]; then
@@ -100,6 +118,10 @@ probe() {
         # stderr: stdout is the verdict. The identity it did have is what a maintainer needs.
         if grep -q 'got "' "$err"; then
             sed -n "s|.*got \"\(.*\)\".*|tier-digests: $1 is signed as \1, not by a trusted run|p" "$err" >&2
+        elif grep -q 'got subjects \[' "$err"; then
+            sed -n "s|.*got subjects \[\(.*\)\].*|tier-digests: $1 is signed as \1, not by a trusted run|p" "$err" >&2
+        elif grep -q 'empty key' "$err"; then
+            echo "tier-digests: $1 has a signature in the legacy format or by a key, not by a trusted run" >&2
         else
             echo "tier-digests: $1 has no signature" >&2
         fi
@@ -118,6 +140,7 @@ signed() { bash "$ROOT/forge/scripts/retry.sh" bash "$SELF" probe "$1"; }
 verify_tiers() {
     local registry=$1 n=0 digest verdict unsigned=()
     shift
+    trust
     for digest; do
         verdict=$(signed "$registry/athanor-forge-tier$n-repo@$digest")
         [[ $verdict == signed ]] || unsigned+=("tier$n")
@@ -144,10 +167,15 @@ verify)
 resolve)
     registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
     registry=${registry,,}
+    tag=latest
+    if [[ -n $BASE ]]; then
+        tag=${BASE,,}
+        tag=branch-${tag//[^a-z0-9._-]/-}
+    fi
     args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     digests=()
     for n in 0 1 2 3; do
-        ref=$registry/athanor-forge-tier$n-repo:$TAG
+        ref=$registry/athanor-forge-tier$n-repo:$tag
         digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref")
         [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$ref gave no digest: '$digest'"
         args+=(--arg "tier$n" "$digest")

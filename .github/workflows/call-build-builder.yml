@@ -10,7 +10,6 @@ on:
 env:
   # REGISTRY_HOST repository variable, default ghcr.io (as in forge-ghcr-cleanup.yml).
   REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
-  FEDORA_VERSION: 43
   SCCACHE_CACHE_SIZE: 5G
 
 jobs:

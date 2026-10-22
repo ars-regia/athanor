@@ -39,6 +39,7 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
@@ -105,7 +106,9 @@ fi
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
-# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp.
+# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp,
+# and runs the container in systemd mode, whose cgroup tree is writable: bar_session.py --unit
+# puts the bar in its unit's cgroup there, for the compositor's allow-list (OS4).
 # ATHANOR_TOOLKIT_RENDERER reaches athanor-toolkit's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
@@ -116,6 +119,9 @@ in_rig() { # in_rig <image> <command...>
     fi
     if [ -n "${RIG_COMPOSITOR:-}" ]; then
         opts+=(-e RIG_COMPOSITOR)
+    fi
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        opts+=(--systemd=always)
     fi
     if [ -n "${ATHANOR_TOOLKIT_RENDERER:-}" ]; then
         opts+=(-e ATHANOR_TOOLKIT_RENDERER)
@@ -549,9 +555,10 @@ build-toolkit)
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 tasks 1, 4 and 5: what a client of athanor-compositor binds. The rig
-    # has no systemd and no allow-list, so wayland-info runs in no unit and is granted none of
-    # the privileged globals of task 5; the fixture checks the grant.
+    # doc_own_stack.md, C1 tasks 1, 4 and 5: what a client of athanor-compositor binds.
+    # session.sh installs the shipped allow-list, but wayland-info is not listed in it and runs
+    # in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
+    # the grant.
     require athanor-compositor build-compositor
     rm -f "$out/compositor-globals.txt"
     in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
@@ -888,8 +895,8 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggle, a button, three toggles and a field, and the
-        # title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
+        # The gallery's first page: the page toggle (three pages), a button, three toggles and a
+        # field, and the title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
         # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
         # hold all the reference holds, the GTK twin's, recorded (OS8).
         # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
@@ -898,7 +905,7 @@ atspi)
         transcript=atspi-gallery${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
             bash -c "$enable && exec $bin --lang ${3:-en}"
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
@@ -916,14 +923,37 @@ atspi)
         ;;
     bar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
-        # accessibility, tiling, power, the shield.
+        # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
+        # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
+        # 6: input source and tiling need zcosmic_keyboard_layout_manager_v1 and
+        # zcosmic_workspace_manager_v2, whose private replacements docs/spikes/c1-protocols.md
+        # (section 3) proposes and revision 2 specifies.
+        unit='' widgets=8
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            require athanor-compositor build-compositor
+            unit=--unit widgets=6
+        fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 8" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+        # GTK keeps exporting the tree of a surface the compositor closed, so the walk alone
+        # passes a bar that is not on screen; the compositor's log says when it closed one
+        # (src/layer.rs). A missing or empty log fails too: grep would find nothing in it.
+        if [ -n "$unit" ]; then
+            log="$out/atspi-bar-compositor.log"
+            if [ ! -s "$log" ]; then
+                echo "atspi bar: no compositor log at $log" >&2
+                exit 1
+            fi
+            if grep -q "not granted them was closed" "$log"; then
+                echo "atspi bar: athanor-compositor closed the bar's surface; see $log" >&2
+                exit 1
+            fi
+        fi
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,

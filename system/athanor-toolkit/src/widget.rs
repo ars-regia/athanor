@@ -78,6 +78,11 @@ pub enum Kind {
         /// Whether the switch is on.
         active: bool,
     },
+    /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
+    /// steps. It fills the width of its column or group, or its cell in a row, and takes the
+    /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
+    /// it with [`Ui::slider`], which keeps its range valid.
+    Slider(Slider),
     /// A single-line text field.
     Field(Box<TextField>),
     /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
@@ -95,6 +100,67 @@ pub enum Kind {
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
+    /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
+    /// with its aspect ratio kept, centred. It takes no input.
+    Image {
+        /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
+        image: crate::icon::Image,
+        /// The side of the square, in logical pixels.
+        size: f32,
+        /// What the image shows, which names it for assistive technologies; empty for an image
+        /// that only decorates.
+        description: String,
+    },
+}
+
+/// The state of a [`Kind::Slider`]: a name, a range and a value that is always on one of its
+/// steps. The fields are closed to applications so that the invariants hold: the range is
+/// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
+/// `max`, which is always a value even when the step does not divide the range. Make one with
+/// [`Ui::slider`] and change it with [`Ui::set_value`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slider {
+    pub(crate) name: String,
+    pub(crate) value: f64,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
+    pub(crate) step: f64,
+}
+
+impl Slider {
+    /// How many steps `value` is from `min`, the last one being `max`.
+    fn last(&self) -> i64 {
+        // A hair under the exact quotient, so that a range the step divides does not count
+        // `max` twice when the division rounds up.
+        (((self.max - self.min) / self.step) - 1e-9).ceil() as i64
+    }
+
+    /// The value `index` steps from `min`, never past `max`.
+    fn at(&self, index: i64) -> f64 {
+        (self.min + index as f64 * self.step).min(self.max)
+    }
+
+    /// The index of the step `value` is on, or the nearest one.
+    fn index(&self, value: f64) -> i64 {
+        if value >= self.max {
+            return self.last();
+        }
+        (((value - self.min) / self.step).round() as i64).clamp(0, self.last())
+    }
+
+    /// The step nearest to `value`, inside the range; `None` for NaN.
+    fn snap(&self, value: f64) -> Option<f64> {
+        if value.is_nan() {
+            return None;
+        }
+        let value = value.clamp(self.min, self.max);
+        let below = self.at(self.index(value));
+        Some(if (self.max - value).abs() < (value - below).abs() {
+            self.max
+        } else {
+            below
+        })
+    }
 }
 
 /// A button of the title bar.
@@ -158,6 +224,7 @@ impl Widget {
                 | Kind::Toggle { .. }
                 | Kind::Check { .. }
                 | Kind::Switch { .. }
+                | Kind::Slider(_)
                 | Kind::Field(_)
                 | Kind::WindowButton(_)
                 | Kind::MenuItem(_)
@@ -175,6 +242,8 @@ pub enum Event {
     Selected(WidgetId),
     /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
     Toggled(WidgetId),
+    /// A slider's value changed; ask [`Ui::value`] what it is.
+    Changed(WidgetId),
     /// A field's committed text changed.
     Edited(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
@@ -237,6 +306,14 @@ pub enum Key {
     Delete,
     /// Text to type, which may be several characters (a composed or pasted character).
     Text(String),
+    /// Home: the least value of a slider.
+    Home,
+    /// End: the greatest value of a slider.
+    End,
+    /// Page Up: ten steps more on a slider.
+    PageUp,
+    /// Page Down: ten steps fewer on a slider.
+    PageDown,
     /// Escape: closes the open popup, which the driver handles.
     Escape,
     /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
@@ -282,6 +359,8 @@ impl Ui {
 
     /// The root column every widget descends from.
     pub const ROOT: WidgetId = 0;
+    /// The most steps a slider may have between its minimum and its maximum.
+    pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
     /// The longest text a field takes from outside the keyboard, in characters.
     pub const FIELD_MAX_CHARS: usize = 1024;
     /// How far the pointer moves on either axis, in logical pixels, from a press before a drag
@@ -349,6 +428,82 @@ impl Ui {
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
         )
+    }
+
+    /// Adds a slider named `name` for assistive technologies, from `min` to `max` in steps of
+    /// `step` counted from `min` (`max` is always a value, even when the step does not divide
+    /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
+    /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
+    /// at most [`Ui::SLIDER_MAX_STEPS`] steps.
+    pub fn slider(
+        &mut self,
+        parent: WidgetId,
+        name: &str,
+        min: f64,
+        max: f64,
+        step: f64,
+        value: f64,
+    ) -> Option<WidgetId> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(self.add(parent, Kind::Slider(slider)))
+    }
+
+    /// The value of the slider `id`, or `None` if it is not a slider.
+    pub fn value(&self, id: WidgetId) -> Option<f64> {
+        match &self.widgets[id].kind {
+            Kind::Slider(slider) => Some(slider.value),
+            _ => None,
+        }
+    }
+
+    /// Sets the slider `id` to the step nearest to `value`, inside its range, as an assistive
+    /// technology's SetValue does. `None`, and nothing changes, for a widget that is not a
+    /// slider, for NaN and for a value that lands where the slider already is.
+    pub fn set_value(&mut self, id: WidgetId, value: f64) -> Option<Event> {
+        let Kind::Slider(slider) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        let value = slider.snap(value)?;
+        let moved = value != slider.value;
+        slider.value = value;
+        moved.then_some(Event::Changed(id))
+    }
+
+    /// Moves the slider `id` by `steps` steps, stopping at either end.
+    pub(crate) fn step_value(&mut self, id: WidgetId, steps: i64) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let index = (slider.index(slider.value).saturating_add(steps)).clamp(0, slider.last());
+        let value = slider.at(index);
+        self.set_value(id, value)
+    }
+
+    /// Sets the slider `id` from the pointer at `x`, in logical pixels.
+    fn slide(&mut self, id: WidgetId, x: f32) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let fraction = slider_fraction(self.widgets[id].rect, self.rtl, self.theme.font_size, x);
+        let value = slider.min + f64::from(fraction) * (slider.max - slider.min);
+        self.set_value(id, value)
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
@@ -504,6 +659,7 @@ impl Ui {
             }
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
+            Kind::Image { size, .. } => (*size, *size),
             Kind::Column | Kind::Group(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
@@ -555,6 +711,7 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
+            Kind::Slider(_) => (field_width, slider_knob(size) + pad),
             Kind::Field(field) => {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
@@ -638,7 +795,11 @@ impl Ui {
                 for &c in children {
                     if matches!(
                         self.widgets[c].kind,
-                        Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Switch { .. }
+                        Kind::Row
+                            | Kind::Group(_)
+                            | Kind::Menu
+                            | Kind::Switch { .. }
+                            | Kind::Slider(_)
                     ) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
@@ -712,6 +873,10 @@ impl Ui {
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
         let press = self.press.as_mut()?;
+        if let Kind::Slider(_) = self.widgets[press.widget].kind {
+            let id = press.widget;
+            return self.slide(id, x);
+        }
         let moved = (x - press.x).abs().max((y - press.y).abs());
         if press.dragging || moved <= Self::DRAG_THRESHOLD {
             return None;
@@ -746,7 +911,8 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
-                None
+                // A slider takes its value from the press, and from the drag that follows.
+                id.and_then(|id| self.slide(id, x))
             }
             PointerButton::Secondary => id.map(Event::ContextMenu),
         }
@@ -759,6 +925,9 @@ impl Ui {
             return None;
         }
         let press = self.press.take()?;
+        if let Kind::Slider(_) = self.widgets[press.widget].kind {
+            return None;
+        }
         let to = self.hit(x, y);
         if press.dragging {
             return Some(Event::DragEnded {
@@ -773,7 +942,9 @@ impl Ui {
 
     /// Handles a key: a focused field takes text, deletion and the horizontal arrows; otherwise
     /// Tab and Shift+Tab walk the logical order, the arrows the visual one, and Enter or Space
-    /// activates.
+    /// activates. A focused slider takes the arrows (Right moves the knob right, which lowers the
+    /// value when mirrored; Up and Down are not mirrored), Page Up and Page Down (ten steps) and
+    /// Home and End (the least and the greatest value).
     pub fn key(&mut self, key: Key) -> Option<Event> {
         let focused = self.focus;
         if let Some(id) = focused {
@@ -794,6 +965,24 @@ impl Ui {
                     _ => return self.navigate(key),
                 }
                 return Some(Event::Edited(id));
+            }
+        }
+        if let Some(id) = focused {
+            if let Kind::Slider(slider) = &self.widgets[id].kind {
+                let (min, max) = (slider.min, slider.max);
+                // What is seen: Right moves the knob right, which is toward min when mirrored.
+                let along = if self.rtl { -1 } else { 1 };
+                return match key {
+                    Key::Right => self.step_value(id, along),
+                    Key::Left => self.step_value(id, -along),
+                    Key::Up => self.step_value(id, 1),
+                    Key::Down => self.step_value(id, -1),
+                    Key::PageUp => self.step_value(id, 10),
+                    Key::PageDown => self.step_value(id, -10),
+                    Key::Home => self.set_value(id, min),
+                    Key::End => self.set_value(id, max),
+                    key => self.navigate(key),
+                };
             }
         }
         match key {
@@ -885,6 +1074,18 @@ pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) ->
     }
 }
 
+/// The x of the label of a check button or a switch of width `width`, given its `mark`: a check's
+/// label follows its box by `gap`, wherever the widget's rectangle `r` ends; a switch's label
+/// takes the far edge, opposite its track.
+pub(crate) fn label_x(r: Rect, mark: Rect, rtl: bool, is_switch: bool, gap: f32, width: f32) -> f32 {
+    match (is_switch, rtl) {
+        (false, false) => mark.x + mark.w + gap,
+        (false, true) => mark.x - gap - width,
+        (true, false) => r.x,
+        (true, true) => r.x + r.w - width,
+    }
+}
+
 /// The knob inside the `track` of a switch: at the start edge when off, at the end edge when on,
 /// so that it mirrors in right-to-left.
 pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
@@ -901,6 +1102,34 @@ pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
         w: d,
         h: d,
     }
+}
+
+/// The diameter of a slider's knob at text size `font`, in logical pixels.
+pub(crate) fn slider_knob(font: f32) -> f32 {
+    font * 1.4
+}
+
+/// The horizontal centre of the knob of a slider in rectangle `r` when its value is `fraction`
+/// of the way from min to max: the track runs from min at the start edge to max at the end
+/// edge, a knob's radius inside the rectangle so that the knob stays in it.
+pub(crate) fn slider_knob_x(r: Rect, rtl: bool, font: f32, fraction: f64) -> f32 {
+    let inset = slider_knob(font) / 2.0;
+    let length = (r.w - 2.0 * inset).max(0.0);
+    let along = fraction as f32 * length;
+    if rtl {
+        r.x + r.w - inset - along
+    } else {
+        r.x + inset + along
+    }
+}
+
+/// The inverse of [`slider_knob_x`]: how far from min to max the pointer at `x` is, from 0 to 1.
+fn slider_fraction(r: Rect, rtl: bool, font: f32, x: f32) -> f32 {
+    let (at_min, at_max) = (slider_knob_x(r, rtl, font, 0.0), slider_knob_x(r, rtl, font, 1.0));
+    if at_min == at_max {
+        return 0.0;
+    }
+    ((x - at_min) / (at_max - at_min)).clamp(0.0, 1.0)
 }
 
 /// Bidirectional overrides, isolates and marks, and the line and paragraph separators: they
@@ -1010,6 +1239,38 @@ mod tests {
             );
             assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
             assert!(ui.is_active(off));
+        }
+    }
+
+    #[test]
+    fn a_check_label_follows_its_box_in_a_row_cell() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Checks", Theme::default(), rtl);
+            ui.min_width = 600.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let check = |label: &str| Kind::Check {
+                label: label.into(),
+                active: false,
+            };
+            let bold = ui.add(row, check("Bold"));
+            ui.add(row, check("A much longer label"));
+            ui.layout();
+            let widget = ui.widget(bold);
+            let width = widget.text.as_ref().expect("a laid-out label").width();
+            assert!(width > 0.0);
+            let (r, gap) = (widget.rect, ui.theme.gap);
+            let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
+            assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
+            let x = label_x(r, mark, rtl, false, gap, width);
+            if rtl {
+                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
+            } else {
+                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
+            }
+            // A switch keeps the far edge.
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            let x = label_x(r, track, rtl, true, gap, width);
+            assert_eq!(if rtl { x + width } else { x }, if rtl { r.x + r.w } else { r.x });
         }
     }
 
@@ -1368,5 +1629,150 @@ mod tests {
         ui.set_description(app, None);
         ui.set_tooltip(app, None);
         assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+    }
+
+    fn slider(min: f64, max: f64, step: f64, value: f64, rtl: bool) -> (Ui, WidgetId) {
+        let mut ui = Ui::new("Slider", Theme::default(), rtl);
+        let id = ui
+            .slider(Ui::ROOT, "Level", min, max, step, value)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        ui.set_focus(Some(id));
+        (ui, id)
+    }
+
+    #[test]
+    fn a_slider_refuses_a_broken_range() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        let (inf, nan) = (f64::INFINITY, f64::NAN);
+        for (min, max, step, value) in [
+            (0.0, 10.0, 0.0, 0.0),
+            (0.0, 10.0, nan, 0.0),
+            (0.0, 10.0, -1.0, 0.0),
+            (10.0, 0.0, 1.0, 0.0),
+            (5.0, 5.0, 1.0, 5.0),
+            (-inf, 10.0, 1.0, 0.0),
+            (0.0, inf, 1.0, 0.0),
+            (0.0, 10.0, inf, 0.0),
+            (0.0, 10.0, 1.0, nan),
+            (0.0, 10.0, 1.0, inf),
+        ] {
+            assert_eq!(ui.slider(Ui::ROOT, "Level", min, max, step, value), None);
+        }
+        assert_eq!(ui.len(), 1, "a refused slider adds nothing");
+    }
+
+    #[test]
+    fn a_slider_refuses_a_range_it_cannot_count_or_draw() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        // The span overflows, and the steps do not fit comfortably.
+        assert_eq!(ui.slider(Ui::ROOT, "L", -1e308, 1e308, 1.0, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 100.0, 1e-300, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 1e12, 1.0, 0.0), None);
+        assert_eq!(ui.len(), 1);
+        // The most steps is still a slider, and its keys cannot overflow.
+        let id = ui.slider(Ui::ROOT, "L", 0.0, 2e9, 1.0, 2e9);
+        assert!(id.is_some());
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.step_value(id, i64::MAX), None);
+        assert_eq!(ui.step_value(id, i64::MAX).or(ui.step_value(id, -1)), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(2e9 - 1.0));
+    }
+
+    #[test]
+    fn a_slider_ends_on_max() {
+        let (mut ui, id) = slider(0.0, 10.0, 3.0, 0.0, false);
+        assert_eq!(ui.key(Key::End), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.key(Key::Left), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(9.0));
+        assert_eq!(ui.key(Key::Right), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.set_value(id, 5.0), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(6.0));
+        assert_eq!(ui.set_value(id, 9.6), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_slider_stays_on_its_steps_within_its_range() {
+        let (mut ui, id) = slider(0.0, 10.0, 2.0, 0.0, false);
+        for (set, value) in [(11.0, 10.0), (-3.0, 0.0), (3.1, 4.0), (f64::INFINITY, 10.0)] {
+            ui.set_value(id, set);
+            assert_eq!(ui.value(id), Some(value), "set to {set}");
+        }
+        ui.set_value(id, 4.0);
+        assert_eq!(ui.set_value(id, f64::NAN), None);
+        assert_eq!(ui.value(id), Some(4.0));
+        // A value that rounds to where it is moves nothing.
+        assert_eq!(ui.set_value(id, 4.2), None);
+
+        for (key, moved, value) in [
+            (Key::Right, true, 6.0),
+            (Key::Up, true, 8.0),
+            (Key::Left, true, 6.0),
+            (Key::Down, true, 4.0),
+            (Key::PageUp, true, 10.0),
+            (Key::PageUp, false, 10.0),
+            (Key::PageDown, true, 0.0),
+            (Key::PageDown, false, 0.0),
+            (Key::Left, false, 0.0),
+            (Key::End, true, 10.0),
+            (Key::End, false, 10.0),
+            (Key::Home, true, 0.0),
+            (Key::Home, false, 0.0),
+        ] {
+            let event = ui.key(key.clone());
+            let expected = moved.then_some(Event::Changed(id));
+            assert_eq!(event, expected, "{key:?}");
+            assert_eq!(ui.value(id), Some(value), "{key:?}");
+        }
+        // Only a slider has a value.
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        assert_eq!((ui.value(label), ui.set_value(label, 1.0)), (None, None));
+    }
+
+    #[test]
+    fn a_mirrored_slider_follows_what_is_seen() {
+        let seen = |rtl| {
+            let (mut ui, id) = slider(0.0, 10.0, 1.0, 5.0, rtl);
+            let r = ui.widget(id).rect;
+            let font = ui.theme.font_size;
+            let min = slider_knob_x(r, rtl, font, 0.0);
+            let max = slider_knob_x(r, rtl, font, 1.0);
+            assert_eq!(min < max, !rtl, "rtl {rtl}: min is at the start edge");
+            // The pointer at the min end gives min, at the max end gives max.
+            ui.click(min, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(0.0));
+            ui.click(max, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(10.0));
+            ui.set_value(id, 5.0);
+            ui.key(Key::Right);
+            ui.value(id)
+        };
+        assert_eq!(seen(false), Some(6.0));
+        assert_eq!(seen(true), Some(4.0));
+    }
+
+    #[test]
+    fn a_slider_follows_a_press_and_a_drag() {
+        let (mut ui, id) = slider(0.0, 100.0, 1.0, 0.0, false);
+        let r = ui.widget(id).rect;
+        let (y, font) = (r.y + r.h / 2.0, ui.theme.font_size);
+        let at = |f| slider_knob_x(r, false, font, f);
+        let press = ui.pointer_press(at(0.5), y, PointerButton::Primary);
+        assert_eq!(press, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(50.0));
+        // A drag keeps moving the knob, past the drag threshold and outside the widget, and
+        // never starts a drag of its own.
+        let moved = ui.pointer_motion(at(0.75), y + 40.0);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(75.0));
+        let moved = ui.pointer_motion(r.x + r.w + 50.0, y);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(100.0));
+        assert_eq!(ui.pointer_release(at(1.0), y, PointerButton::Primary), None);
+        assert_eq!(ui.pointer_motion(at(0.1), y), None, "the button is up");
+        assert_eq!(ui.value(id), Some(100.0));
     }
 }
