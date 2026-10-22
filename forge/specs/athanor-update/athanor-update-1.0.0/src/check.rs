@@ -478,6 +478,8 @@ pub fn at_shutdown<T: Tools>(ctx: &Context<'_, T>) -> Result<(), Failure> {
     if local_update(ctx, &status)? != UpdateState::Downloaded {
         return Ok(());
     }
+    // An unreadable record of the newest booted build makes the check unlock nothing; so here.
+    ctx.store.newest_booted().map_err(|err| storage("cannot read the record of the newest booted build", err))?;
     let policy = crate::policy::in_force(&ctx.policy);
     if !matches!(stored_class(ctx, &policy, sigobj::repository_of(&staged.image), &staged.digest), Class::Security { .. }) {
         return Ok(());
@@ -1808,7 +1810,7 @@ pub(crate) mod tests {
 
     #[test]
     fn shutdown_with_an_unreadable_file_unlocks_nothing() {
-        for (name, text) in [("automatic-security-updates", "maybe\n"), ("lineage.json", "{")] {
+        for (name, text) in [("automatic-security-updates", "maybe\n"), ("lineage.json", "{"), ("newest-booted", "soon\n")] {
             let (machine, tools) = staged_for_shutdown(&format!("shutdown-unreadable-{name}"), security(), &open_lineage(NOW, true));
             std::fs::write(machine.store.var.join(name), text).expect("write");
             let failure = at_shutdown(&machine.ctx(&tools, NOW + 604_800)).expect_err("unreadable");
