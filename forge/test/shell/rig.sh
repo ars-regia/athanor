@@ -65,8 +65,12 @@ out=${ATHANOR_RIG_OUT:-$root/.scratch/shell-rig}
 # The dock the atspi and orca scenes run, as a path inside the rig.
 dock_bin=${ATHANOR_DOCK_BIN:-/out/bin/athanor-dock}
 dock_app=${dock_bin##*/}
-# Another dock's captures sit beside the GTK dock's goldens under their own names.
-dock_tag=${ATHANOR_DOCK_BIN:+toolkit-}
+# The toolkit dock's captures sit beside the GTK dock's goldens under their own names; any
+# other dock is compared with the GTK goldens.
+dock_tag=
+if [ "$dock_bin" = /out/toolkit-dock/athanor-dock ]; then
+    dock_tag=toolkit-
+fi
 # RIG_HOLD is split into words, so the name it carries must be one word.
 case $dock_app in
 '' | *[[:space:]]*)
