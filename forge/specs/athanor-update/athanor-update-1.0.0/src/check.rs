@@ -503,12 +503,13 @@ pub fn run<T: Tools>(ctx: &Context<'_, T>, offline: bool) -> Result<State, Failu
         }
         // Applied (ADR-0127 point 10, as amended on 2026-10-22): the booted digest verifies as
         // the security class, was built after the anchor, greenboot is not returning from it,
-        // and greenboot declared the boot good: `boot-complete.target` is active, read here at
-        // run time, since a unit ordering only holds within one transaction. The state service
-        // at boot runs before that verdict and never counts it. A boot that failed its health
+        // and greenboot declared the boot good: `greenboot-success.target` is active, read here
+        // at run time, since a unit ordering only holds within one transaction.
+        // `boot-complete.target` is not that verdict: it becomes active whatever the health
+        // check says. The state service at boot runs before the verdict and never counts it. A boot that failed its health
         // checks is not counted, and the check still runs and downloads.
         let booted = &status.booted;
-        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) && ctx.tools.boot_complete() {
+        if !offline && !status.rollback_queued && booted.build_time > lineage.anchor_build_time.unwrap_or(0) && matches!(stored_class(ctx, &policy, sigobj::repository_of(&booted.image), &booted.digest), Class::Security { .. }) && ctx.tools.boot_healthy() {
             lineage.applied(&booted.digest, booted.build_time);
         }
     }
@@ -645,8 +646,8 @@ pub(crate) mod tests {
         /// The test vector the registry serves in place of the one of the digest's class; ""
         /// serves a manifest with no layers.
         pub served: Cell<Option<&'static str>>,
-        /// `boot-complete.target` is active: greenboot's required health checks passed.
-        pub boot_complete: bool,
+        /// `greenboot-success.target` is active: greenboot's required health checks passed.
+        pub boot_healthy: bool,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -666,7 +667,7 @@ pub(crate) mod tests {
                 attestations: RefCell::new(HashMap::new()),
                 attestation_breaks: Cell::new(false),
                 served: Cell::new(None),
-                boot_complete: true,
+                boot_healthy: true,
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -788,8 +789,8 @@ pub(crate) mod tests {
         fn metered(&self) -> bool {
             self.metered
         }
-        fn boot_complete(&self) -> bool {
-            self.boot_complete
+        fn boot_healthy(&self) -> bool {
+            self.boot_healthy
         }
     }
 
@@ -1487,13 +1488,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_boot_that_failed_its_health_checks_is_not_applied() {
-        // Greenboot failed boot-complete.target, and no rollback is queued: someone intervenes
+        // Greenboot's health check failed, and no rollback is queued: someone intervenes
         // by hand. The check still runs and asks the registry; the boot is not counted.
         let machine = Machine::new("health-failed", &["real/k1.pub"]);
         let lineage = Lineage { anchor: Some(digest(1)), anchor_build_time: Some(1000), ..open_lineage(NOW - 86_400, false) };
         machine.store.set_lineage(&lineage).expect("write");
         let mut tools = booted_attested(&machine, false);
-        tools.boot_complete = false;
+        tools.boot_healthy = false;
         let state = run(&machine.ctx(&tools, NOW), false).expect("check");
         assert_eq!(state.postpone, lineage.published());
         assert_eq!(machine.store.lineage().expect("stored"), lineage);
