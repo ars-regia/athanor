@@ -68,12 +68,12 @@ mod tests {
     fn the_local_zone_is_readable_under_confinement() {
         // Fedora links /etc/localtime into /usr/share/zoneinfo; Landlock judges the resolved file.
         let Ok(target) = std::fs::read_link("/etc/localtime") else {
-            eprintln!("skipped: /etc/localtime is not a symlink on this host");
+            eprintln!("skipped: /etc/localtime is a regular file or missing, not a symlink, on this host");
             return;
         };
-        let resolved = Path::new("/etc").join(target);
-        if !std::fs::canonicalize(&resolved).is_ok_and(|real| real.starts_with("/usr")) {
-            eprintln!("skipped: /etc/localtime does not resolve into /usr on this host");
+        let resolved = std::fs::canonicalize(Path::new("/etc").join(&target));
+        if !resolved.as_ref().is_ok_and(|real| real.starts_with("/usr")) {
+            eprintln!("skipped: /etc/localtime resolves to {resolved:?}, not into /usr, on this host");
             return;
         }
         let writable = std::env::temp_dir().join(format!("athanor-update-notify-zone-{}", std::process::id()));
