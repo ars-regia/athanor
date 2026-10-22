@@ -120,9 +120,10 @@ fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &s
 }
 
 /// The class of the candidate: its release attestation is fetched, then verified. A failed
-/// fetch is the feature class, logged and not a failure of the check: the digest then waits
-/// for `Apply()`, and the next check fetches again. Only the attestations of the booted, the
-/// staged and the candidate digest are kept.
+/// fetch is logged and not a failure of the check: the attestation stored by an earlier check
+/// decides, and with none the digest is of the feature class and waits for `Apply()`; the next
+/// check fetches again. Only the attestations of the booted, the staged and the candidate
+/// digest are kept.
 fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status, digest: &str) -> Class {
     let repository = sigobj::repository_of(&status.booted.image);
     let keep: Vec<&str> = [Some(status.booted.digest.as_str()), status.staged.as_ref().map(|staged| staged.digest.as_str()), Some(digest)].into_iter().flatten().collect();
@@ -132,10 +133,19 @@ fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &St
     let Some(dir) = ctx.store.attestation_dir(digest) else {
         return Class::Feature;
     };
-    // The copy is bounded neither in size nor in time: #658.
-    if let Err(failure) = ctx.tools.fetch_attestation(repository, digest, &dir) {
-        tracing::warn!(code = ?failure.code, %digest, "the release attestation could not be fetched; the candidate is of the feature class");
-        return Class::Feature;
+    // The copy goes to a sibling and replaces the stored attestation only once complete: skopeo
+    // leaves a partial directory behind when it fails, and a registry that fails on purpose must
+    // not erase an attestation that verified. The copy is bounded neither in size nor in time: #658.
+    let partial = dir.with_extension("partial");
+    let fetched = remove_dir(&partial).map_err(|err| tracing::error!(%err, "cannot clear an earlier partial attestation copy")).and_then(|()| {
+        ctx.tools.fetch_attestation(repository, digest, &partial).map_err(|failure| {
+            tracing::warn!(code = ?failure.code, %digest, "the release attestation could not be fetched; the one stored, if any, decides");
+        })
+    });
+    if fetched.is_ok() {
+        if let Err(err) = remove_dir(&dir).and_then(|()| std::fs::rename(&partial, &dir)) {
+            tracing::error!(%err, %digest, "cannot store the fetched release attestation");
+        }
     }
     let class = stored_class(ctx, policy, repository, digest);
     if class == Class::Feature {
@@ -144,6 +154,14 @@ fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &St
         tracing::warn!(%digest, "the release attestation does not verify as the security class; the candidate is of the feature class");
     }
     class
+}
+
+/// Removes a directory and what it holds; one that does not exist is no error.
+fn remove_dir(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        removed => removed,
+    }
 }
 
 /// A security-class digest is staged and locked: the check unlocks it for the next shutdown
@@ -580,6 +598,8 @@ pub(crate) mod tests {
         pub names: bool,
         /// The release attestations the registry serves, by digest; any other fetch fails.
         pub attestations: RefCell<HashMap<String, Class>>,
+        /// The attestation copy fails midway, as skopeo's does, leaving only `version` behind.
+        pub attestation_breaks: Cell<bool>,
         pub calls: RefCell<Vec<String>>,
     }
 
@@ -597,6 +617,7 @@ pub(crate) mod tests {
                 status_fails: Cell::new(false),
                 names: true,
                 attestations: RefCell::new(HashMap::new()),
+                attestation_breaks: Cell::new(false),
                 calls: RefCell::new(Vec::new()),
             }
         }
@@ -686,6 +707,14 @@ pub(crate) mod tests {
         }
         fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
             self.call(format!("fetch_attestation {repository} {digest}"));
+            if self.attestation_breaks.get() {
+                if dest.exists() {
+                    std::fs::remove_dir_all(dest).expect("clean");
+                }
+                std::fs::create_dir_all(dest).expect("mkdir");
+                std::fs::write(dest.join("version"), "Directory Transport Version: 1.1\n").expect("write");
+                return Err(Failure { code: ErrorCode::Network, host: Some("registry.example".into()) });
+            }
             let vector = match self.attestations.borrow().get(digest) {
                 Some(Class::Security { .. }) => "att-security",
                 Some(Class::Feature) => "att-feature",
@@ -1474,6 +1503,24 @@ pub(crate) mod tests {
             assert_eq!(machine.store.lineage().expect("stored").published(), state.postpone);
             assert!(!tools.called("download") && !tools.called("apply_downloaded"));
         }
+    }
+
+    #[test]
+    fn a_failed_refetch_keeps_the_stored_attestation() {
+        // The staged digest is postponed; a refetch that fails midway must not erase what verified.
+        let (machine, tools) = offered_attested("refetch-breaks", Some(security()));
+        store_attestation(&machine, &tools);
+        stage(&tools);
+        machine.store.set_lineage(&open_lineage(NOW - 86_400, true)).expect("write");
+        tools.attestation_breaks.set(true);
+        let state = run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert_eq!((state.update, state.last_error), (UpdateState::Downloaded, ErrorCode::None));
+        assert!(tools.called("fetch_attestation"));
+        let policy = crate::policy::in_force(&machine.policy);
+        assert_eq!(stored_class(&machine.ctx(&tools, NOW), &policy, ATT_REPO, &attested()), security(), "the stored attestation survives");
+        let state = run(&machine.ctx(&tools, NOW + 6 * 86_400), true).expect("offline");
+        assert_eq!(state.update, UpdateState::WillApplyAtNextShutdown, "the expired postpone still unlocks at boot");
+        assert!(tools.called("apply_downloaded"));
     }
 
     #[test]
