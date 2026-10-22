@@ -1294,12 +1294,13 @@ impl Ui {
         None
     }
 
-    /// Shows the input method's preedit in the focused field.
+    /// Shows the input method's preedit in the focused field, scrolled to its caret.
     pub fn compose(&mut self, preedit: &str, cursor: Option<(usize, usize)>) {
         if let Some(Kind::Field(field) | Kind::TextArea(field)) =
             self.focus.map(|id| &mut self.widgets[id].kind)
         {
             field.compose(&mut self.text, preedit, cursor);
+            field.scroll_to_caret(&mut self.text);
         }
     }
 
@@ -2322,6 +2323,17 @@ mod tests {
         let (top, bottom) = (c.y0 as f32 - offset, c.y1 as f32 - offset);
         let shown = top >= -0.5 && bottom <= view + 0.5;
         (shown, (c.y0 as f32 / line).round() as i32)
+    }
+
+    #[test]
+    fn composing_scrolls_a_text_area_to_its_caret() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "1\n2\n3\n4\n5\n6", 3);
+        ui.layout();
+        ui.set_focus(Some(area));
+        assert_eq!(caret_line(&mut ui, area), (false, 5));
+        ui.compose("x", Some((1, 1)));
+        assert_eq!(caret_line(&mut ui, area), (true, 5));
     }
 
     #[test]
