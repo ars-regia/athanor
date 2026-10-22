@@ -4,9 +4,12 @@
 #
 #   resolve     write tier-digests.json for a build outside the Orchestrator run that
 #               published the tiers (System Image Check and local builds): the registry, the
-#               digest that each athanor-forge-tier<N>-repo:latest names now, read once, so
+#               digest that each athanor-forge-tier<N>-repo:<tag> names now, read once, so
 #               every image the job builds installs the same tiers whatever is published
-#               meanwhile, and when it was resolved (UTC), which build-image.sh prints
+#               meanwhile, and when it was resolved (UTC), which build-image.sh prints. The
+#               file is written only when every digest verifies, as verify does.
+#   verify      check that each tier digest of tier-digests.json is signed by a trusted run;
+#               the Orchestrator runs it before the system image build
 #   signed REF  print signed or unsigned for one image reference, retrying a failure of
 #               cosign itself; forge/scripts/publish_tiers.sh asks it before it reuses a tier
 #   probe REF   one attempt of signed
@@ -21,11 +24,23 @@
 # GITHUB_REPOSITORY (default https://github.com and ars-regia/athanor) run on a branch of
 # TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
-# trusted run accepts them. No other branch is trusted, rebase/* included: creating a branch is
-# not protected, and a tier signed there could be adopted by the next iso-v0 run. A
-# missing or foreign signature is unsigned; any other failure of cosign (registry, Rekor,
-# TUF, network) is an error, never a missing signature. Needs skopeo and jq, cosign for signed
-# and probe, and a registry session when the tier images are private.
+# trusted run accepts them. No other branch is trusted, rebase/* included, but for the base of a
+# pull request below: creating a branch is not protected, and a tier signed there could be
+# adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
+# verify fail on it; any other failure of cosign (registry, Rekor, TUF, network) is an error,
+# never a missing signature. Needs skopeo, cosign and jq, and a registry session when the tier
+# images are private.
+#
+# resolve reads the tag `latest`, except in a pull request (GITHUB_BASE_REF set) into a branch
+# other than iso-v0 and main, such as a rebase integration branch (ADR-0125): there it reads the
+# tag `branch-<base>` that forge/scripts/publish_tiers.sh gives that branch's tiers, and trusts
+# that branch's signatures when a ruleset on the branch requires a code owner's review of pull
+# requests and forbids force pushes (decided by the maintainer on 2026-10-22), so the check
+# builds on the base it merges into. The branch's creation is not itself reviewed. `gh api`
+# (GH_TOKEN) reads the rules of the branch at check time: a pull_request rule with
+# require_code_owner_review and a non_fast_forward rule; rules that cannot be read are an error,
+# never an unprotected branch. The trust affects only that pull request's check, never the tiers
+# publish_tiers.sh reuses or anything pushed to iso-v0 or main.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -42,7 +57,7 @@ die() {
     exit 1
 }
 case ${1:-}:$# in
-resolve:1 | signed:2 | probe:2) ;;
+resolve:1 | verify:1 | signed:2 | probe:2) ;;
 *) usage ;;
 esac
 
@@ -58,11 +73,33 @@ ISSUER=https://token.actions.githubusercontent.com
 # Each "no matching signatures" form is anchored to the end of the line: cosign appends a
 # transient cause (a Rekor lookup that failed) to the same prefix, and that is an error.
 # A match on any line counts: with a foreign signature beside a trusted one whose check failed
-# for a transient cause, the reference reads as unsigned. Publishing then only signs it again;
-# a verifier must not use this to tell "unsigned" from an error without checking that too.
+# for a transient cause, the reference reads as unsigned. Publishing then only signs it again,
+# and resolve and verify fail on unsigned as on an error, so the match only names the cause
+# wrongly; any other verifier must not use it to tell "unsigned" from an error.
 UNVERIFIED='no signatures found|no matching CertificateIdentity|none of the expected identities matched|no matching signatures: *$|no matching signatures: error verifying bundle: empty key *$'
 
-# trust: sets IDENTITY, the certificate identity regex of a trusted run. resolve never calls it.
+# BASE: the base branch of a pull request into a branch other than iso-v0 and main, else empty.
+BASE=${GITHUB_BASE_REF:-}
+if [[ $BASE == iso-v0 || $BASE == main ]]; then
+    BASE=''
+elif [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    die "the base branch '$BASE' is not a branch name"
+fi
+
+# protected: whether a ruleset protects BASE; dies when its rules cannot be read.
+protected() {
+    local rules verdict
+    rules=$(gh api "/repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/rules/branches/$BASE") ||
+        die "cannot read the rules of the base branch '$BASE'"
+    verdict=$(jq -r 'if type == "array" then
+            any(.[]; .type == "pull_request" and .parameters.require_code_owner_review == true)
+            and any(.[]; .type == "non_fast_forward")
+        else error("not a list of rules") end' <<< "$rules") ||
+        die "cannot read the rules of the base branch '$BASE'"
+    [[ $verdict == true ]]
+}
+
+# trust: sets IDENTITY, the certificate identity regex of a trusted run.
 trust() {
     local workflow ref own refs='' trusted
     command -v cosign > /dev/null || die "cosign is not on PATH"
@@ -83,6 +120,11 @@ trust() {
         refs+="|${own//./\\.}"
     elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
         echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
+    fi
+    if [[ -n $BASE ]] && protected; then
+        refs+="|${BASE//./\\.}"
+    elif [[ -n $BASE ]]; then
+        echo "tier-digests: the base branch '$BASE' is not protected by a ruleset: its tiers are not trusted" >&2
     fi
     IDENTITY="^${workflow}@refs/heads/(${refs})\$"
 }
@@ -116,19 +158,52 @@ probe() {
 
 signed() { bash "$ROOT/forge/scripts/retry.sh" bash "$SELF" probe "$1"; }
 
+# verify_tiers REGISTRY DIGEST0 DIGEST1 DIGEST2 DIGEST3: fails unless all four are signed.
+verify_tiers() {
+    local registry=$1 n=0 digest verdict unsigned=()
+    shift
+    trust
+    for digest; do
+        verdict=$(signed "$registry/athanor-forge-tier$n-repo@$digest")
+        [[ $verdict == signed ]] || unsigned+=("tier$n")
+        n=$((n + 1))
+    done
+    [[ ${#unsigned[@]} -eq 0 ]] || die "${unsigned[*]}: not signed by a trusted run (UD44): $IDENTITY"
+    echo "tier-digests: the four tiers are signed by a trusted run"
+}
+
 case $1 in
 probe) probe "$2" ;;
 signed) signed "$2" ;;
+verify)
+    [[ -f $FILE ]] || die "$FILE is missing"
+    registry=$(jq -er '.registry | strings | select(test("^[a-z0-9][a-z0-9.:-]*(/[a-z0-9._-]+)+$"))' "$FILE") ||
+        die "$FILE names no valid registry"
+    digests=()
+    for n in 0 1 2 3; do
+        digests+=("$(jq -er ".tier$n | strings | select(test(\"^sha256:[0-9a-f]{64}$\"))" "$FILE")") ||
+            die "$FILE has no valid tier$n digest"
+    done
+    verify_tiers "$registry" "${digests[@]}"
+    ;;
 resolve)
     registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
     registry=${registry,,}
+    tag=latest
+    if [[ -n $BASE ]]; then
+        tag=${BASE,,}
+        tag=branch-${tag//[^a-z0-9._-]/-}
+    fi
     args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
+    digests=()
     for n in 0 1 2 3; do
-        ref=$registry/athanor-forge-tier$n-repo:latest
+        ref=$registry/athanor-forge-tier$n-repo:$tag
         digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref")
         [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$ref gave no digest: '$digest'"
         args+=(--arg "tier$n" "$digest")
+        digests+=("$digest")
     done
+    verify_tiers "$registry" "${digests[@]}"
     mkdir -p "$(dirname "$FILE")"
     jq -n "${args[@]}" '$ARGS.named' > "$FILE"
     echo "tier-digests: $(jq -c . "$FILE")"
