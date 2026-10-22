@@ -108,8 +108,8 @@ pub struct State {
     pub kept_keys: Vec<Keycode>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
-    /// on any connection, hold it again only after a click on one of their surfaces, or when
-    /// the last connection of the identity is gone (`escape_exclusive`).
+    /// on any connection, hold it again only after a click on one of their surfaces
+    /// (`escape_exclusive`).
     pub escaped: Vec<Identity>,
     /// The locks the user asked for with Super+Escape (`request_lock`).
     pub lock_requests: u64,

@@ -37,7 +37,7 @@ impl Lock {
 impl Lock {
     /// Each lock surface takes the size of its output, after the outputs were laid out again.
     pub fn resize(&self, space: &smithay::desktop::Space<smithay::desktop::Window>) {
-        for (output, surface) in &self.surfaces {
+        for (output, surface) in self.surfaces.iter().filter(|(_, surface)| surface.alive()) {
             let Some(area) = space.output_geometry(output) else {
                 continue;
             };

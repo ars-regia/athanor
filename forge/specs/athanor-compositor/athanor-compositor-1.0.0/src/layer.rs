@@ -185,7 +185,7 @@ impl State {
     /// The escape holds for the identity the grant went to (executable and unit), not for the
     /// connection or the surface: no exclusive surface of it, on any connection, remapped or
     /// new, takes the keyboard until the user clicks on one of its layer surfaces that takes
-    /// the keyboard (`click_focus`) or its last connection is gone.
+    /// the keyboard (`click_focus`). A client that exits and starts again stays escaped.
     pub fn escape_exclusive(&mut self) {
         let Some(surface) = self.exclusive_layer() else {
             return;
