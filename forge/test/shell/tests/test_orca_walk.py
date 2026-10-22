@@ -49,6 +49,36 @@ class PressesTest(unittest.TestCase):
         )
 
 
+class UtterancesTest(unittest.TestCase):
+    def test_both_voice_formats_are_read(self):
+        # A space before the brace up to Orca 50, none from Orca 51.
+        log = (
+            "12:00:00.1 - SPEECH OUTPUT: 'Screen reader on.' {'established': 'False'}\n"
+            "12:00:01.2 - SPEECH OUTPUT: 'Layout'{'established': 'False'}\n"
+        )
+        self.assertEqual(walk.utterances(log), ["Screen reader on.", "Layout"])
+
+    def test_an_apostrophe_inside_the_text_stays_in_it(self):
+        log = "SPEECH OUTPUT: 'it's here'{'v': 1}\nSPEECH OUTPUT: 'Don't' {'v': 1}\n"
+        self.assertEqual(walk.utterances(log), ["it's here", "Don't"])
+
+    def test_a_line_that_is_not_speech_output_is_ignored(self):
+        log = (
+            "SPEECH: Speak 'Screen reader on.' acss: {}\n"
+            "SPEECH DISPATCHER: Speaking 'Layout' as string\n"
+            "BRAILLE LINE:  'Layout'\n"
+            "SPEECH OUTPUT 'no colon'{}\n"
+        )
+        self.assertEqual(walk.utterances(log), [])
+
+    def test_text_not_closed_before_the_voice_is_rejected(self):
+        self.assertEqual(walk.utterances("SPEECH OUTPUT: 'x'y{v}\n"), [])
+        self.assertEqual(walk.utterances("SPEECH OUTPUT: 'unterminated {v}\n"), [])
+
+    def test_an_utterance_without_a_voice_ends_at_the_line(self):
+        self.assertEqual(walk.utterances("SPEECH OUTPUT: 'bare'\nnext\n"), ["bare"])
+
+
 class WalkTest(unittest.TestCase):
     def run_walk(self, orca, run):
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:
