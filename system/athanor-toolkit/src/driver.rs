@@ -1511,6 +1511,10 @@ impl App {
             Keysym::Right => Key::Right,
             Keysym::Up => Key::Up,
             Keysym::Down => Key::Down,
+            Keysym::Home => Key::Home,
+            Keysym::End => Key::End,
+            Keysym::Page_Up => Key::PageUp,
+            Keysym::Page_Down => Key::PageDown,
             Keysym::Return | Keysym::KP_Enter => Key::Enter,
             Keysym::BackSpace => Key::Backspace,
             Keysym::Delete => Key::Delete,
@@ -1932,7 +1936,14 @@ impl PointerHandler for App {
                             .pointer_release(at.0, at.1, PointerButton::Primary);
                         self.changed(id, event);
                     }
-                    PointerEventKind::Axis { .. } => self.hide_tooltip(),
+                    // wl_pointer's axis values are in surface coordinates: logical pixels.
+                    PointerEventKind::Axis { vertical, .. } => {
+                        let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+                        self.hide_tooltip();
+                        if moved {
+                            self.changed(id, None);
+                        }
+                    }
                     _ => {}
                 }
             }

@@ -14,7 +14,7 @@
 #   - athanor-nvidia-rpms, the mirror the NVIDIA locks index, is never pruned;
 #   - every other package keeps its two newest tagged versions and every version tagged
 #     latest, main or stable, with whatever signs them as above (the tier repositories are
-#     signed, UD44); the other tagged versions and the untagged
+#     verified before every system build, UD44); the other tagged versions and the untagged
 #     ones are deleted.
 #     athanor-iso also keeps the ISO of every promoted run, athanor-iso:<run_id> (UD8): the
 #     run ids an athanor-system image tagged stable, stable-previous, stable-<YYYYMMDD> or

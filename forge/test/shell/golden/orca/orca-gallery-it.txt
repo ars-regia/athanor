@@ -2,6 +2,8 @@ Lettore schermo attivo.
 Galleria
 Pulsanti pulsante di commutazione premuto.
 Scelte pulsante di commutazione non premuto.
+Valori pulsante di commutazione non premuto.
+Elenchi pulsante di commutazione non premuto.
 Un pulsante button.
 Uno pulsante di commutazione premuto.
 Due pulsante di commutazione non premuto.
@@ -11,7 +13,21 @@ Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Scelte pulsante di commutazione premuto.
+Valori pulsante di commutazione non premuto.
+Elenchi pulsante di commutazione non premuto.
 Opzione uno casella di spunta spuntata.
 Opzione due casella di spunta non spuntata.
 Un interruttore casella di spunta spuntata.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Valori pulsante di commutazione premuto.
+Elenchi pulsante di commutazione non premuto.
+Un cursore controllo scorrevole orizzontale 50 50 percento.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Elenchi pulsante di commutazione premuto.
+Un elenco Elenco con 50 voci
+Riga 1.
 Lettore schermo disattivato.

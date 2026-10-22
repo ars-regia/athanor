@@ -109,7 +109,7 @@ TIER = "athanor-forge-tier0-repo"
 
 class SignedPackages(Tool):
     """Every package keeps what signs the versions it keeps (UD44: the tier repositories are
-    signed)."""
+    verified before every system build)."""
 
     VERSIONS = [image(1, ["latest"], OLD), *referrers(10, 1),
                 image(2, ["101"], "2026-06-01"), *referrers(20, 2),
