@@ -62,36 +62,36 @@ msgstr ""
 msgid "Running applications"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:160 src/toolkit/dock.rs:378
+#: ../../../../system/athanor-apps/src/row.rs:160 src/toolkit/dock.rs:391
 msgid "Running"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:388 src/toolkit/dock.rs:676
+#: ../../../../system/athanor-apps/src/row.rs:388 src/toolkit/dock.rs:691
 #, rust-format
 msgid "Minimise {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:392 src/toolkit/dock.rs:687
+#: ../../../../system/athanor-apps/src/row.rs:392 src/toolkit/dock.rs:702
 #, rust-format
 msgid "Close {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:419 src/toolkit/dock.rs:704
+#: ../../../../system/athanor-apps/src/row.rs:419 src/toolkit/dock.rs:719
 msgid "Open"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:421 src/toolkit/dock.rs:706
+#: ../../../../system/athanor-apps/src/row.rs:421 src/toolkit/dock.rs:721
 msgid "New Window"
 msgstr ""
 
-#: src/toolkit/dock.rs:394 src/toolkit/dock.rs:774 src/ui/surface.rs:266
+#: src/toolkit/dock.rs:407 src/toolkit/dock.rs:799 src/ui/surface.rs:266
 msgid "Dock"
 msgstr ""
 
-#: src/toolkit/dock.rs:713 src/ui/mod.rs:245
+#: src/toolkit/dock.rs:730 src/ui/mod.rs:245
 msgid "Unpin from Dock"
 msgstr ""
 
-#: src/toolkit/dock.rs:715 src/ui/mod.rs:247
+#: src/toolkit/dock.rs:731 src/ui/mod.rs:247
 msgid "Pin to Dock"
 msgstr ""
