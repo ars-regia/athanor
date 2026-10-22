@@ -123,6 +123,9 @@ class UpdateTrust(unittest.TestCase):
             (tier0.replace("/tmp/tier0-repo", "/tmp/elsewhere"), ["system/Containerfile:2"]),
             ("RUN rpm -Uvh --nosignature x.rpm\n", ["system/Containerfile:1"]),
             ("RUN dnf5 install -y --nogpgcheck x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --no-gpgchecks x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=gpgcheck=no x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=gpgcheck=off x\n", ["system/Containerfile:1"]),
             ("RUN echo '%_pkgverify_level none' > /etc/rpm/macros.x\n", ["system/Containerfile:1"]),
             ("RUN dnf5 install -y --setopt=localpkg_gpgcheck=0 ./x.rpm\n", ["system/Containerfile:1"]),
         ):

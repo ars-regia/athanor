@@ -1418,7 +1418,7 @@ def update_trust_problems(root=None):
 # The one RPM signature override of the image build: athanor-base-config from the digest-pinned
 # tier 0 image, at rpm's digest level (UD44: the forge's RPMs are not signed).
 TIER0_DIGEST_INSTALL = "rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps \"$BASE_CONFIG\"; \\"
-SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--nogpgcheck|gpgcheck=(0|false|False)")
+SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--no-?gpgchecks?|gpgcheck=(0|no|off|false)", re.I)
 
 
 def image_policy_problems(root=None):
