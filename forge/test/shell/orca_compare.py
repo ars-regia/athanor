@@ -9,6 +9,7 @@ Prints a verdict per utterance and exits 1 when one is missing.
 """
 
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 # Orca says a node's role after its name. AccessKit 0.25 has no "grouping": its groups reach
@@ -21,6 +22,12 @@ from pathlib import Path
 # and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
 # as an entry's. Only that line is rewritten: Orca ends a field's line with a full stop and a
 # label's without, so a label such as "Sample text" is matched as it is said.
+#
+# A multi-line field too: GTK's GtkTextView reaches AT-SPI as a text, AccessKit's
+# Role::MultilineTextInput as a multi-line entry, and Orca says the line of the caret after a
+# text's line but in the same utterance as an entry's. So a text's line and the utterance that
+# follows it in the reference may be heard together, as an entry's line that ends in that
+# utterance; neither alone, nor a line after anything but a text.
 #
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` key
@@ -66,8 +73,17 @@ def compare(reference, transcript):
     if not reference:
         # A reference that holds nothing would let any transcript pass.
         return lines, ["the reference holds no utterance"]
+    together = {}
+    for field, after in pairwise(reference):
+        for role, said in SAME_FIELD_ROLE.items():
+            if field.endswith(f" {role}."):
+                joined = f"{field[: -len(role) - 1]}{said} {after}"
+                if joined in spoken:
+                    together.setdefault(field, joined)
+                    together.setdefault(after, joined)
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
+        said = said or together.get(utterance)
         if said is None:
             lines.append(f"{utterance!r}: missing; FAIL")
             failures.append(f"{utterance!r}: missing")
