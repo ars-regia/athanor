@@ -1,6 +1,6 @@
 //! athanor-dock-toolkit: the dock of doc_bar.md, BR7, drawn with Athanor's own toolkit (the
 //! dock plan, task 6). It runs beside the GTK dock, which stays the shipped one until the
-//! switch (task 9), and is installed as `athanor-dock` where it runs, so that it keeps the
+//! switch (task 10), and is installed as `athanor-dock` where it runs, so that it keeps the
 //! application name on the bus and in AT-SPI. `--record-exit` is the unit's ExecStopPost,
 //! as for the GTK dock.
 
