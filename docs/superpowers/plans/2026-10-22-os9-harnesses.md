@@ -17,7 +17,7 @@
 - cosmic-comp stays the rig's and the image's default. Every change under `RIG_COMPOSITOR=athanor` leaves the cosmic-comp cases and their goldens unchanged. `RIG_OUTPUTS=2` keeps its present meaning: cosmic-comp on KMS and vkms in the KVM guest (`scene.sh`, `rig.sh` `in_rig`).
 - Not in this plan: C1 task 9 (the maintainer's console sessions) and task 9a (the optional session at the greeter, `origin/session/optional-own-compositor`, which also packages the compositor); the toolkit (stage 1 and the toolkit dock are paused; the existing test binary `athanor-toolkit-input-method` is reused as it is, and the bin target `athanor-dock-toolkit` is out of scope); OS9 items 4 and 5 (the toolkit's Unicode conformance and `vello_cpu` goldens).
 - Features whose checks come with the feature, not here: the KeyboardMonitor of AX4, the keyboard aids of AX11, the trusted-path border of LP13, xwayland-satellite, the AX5 reader gate and `athanor-a11y`. A step below that needs one of them says so and stops.
-- **Stop and ask** before editing anything on the login path, PAM, polkit or signing. In this plan: no allow-list line for the greeter or the lock screen, not even a rig-only one, until the maintainer answers open question 3. Every case that needs the greeter's overlay layer or `ext_session_lock_manager_v1` under the own compositor is marked "waiting on open question 3" and is excluded from every pass claim of the task that carries it. No change to `system/athanor-bus-api/src/polkit.rs` is planned.
+- **Stop and ask** before editing anything on the login path, PAM, polkit or signing. Open question 3 is answered: the greeter UI's line and the lock screen's line land in task 4, each read from its unit file and confirmed against the binds, and no other file of the login path changes. No change to `system/athanor-bus-api/src/polkit.rs` is planned.
 - The compositor keeps `panic = "abort"`: no new `unwrap()`, `expect()` or `panic!` outside tests (`verify.py panics`). Every new privileged interface is granted only by the allow-list, never to a client behind a security context.
 - `scripts/verify.py`, `forge/config/packages.json` and Markdown under `docs/` change through an exact-match replacement script, then `git diff --numstat` shows only the intended lines.
 - A new `verify.py` check gets its test under `scripts/tests/`. A new or changed workflow is listed in `docs/architecture/doc_ci.md` and has its row in `doc_pipeline.md` section 3.5; its YAML only checks out and calls a script.
@@ -31,6 +31,7 @@
 3. **The keyboard stays with the input method while the session is locked** (register row 8): a locked screen's password typed into an input method. Pinned by `os9_the_input_method_grab_is_dropped_while_locked` (task 7).
 4. **A golden difference passes as tolerated noise.** The comparison under the own compositor accepts a changed surface because it is within `compare.py`'s 64-pixel tolerance of a different golden, or because an explanation still names a cause that was fixed. Pinned by `test_a_difference_without_an_explanation_fails` and `test_an_explanation_without_a_difference_fails` (task 5).
 5. **A synthetic key bypasses the compositor's own keys.** A virtual keyboard's keys must take the same path as a hardware key, so the compositor's escape holds against them. Pinned by `os9_a_virtual_key_takes_the_hardware_path` (task 6).
+6. **A virtual keyboard types into the lock surface** (open question 12): a script could enter or probe a password on a locked screen. Pinned by `os9_a_virtual_key_is_dropped_while_locked` (task 6).
 
 ---
 
@@ -43,15 +44,15 @@ The fixture today asserts the privileged globals of C1 task 5 (`PRIVILEGED`, `fi
 **Files:**
 - Create: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals`
 - Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/fixture.rs` (replace `PRIVILEGED` and `TASK4_GLOBALS` with the file's rows; keep `Local::privileged` working on them)
-- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs` (a `#[cfg(test)]` accessor only)
+- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs` (the two privileges of step 3, and a `#[cfg(test)]` accessor), `src/state.rs` and `src/workspace.rs` (the workspace manager's filter)
 
 **Interfaces:**
 - Consumes: `Running::start`, `Local::connect(run, Option<SecurityContext>)`, `Local::sees(&str)`, `fixture_window`, the `Fake` process and `FIXTURE_ALLOW_LIST`.
 - Produces: `data/globals`, one line per global, `<interface> <class>`, `#` starting a comment line, with four classes:
   - `standard`: offered to every client;
-  - `unconfined`: offered to every client outside a security context (today `ext_workspace_manager_v1` and `wp_security_context_manager_v1`, filtered by `state::unconfined`);
+  - `unconfined`: offered to every client outside a security context (today `wp_security_context_manager_v1`, filtered by `state::unconfined`; task 7 adds `zwp_text_input_manager_v3`);
   - `layer-gated`: offered to every client, its top and overlay layers refused in `layer_commit` unless the allow-list grants it (today `zwlr_layer_shell_v1`);
-  - `privileged`: offered only by the allow-list (today the four other names of `Privilege::ALL`).
+  - `privileged`: offered only by the allow-list (the four other names of `Privilege::ALL`, and `ext_workspace_manager_v1` and `zwlr_output_manager_v1`, which step 3 adds: open questions 7 and 10).
   In `fixture.rs`, `enum Class { Standard, Unconfined, LayerGated, Privileged }` and `fn classified() -> Vec<(&'static str, Class)>`, parsed from `include_str!("../data/globals")`. In `identity.rs`, `#[cfg(test)] pub(crate) fn names() -> impl Iterator<Item = &'static str>` over `Privilege::ALL`. Tasks 2, 6 and 7 add their rows to `data/globals`; Python reads the same file (tasks 3, 4 and 12).
 
 - [ ] **Step 1: Write the failing tests**
@@ -71,6 +72,19 @@ fn os9_the_table_matches_the_allow_list_names() {
     // The privileged and layer-gated rows, together, equal identity::names(); each one is a name
     // AllowList::parse accepts on a line of its own.
 }
+
+#[test]
+fn os9_the_workspace_list_is_privileged() {
+    // A client with no line, and one behind a security context, do not list
+    // ext_workspace_manager_v1; the bar, allow-listed for it, does.
+}
+
+#[test]
+fn os9_the_output_manager_is_granted_to_the_control_center_only() {
+    // Only a client whose line names zwlr_output_manager_v1 lists it; the bar, without it in its
+    // line, does not. The control center sets an output's scale through it and the output keeps
+    // that scale in the next frame.
+}
 ```
 
 The refusal of the top and overlay layers to a client not granted them stays pinned by the existing `task5_top_layers_are_closed_to_a_client_not_granted_them`.
@@ -80,7 +94,7 @@ The refusal of the top and overlay layers to a client not granted them stays pin
 Run: `CARGO_TARGET_DIR=/var/tmp/athanor-target taskset -c 0-3 cargo test -p athanor-compositor -j 4 os9_`
 Expected: FAIL to compile, `cannot find function classified`.
 
-- [ ] **Step 3: Write `data/globals`** from what `State::new` offers at the head, add `Class`, `classified()` and `names()`, and rewrite `Local::privileged` and `task4_standard_globals_are_offered` over `classified()`.
+- [ ] **Step 3: Write `data/globals`** from what `State::new` offers at the head, add `Class`, `classified()` and `names()`, and rewrite `Local::privileged` and `task4_standard_globals_are_offered` over `classified()`. Then add `Privilege::Workspaces` (`ext_workspace_manager_v1`), offered through `granted(c, Privilege::Workspaces)` in place of `state::unconfined`, and `Privilege::OutputManagement` (`zwlr_output_manager_v1`), with a row each in `data/globals`. For the output manager, check the pinned Smithay revision as task 2 step 1 does; when it has no server for it, serve the head and configuration requests that set a scale from the compositor's own dispatch over `wayland-protocols-wlr`, and stop and report if the protocol needs more than the scale to be usable.
 
 - [ ] **Step 4: Run the crate's tests**
 
@@ -215,8 +229,7 @@ Under the allow-list only the bar keeps its top layer; the dock and the launcher
   - a binary target counts when its package's spec installs it to `/usr/bin` (`install ... target/release/<bin> %{buildroot}/usr/bin/<bin>`), so `athanor-dock-toolkit`, which the dock's spec does not install, is skipped;
   - a target's sources are the files under its `path`'s directory, minus those under the directory of another `[[bin]]` of the same crate (the dock's `src/toolkit/` belongs to `athanor-dock-toolkit`), minus `#[cfg(test)]` modules and `tests/`;
   - a target's sources include those of the workspace crates it depends on by `path =` in its crate's `[dependencies]`, followed transitively, so the dock's `ext_foreign_toplevel_list_v1`, bound in `system/athanor-compositor-client`, counts for the dock; an `optional = true` dependency is followed only when the feature set the package's spec builds with enables it, so the dock's optional `athanor-toolkit` is not followed and `athanor-dock-toolkit` stays out;
-  - the check fails only when a counted target asks for the top or overlay layer (`set_layer(Layer::Top)`, `set_layer(Layer::Overlay)`, `layer: Layer::Top` or `Layer::Overlay`) or names a `privileged` row of `data/globals`, and `/usr/bin/<bin>` has no line at all; when a target that asks for the top or overlay layer has a line that does not name `zwlr_layer_shell_v1` (the failure of #683: the surface is closed); and when a line names an executable no spec installs. Apart from that presence check on one name, it never proposes or derives a line's interfaces: every interface in a line is a privilege grant, which comes from the maintainer's review (C1 results, section 10 item 1);
-  - a named constant `PENDING_OPEN_QUESTION_3` lists the greeter's binary, `athanor-greeter-ui`, with a comment citing open question 3: its missing line is reported as a note, not a failure. When the maintainer answers open question 3 the constant is emptied and the line added.
+  - the check fails only when a counted target asks for the top or overlay layer (`set_layer(Layer::Top)`, `set_layer(Layer::Overlay)`, `layer: Layer::Top` or `Layer::Overlay`) or names a `privileged` row of `data/globals`, and `/usr/bin/<bin>` has no line at all; when a target that asks for the top or overlay layer has a line that does not name `zwlr_layer_shell_v1` (the failure of #683: the surface is closed); and when a line names an executable no spec installs. Apart from that presence check on one name, it never proposes or derives a line's interfaces: every interface in a line is a privilege grant, which comes from the maintainer's review (C1 results, section 10 item 1).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -231,9 +244,8 @@ def test_a_bind_in_a_path_dependency_counts(self): ...                 # athanor
 def test_a_disabled_optional_dependency_is_not_followed(self): ...     # the dock's athanor-toolkit
 def test_a_top_layer_target_whose_line_omits_layer_shell_fails(self): ...
 def test_a_target_with_a_line_passes_whatever_its_other_interfaces(self): ...  # any names beside zwlr_layer_shell_v1
-def test_a_pending_binary_is_a_note_not_a_failure(self): ...
-def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
-    # PENDING_OPEN_QUESTION_3 is a subset of the greeter, the lock screen and the polkit agent.
+def test_the_greeter_overlay_target_needs_its_line(self): ...                     # athanor-greeter-ui, Layer::Overlay
+def test_a_target_naming_the_session_lock_needs_its_line(self): ...             # ext_session_lock_manager_v1
 ```
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest scripts.tests.test_verify_allow_list` fails, the check does not exist.
@@ -242,11 +254,11 @@ def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
 
 - [ ] **Step 4: Run it on the tree**: `python3 scripts/verify.py allow-list`. Expected at the head: it names `athanor-dock` (`src/ui/surface.rs`), `athanor-launcher`, `athanor-control-center` and `athanor-greeter-ui` (`src/ui.rs`, `Layer::Overlay`), and nothing under `src/toolkit/`.
 
-- [ ] **Step 5: Add the three lines the maintainer gave.** The dock's as C1 results, section 10 item 1, gives it: `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`. The launcher's and the control center's from the answer to open question 14: `/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1` and `/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1`. Read the unit names from the packages' unit files, never from memory. Before each line lands, confirm it against what the binary actually binds: list the globals its crate and the path dependencies `verify.py allow-list` follows bind in source, and compare them with the line. A global the binary binds that its line lacks, or one the line grants that nothing binds, goes back to the maintainer with that list; the line is never widened or narrowed on one's own. With the three lines in, the task's pull request stays a draft only for the greeter's line (step 6, open question 3).
+- [ ] **Step 5: Add the lines the maintainer gave.** The dock's as C1 results, section 10 item 1, gives it: `/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1`. The launcher's and the control center's from the answer to open question 14: `/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1` and `/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1` (the layer shell from question 14, the output manager from question 10: the control center sets an output's scale and no other client holds that grant). `ext_workspace_manager_v1` (open question 7) is added to the line of every binary that binds it through `athanor-compositor-client` (`connection.rs`), the bar's existing line included, by the confirmation below. Read the unit names from the packages' unit files, never from memory. Before each line lands, confirm it against what the binary actually binds: list the globals its crate and the path dependencies `verify.py allow-list` follows bind in source, and compare them with the line. A global the binary binds that its line lacks, or one the line grants that nothing binds, goes back to the maintainer with that list; the line is never widened or narrowed on one's own. With these lines in, step 6 adds the two of the login path.
 
-- [ ] **Step 6: Stop and ask the maintainer for the greeter's line** (login path, open question 3). Paste the check's finding and a proposed line; add no line, shipped or rig-only, without the answer. Until then the greeter stays in `PENDING_OPEN_QUESTION_3`; `scripts/ci/known-red.txt` only shrinks and is not used.
+- [ ] **Step 6: Add the two lines of open question 3**, each read from its unit file and confirmed against the binds as in step 5. The greeter UI: `/usr/bin/athanor-greeter-ui <unit> zwlr_layer_shell_v1`, the binary installed by `athanor-greeter-ui.spec`; at the head `athanor-greeter-client` execs it inside greetd's sandbox (`greetd.toml`) and no unit file of its own names it, so read the unit whose cgroup holds the process, and when the greeter has none, report that to the maintainer instead of naming `greetd.service` unasked. The lock screen: `<executable> athanor-lock.service ext_session_lock_manager_v1`, the executable read from `ExecStart=` of the unit `doc_session.md` names; at the head the locker is cosmic-greeter, a cosmic component outside the check, and no `athanor-lock` is installed, so this line lands in the pull request that installs it and this task's pull request says so. A bind the confirmation finds that a line lacks goes back to the maintainer; a line is never widened on one's own. `scripts/ci/known-red.txt` only shrinks and is not used.
 
-- [ ] **Step 7: Run**: `python3 scripts/verify.py allow-list` passes, with the greeter as its only note; `python3 -B -m unittest discover -s scripts/tests` passes; `git diff --numstat scripts/verify.py` shows only the added lines.
+- [ ] **Step 7: Run**: `python3 scripts/verify.py allow-list` passes with no note; `python3 -B -m unittest discover -s scripts/tests` passes; `git diff --numstat scripts/verify.py` shows only the added lines.
 
 - [ ] **Step 8: Commit**
 
@@ -259,6 +271,7 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 
 **Files:**
 - Modify: `forge/test/shell/rig.sh` (`capture_bar`, `capture_dock`, `capture_launcher`, `capture_layout`, `capture_chooser` and the `atspi` cases; a new command `golden-report`)
+- Modify: `forge/test/shell/cases.py` (`SURFACES` gains `lock` and `polkit-agent`)
 - Modify: `forge/test/shell/bar_session.py` only if `as_unit` needs the unit name apart from the executable's
 - Create: `forge/test/shell/golden_report.py`, `forge/test/shell/golden/athanor-differences.toml`
 - Create: `forge/test/shell/tests/test_golden_report.py`
@@ -267,7 +280,7 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 - Consumes: `as_unit(binary)`; `compare.py` and its `TOLERANCE`; `cases.py` (`SURFACES`, `layout --outputs N`); the allow-list of task 4; the rig of task 3.
 - Produces:
   - Under `RIG_COMPOSITOR=athanor`, every capture case starts its client as its unit (`--unit` generalised), and the `atspi` cases fail when the compositor log says a surface was closed, as `atspi bar` does today.
-  - `rig.sh golden-report [surface...]` runs, under the own compositor, the cases of `cases.py` `SURFACES` except the toolkit's (`toolkit-chooser`; the galleries are not in `SURFACES`) and except the greeter, which waits on open question 3: 17 surfaces of 12 cases each, 204 cases, plus the 21 one-output and 6 two-output layout cases, 231 in all. It writes `out/golden-report.md`: per case, the pixel count against the cosmic-comp golden and the explanation, or `unexplained`; the greeter's 12 cases are listed as "waiting on open question 3". With surface names it runs only those.
+  - `rig.sh golden-report [surface...]` runs, under the own compositor, the cases of `cases.py` `SURFACES` except the toolkit's (`toolkit-chooser`; the galleries are not in `SURFACES`): 20 surfaces of 12 cases each, the greeter, the lock screen and the polkit agent among them, 240 cases, plus the 21 one-output and 6 two-output layout cases, 267 in all. No cosmic component has a case (open question 1: OS5 replaces them). It writes `out/golden-report.md`: per case, the pixel count against the cosmic-comp golden and the explanation, or `unexplained`. With surface names it runs only those.
   - `golden_report.report(results, explanations) -> tuple[str, list[str]]`, pure: the report's text and its problems.
   - `athanor-differences.toml` holds `[[difference]]` entries, `case = "..."`, `cause = "..."`, `issue = N`, one per case that differs.
 - Runtime: about 20 seconds a case (an estimate: container start, the 8 to 12 second settle, the capture), so about 77 minutes for the whole report on the laptop. Step 4 measures it.
@@ -278,13 +291,13 @@ git commit -m "feat(compositor): allow-list lines for the dock, launcher and con
 def test_a_difference_without_an_explanation_fails(self): ...
 def test_an_explanation_without_a_difference_fails(self): ...   # a stale entry
 def test_an_explanation_needs_a_cause_and_an_issue(self): ...
-def test_the_report_runs_every_surface_but_the_toolkit_and_the_greeter(self): ...  # 204 + 27
-def test_the_greeter_is_listed_as_waiting(self): ...
+def test_the_report_runs_every_surface_but_the_toolkit(self): ...  # 240 + 27
+def test_the_lock_screen_and_the_polkit_agent_have_cases(self): ...  # in SURFACES, no cosmic component
 ```
 
 - [ ] **Step 2: Run them**: `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_golden_report.py'` fails, the module does not exist.
 
-- [ ] **Step 3: Implement `golden_report.py`** and the `rig.sh golden-report` command; generalise `--unit` to every client of the capture cases.
+- [ ] **Step 3: Implement `golden_report.py`** and the `rig.sh golden-report` command; generalise `--unit` to every client of the capture cases. `SURFACES` has no case for the lock screen or the polkit agent: add `lock` and `polkit-agent` (light and dark, scales 1.0 and 1.5, as the bar's) with a `capture_lock` and a `capture_polkit_agent` beside `capture_launcher`, each starting its client as its unit from task 4's lines, and record their goldens under cosmic-comp beside the others. When the binary of either does not exist at the branch head, stop and report: cosmic-greeter's locker and cosmic-osd's agent are cosmic components and get no case.
 
 - [ ] **Step 4: Run the report on the laptop**, one rig at a time: `forge/test/shell/rig.sh build-bar`, `rig.sh build-dock`, `rig.sh build-launcher`, `rig.sh build-layout` (the chooser cases) and `rig.sh build-compositor`, one invocation each, then `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh golden-report`, and record its wall time in the pull request. Write one entry per differing case with its cause from the eight of `c1-own-compositor.md` (#591) or a new one. Expected: exit 0, with every difference explained. A case without a cause fails the report; the task is not done until it is explained or fixed.
 
@@ -302,7 +315,7 @@ git commit -m "test(shell): every surface under the own compositor as its unit, 
 `wtype` fails under the own compositor ("Compositor does not support the virtual keyboard protocol"), so `rig.sh orca` cannot drive Orca there. OS4 lists the virtual keyboard and pointer as privileged.
 
 **Files:**
-- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/input.rs`, `src/identity.rs`, `src/state.rs`, `src/handlers.rs`, `src/fixture.rs`, `data/globals`, `README.md`
+- Modify: `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/input.rs`, `src/identity.rs`, `src/state.rs`, `src/handlers.rs`, `src/lock.rs`, `src/fixture.rs`, `data/globals`, `README.md`
 
 **Interfaces:**
 - Consumes: `State::key_input(code, key_state, time)` and `pointer_to` in `input.rs`; `data/globals`.
@@ -329,13 +342,20 @@ fn os9_a_virtual_pointer_stays_inside_the_outputs() {
     // on an output, as task8_an_output_that_shrinks_strands_no_window_and_no_pointer requires of
     // a hardware pointer.
 }
+
+#[test]
+fn os9_a_virtual_key_is_dropped_while_locked() {
+    // With the session locked and the lock surface focused, a granted client's virtual key
+    // reaches neither the lock surface nor any other client; a hardware key aimed at the lock
+    // surface still reaches it; after unlock the same virtual key is delivered again.
+}
 ```
 
-Two `privileged` rows go into `data/globals`. What a virtual key does while the session is locked is open question 12; no test asserts it and no code special-cases it until the maintainer answers, and the pull request says so.
+Two `privileged` rows go into `data/globals`. While the session is locked the compositor drops a virtual keyboard's keys aimed at the lock surface (open question 12), as it drops the input method's grab; `os9_a_virtual_key_is_dropped_while_locked` pins it.
 
 - [ ] **Step 2: Run them**: as task 1 step 2, FAIL, the globals are not offered.
 
-- [ ] **Step 3: Implement** with Smithay's `VirtualKeyboardManagerState` (filter `granted(c, Privilege::VirtualKeyboard)`) and a virtual pointer handler that calls `pointer_to` and the button path; the keymap a virtual keyboard uploads applies to its own keys only.
+- [ ] **Step 3: Implement** with Smithay's `VirtualKeyboardManagerState` (filter `granted(c, Privilege::VirtualKeyboard)`) and a virtual pointer handler that calls `pointer_to` and the button path; the keymap a virtual keyboard uploads applies to its own keys only. In `lock.rs`, `State::key_input` takes the key's source and drops a virtual one while the session is locked; hardware keys are unaffected.
 
 - [ ] **Step 4: Run**: the crate's tests pass (task 1 step 4). The fixture tests are this task's proof: they run in-process against the compositor. `rig.sh toolkit-popup` is not one, since `toolkit_popup_check.py` starts its own sway and ignores `RIG_COMPOSITOR`. The rig proof of the virtual keyboard is task 8's Orca walk.
 
@@ -355,7 +375,7 @@ git commit -am "feat(compositor): virtual keyboard and pointer for allow-listed 
 
 **Interfaces:**
 - Consumes: `data/globals`; the lock in `lock.rs`; `in-unit.sh` (task 3); the existing `athanor-toolkit-input-method`.
-- Produces: `Privilege::InputMethod` (`zwp_input_method_manager_v2`, `privileged`), and `zwp_text_input_manager_v3`, whose class is open question 13. In the fixture, `struct SimulatedInputMethod`: a fixture client on the input method protocol that commits a preedit and a string, and takes the keyboard grab, usable by later fixture tests.
+- Produces: `Privilege::InputMethod` (`zwp_input_method_manager_v2`, `privileged`), and `zwp_text_input_manager_v3`, `unconfined` (open question 13: not offered behind a security context). In the fixture, `struct SimulatedInputMethod`: a fixture client on the input method protocol that commits a preedit and a string, and takes the keyboard grab, usable by later fixture tests.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -376,6 +396,12 @@ fn os9_the_input_method_grab_is_dropped_while_locked() {
 fn os9_a_sandboxed_client_cannot_be_an_input_method() {
     // Through a security context, zwp_input_method_manager_v2 is not listed.
 }
+
+#[test]
+fn os9_a_sandboxed_client_has_no_text_input() {
+    // Through a security context, zwp_text_input_manager_v3 is not listed; outside one, every
+    // client lists it.
+}
 ```
 
 ```python
@@ -385,7 +411,7 @@ def test_the_input_method_starts_in_its_rig_unit(self): ...         # under atha
 
 - [ ] **Step 2: Run them**: the Rust tests FAIL, the globals are not offered; `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_input_method_check.py'` fails.
 
-- [ ] **Step 3: Stop and ask the maintainer open question 13** (the class of `zwp_text_input_manager_v3`), and write its row in `data/globals` from the answer; `os9_every_global_is_classified` fails until it is there.
+- [ ] **Step 3: Write the row** `zwp_text_input_manager_v3 unconfined` in `data/globals` and offer the global through `state::unconfined`, as `wp_security_context_manager_v1` is; `os9_every_global_is_classified` fails until it is there.
 
 - [ ] **Step 4: Implement** with Smithay's `TextInputManagerState` and `InputMethodManagerState` (filter `granted(c, Privilege::InputMethod)`); the lock ends the grab where it takes the keyboard. Change `input_method_check.py` as listed in Files.
 
@@ -410,7 +436,7 @@ Orca references exist for the chooser, the dock and the gallery only (`golden/or
 
 **Interfaces:**
 - Consumes: the virtual keyboard of task 6; `in-unit.sh` (task 3); `orca_compare.py`; the local rig image with Orca (`ATHANOR_RIG_IMAGE`).
-- Produces: `rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]`, the same command under both compositors; the reference is always the cosmic-comp transcript. Under the own compositor the greeter waits on open question 3.
+- Produces: `rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]`, the same command under both compositors; the reference is always the cosmic-comp transcript. Under the own compositor the greeter runs as its unit, with the line of task 4.
 
 - [ ] **Step 1: Write the failing test** in `test_orca_walk.py`: `test_wtype_runs_in_its_rig_unit` (under `RIG_COMPOSITOR=athanor`, every press's argv starts with `in-unit.sh rig-wtype.service /usr/bin/wtype`; without it, with `wtype`).
 
@@ -420,7 +446,7 @@ Orca references exist for the chooser, the dock and the gallery only (`golden/or
 
 - [ ] **Step 4: Record the references on cosmic-comp**, on the laptop: `forge/test/shell/rig.sh orca bar`, `orca bar it`, and the same for the launcher and the greeter; commit the transcripts after reading each one: every control of the surface is named, and nothing is in English in the Italian file except proper names.
 
-- [ ] **Step 5: Run under the own compositor**: `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh orca <surface> [it]` for the chooser, the dock, the gallery, the bar and the launcher. Expected: `orca_compare.py` passes, or names each line that is poorer; each such line goes into the pull request with its cause (the bar's two missing widgets of C1 are known: input source and tiling need the private protocols of `c1-protocols.md` section 3, which revision 2 specifies). The greeter under the own compositor waits on open question 3 and is not claimed.
+- [ ] **Step 5: Run under the own compositor**: `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh orca <surface> [it]` for the chooser, the dock, the gallery, the bar, the launcher and the greeter. Expected: `orca_compare.py` passes, or names each line that is poorer; each such line goes into the pull request with its cause (the bar's two missing widgets of C1 are known: input source and tiling need the private protocols of `c1-protocols.md` section 3, which revision 2 specifies).
 
 - [ ] **Step 6: Commit**
 
@@ -457,7 +483,7 @@ def test_the_ring_width_is_three_in_high_contrast(self): ...
 
 - [ ] **Step 3: Implement** the checks; `ring_check.py` reads the focused control's extents from the walk, samples the 2 px ring (3 px in high contrast) and the surface beside it, and computes the WCAG ratio.
 
-- [ ] **Step 4: Run on the laptop**, both compositors: `forge/test/shell/rig.sh atspi bar --matrix` and `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar --matrix`, then the dock and the launcher; the greeter on cosmic-comp, which carries the AX4 password case. Expected: pass, or each problem as a finding with its surface and variant. The greeter under the own compositor and the lock screen wait on open question 3 and are not claimed.
+- [ ] **Step 4: Run on the laptop**, both compositors: `forge/test/shell/rig.sh atspi bar --matrix` and `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar --matrix`, then the dock and the launcher; the greeter on cosmic-comp, which carries the AX4 password case. Expected: pass, or each problem as a finding with its surface and variant. The greeter runs under the own compositor as its unit, with the line of task 4.
 
 - [ ] **Step 5: Commit**
 
@@ -561,7 +587,7 @@ Prerequisite: C1 task 9a merged (the session exists in the image). Until then th
 
 - [ ] **Step 1: Run each acceptance under the own session in the dev VM** (one VM, the memory check first) and record each failure.
 - [ ] **Step 2: Change only what depends on the compositor** (the privileged list, cosmic-comp's process name), never an expectation of the surface.
-- [ ] **Step 3: Run**: `compositor-acceptance.sh`, `bar-acceptance.sh`, `dock-acceptance.sh` and `launcher-acceptance.sh` pass under both sessions. `lock-acceptance.sh` under the own session waits on open question 3 and is not claimed. The ST7 keyboard traversal runs per surface; Orca started by its key, the gate refusals and the KeyboardMonitor refusal of AX17 wait for `athanor-a11y`, the AX5 gate and the AX4 monitor, and the pull request says so.
+- [ ] **Step 3: Run**: `compositor-acceptance.sh`, `bar-acceptance.sh`, `dock-acceptance.sh` and `launcher-acceptance.sh` pass under both sessions. `lock-acceptance.sh` passes under the own session as well, with the lock screen's line of task 4. The ST7 keyboard traversal runs per surface; Orca started by its key, the gate refusals and the KeyboardMonitor refusal of AX17 wait for `athanor-a11y`, the AX5 gate and the AX4 monitor, and the pull request says so.
 - [ ] **Step 4: Commit**
 
 ```bash
