@@ -307,7 +307,7 @@ LIST
 ```
 
 The shipped `data/privileged-clients` has no line for the dock, so the dock's top layer and its
-window list are refused in any image: a gap to close in task 9a. The dock line above is only for
+window list are refused in any image: a gap to close in task 9a (#683). The dock line above is only for
 this run.
 
 ### 2. Start
@@ -362,11 +362,13 @@ run. A unit that failed is retried with the same command (`--collect` removes it
 shows none while they run, `grep "was closed" "$log"`: the line "a surface on the top layers of a
 client not granted them was closed" means the allow-list did not match (wrong unit name, or the
 file is missing: redo step 1). If `status` shows a unit failed, read `journalctl --user -u
-c1-bar`; the bar's Landlock ruleset may refuse the runtime directory under `~/c1/run`, which is
-not checked here.
+c1-bar`. The test units keep a `running` line in their record under `~/c1/run`, so five starts
+in ten minutes put the test bar on its vendor layout; `rm -rf ~/c1/run` and its `mkdir` again
+reset it. What is changed in the test goes to the real files: a pinned dock entry or the
+high-contrast toggle stays after the run.
 
-Ctrl+Alt+F1 returns to the graphical session, without its bar and dock until step 6;
-Ctrl+Alt+F3 comes back to the compositor.
+Ctrl+Alt+F1 returns to the graphical session, without its bar and dock until the `start` line
+of step 6; Ctrl+Alt+F3 comes back to the compositor.
 
 ### 3. If the screen stays black
 
@@ -375,7 +377,10 @@ In this order, stopping at the first that works:
 1. Super+Escape: takes the keyboard back from an exclusive surface and asks logind to lock the
    session. It frees a stuck keyboard, not a black output.
 2. Ctrl+Alt+F1 (or F2): the compositor reserves Ctrl+Alt+F1 to F12 for the virtual terminals.
-3. From another machine over SSH, as the same user:
+   The graphical session on F1 has no bar or dock: run the commands of item 3 from a console
+   (Ctrl+Alt+F2) or over SSH.
+3. From another machine over SSH (`ssh -t`, which `sudo` needs for its password), as the same
+   user:
    ```
    systemctl --user stop c1-bar c1-dock
    pkill -TERM -f '^/[^ ]*athanor-compositor --drm'
@@ -415,18 +420,9 @@ the frame-time report every 10 seconds), `journal.txt` (the bar's and the dock's
 `c1-bar.service` and `c1-dock.service`), `dmesg-gpu.txt`, and a few lines in your own words: the
 machine, the times, what you saw.
 
-### 6. How defects are recorded
-
-The plan (task 9) puts every defect with its log lines into the results. The results document
-of the spike, `docs/spikes/c1-own-compositor.md`, does not exist yet: task 10 writes it, with a
-section for every NVIDIA defect and the frame times of each machine. Until then each defect is
-an issue or goes into the pull request that fixes it, as machine, time, what was seen, and the
-verbatim lines of the compositor log, the journal and `dmesg`; task 10 gathers them. A suspend
-or an unplug that resets the desktop is not a defect of this work: it is #604.
-
 ### 6. Back to the graphical session
 
-When the run ends, from the console (or over SSH), as the same user:
+When the run ends, from the console (or over SSH with `ssh -t`), as the same user:
 
 ```
 systemctl --user stop c1-bar c1-dock
@@ -440,3 +436,12 @@ not touch. If the bar or the dock was started under `c1-bar` or `c1-dock` withou
 `RUNTIME_DIRECTORY` above, the real record may count those starts and, after five in ten
 minutes, put the real unit on the vendor layout; clear it before the `start` line with
 `rm -f "$XDG_RUNTIME_DIR/athanor-bar/failures" "$XDG_RUNTIME_DIR/athanor-dock/failures"`.
+
+### 7. How defects are recorded
+
+The plan (task 9) puts every defect with its log lines into the results. The results document
+of the spike, `docs/spikes/c1-own-compositor.md`, does not exist yet: task 10 writes it, with a
+section for every NVIDIA defect and the frame times of each machine. Until then each defect is
+an issue or goes into the pull request that fixes it, as machine, time, what was seen, and the
+verbatim lines of the compositor log, the journal and `dmesg`; task 10 gathers them. A suspend
+or an unplug that resets the desktop is not a defect of this work: it is #604.
