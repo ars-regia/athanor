@@ -58,7 +58,7 @@ zones, which windows are placed inside, and `xdg_popup`s parented to a layer sur
 keyboard follows `keyboard_interactivity`: an exclusive surface on the top or overlay layer
 holds it while mapped, an on-demand one takes it on a click, and one with none never gets it.
 A popup grab is honoured only for a client that already holds the pointer or the keyboard.
-Every client may bind the protocol until task 5 grants the top and overlay layers by identity.
+Since task 5 the top and overlay layers are a privileged client's.
 
 Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
 windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
@@ -67,5 +67,117 @@ through the toplevel capture source, into a client's `wl_shm` buffer (`src/captu
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
 output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox connects: they
-see none of these globals but the idle notifier, nor the security context manager, until task 5
-grants them by identity.
+see none of these globals but the idle notifier, nor the security context manager.
+
+Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
+connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
+every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse
+race open), the pidfd's pid from its fdinfo, then `/proc/<pid>/exe` and `/proc/<pid>/cgroup`, and
+reads the pidfd's pid again: unless it still names the same process, nothing is granted. The
+unit is the first component of the cgroup v2 path that is not a slice, below the user manager
+for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub-cgroup after
+another unit. The allow-list, `/usr/share/athanor/compositor/privileged-clients`
+(`data/privileged-clients`), has one grant per line, `<executable> <unit> <interface>...`; the
+executable is a path under `/usr`, the unit a service or a scope, each interface one of the
+privileged globals the compositor offers. A grant needs the executable's path, the unit, and
+the file: `stat` of `/proc/<pid>/exe` and `stat` of the allow-list's path in the compositor's
+mount namespace must name the same device and inode, since a sandbox whose own `/usr` holds a
+file at the bar's path reads back the bar's path. The `stat`s run only for a client whose path
+and unit match a line, and the pidfd's pid is read again after them: a `stat` reaches the
+client's own file system and blocks while a FUSE server stalls, and the compositor with it. A
+bar still running after an update of its
+package runs a deleted file, and a connection it opens then is granted nothing until it
+restarts. A missing, unreadable or malformed allow-list grants
+nothing, and so does a peer whose identity cannot be read. Each connection logs its identity and
+grants at debug level, and an identity that cannot be read as a warning. A client that connects through a
+security context's listener is granted nothing, whatever its identity.
+
+| Global | Granted to |
+| --- | --- |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1` | the allow-list's clients, each global by its own line |
+| `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
+| `zwlr_layer_shell_v1`, bottom and background layers | every client |
+| `ext_workspace_manager_v1`, `wp_security_context_manager_v1` | every client outside a security context |
+
+The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
+the bar what the plan names, and the fixture grants its clients every privileged global as the
+bar (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+can lock the session until one is added.
+
+What the check does not cover, for revision 2 of `doc_own_stack.md`:
+
+- **The identity is the one read at connect.** A client that `exec`s another program after
+  connecting keeps what it connected as, and one that connected as another program gains
+  nothing by `exec`ing the bar (`task5_exec_after_connect_keeps_the_connect_identity`). The
+  same holds for a connection handed to another process. Revision 2 must say whether that is
+  acceptable for programs under `/usr`, or ask for a check at each bind, through the pidfd kept
+  from connect.
+- A client that names the bar's path and unit, from its own mount namespace with a stalled FUSE
+  mount at that path, still blocks the compositor in the `stat` of its executable. `statx` with
+  `AT_STATX_DONT_SYNC` would read the device and inode without asking the FUSE server; revision
+  2 decides.
+- **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
+  start a unit of any name with `systemd-run --user` and run the bar's executable in it.
+- **ext-workspace-v1 is not among OS4's privileged protocols**: every unconfined client may
+  switch workspaces. The bottom and background layers of `wlr-layer-shell` stay offered inside a
+  security context. Revision 2 decides both.
+- Input-method, virtual keyboard and pointer, data control and the private interface are not
+  offered yet; each joins the allow-list's interfaces when it is.
+- A granted client's exclusive overlay surface keeps the keyboard while it lives, with no escape
+  for the user. Task 8 of the C1 plan, the DRM backend, adds the escape: the compositor does not
+  run on a console (task 9) without it.
+- The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
+  `rig.sh compositor-globals` checks that `wayland-info`, outside any unit, is refused the
+  privileged globals; the grant itself is checked by the fixture only, with the executable and
+  the cgroup faked and the pidfd real.
+- A kernel without `SO_PEERPIDFD` answers `ENOPROTOOPT`, and no client is granted anything;
+  no tested kernel lacks it, so that answer itself is not exercised
+  (`a_socket_with_no_peer_has_no_identity` checks the refusal on another error, `ENODATA`).
+
+Task 6 runs it nested in a real session: on the desktop, inside cosmic-comp on NVIDIA's EGL, for
+an hour, with the bar, the dock, a terminal and `gtk_animation.py`. The nested backend logs the
+same frame-time report as the headless one, every 10 seconds; its draw time is the draw alone,
+not the submit, which waits on the parent. A frame with nothing to draw is not presented, so the
+parent does not pace the next one: the compositor waits a frame period before it asks for it.
+`forge/test/shell/compositor_soak.sh` takes the clients that draw only when something changes
+after `--idle`, and checks only that they stay up. The bar and the dock run there from outside
+`/usr` and in no unit, so the allow-list does not grant them and their top-layer surfaces are
+closed: the soak shows that they connect and stay up, not that they are drawn.
+
+Task 7 reads the bar through AT-SPI under the compositor, in the rig:
+`RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar [it]`. The bar runs there as its unit
+would: `session.sh` installs `data/privileged-clients` where the compositor reads it, the
+container runs in podman's systemd mode, whose cgroup tree is writable, and
+`bar_session.py --unit` starts `/usr/bin/athanor-bar` inside the cgroup `athanor-bar.service`, so
+the grant of task 5 is the real one, through the pidfd, the executable and the cgroup. GTK keeps
+exporting the tree of a surface the compositor closed: in one run of task 7 without `--unit` (an
+observation, not a fixture), the walk passed while the compositor's log said it closed the bar's
+surface and the capture was empty. The check therefore also fails when that log is missing or
+says it closed the bar's surface. The bar
+shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
+`zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
+replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies.
+
+Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibility.md` AX4):
+
+- The rig's Orca walks (`rig.sh orca`) do not need it. In the rig under cosmic-comp, which owns
+  `org.freedesktop.a11y.Manager` with the monitor on the scene's bus, Orca's debug log records no
+  key event during a walk, and `KP_Enter`, Orca's "where am I", pressed through `wtype` after two
+  Tabs, is not spoken: Orca speaks from AT-SPI focus events alone. The keys reach the
+  application through the virtual keyboard and, by these signs, not the monitor; cosmic-comp's
+  source was not traced to confirm it.
+- Orca's own commands need it. Under this compositor nothing owns `org.freedesktop.a11y.Manager`,
+  so Orca's commands do not reach Orca, and the rig cannot walk any surface yet: `wtype` stops at
+  "Compositor does not support the virtual keyboard protocol".
+- The size of the work: the monitor on the session bus (`GrabKeyboard`, `UngrabKeyboard`,
+  `WatchKeyboard`, `UnwatchKeyboard`, `SetKeyGrabs`, the `KeyEvent` signal) through zbus, already
+  a dependency of the workspace, on a thread of its own that talks to calloop through a channel;
+  the filter in the keyboard path that sends every key to a watcher and keeps the grabbed ones
+  from the focused client; and AX4's admission at every call, the owner of
+  `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
+  `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
+  checks. Whether the image's session bus returns `ProcessFD` is unverified
+  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). For the rig to test it,
+  `zwp_virtual_keyboard_v1` (Smithay's `VirtualKeyboardManagerState`), whose keys must go through
+  the same filter, which cosmic-comp's do not: about 100 lines more (an estimate). Then
+  `rig.sh orca` can run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.

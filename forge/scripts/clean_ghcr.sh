@@ -13,14 +13,16 @@
 #     days is an interim number;
 #   - athanor-nvidia-rpms, the mirror the NVIDIA locks index, is never pruned;
 #   - every other package keeps its two newest tagged versions and every version tagged
-#     latest, main or stable; the other tagged versions and the untagged ones are deleted.
+#     latest, main or stable, with whatever signs them as above (the tier repositories are
+#     verified before every system build, UD44); the other tagged versions and the untagged
+#     ones are deleted.
 #     athanor-iso also keeps the ISO of every promoted run, athanor-iso:<run_id> (UD8): the
 #     run ids an athanor-system image tagged stable, stable-previous, stable-<YYYYMMDD> or
 #     promoted-<run_id> names: the promoted-<run_id> tag, or the run id tag of an image promoted before it. The janitor stops before it deletes any ISO when that set cannot be read, when
 #     no athanor-system image is tagged stable, when a promoted athanor-system image carries no
 #     run id, or when the set misses the run of athanor-iso:stable.
 # Usage: clean_ghcr.sh OWNER. Needs gh with read:packages and delete:packages, and for the
-# system images skopeo logged in to the registry.
+# signed images skopeo logged in to the registry.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -45,30 +47,40 @@ delete() { # delete PACKAGE API: version ids on stdin
   done
 }
 
-prune_system_image() { # prune_system_image PACKAGE API VERSIONS
-  local package=$1 api=$2 versions=$3 cutoff digest hex member
+keep_signed() { # keep_signed PACKAGE API VERSIONS KEPT: KEPT holds one kept digest per line
+  # Deletes every version that is neither kept nor part of a kept digest's signatures. Every
+  # list is read into a variable before its loop: a failure inside a process substitution would
+  # not stop the janitor, and what the list should have kept would be deleted as unreachable.
+  local package=$1 api=$2 versions=$3 kept=$4 digest hex member signatures index members
   local -A live=()
-  cutoff=$((NOW - RETENTION_DAYS * 86400))
   while IFS= read -r digest; do
     [[ -n $digest ]] || continue
     live[$digest]=1
     hex=${digest#sha256:}
-    while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done < <(jq -r --arg hex "$hex" '
+    signatures=$(jq -r --arg hex "$hex" '
       .[] | select(.metadata.container.tags | any(startswith("sha256-" + $hex))) | .name' <<< "$versions")
+    while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done <<< "$signatures"
     if jq -e --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<< "$versions" > /dev/null; then
-      while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done < <(
-        skopeo inspect --raw "docker://${REGISTRY_HOST}/${OWNER}/${package}:sha256-${hex}" | jq -r '.manifests[]?.digest')
+      index=$(skopeo inspect --raw "docker://${REGISTRY_HOST}/${OWNER}/${package}:sha256-${hex}")
+      members=$(jq -r '.manifests[]?.digest' <<< "$index")
+      while IFS= read -r member; do [[ -z $member ]] || live[$member]=1; done <<< "$members"
     fi
-  done < <(jq -r --argjson cutoff "$cutoff" '
-    .[]
-    | select(.metadata.container.tags | any(startswith("sha256-") | not))
-    | select((.metadata.container.tags | any(test("^(latest|stable|stable-previous|stable-[0-9]{8}|promoted-[0-9]+)$")))
-          or ((.created_at | fromdateiso8601) >= $cutoff))
-    | .name' <<< "$versions")
+  done <<< "$kept"
   echo "${package}: ${#live[@]} manifests reachable from a kept image"
   while read -r id digest; do
     [[ -n ${live[$digest]:-} ]] || echo "$id"
   done < <(jq -r '.[] | "\(.id) \(.name)"' <<< "$versions") | delete "$package" "$api"
+}
+
+prune_system_image() { # prune_system_image PACKAGE API VERSIONS
+  local cutoff=$((NOW - RETENTION_DAYS * 86400)) kept
+  kept=$(jq -r --argjson cutoff "$cutoff" '
+    .[]
+    | select(.metadata.container.tags | any(startswith("sha256-") | not))
+    | select((.metadata.container.tags | any(test("^(latest|stable|stable-previous|stable-[0-9]{8}|promoted-[0-9]+)$")))
+          or ((.created_at | fromdateiso8601) >= $cutoff))
+    | .name' <<< "$3")
+  keep_signed "$@" "$kept"
 }
 
 keep_isos() { # keep_isos REASON: stops the janitor before it deletes any ISO
@@ -112,10 +124,14 @@ while IFS= read -r package; do
   esac
   promoted='[]'
   if [[ $package == athanor-iso ]]; then promoted=$(promoted_runs "$versions"); fi
-  jq -r --argjson promoted "$promoted" '
-    ([.[] | select(.metadata.container.tags | length > 0)] | sort_by(.created_at) | reverse | .[:2] | map(.id)) as $newest
+  # A signature's tag (sha256-<hex>...) does not make a version one of the two newest: it stays
+  # exactly as long as the digest it signs.
+  kept=$(jq -r --argjson promoted "$promoted" '
+    ([.[] | select(.metadata.container.tags | any(startswith("sha256-") | not))]
+      | sort_by(.created_at) | reverse | .[:2] | map(.id)) as $newest
     | .[]
-    | select((.id as $id | $newest | index($id)) | not)
-    | select(.metadata.container.tags | any(test("^(latest|main|stable)$") or IN($promoted[])) | not)
-    | .id' <<< "$versions" | delete "$package" "$api"
+    | select((.id as $id | $newest | index($id))
+          or (.metadata.container.tags | any(test("^(latest|main|stable)$") or IN($promoted[]))))
+    | .name' <<< "$versions")
+  keep_signed "$package" "$api" "$versions" "$kept"
 done <<< "$packages"

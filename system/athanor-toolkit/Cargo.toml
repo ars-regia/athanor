@@ -10,6 +10,8 @@ accesskit = "0.25"
 accesskit_unix = "0.24"
 parley = "0.12"
 vello_cpu = "0.3"
+# Rasterises the SVG icons of the icon theme; no text, fonts or embedded raster images.
+resvg = { version = "0.48.1", default-features = false }
 vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"], optional = true }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"], optional = true }
 wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], optional = true }

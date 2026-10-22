@@ -1,0 +1,27 @@
+[package]
+name = "athanor-toolkit-gallery"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+description = "Every widget of athanor-toolkit on one page each, the reference the toolkit is checked against"
+publish = false
+
+[dependencies]
+athanor-toolkit = { path = ".." }
+
+# A workspace root of its own: the gallery is a client of the toolkit, as an application outside
+# Athanor would be, and takes nothing from the repository's workspace.
+[workspace]
+
+# The repository root's profiles, which a workspace root of its own does not inherit.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+rpath = false
+overflow-checks = true

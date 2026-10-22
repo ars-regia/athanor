@@ -255,7 +255,7 @@ mod tests {
 
     fn published(machine: &Machine) -> UpdateState {
         let text = std::fs::read_to_string(machine.store.run.join("state.json")).expect("state");
-        athanor_trust_state::parse(&text).expect("schema 1").update
+        athanor_trust_state::parse(&text).expect("schema 2").update
     }
 
     #[tokio::test]

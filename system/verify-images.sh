@@ -17,22 +17,28 @@
 # (scripts/ci/evidence.py) for each image it verified, naming ID as the run; a digests file
 # whose tag is not ID on every line is refused before anything is verified.
 #
+# With --attestations DIR, the release statements of candidate (PB4b, ADR-0127), it also runs
+# `cosign verify-attestation` on the host for each image, with each public key of the checkout,
+# through scripts/ci/release_attestation.py: at least one attestation must verify, and every
+# one that verifies must carry the predicate type, subject and predicate of its statement.
+#
 # Usage: verify-images.sh --registry REGISTRY/OWNER [--builder CONTENT_HASH]
-#                         [--evidence DIR --build-run-id ID] DIGESTS_FILE
+#                         [--evidence DIR --build-run-id ID] [--attestations DIR] DIGESTS_FILE
 #        (lines: "REPOSITORY TAG DIGEST", image-digests.sh)
 # Environment: VERIFY_KEYS_DIR (default system/keys).
 set -euo pipefail
 
 usage() {
-    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--builder CONTENT_HASH] [--evidence DIR --build-run-id ID] DIGESTS_FILE" >&2
+    echo "usage: ${0##*/} --registry REGISTRY/OWNER [--builder CONTENT_HASH] [--evidence DIR --build-run-id ID] [--attestations DIR] DIGESTS_FILE" >&2
     exit 2
 }
-registry='' builder='' evidence='' build_run=''
+registry='' builder='' evidence='' build_run='' attestations=''
 while [[ $# -gt 1 ]]; do
-    case $1 in --registry) registry=$2 ;; --builder) builder=$2 ;; --evidence) evidence=$2 ;; --build-run-id) build_run=$2 ;; *) usage ;; esac
+    case $1 in --registry) registry=$2 ;; --builder) builder=$2 ;; --evidence) evidence=$2 ;; --build-run-id) build_run=$2 ;; --attestations) attestations=$2 ;; *) usage ;; esac
     shift 2
 done
 [[ $# -eq 1 && -n $registry ]] || usage
+[[ -z $attestations || -d $attestations ]] || usage
 digests=$1
 [[ -z $builder || $builder =~ ^[0-9a-f]{64}$ ]] || {
     echo "${0##*/}: --builder is not a content hash: '$builder'" >&2
@@ -80,6 +86,10 @@ while read -r repository _ digest; do
         "docker://$repository@$digest" "dir:$target"
     rm -rf "$work/pull-$n"
     echo "verified with the shipped policy: $repository@$digest"
+    if [[ -n $attestations ]]; then
+        bash "$retry" python3 -B "$root/scripts/ci/release_attestation.py" verify --keys-dir "$keys_dir" \
+            --statement "$attestations/${repository##*/}/${digest#sha256:}.json" "$repository@$digest" < /dev/null
+    fi
     if [[ -n $evidence ]]; then
         python3 -B "$root/scripts/ci/evidence.py" write --gate signature --image "${repository##*/}" \
             --digest "$digest" --run-id "$build_run" --verdict pass \

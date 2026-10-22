@@ -1,6 +1,7 @@
 //! The nested backend: a window of the parent compositor is the output; its events are input,
 //! resizes and the redraws that paint the space.
 
+use crate::headless::report_frame_times;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -9,10 +10,11 @@ use smithay::backend::renderer::ImportDma;
 use smithay::backend::winit::{WinitEvent, WinitGraphicsBackend};
 use smithay::desktop::layer_map_for_output;
 use smithay::output::{Mode, Output};
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use smithay::utils::Transform;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The output's refresh, in mHz: the parent compositor paces the redraws.
 const REFRESH: i32 = 60_000;
@@ -22,6 +24,8 @@ pub struct Nested {
     pub backend: WinitGraphicsBackend<GlesRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
+    /// A redraw with nothing drawn has scheduled the next one: further ones do not add another.
+    frame_scheduled: bool,
 }
 
 /// Opens the window, its output at `scale`, and linux-dmabuf version 3 with the renderer's
@@ -49,10 +53,12 @@ pub fn start(
         backend,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
+        frame_scheduled: false,
     };
     let mut state = State::new(event_loop, display, Backend::Nested(Box::new(nested)))?;
     state.map_output(&output);
     state.dmabuf_state.create_global::<State>(&dh, formats);
+    report_frame_times(event_loop, &mut state)?;
 
     event_loop
         .handle()
@@ -92,16 +98,22 @@ impl State {
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
                 let view = View::of(&self.space, self.lock.as_ref(), &output);
-                draw_view(
+                let started = Instant::now();
+                let drawn = draw_view(
                     renderer,
                     &mut framebuffer,
                     &output,
                     age,
                     view,
                     &mut nested.damage_tracker,
-                )
-                .map(|result| (result.damage.cloned(), result.states))
-                .map_err(|error| error.to_string())
+                );
+                // The draw alone, as on the headless backend: the submit waits on the parent.
+                if let (Ok(_), Some(stats)) = (&drawn, &mut self.frame_stats) {
+                    stats.drew(started.elapsed());
+                }
+                drawn
+                    .map(|result| (result.damage.cloned(), result.states))
+                    .map_err(|error| error.to_string())
             }
             Err(error) => Err(error.to_string()),
         };
@@ -122,8 +134,8 @@ impl State {
             // so a lock is confirmed only once it is on screen.
             nested.damage_tracker = OutputDamageTracker::from_output(&output);
         }
-        if let Ok((damage, states)) = rendered {
-            let presented = shown && damage.is_some();
+        let presented = shown && matches!(rendered, Ok((Some(_), _)));
+        if let Ok((_, states)) = rendered {
             self.frame_done(&output, &states, presented, frame_target, frame_period);
         }
         self.serve_captures();
@@ -136,8 +148,36 @@ impl State {
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");
         }
-        if let Backend::Nested(nested) = &self.backend {
-            nested.backend.window().request_redraw();
+        // A presented frame is paced by the parent; one with nothing to draw is not, and asking
+        // for the next at once spins a core. It waits a frame period instead.
+        // ponytail: an idle output still wakes at 60 Hz; redraw on damage only if that shows.
+        // A resize or an input event redraws as well: one timer at a time, or each such redraw
+        // would start another chain and the idle rate would double.
+        if presented {
+            request_redraw(self);
+        } else if let Backend::Nested(nested) = &mut self.backend {
+            if !nested.frame_scheduled {
+                let timer = Timer::from_duration(frame_period);
+                match self.loop_handle.insert_source(timer, |_, _, state| {
+                    if let Backend::Nested(nested) = &mut state.backend {
+                        nested.frame_scheduled = false;
+                    }
+                    request_redraw(state);
+                    TimeoutAction::Drop
+                }) {
+                    Ok(_) => nested.frame_scheduled = true,
+                    // The next parent event redraws: asking at once would spin, as above.
+                    Err(error) => {
+                        tracing::warn!(error = %error.error, "the next frame could not be scheduled")
+                    }
+                }
+            }
         }
+    }
+}
+
+fn request_redraw(state: &State) {
+    if let Backend::Nested(nested) = &state.backend {
+        nested.backend.window().request_redraw();
     }
 }

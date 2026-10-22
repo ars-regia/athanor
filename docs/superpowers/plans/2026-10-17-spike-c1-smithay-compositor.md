@@ -58,7 +58,7 @@ The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout
 
 ### Task 5: privileged globals by executable and unit
 
-- [ ] At connect, read the peer's pid through `SO_PEERCRED`, open its pidfd, read its executable and its cgroup, and derive the unit. An allow-list under `/usr` maps executable and unit pairs to globals.
+- [ ] At connect, take the peer's pidfd through `SO_PEERPIDFD`, read its executable and its cgroup through the pidfd's pid, and derive the unit; without `SO_PEERPIDFD` (Linux 6.5) the peer has no identity and is granted nothing. An allow-list under `/usr` maps executable and unit pairs to globals.
 - [ ] Clients on a security-context listener get the standard globals only.
 - [ ] Check, in the fixture and with `wayland-info`: from `athanor-bar.service` with the bar's executable, the layer-shell, toplevel and capture globals are listed; from the same unit with another executable, from another unit, and through a security context, they are not.
 
@@ -74,9 +74,12 @@ The client is the chooser of our own toolkit (milestone T1), not the GTK4 layout
 ### Task 8: the DRM backend
 
 - [ ] The udev/DRM backend with libseat, from `anvil`, with `linux-drm-syncobj-v1`, output hot-plug and session pause and resume.
+- [ ] A key the compositor keeps for itself takes the keyboard back from an exclusive overlay or top surface of a granted client, and a test shows it.
 - [ ] Check in the development VM (virtio-gpu, KMS) from its console over SSH, without the maintainer.
 
 ### Task 9: console sessions (the maintainer, last)
+
+The compositor runs on a console only once the keyboard escape of task 8 is in.
 
 - [ ] Write the commands: switch to a text console, start the compositor with the bar, the dock and a terminal, and switch back; the log path to send back.
 - [ ] Laptop: one hour of use. NVIDIA desktop, three outputs: one hour of use, one suspend and resume, one output unplugged and plugged.
