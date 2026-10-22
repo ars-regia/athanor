@@ -24,9 +24,9 @@
 # GITHUB_REPOSITORY (default https://github.com and ars-regia/athanor) run on a branch of
 # TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
-# trusted run accepts them. No other branch is trusted, rebase/* included, but for the base of a
-# pull request below: creating a branch is not protected, and a tier signed there could be
-# adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
+# trusted run accepts them, or on the base of a pull request when a ruleset protects it (decided
+# by the maintainer on 2026-10-22). No other branch is trusted, rebase/* included: creating a
+# branch is not protected, and a tier signed there could be adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
 # verify fail on it; any other failure of cosign (registry, Rekor, TUF, network) is an error,
 # never a missing signature. Needs skopeo, cosign and jq, and a registry session when the tier
 # images are private.
@@ -34,8 +34,11 @@
 # resolve reads the tag `latest`, except in a pull request (GITHUB_BASE_REF set) into a branch
 # other than iso-v0 and main, such as a rebase integration branch (ADR-0125): there it reads the
 # tag `branch-<base>` that forge/scripts/publish_tiers.sh gives that branch's tiers, and trusts
-# that branch's signatures, so the check builds on the base it merges into. The check pushes
-# nothing, so this trust reaches no other run.
+# that branch's signatures when a ruleset protects it, so the check builds on the base it merges
+# into. Protected means that `gh api` (GH_TOKEN) lists, among the rules of the branch, a
+# pull_request rule requiring a code owner's review and a non_fast_forward rule; rules that
+# cannot be read are an error, never an unprotected branch. The check pushes nothing, so this
+# trust reaches no other run.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -81,6 +84,19 @@ elif [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
     die "the base branch '$BASE' is not a branch name"
 fi
 
+# protected: whether a ruleset protects BASE; dies when its rules cannot be read.
+protected() {
+    local rules verdict
+    rules=$(gh api "/repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/rules/branches/$BASE") ||
+        die "cannot read the rules of the base branch '$BASE'"
+    verdict=$(jq -r 'if type == "array" then
+            any(.[]; .type == "pull_request" and .parameters.require_code_owner_review == true)
+            and any(.[]; .type == "non_fast_forward")
+        else error("not a list of rules") end' <<< "$rules") ||
+        die "cannot read the rules of the base branch '$BASE'"
+    [[ $verdict == true ]]
+}
+
 # trust: sets IDENTITY, the certificate identity regex of a trusted run.
 trust() {
     local workflow ref own refs='' trusted
@@ -103,7 +119,11 @@ trust() {
     elif [[ ${GITHUB_REF:-} == refs/heads/* ]]; then
         echo "tier-digests: the branch '$own' is not trusted for its own tiers: its name needs escaping" >&2
     fi
-    [[ -z $BASE ]] || refs+="|${BASE//./\\.}"
+    if [[ -n $BASE ]] && protected; then
+        refs+="|${BASE//./\\.}"
+    elif [[ -n $BASE ]]; then
+        echo "tier-digests: the base branch '$BASE' is not protected by a ruleset: its tiers are not trusted" >&2
+    fi
     IDENTITY="^${workflow}@refs/heads/(${refs})\$"
 }
 

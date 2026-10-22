@@ -203,7 +203,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **File:** `system-image-check.yml`. **Purpose:** PR build of the system images as the pipeline builds them (no key reaches a build), without pushing, plus the package delta against the published image (O7). CI32 merges the bot's `bump/system-*` PRs once it ends.
 - **Triggers:** `pull_request` on the image inputs (`system/Containerfile`, `system/nvidia/**`, `system/scripts/**`, `system/keys/**`, `forge/config/packages.json`, ...). **Output:** artifact `kernel-artifacts`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** `system-image-check-<PR>`, cancels in progress.
-- **Scripts:** `system/kernel-artifacts.sh`, `tier-digests.sh`, `build-image.sh`, `rechunk-image.sh`, `package-delta.sh`, `nvidia/gate.sh`, `forge/specs/azoth/nvr.sh`, `retry.sh`. The tiers are the signed `latest` ones, or, for a pull request into another branch such as `rebase/*` (ADR-0125), that branch's `branch-<name>` tiers signed by its own runs (UD44).
+- **Scripts:** `system/kernel-artifacts.sh`, `tier-digests.sh`, `build-image.sh`, `rechunk-image.sh`, `package-delta.sh`, `nvidia/gate.sh`, `forge/specs/azoth/nvr.sh`, `retry.sh`. The tiers are the signed `latest` ones, or, for a pull request into another branch such as `rebase/*` (ADR-0125), that branch's `branch-<name>` tiers signed by its own runs, trusted as the base of a pull request when a ruleset protects it (decided by the maintainer on 2026-10-22) (UD44).
 - **Health:** `gh run list --workflow system-image-check.yml --branch iso-v0 --limit 5`.
 
 ### CI14 Spec Build Check

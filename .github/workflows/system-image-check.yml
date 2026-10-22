@@ -112,7 +112,10 @@ jobs:
 
       - name: Tier repositories by digest (system/tier-digests.sh)
         # The published tiers, read once and only when signed by a trusted run: every image of
-        # this job installs the same ones (UD28, UD44).
+        # this job installs the same ones (UD28, UD44). GH_TOKEN reads the rules of a base branch
+        # other than iso-v0 and main, trusted only when a ruleset protects it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/tier-digests.sh resolve
 
       - name: Build the planned images

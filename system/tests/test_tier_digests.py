@@ -15,6 +15,14 @@ WORKFLOW = (
     "https://github.com/ars-regia/athanor/.github/workflows/call-system-image.yml"
 )
 TRUSTED = f"{WORKFLOW}@refs/heads/iso-v0"
+RULES = "/repos/ars-regia/athanor/rules/branches/rebase/fedora-45"
+# The rules GitHub returns for a branch a ruleset protects: what rebase/fedora-45 carried on
+# 2026-10-22, less the parameters the check does not read.
+PROTECTED = [
+    {"type": "non_fast_forward"},
+    {"type": "required_status_checks", "parameters": {}},
+    {"type": "pull_request", "parameters": {"require_code_owner_review": True}},
+]
 
 
 class TierDigests(unittest.TestCase):
@@ -23,7 +31,7 @@ class TierDigests(unittest.TestCase):
         self.dir = pathlib.Path(self.tmp.name)
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
-        for tool in ("skopeo", "cosign"):
+        for tool in ("skopeo", "cosign", "gh"):
             (bin_dir / tool).symlink_to(HERE / "fake_registry.py")
         self.fixture = self.dir / "registry.json"
         self.env = {
@@ -52,10 +60,12 @@ class TierDigests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def publish(self, registry, signers=None, transient=(), tag="latest", **digests):
+    def publish(
+        self, registry, signers=None, transient=(), tag="latest", api=None, **digests
+    ):
         """Tag each tier :TAG at its digest, signed by TRUSTED unless SIGNERS names another
         identity (None: no signature) for that tier; TRANSIENT tiers fail cosign verify with a
-        Rekor outage."""
+        Rekor outage. API is what `gh api` answers per path; any other path is a 404."""
         signers = signers or {}
         tags = {
             f"{registry}/athanor-forge-{tier}-repo:{tag}": d
@@ -76,6 +86,7 @@ class TierDigests(unittest.TestCase):
                     "tags": tags,
                     "signatures": signatures,
                     "signature_transient_errors": errors,
+                    "api": api or {},
                 }
             )
         )
@@ -293,7 +304,9 @@ class TierDigests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("'fix/c++' is not trusted for its own tiers", r.stderr)
 
-    def test_a_pull_request_into_a_rebase_branch_builds_on_that_branch_s_tiers_signed(self):
+    def into_rebase_branch(self, rules):
+        """A pull request into rebase/fedora-45, whose tiers that branch's runs signed; RULES is
+        what the API answers for the branch (None: the call fails)."""
         self.env["GITHUB_REF"] = "refs/pull/645/merge"
         self.env["GITHUB_BASE_REF"] = "rebase/fedora-45"
         base = f"{WORKFLOW}@refs/heads/rebase/fedora-45"
@@ -301,11 +314,55 @@ class TierDigests(unittest.TestCase):
             "ghcr.io/ars-regia",
             tag="branch-rebase-fedora-45",
             signers={f"tier{n}": base for n in range(4)},
+            api=None if rules is None else {RULES: rules},
             **DIGESTS,
         )
-        r = self.resolve("resolve")
+        return self.resolve("resolve")
+
+    def test_a_pull_request_into_a_protected_rebase_branch_builds_on_its_tiers(self):
+        r = self.into_rebase_branch(PROTECTED)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(self.out.read_text())["tier2"], DIGESTS["tier2"])
+
+    def test_an_unprotected_base_branch_is_not_trusted(self):
+        """Maintainer decision of 2026-10-22: anyone with push access can create rebase/*, so
+        only a branch a ruleset protects is trusted as the base of a pull request."""
+        for name, rules in (
+            ("no rules", []),
+            ("no pull_request rule", [r for r in PROTECTED if r["type"] != "pull_request"]),
+            ("no code owner review", [
+                *(r for r in PROTECTED if r["type"] != "pull_request"),
+                {"type": "pull_request", "parameters": {"require_code_owner_review": False}},
+            ]),
+            ("force pushes allowed", [r for r in PROTECTED if r["type"] != "non_fast_forward"]),
+        ):
+            with self.subTest(name=name):
+                r = self.into_rebase_branch(rules)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("'rebase/fedora-45' is not protected by a ruleset", r.stderr)
+                self.assertIn("tier0 tier1 tier2 tier3: not signed by a trusted run", r.stderr)
+                self.assertFalse(self.out.exists())
+
+    def test_rules_that_cannot_be_read_are_an_error(self):
+        for name, rules in (("404", None), ("not a list", {"message": "Bad credentials"})):
+            with self.subTest(name=name):
+                r = self.into_rebase_branch(rules)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("cannot read the rules of the base branch 'rebase/fedora-45'", r.stderr)
+                self.assertNotIn("not signed by a trusted run", r.stderr)
+                self.assertNotIn("not protected", r.stderr)
+                self.assertFalse(self.out.exists())
+
+    def test_iso_v0_and_main_as_base_need_no_api_call(self):
+        for base in ("iso-v0", "main"):
+            with self.subTest(base=base):
+                self.env["GITHUB_REF"] = "refs/pull/7/merge"
+                self.env["GITHUB_BASE_REF"] = base
+                self.publish("ghcr.io/ars-regia", **DIGESTS)
+                r = self.resolve("resolve")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                calls = [json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines()]
+                self.assertNotIn("gh", [c[0] for c in calls])
 
     def test_a_pull_request_into_iso_v0_reads_latest_and_trusts_no_other_branch_signed(self):
         self.env["GITHUB_REF"] = "refs/pull/7/merge"
