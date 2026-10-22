@@ -82,6 +82,26 @@ def fill_page(page, container, text):
         row.append(label)
         row.append(switch)
         container.append(row)
+    elif page == "values":
+        scale = Gtk.Scale(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            adjustment=Gtk.Adjustment(value=50, lower=0, upper=100, step_increment=1, page_increment=10),
+        )
+        scale.set_draw_value(False)
+        scale.update_property([Gtk.AccessibleProperty.LABEL], [text["slider"]])
+        container.append(scale)
+    elif page == "lists":
+        scroll = Gtk.ScrolledWindow(
+            min_content_height=200,
+            max_content_height=200,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+        )
+        rows = Gtk.ListBox()
+        rows.update_property([Gtk.AccessibleProperty.LABEL], [text["list"]])
+        for n in range(1, 51):
+            rows.append(Gtk.Label(label=f"{text['row']} {n}", xalign=0))
+        scroll.set_child(rows)
+        container.append(scroll)
     else:
         raise ValueError(f"no page {page!r}")
 

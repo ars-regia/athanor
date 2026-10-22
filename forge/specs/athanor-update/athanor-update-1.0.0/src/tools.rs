@@ -63,8 +63,15 @@ pub trait Tools {
     fn switch(&self, image: &str) -> Result<(), Failure>;
     /// Copies `<repository>:sha256-<hex>.sig` into `dest` under the attachments policy.
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
+    /// Copies the release attestation `<repository>:sha256-<hex>.att` into `dest` under the
+    /// attachments policy (ADR-0127, point 2). Its class is read by `attestation::class_of`.
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure>;
     /// NetworkManager's `Metered` is 1 (yes) or 3 (guessed yes). No NetworkManager: false.
     fn metered(&self) -> bool;
+    /// `greenboot-success.target` is active: greenboot's required health checks passed on this
+    /// boot. `boot-complete.target` does not say it: it becomes active whatever they say. Any
+    /// other answer, an error included, is false.
+    fn boot_healthy(&self) -> bool;
 }
 
 /// Seconds since the epoch of an RFC 3339 time, as the image labels carry it.
@@ -261,6 +268,14 @@ const RPM_OSTREE: &str = "/usr/bin/rpm-ostree";
 const BUSCTL: &str = "/usr/bin/busctl";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
+/// Copies `<repository>:sha256-<hex>.<suffix>` into `dest` under the attachments policy.
+fn fetch_attachment(repository: &str, digest: &str, suffix: &str, dest: &Path) -> Result<(), Failure> {
+    let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
+    let source = format!("docker://{repository}:sha256-{hex}.{suffix}");
+    let dest = format!("dir:{}", dest.display());
+    run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
+}
+
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
     run_with_stderr(program, args, host).map_err(|(failure, _)| failure)
 }
@@ -335,15 +350,21 @@ impl Tools for System {
     }
 
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
-        let source = format!("docker://{repository}:sha256-{hex}.sig");
-        let dest = format!("dir:{}", dest.display());
-        run(SKOPEO, &["copy", "--policy", ATTACHMENTS_POLICY, &source, &dest], host_of(repository)).map(drop)
+        fetch_attachment(repository, digest, "sig", dest)
+    }
+
+    fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
+        fetch_attachment(repository, digest, "att", dest)
     }
 
     fn metered(&self) -> bool {
         let property = ["--system", "get-property", "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager", "Metered"];
         matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok("u 1" | "u 3"))
+    }
+
+    fn boot_healthy(&self) -> bool {
+        let property = ["--system", "get-property", "org.freedesktop.systemd1", "/org/freedesktop/systemd1/unit/greenboot_2dsuccess_2etarget", "org.freedesktop.systemd1.Unit", "ActiveState"];
+        matches!(run(BUSCTL, &property, None).as_deref().map(str::trim), Ok(r#"s "active""#))
     }
 }
 
@@ -475,6 +496,12 @@ mod tests {
         assert!(!manifest_absent("pinging container registry r: dial tcp: i/o timeout"));
         assert!(!access_denied("reading manifest latest in r/o/a: name unknown: repository name not known to registry"));
         assert!(access_denied("Error reading manifest latest in ghcr.io/o/absent: denied: requested access to the resource is denied"));
+    }
+
+    #[test]
+    fn an_attestation_is_fetched_only_for_a_sha256_digest() {
+        let refused = System.fetch_attestation("registry.example/o/a", "sha256:../../etc", Path::new("/nonexistent"));
+        assert_eq!(refused, Err(Failure { code: ErrorCode::Internal, host: None }));
     }
 
     #[test]

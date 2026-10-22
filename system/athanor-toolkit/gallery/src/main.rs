@@ -13,7 +13,7 @@ const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 2] = ["buttons", "choices"];
+const PAGES: [&str; 4] = ["buttons", "choices", "values", "lists"];
 
 /// The command line.
 struct Options {
@@ -100,6 +100,18 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), Str
                 },
             );
         }
+        "values" => {
+            ui.slider(group, t("slider")?, 0.0, 100.0, 1.0, 50.0)
+                .ok_or("the slider's range is broken")?;
+        }
+        "lists" => {
+            let scroll = ui.scroll(group, 200.0);
+            let list = ui.list(scroll, t("list")?);
+            let row = t("row")?;
+            for n in 1..=50 {
+                ui.list_row(list, &format!("{row} {n}"));
+            }
+        }
         _ => return Err(format!("no page {name:?}")),
     }
     Ok(())
@@ -147,15 +159,23 @@ fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
     Ok((ui, shown))
 }
 
+/// Shows the page of `selected` and hides the others; a selection that is not a page toggle,
+/// such as a toggle inside a page, changes nothing.
+fn show_page(ui: &mut Ui, pages: &[(WidgetId, WidgetId)], selected: WidgetId) {
+    if pages.iter().any(|&(toggle, _)| toggle == selected) {
+        for &(toggle, group) in pages {
+            ui.set_visible(group, toggle == selected);
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let run = || -> Result<(), String> {
         let options = Options::parse(std::env::args().skip(1))?;
         let (ui, pages) = build(&options)?;
         let on_event = move |ui: &mut Ui, event: Event| {
             if let Event::Selected(selected) = event {
-                for &(toggle, group) in &pages {
-                    ui.set_visible(group, toggle == selected);
-                }
+                show_page(ui, &pages, selected);
             }
         };
         driver::run_window(ui, "athanor-toolkit-gallery", Box::new(on_event))
@@ -167,5 +187,23 @@ fn main() -> ExitCode {
             eprintln!("athanor-toolkit-gallery: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_selection_inside_a_page_keeps_the_page() -> Result<(), String> {
+        let (mut ui, pages) = build(&Options::parse(std::iter::empty())?)?;
+        let (first, second) = (pages[0], pages[1]);
+        assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
+        // Not a page toggle: the group's own id stands for any widget inside a page.
+        show_page(&mut ui, &pages, first.1);
+        assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
+        show_page(&mut ui, &pages, second.0);
+        assert!(!ui.is_visible(first.1) && ui.is_visible(second.1));
+        Ok(())
     }
 }

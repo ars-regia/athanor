@@ -47,10 +47,12 @@ predicate type of point 1 as written below:
 1. **Predicate type.** The release attestation has the predicate type
    `https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_pipeline.md#pb4b`,
    a URL the project controls that leads to its specification.
-2. **Envelope and transport.** An in-toto Statement v1 in a DSSE envelope, attached by
+2. **Envelope and transport.** An in-toto Statement in a DSSE envelope, attached by
    `cosign attest --key … --type <predicate type> --tlog-upload=false --new-bundle-format=false`
    as `<repo>:sha256-<hex>.att`, with the layer media type
    `application/vnd.dsse.envelope.v1+json`. Retention already keeps `.att` tags (UT10).
+   *Amended on 2026-10-21 by the maintainer:* the statement is v0.1, as cosign 3.0.6 writes
+   it, or v1, and the client accepts exactly these two `_type` values.
 3. **Fields.** The subject is `[{name: <repository>, digest: {sha256: <hex>}}]`. The predicate
    holds `class` (`security` or `feature`), `advisories` (sorted, unique ids), `class_reason`,
    `build_time` (RFC 3339), `revision` (the 40-hex commit), `build_run_id` (a decimal string)
@@ -78,9 +80,26 @@ predicate type of point 1 as written below:
 9. **When `postpone` is `null`.** While no lineage is open, that is while no security digest
    has reached `will-apply-at-next-shutdown` since the anchor. The anchor is persisted under
    `/var/lib` either way, and `first_notice_at` is never `null` inside the object.
+   *Note of 2026-10-22:* a lineage file or an opt-out file that cannot be read is reported
+   as `storage` and left as it is, never read as the default: until an administrator removes
+   it, the check downloads and unlocks nothing, as with an unreadable held digest (UT6). A
+   reset would grant a new budget, and a default would turn a switched-off opt-out back on.
 10. **What counts as applied.** The booted digest verifies as the security class, differs from
     the anchor, and `rollbackQueued` is false. A boot that greenboot returns from is not
     applied.
+    *Amended on 2026-10-22 by the maintainer:* the booted digest must also have been built
+    after the anchor. `lineage.json` keeps the anchor's build time beside it, in seconds, `null`
+    before the first, and a digest without a build time label never counts, so a return by `GoBack()`
+    to an earlier security digest does not reset the budget. The rule compares with the
+    anchor, not with the newest build ever booted: a security digest built after the anchor
+    counts even when a newer feature digest booted in between. Only `athanor-update check`
+    counts a boot as applied, and only while `greenboot-success.target` is active, which it
+    reads at run time: greenboot reaches that target only when the required health checks
+    pass, where `boot-complete.target` becomes active whatever they say. Its unit is also
+    ordered `After=greenboot-success.target`, an ordering that holds within one transaction
+    only. The check at boot of `athanor-update-state.service` runs before
+    greenboot's verdict and never counts a boot. A boot whose health checks failed is not
+    counted, whether or not a rollback is queued, and the check still runs and downloads.
 11. **What counts as a boot.** A new `/proc/sys/kernel/random/boot_id` seen by
     `athanor-update check --offline`. A soft reboot keeps the boot id and is not counted.
 12. **Item 19's three checks.** UT6's hold stands: the digest stays held until a newer one is

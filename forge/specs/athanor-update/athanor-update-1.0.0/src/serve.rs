@@ -37,7 +37,7 @@ pub enum Error {
     NoState(String),
     /// `State`: the file is not a root-owned regular file others cannot write.
     Untrusted(String),
-    /// `State`: the file could not be read or is not schema 1.
+    /// `State`: the file could not be read or is not schema 2.
     Unreadable(String),
 }
 

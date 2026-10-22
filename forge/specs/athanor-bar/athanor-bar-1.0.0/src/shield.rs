@@ -29,7 +29,7 @@ pub enum Unreadable {
     Missing,
     /// Not owned by root, or a link: ignored (UT7).
     Untrusted,
-    /// Anything else that is not a schema-1 state.
+    /// Anything else that is not a schema-2 state.
     Malformed,
     /// The update service did not answer, or the bus could not say who did.
     NoAnswer,

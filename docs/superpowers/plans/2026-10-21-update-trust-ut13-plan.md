@@ -59,7 +59,7 @@
 | 7 | Fedora half of PL55 | count only advisories of `type="security"`; updateinfo from the `updates` repository of the candidate's `VERSION_ID`, reached through the Fedora metalink and checked against the repomd checksum |
 | 8 | Opt-out wording | UT6 and the last sentence of the UT13 opt-out bullet are read with "it" = the opt-out: `SetAutomaticSecurityUpdates(false)` re-locks an unlocked security digest; `SetAutomaticSecurityUpdates(true)` unlocks a waiting one and starts the lineage clock if it has not started. Both sentences are rewritten in terms of `enabled` |
 | 9 | `postpone` nullability | `null` while no lineage is open (no security digest has reached `will-apply-at-next-shutdown` since the anchor); `anchor` is persisted under `/var/lib` either way; `first_notice_at` is never `null` inside the object |
-| 10 | What counts as applied | the booted digest verifies as security class, differs from the anchor, and `rollbackQueued` is false; a boot greenboot returns from is not applied |
+| 10 | What counts as applied | the booted digest verifies as security class, differs from the anchor, and `rollbackQueued` is false; a boot greenboot returns from is not applied. *Amended on 2026-10-22 by the maintainer:* it was also built after the anchor, whose build time `lineage.json` keeps (a missing label never counts), so `GoBack()` to an earlier security digest does not reset the budget |
 | 11 | What counts as a boot | a new `/proc/sys/kernel/random/boot_id` seen by `check --offline`; a soft reboot keeps the boot id and is not counted |
 | 12 | Item 19 "three checks" | UT6's hold stands: the digest stays held until a newer one is offered; acceptance runs three checks and asserts none downloads it |
 | 13 | Shutdown evaluation | `athanor-update-state.service` gains `RemainAfterExit=yes`, `ExecStop=/usr/bin/athanor-update shutdown`, `After=ostree-finalize-staged.service` (stopped before it), `TimeoutStopSec=30`; UT1's unit count is corrected |
@@ -213,6 +213,7 @@
 **Interfaces:**
 - Consumes: Task 4 `class_of`, `Tools::fetch_attestation`, `Store::attestation_dir`; Task 5 `Lineage`, `Store::{lineage, set_lineage, automatic_security_updates}`.
 - Produces: `fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, repository: &str, digest: &str) -> Class` (fetch, then `class_of`; a failed fetch is `Feature`, logged, not a check failure); `fn settle_security<T: Tools>(ctx: &Context<'_, T>, status: &Status, lineage: &mut Lineage, automatic: bool) -> Result<UpdateState, Failure>` (unlock or keep locked; opens the lineage on the first unlock); `Fake` gains `attestation(digest, Class)` and records `"fetch_attestation"`, `"apply_downloaded"`.
+- The decision reads `Store::automatic_security_updates()` and treats `Err` as a failed check (`Failure`, `Storage`), never the published `automatic_security_updates`, which is `false` for an unreadable file too.
 
 - [ ] **Step 1: Write the failing tests** in `check.rs`:
   - `a_security_digest_downloads_and_unlocks` (item 17): state `WillApplyAtNextShutdown`, calls include `download` then `apply_downloaded`, no reboot call, `postpone.first_notice_at == NOW`, `boots_remaining == 7`, `postponed == false`.

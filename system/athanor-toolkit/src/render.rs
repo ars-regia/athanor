@@ -3,11 +3,15 @@
 
 use crate::text::Brush;
 use crate::theme::Rgba;
-use crate::widget::{knob_rect, mark_rect, mark_size, Kind, Ui, WindowButton};
+use crate::widget::{
+    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui,
+    WindowButton,
+};
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
-use vello_cpu::peniko::{Color, FontData};
-use vello_cpu::{Glyph, Pixmap, RenderContext};
+use vello_cpu::peniko::{Color, FontData, ImageSampler};
+use std::sync::Arc;
+use vello_cpu::{Glyph, Image, ImageSource, Pixmap, RenderContext};
 
 /// The error of drawing and of the GPU renderer: any error that can cross threads.
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -29,6 +33,10 @@ pub trait Canvas {
     fn fill_path(&mut self, path: &BezPath);
     /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
+    /// Fills `rect` with an image, scaled to it on each axis: the caller keeps the aspect ratio.
+    /// vello_cpu reads the pixmap as it draws; vello_gpu draws the copy uploaded to its atlas
+    /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no copy of.
+    fn fill_image(&mut self, resources: &Self::Resources, rect: &Rect, pixmap: &Arc<Pixmap>);
     /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
@@ -44,7 +52,7 @@ pub trait Canvas {
 }
 
 macro_rules! canvas {
-    ($canvas:ty, $resources:ty) => {
+    ($canvas:ty, $resources:ty, $image_source:path, $glyph_resources:path) => {
         impl Canvas for $canvas {
             type Resources = $resources;
             fn set_transform(&mut self, transform: Affine) {
@@ -65,6 +73,26 @@ macro_rules! canvas {
             fn stroke_path(&mut self, path: &BezPath) {
                 <$canvas>::stroke_path(self, path);
             }
+            fn fill_image(&mut self, resources: &$resources, rect: &Rect, pixmap: &Arc<Pixmap>) {
+                let Some(source) = $image_source(resources, pixmap) else {
+                    return;
+                };
+                let image = Image {
+                    image: source,
+                    sampler: ImageSampler::default(),
+                };
+                <$canvas>::set_paint(self, image);
+                <$canvas>::set_paint_transform(
+                    self,
+                    Affine::translate((rect.x0, rect.y0))
+                        * Affine::scale_non_uniform(
+                            rect.width() / f64::from(pixmap.width()),
+                            rect.height() / f64::from(pixmap.height()),
+                        ),
+                );
+                <$canvas>::fill_rect(self, rect);
+                <$canvas>::set_paint_transform(self, Affine::IDENTITY);
+            }
             fn push_clip_path(&mut self, path: &BezPath) {
                 <$canvas>::push_clip_path(self, path);
             }
@@ -78,7 +106,7 @@ macro_rules! canvas {
                 size: f32,
                 glyphs: impl Iterator<Item = Glyph> + Clone,
             ) -> Result<(), Error> {
-                self.glyph_run(resources, font)
+                self.glyph_run($glyph_resources(resources), font)
                     .font_size(size)
                     .hint(true)
                     .fill_glyphs(glyphs)?;
@@ -88,9 +116,24 @@ macro_rules! canvas {
     };
 }
 
-canvas!(RenderContext, vello_cpu::Resources);
+/// vello_cpu draws an image straight from its pixmap.
+fn cpu_image(_: &vello_cpu::Resources, pixmap: &Arc<Pixmap>) -> Option<ImageSource> {
+    Some(ImageSource::Pixmap(Arc::clone(pixmap)))
+}
+
+/// vello_cpu's resources are its glyph cache.
+fn cpu_glyphs(resources: &mut vello_cpu::Resources) -> &mut vello_cpu::Resources {
+    resources
+}
+
+canvas!(RenderContext, vello_cpu::Resources, cpu_image, cpu_glyphs);
 #[cfg(feature = "gpu")]
-canvas!(vello_gpu::Scene, vello_gpu::Resources);
+canvas!(
+    vello_gpu::Scene,
+    crate::gpu::Resources,
+    crate::gpu::Resources::image,
+    crate::gpu::Resources::glyphs
+);
 
 fn color(c: Rgba) -> Color {
     let [r, g, b, a] = c.0;
@@ -209,10 +252,51 @@ pub fn paint<C: Canvas>(
         if !ui.is_visible(id) {
             continue;
         }
+        // Inside a scroll, only what its viewport, rounded, shows.
+        let clip = ui.clip(id);
+        if clip.is_some_and(|c| !overlaps(ui.widgets[id].rect, c)) {
+            continue;
+        }
+        if let Some(c) = clip {
+            ctx.push_clip_path(&rounded(c, 0.0, t.radius));
+        }
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
-            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu => {}
+            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
+            // A white sheet under its rows, as GTK's list.
+            Kind::List { .. } => {
+                ctx.set_paint(color(t.on_accent));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+            }
+            // A row with its text at the start edge: tinted with the accent when selected, and
+            // toward the text under the pointer.
+            Kind::ListRow(_) => {
+                let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
+                let fill = if selected {
+                    Some(mix(t.on_accent, t.accent, SELECTED))
+                } else {
+                    None
+                };
+                let fill = match (fill, hover == Some(id)) {
+                    (fill, true) => Some(mix(fill.unwrap_or(t.on_accent), t.text, HOVER)),
+                    (fill, false) => fill,
+                };
+                if let Some(fill) = fill {
+                    ctx.set_paint(color(fill));
+                    ctx.fill_path(&rounded(r, -1.0, t.radius - 1.0));
+                }
+                let widget = &ui.widgets[id];
+                if let Some(layout) = &widget.text {
+                    let x = if ui.rtl {
+                        r.x + r.w - t.padding - layout.width()
+                    } else {
+                        r.x + t.padding
+                    };
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+            }
             Kind::Separator => {
                 let y = f64::from((r.y + r.h / 2.0).floor());
                 ctx.set_paint(color(t.border));
@@ -281,6 +365,15 @@ pub fn paint<C: Canvas>(
                     ctx.stroke_path(&line.to_path(0.1));
                 }
             }
+            Kind::Image { image, .. } => {
+                // The image keeps its aspect ratio, centred in its square.
+                let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                let fit = (f64::from(r.w) / w).min(f64::from(r.h) / h);
+                let (w, h) = (w * fit, h * fit);
+                let x = f64::from(r.x) + (f64::from(r.w) - w) / 2.0;
+                let y = f64::from(r.y) + (f64::from(r.h) - h) / 2.0;
+                ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+            }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
                     draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
@@ -338,11 +431,41 @@ pub fn paint<C: Canvas>(
                     }
                 }
                 if let Some(layout) = &widget.text {
-                    // The mark is at the left when `ui.rtl == is_switch`, as `mark_rect` puts it.
-                    let x = if ui.rtl == is_switch { r.x + r.w - layout.width() } else { r.x };
+                    let x = label_x(r, mark, ui.rtl, is_switch, t.gap, layout.width());
                     let y = r.y + (r.h - layout.height()) / 2.0;
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
+            }
+            // A track, filled with the accent from min to the knob, and a round knob on it.
+            Kind::Slider(slider) => {
+                let d = slider_knob(t.font_size);
+                let fraction = (slider.value - slider.min) / (slider.max - slider.min);
+                let x_min = slider_knob_x(r, ui.rtl, t.font_size, 0.0);
+                let x_knob = slider_knob_x(r, ui.rtl, t.font_size, fraction);
+                let x_max = slider_knob_x(r, ui.rtl, t.font_size, 1.0);
+                let (cy, thick) = (r.y + r.h / 2.0, 4.0);
+                let bar = |from: f32, to: f32| crate::widget::Rect {
+                    x: from.min(to),
+                    y: cy - thick / 2.0,
+                    w: (to - from).abs(),
+                    h: thick,
+                };
+                ctx.set_paint(color(t.border));
+                ctx.fill_path(&rounded(bar(x_min, x_max), 0.0, thick / 2.0));
+                ctx.set_paint(color(t.accent));
+                ctx.fill_path(&rounded(bar(x_min, x_knob), 0.0, thick / 2.0));
+                let knob = Circle::new((f64::from(x_knob), f64::from(cy)), f64::from(d / 2.0));
+                let fill = if hover == Some(id) {
+                    mix(t.on_accent, t.text, HOVER)
+                } else {
+                    t.on_accent
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&knob.to_path(0.1));
+                ctx.set_paint(color(t.border));
+                ctx.set_stroke(Stroke::new(1.0));
+                let edge = Circle::new(knob.center, knob.radius - 0.5);
+                ctx.stroke_path(&edge.to_path(0.1));
             }
             Kind::Field(field) => {
                 ctx.set_paint(color(t.on_accent));
@@ -372,12 +495,54 @@ pub fn paint<C: Canvas>(
             }
         }
         if focus == Some(id) {
+            // A row's ring stays inside it, where its list's edge and the viewport do not cut it.
+            let row = matches!(ui.widgets[id].kind, Kind::ListRow(_));
+            let (outset, radius) = if row {
+                (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
+            } else {
+                (t.focus_width, t.radius)
+            };
             ctx.set_paint(color(t.focus));
             ctx.set_stroke(Stroke::new(f64::from(t.focus_width)));
-            ctx.stroke_path(&rounded(r, t.focus_width, t.radius));
+            ctx.stroke_path(&rounded(r, outset, radius));
+        }
+        if clip.is_some() {
+            ctx.pop_clip();
+        }
+    }
+    for id in 0..ui.widgets.len() {
+        if let Some(bar) = scroll_indicator(ui, id) {
+            ctx.set_paint(color(t.border));
+            ctx.fill_path(&rounded(bar, 0.0, bar.w / 2.0));
         }
     }
     Ok(())
+}
+
+/// How much of the accent a selected list row's fill takes.
+const SELECTED: f32 = 0.15;
+
+/// Whether two rectangles share any area.
+fn overlaps(a: crate::widget::Rect, b: crate::widget::Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.bottom() && b.y < a.bottom()
+}
+
+/// The thin bar at the end edge of the visible scroll `id` whose content is taller than its
+/// viewport: as long as the viewport is of the content, at least 16 logical pixels, and as far
+/// down it as the content is scrolled.
+fn scroll_indicator(ui: &Ui, id: crate::widget::WidgetId) -> Option<crate::widget::Rect> {
+    let Kind::Scroll { height, offset } = ui.widgets[id].kind else {
+        return None;
+    };
+    let content = ui.content_height(id);
+    if content <= height || !ui.is_visible(id) {
+        return None;
+    }
+    let (r, w, inset) = (ui.widgets[id].rect, 3.0, 2.0);
+    let h = (height * height / content).max(16.0).min(height);
+    let x = if ui.rtl { r.x + inset } else { r.x + r.w - inset - w };
+    let y = r.y + (height - h) * offset / (content - height);
+    Some(crate::widget::Rect { x, y, w, h })
 }
 
 #[cfg(test)]
@@ -465,6 +630,42 @@ mod tests {
     }
 
     #[test]
+    fn a_slider_is_drawn_on_its_track_at_a_fractional_scale() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Slider", crate::Theme::default(), false);
+        let id = ui.slider(crate::Ui::ROOT, "Level", 0.0, 100.0, 1.0, 50.0);
+        let id = id.unwrap_or(crate::Ui::ROOT);
+        let scale = 1.5;
+        let pixmap = render(&mut ui, scale)?;
+        let (r, font) = (ui.widget(id).rect, ui.theme.font_size);
+        let at = |x: f32, y: f32| {
+            let (px, py) = ((x * scale) as usize, (y * scale) as usize);
+            let i = 4 * (usize::from(pixmap.width()) * py + px);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let cy = r.y + r.h / 2.0;
+        let knob = crate::widget::slider_knob_x(r, false, font, 0.5);
+        let (from, to) = (
+            crate::widget::slider_knob_x(r, false, font, 0.0),
+            crate::widget::slider_knob_x(r, false, font, 1.0),
+        );
+        let t = &ui.theme;
+        // The knob's centre, the accent before it and the plain track after it, at the scaled
+        // pixels, and nothing on the rows above the track.
+        assert_eq!(at(knob, cy), t.on_accent.0.to_vec());
+        assert_eq!(at((from + knob) / 2.0, cy), t.accent.0.to_vec());
+        assert_eq!(at((knob + to) / 2.0, cy), t.border.0.to_vec());
+        assert_eq!(at((from + knob) / 2.0, cy - 6.0), t.background.0.to_vec());
+        // The track and the knob stay inside the widget's rectangle.
+        assert!(from - slider_knob_edge(font) >= r.x - 0.01);
+        assert!(to + slider_knob_edge(font) <= r.x + r.w + 0.01);
+        Ok(())
+    }
+
+    fn slider_knob_edge(font: f32) -> f32 {
+        crate::widget::slider_knob(font) / 2.0
+    }
+
+    #[test]
     fn a_scale_that_is_not_positive_is_refused() {
         let mut ui = chooser::build(&athanor_i18n::Catalog::empty(), false).ui;
         for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
@@ -489,6 +690,36 @@ mod tests {
             assert!(pixels.contains(&[r, g, b, 255]), "scale {scale}");
             let shades: std::collections::HashSet<&[u8; 4]> = pixels.iter().collect();
             assert!(shades.len() > 16, "scale {scale}: {} shades", shades.len());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_scroll_shows_only_its_viewport_and_an_indicator_at_the_end_edge() -> Result<(), Error> {
+        for rtl in [false, true] {
+            let mut ui = crate::Ui::new("Scroll", crate::Theme::default(), rtl);
+            let scroll = ui.scroll(crate::Ui::ROOT, 100.0);
+            let list = ui.list(scroll, "Rows");
+            let rows: Vec<_> = (1..=50).map(|n| ui.list_row(list, &format!("Row {n}"))).collect();
+            ui.add(crate::Ui::ROOT, crate::Kind::Button("After".into()));
+            let pixmap = render(&mut ui, 1.0)?;
+            let at = |x: f32, y: f32| {
+                let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+                pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+            };
+            let (view, t) = (ui.widget(scroll).rect, &ui.theme);
+            // Inside the viewport the list's sheet shows; in the gap under it, the background,
+            // though the list runs on far below.
+            let middle = view.x + view.w / 2.0;
+            assert_eq!(at(middle, view.y + 4.0), t.on_accent.0.to_vec(), "rtl {rtl}");
+            assert!(ui.widget(rows[49]).rect.y > view.bottom() + t.margin);
+            assert_eq!(at(middle, view.bottom() + 2.0), t.background.0.to_vec(), "rtl {rtl}");
+            // The indicator sits at the top of the end edge: the right in LTR, the left in RTL.
+            let edge = if rtl { view.x + 3.5 } else { view.x + view.w - 3.5 };
+            let far = if rtl { view.x + view.w - 3.5 } else { view.x + 3.5 };
+            assert_eq!(at(edge, view.y + 8.0), t.border.0.to_vec(), "rtl {rtl}");
+            assert_ne!(at(far, view.y + 8.0), t.border.0.to_vec(), "rtl {rtl}");
+            assert_ne!(at(edge, view.bottom() - 8.0), t.border.0.to_vec(), "rtl {rtl}");
         }
         Ok(())
     }

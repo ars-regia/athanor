@@ -23,6 +23,15 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// The part of the rectangle inside `other`, empty where they do not meet.
+    pub(crate) fn intersect(self, other: Rect) -> Rect {
+        let (x, y) = (self.x.max(other.x), self.y.max(other.y));
+        let right = (self.x + self.w).min(other.x + other.w);
+        let bottom = self.bottom().min(other.bottom());
+        let (w, h) = ((right - x).max(0.0), (bottom - y).max(0.0));
+        Rect { x, y, w, h }
+    }
+
     /// Whether the point is inside the rectangle; the right and bottom edges are outside.
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
@@ -78,8 +87,40 @@ pub enum Kind {
         /// Whether the switch is on.
         active: bool,
     },
+    /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
+    /// steps. It fills the width of its column or group, or its cell in a row, and takes the
+    /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
+    /// it with [`Ui::slider`], which keeps its range valid.
+    Slider(Slider),
     /// A single-line text field.
     Field(Box<TextField>),
+    /// A viewport `height` logical pixels high onto its child, which it fills the width with and
+    /// scrolls under the wheel and the touchpad, and to keep the keyboard focus in view, as GTK's
+    /// `ScrolledWindow`. What lies outside the viewport is not drawn and takes no pointer input;
+    /// a thin indicator at the end edge shows the position while the child is taller. Add it
+    /// with [`Ui::scroll`].
+    Scroll {
+        /// The height of the viewport, in logical pixels.
+        height: f32,
+        /// How far the child is scrolled, in logical pixels from its top: from 0 to its height
+        /// less the viewport's.
+        offset: f32,
+    },
+    /// A list of rows of text, stacked top to bottom, of which the user chooses one, as GTK's
+    /// `ListBox`. It is one stop of the Tab order, on its selected row (the first while none is):
+    /// the arrows, Page Up, Page Down, Home and End choose another; Up on the first row and Down
+    /// on the last leave the list as Shift+Tab and Tab do. A row chosen by the keyboard, a click
+    /// or Enter raises [`Event::Selected`]. It fills the width of its column, group or scroll.
+    /// Add it with [`Ui::list`] and its rows with [`Ui::list_row`].
+    List {
+        /// The name assistive technologies read for the list.
+        name: String,
+        /// The row chosen, if any; see [`Ui::selected`].
+        selected: Option<WidgetId>,
+    },
+    /// A row of a [`Kind::List`], with its text at the start edge. The pointer chooses it; the
+    /// keyboard reaches it only through its list.
+    ListRow(String),
     /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
     /// does: the title centred and the window's buttons at the end edge. See [`Ui::add_title_bar`].
     TitleBar,
@@ -95,6 +136,67 @@ pub enum Kind {
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
+    /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
+    /// with its aspect ratio kept, centred. It takes no input.
+    Image {
+        /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
+        image: crate::icon::Image,
+        /// The side of the square, in logical pixels.
+        size: f32,
+        /// What the image shows, which names it for assistive technologies; empty for an image
+        /// that only decorates.
+        description: String,
+    },
+}
+
+/// The state of a [`Kind::Slider`]: a name, a range and a value that is always on one of its
+/// steps. The fields are closed to applications so that the invariants hold: the range is
+/// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
+/// `max`, which is always a value even when the step does not divide the range. Make one with
+/// [`Ui::slider`] and change it with [`Ui::set_value`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slider {
+    pub(crate) name: String,
+    pub(crate) value: f64,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
+    pub(crate) step: f64,
+}
+
+impl Slider {
+    /// How many steps `value` is from `min`, the last one being `max`.
+    fn last(&self) -> i64 {
+        // A hair under the exact quotient, so that a range the step divides does not count
+        // `max` twice when the division rounds up.
+        (((self.max - self.min) / self.step) - 1e-9).ceil() as i64
+    }
+
+    /// The value `index` steps from `min`, never past `max`.
+    fn at(&self, index: i64) -> f64 {
+        (self.min + index as f64 * self.step).min(self.max)
+    }
+
+    /// The index of the step `value` is on, or the nearest one.
+    fn index(&self, value: f64) -> i64 {
+        if value >= self.max {
+            return self.last();
+        }
+        (((value - self.min) / self.step).round() as i64).clamp(0, self.last())
+    }
+
+    /// The step nearest to `value`, inside the range; `None` for NaN.
+    fn snap(&self, value: f64) -> Option<f64> {
+        if value.is_nan() {
+            return None;
+        }
+        let value = value.clamp(self.min, self.max);
+        let below = self.at(self.index(value));
+        Some(if (self.max - value).abs() < (value - below).abs() {
+            self.max
+        } else {
+            below
+        })
+    }
 }
 
 /// A button of the title bar.
@@ -158,9 +260,11 @@ impl Widget {
                 | Kind::Toggle { .. }
                 | Kind::Check { .. }
                 | Kind::Switch { .. }
+                | Kind::Slider(_)
                 | Kind::Field(_)
                 | Kind::WindowButton(_)
                 | Kind::MenuItem(_)
+                | Kind::ListRow(_)
         )
     }
 }
@@ -175,6 +279,8 @@ pub enum Event {
     Selected(WidgetId),
     /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
     Toggled(WidgetId),
+    /// A slider's value changed; ask [`Ui::value`] what it is.
+    Changed(WidgetId),
     /// A field's committed text changed.
     Edited(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
@@ -237,6 +343,14 @@ pub enum Key {
     Delete,
     /// Text to type, which may be several characters (a composed or pasted character).
     Text(String),
+    /// Home: the least value of a slider.
+    Home,
+    /// End: the greatest value of a slider.
+    End,
+    /// Page Up: ten steps more on a slider.
+    PageUp,
+    /// Page Down: ten steps fewer on a slider.
+    PageDown,
     /// Escape: closes the open popup, which the driver handles.
     Escape,
     /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
@@ -282,6 +396,8 @@ impl Ui {
 
     /// The root column every widget descends from.
     pub const ROOT: WidgetId = 0;
+    /// The most steps a slider may have between its minimum and its maximum.
+    pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
     /// The longest text a field takes from outside the keyboard, in characters.
     pub const FIELD_MAX_CHARS: usize = 1024;
     /// How far the pointer moves on either axis, in logical pixels, from a press before a drag
@@ -349,6 +465,199 @@ impl Ui {
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
         )
+    }
+
+    /// Adds a slider named `name` for assistive technologies, from `min` to `max` in steps of
+    /// `step` counted from `min` (`max` is always a value, even when the step does not divide
+    /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
+    /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
+    /// at most [`Ui::SLIDER_MAX_STEPS`] steps.
+    pub fn slider(
+        &mut self,
+        parent: WidgetId,
+        name: &str,
+        min: f64,
+        max: f64,
+        step: f64,
+        value: f64,
+    ) -> Option<WidgetId> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(self.add(parent, Kind::Slider(slider)))
+    }
+
+    /// The value of the slider `id`, or `None` if it is not a slider.
+    pub fn value(&self, id: WidgetId) -> Option<f64> {
+        match &self.widgets[id].kind {
+            Kind::Slider(slider) => Some(slider.value),
+            _ => None,
+        }
+    }
+
+    /// Sets the slider `id` to the step nearest to `value`, inside its range, as an assistive
+    /// technology's SetValue does. `None`, and nothing changes, for a widget that is not a
+    /// slider, for NaN and for a value that lands where the slider already is.
+    pub fn set_value(&mut self, id: WidgetId, value: f64) -> Option<Event> {
+        let Kind::Slider(slider) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        let value = slider.snap(value)?;
+        let moved = value != slider.value;
+        slider.value = value;
+        moved.then_some(Event::Changed(id))
+    }
+
+    /// Moves the slider `id` by `steps` steps, stopping at either end.
+    pub(crate) fn step_value(&mut self, id: WidgetId, steps: i64) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let index = (slider.index(slider.value).saturating_add(steps)).clamp(0, slider.last());
+        let value = slider.at(index);
+        self.set_value(id, value)
+    }
+
+    /// Sets the slider `id` from the pointer at `x`, in logical pixels.
+    fn slide(&mut self, id: WidgetId, x: f32) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let fraction = slider_fraction(self.widgets[id].rect, self.rtl, self.theme.font_size, x);
+        let value = slider.min + f64::from(fraction) * (slider.max - slider.min);
+        self.set_value(id, value)
+    }
+
+    /// Adds a scroll whose viewport is `height` logical pixels high; add its child to the id it
+    /// returns. A height that is negative or not finite counts as 0.
+    pub fn scroll(&mut self, parent: WidgetId, height: f32) -> WidgetId {
+        let height = if height.is_finite() { height.max(0.0) } else { 0.0 };
+        self.add(parent, Kind::Scroll { height, offset: 0.0 })
+    }
+
+    /// Adds a list named `name` for assistive technologies, with no row selected.
+    pub fn list(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let name = name.to_owned();
+        self.add(parent, Kind::List { name, selected: None })
+    }
+
+    /// Adds a row showing `text` at the end of the list `list`.
+    pub fn list_row(&mut self, list: WidgetId, text: &str) -> WidgetId {
+        self.add(list, Kind::ListRow(text.to_owned()))
+    }
+
+    /// The selected row of the list `list`, or `None` if no row is or `list` is not a list.
+    pub fn selected(&self, list: WidgetId) -> Option<WidgetId> {
+        match self.widgets[list].kind {
+            Kind::List { selected, .. } => selected,
+            _ => None,
+        }
+    }
+
+    /// The list `id` is a row of, if it is one.
+    fn list_of(&self, id: WidgetId) -> Option<WidgetId> {
+        let parent = self.widgets[id].parent?;
+        let is_row = matches!(self.widgets[id].kind, Kind::ListRow(_));
+        let in_list = matches!(self.widgets[parent].kind, Kind::List { .. });
+        (is_row && in_list).then_some(parent)
+    }
+
+    /// The height of the visible children of the scroll `id`, which its viewport shows part of.
+    pub(crate) fn content_height(&self, id: WidgetId) -> f32 {
+        let children = self.visible_children(id);
+        children.iter().map(|&c| self.widgets[c].rect.h).sum()
+    }
+
+    /// Scrolls the scroll `id` by `dy` logical pixels, down when positive, within its content,
+    /// and places its content again; returns whether it moved.
+    fn scroll_by(&mut self, id: WidgetId, dy: f32) -> bool {
+        let most = self.content_height(id);
+        let Kind::Scroll { height, offset } = &mut self.widgets[id].kind else {
+            return false;
+        };
+        let to = (*offset + dy).min(most - *height).max(0.0);
+        if to == *offset {
+            return false;
+        }
+        *offset = to;
+        let r = self.widgets[id].rect;
+        self.place(id, r.x, r.y);
+        true
+    }
+
+    /// Scrolls every scroll that holds `id`, the innermost first, until `id` is inside its
+    /// viewport, or its top is when it is taller than the viewport.
+    fn reveal(&mut self, id: WidgetId) {
+        let mut at = self.widgets[id].parent;
+        while let Some(scroll) = at {
+            if let Kind::Scroll { .. } = self.widgets[scroll].kind {
+                let (view, r) = (self.widgets[scroll].rect, self.widgets[id].rect);
+                let dy = if r.y < view.y {
+                    r.y - view.y
+                } else {
+                    (r.bottom() - view.bottom()).min(r.y - view.y).max(0.0)
+                };
+                self.scroll_by(scroll, dy);
+            }
+            at = self.widgets[scroll].parent;
+        }
+    }
+
+    /// The part of the window where widget `id` can be seen: the intersection of the viewports
+    /// of the scrolls that hold it, or `None` when no scroll does.
+    pub(crate) fn clip(&self, id: WidgetId) -> Option<Rect> {
+        let mut clip: Option<Rect> = None;
+        let mut at = self.widgets[id].parent;
+        while let Some(w) = at {
+            if let Kind::Scroll { .. } = self.widgets[w].kind {
+                let v = self.widgets[w].rect;
+                clip = Some(clip.map_or(v, |c| c.intersect(v)));
+            }
+            at = self.widgets[w].parent;
+        }
+        clip
+    }
+
+    /// The pointer's wheel or touchpad scrolled by `dy` logical pixels, down when positive, at
+    /// the point, in logical pixels: the innermost scroll under it follows, within its content.
+    /// Returns whether anything moved, and so needs drawing again.
+    pub fn pointer_axis(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        if !dy.is_finite() {
+            return false;
+        }
+        let under = (0..self.widgets.len()).filter(|&id| {
+            matches!(self.widgets[id].kind, Kind::Scroll { .. })
+                && self.widgets[id].rect.contains(x, y)
+                && self.clip(id).is_none_or(|c| c.contains(x, y))
+                && self.is_visible(id)
+        });
+        // The innermost: the one with the most ancestors.
+        let depth = |id: WidgetId| {
+            std::iter::successors(Some(id), |&w| self.widgets[w].parent).count()
+        };
+        let Some(scroll) = under.max_by_key(|&id| depth(id)) else {
+            return false;
+        };
+        let moved = self.scroll_by(scroll, dy);
+        if moved {
+            self.hover = self.hit(x, y);
+        }
+        moved
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
@@ -421,10 +730,14 @@ impl Ui {
     }
 
     /// Moves the focus to `id`, or clears it with `None`; a widget that takes no focus leaves
-    /// it where it is.
+    /// it where it is. A widget newly focused inside a scroll is scrolled into view.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
         match id {
             Some(id) if !self.widgets[id].is_focusable() || !self.is_visible(id) => {}
+            Some(id) if self.focus != Some(id) => {
+                self.focus = Some(id);
+                self.reveal(id);
+            }
             _ => self.focus = id,
         }
     }
@@ -476,7 +789,7 @@ impl Ui {
         self.size
     }
 
-    fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
+    pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
         let widgets = &self.widgets;
         let shown = widgets[id].children.iter();
         shown.copied().filter(|&c| widgets[c].visible).collect()
@@ -498,12 +811,21 @@ impl Ui {
         };
         let widget = &mut self.widgets[id];
         let (w, h) = match &mut widget.kind {
-            Kind::Menu => {
+            Kind::Menu | Kind::List { .. } => {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 (w, sizes.iter().map(|s| s.1).sum::<f32>())
             }
+            Kind::Scroll { height, offset } => {
+                let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                let content = sizes.iter().map(|s| s.1).sum::<f32>();
+                // A height set through `Ui::add` is checked here; NaN falls to 0 in `max`.
+                *height = if height.is_finite() { height.max(0.0) } else { 0.0 };
+                *offset = offset.min(content - *height).max(0.0);
+                (w, *height)
+            }
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
+            Kind::Image { size, .. } => (*size, *size),
             Kind::Column | Kind::Group(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
@@ -539,7 +861,10 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Button(text) | Kind::Toggle { label: text, .. } | Kind::MenuItem(text) => {
+            Kind::Button(text)
+            | Kind::Toggle { label: text, .. }
+            | Kind::MenuItem(text)
+            | Kind::ListRow(text) => {
                 let layout = self.text.layout(text, size, rtl);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
@@ -555,6 +880,7 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
+            Kind::Slider(_) => (field_width, slider_knob(size) + pad),
             Kind::Field(field) => {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
@@ -596,8 +922,11 @@ impl Ui {
                     }
                 }
             }
-            Kind::Menu => {
-                let mut cy = y;
+            Kind::Menu | Kind::List { .. } | Kind::Scroll { .. } => {
+                let mut cy = match self.widgets[id].kind {
+                    Kind::Scroll { offset, .. } => y - offset,
+                    _ => y,
+                };
                 for c in children {
                     self.widgets[c].rect.w = outer.w;
                     self.place(c, x, cy);
@@ -638,7 +967,13 @@ impl Ui {
                 for &c in children {
                     if matches!(
                         self.widgets[c].kind,
-                        Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Switch { .. }
+                        Kind::Row
+                            | Kind::Group(_)
+                            | Kind::Menu
+                            | Kind::Switch { .. }
+                            | Kind::Slider(_)
+                            | Kind::Scroll { .. }
+                            | Kind::List { .. }
                     ) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
@@ -657,7 +992,8 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group, a check button or a switch turns over. Each takes the focus.
+    /// its group, a check button or a switch turns over, a list's row becomes its selected one.
+    /// Each takes the focus.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
         if !self.is_visible(id) {
             return None;
@@ -682,15 +1018,24 @@ impl Ui {
                 }
                 Some(Event::Selected(id))
             }
+            Kind::ListRow(_) => {
+                let list = self.list_of(id);
+                if let Some(Kind::List { selected, .. }) = list.map(|l| &mut self.widgets[l].kind) {
+                    *selected = Some(id);
+                }
+                Some(Event::Selected(id))
+            }
             _ => None,
         }
     }
 
-    /// The focusable widget under the point, in logical pixels.
+    /// The focusable widget under the point, in logical pixels; a widget scrolled out of its
+    /// scroll's viewport is not under any.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
         (0..self.widgets.len()).find(|&id| {
             self.widgets[id].is_focusable()
                 && self.widgets[id].rect.contains(x, y)
+                && self.clip(id).is_none_or(|c| c.contains(x, y))
                 && self.is_visible(id)
         })
     }
@@ -712,6 +1057,10 @@ impl Ui {
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
         let press = self.press.as_mut()?;
+        if let Kind::Slider(_) = self.widgets[press.widget].kind {
+            let id = press.widget;
+            return self.slide(id, x);
+        }
         let moved = (x - press.x).abs().max((y - press.y).abs());
         if press.dragging || moved <= Self::DRAG_THRESHOLD {
             return None;
@@ -746,7 +1095,8 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
-                None
+                // A slider takes its value from the press, and from the drag that follows.
+                id.and_then(|id| self.slide(id, x))
             }
             PointerButton::Secondary => id.map(Event::ContextMenu),
         }
@@ -759,6 +1109,9 @@ impl Ui {
             return None;
         }
         let press = self.press.take()?;
+        if let Kind::Slider(_) = self.widgets[press.widget].kind {
+            return None;
+        }
         let to = self.hit(x, y);
         if press.dragging {
             return Some(Event::DragEnded {
@@ -773,7 +1126,10 @@ impl Ui {
 
     /// Handles a key: a focused field takes text, deletion and the horizontal arrows; otherwise
     /// Tab and Shift+Tab walk the logical order, the arrows the visual one, and Enter or Space
-    /// activates.
+    /// activates. A focused slider takes the arrows (Right moves the knob right, which lowers the
+    /// value when mirrored; Up and Down are not mirrored), Page Up and Page Down (ten steps) and
+    /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
+    /// Up, Page Down (a viewport), Home and End, which choose a row of its list.
     pub fn key(&mut self, key: Key) -> Option<Event> {
         let focused = self.focus;
         if let Some(id) = focused {
@@ -796,6 +1152,66 @@ impl Ui {
                 return Some(Event::Edited(id));
             }
         }
+        if let Some(id) = focused {
+            if let Kind::Slider(slider) = &self.widgets[id].kind {
+                let (min, max) = (slider.min, slider.max);
+                // What is seen: Right moves the knob right, which is toward min when mirrored.
+                let along = if self.rtl { -1 } else { 1 };
+                return match key {
+                    Key::Right => self.step_value(id, along),
+                    Key::Left => self.step_value(id, -along),
+                    Key::Up => self.step_value(id, 1),
+                    Key::Down => self.step_value(id, -1),
+                    Key::PageUp => self.step_value(id, 10),
+                    Key::PageDown => self.step_value(id, -10),
+                    Key::Home => self.set_value(id, min),
+                    Key::End => self.set_value(id, max),
+                    key => self.navigate(key),
+                };
+            }
+        }
+        if let Some((list, id)) = focused.and_then(|id| Some((self.list_of(id)?, id))) {
+            let rows = self.visible_children(list);
+            let at = rows.iter().position(|&r| r == id).unwrap_or(0);
+            let last = rows.len().saturating_sub(1);
+            let to = match key {
+                // Past either end the focus leaves the list for the widget in that direction,
+                // if there is one, as GTK's ListBox does; it does not wrap round.
+                Key::Up if at == 0 => return self.navigate(Key::Up),
+                Key::Down if at == last => return self.navigate(Key::Down),
+                Key::Up => at - 1,
+                Key::Down => at + 1,
+                Key::Home => 0,
+                Key::End => last,
+                Key::PageUp | Key::PageDown => self.page(list, &rows, at, key == Key::PageDown),
+                key => return self.list_key(Some(id), key),
+            };
+            let unmoved = to == at && self.selected(list) == Some(id);
+            return if unmoved { None } else { self.activate(rows[to]) };
+        }
+        self.list_key(focused, key)
+    }
+
+    /// The row a viewport above or below the middle of `rows[at]`, the viewport of the scroll
+    /// that holds `list` or else the list's own height, clamped to the first and last rows.
+    fn page(&self, list: WidgetId, rows: &[WidgetId], at: usize, down: bool) -> usize {
+        let mut viewport = self.widgets[list].rect.h;
+        let mut up = self.widgets[list].parent;
+        while let Some(w) = up {
+            if let Kind::Scroll { height, .. } = self.widgets[w].kind {
+                viewport = height;
+                break;
+            }
+            up = self.widgets[w].parent;
+        }
+        let r = self.widgets[rows[at]].rect;
+        let y = r.y + r.h / 2.0 + if down { viewport } else { -viewport };
+        let past = rows.iter().take_while(|&&row| self.widgets[row].rect.y <= y);
+        past.count().saturating_sub(1).min(rows.len().saturating_sub(1))
+    }
+
+    /// What a key does on `focused` when no widget takes it for itself.
+    fn list_key(&mut self, focused: Option<WidgetId>, key: Key) -> Option<Event> {
         match key {
             Key::Enter => focused.and_then(|id| self.activate(id)),
             Key::Text(s) if s == " " => focused.and_then(|id| self.activate(id)),
@@ -826,7 +1242,7 @@ impl Ui {
             _ => None,
         };
         if next.is_some() {
-            self.focus = next;
+            self.set_focus(next);
         }
         None
     }
@@ -885,6 +1301,18 @@ pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) ->
     }
 }
 
+/// The x of the label of a check button or a switch of width `width`, given its `mark`: a check's
+/// label follows its box by `gap`, wherever the widget's rectangle `r` ends; a switch's label
+/// takes the far edge, opposite its track.
+pub(crate) fn label_x(r: Rect, mark: Rect, rtl: bool, is_switch: bool, gap: f32, width: f32) -> f32 {
+    match (is_switch, rtl) {
+        (false, false) => mark.x + mark.w + gap,
+        (false, true) => mark.x - gap - width,
+        (true, false) => r.x,
+        (true, true) => r.x + r.w - width,
+    }
+}
+
 /// The knob inside the `track` of a switch: at the start edge when off, at the end edge when on,
 /// so that it mirrors in right-to-left.
 pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
@@ -901,6 +1329,34 @@ pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
         w: d,
         h: d,
     }
+}
+
+/// The diameter of a slider's knob at text size `font`, in logical pixels.
+pub(crate) fn slider_knob(font: f32) -> f32 {
+    font * 1.4
+}
+
+/// The horizontal centre of the knob of a slider in rectangle `r` when its value is `fraction`
+/// of the way from min to max: the track runs from min at the start edge to max at the end
+/// edge, a knob's radius inside the rectangle so that the knob stays in it.
+pub(crate) fn slider_knob_x(r: Rect, rtl: bool, font: f32, fraction: f64) -> f32 {
+    let inset = slider_knob(font) / 2.0;
+    let length = (r.w - 2.0 * inset).max(0.0);
+    let along = fraction as f32 * length;
+    if rtl {
+        r.x + r.w - inset - along
+    } else {
+        r.x + inset + along
+    }
+}
+
+/// The inverse of [`slider_knob_x`]: how far from min to max the pointer at `x` is, from 0 to 1.
+fn slider_fraction(r: Rect, rtl: bool, font: f32, x: f32) -> f32 {
+    let (at_min, at_max) = (slider_knob_x(r, rtl, font, 0.0), slider_knob_x(r, rtl, font, 1.0));
+    if at_min == at_max {
+        return 0.0;
+    }
+    ((x - at_min) / (at_max - at_min)).clamp(0.0, 1.0)
 }
 
 /// Bidirectional overrides, isolates and marks, and the line and paragraph separators: they
@@ -1010,6 +1466,38 @@ mod tests {
             );
             assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
             assert!(ui.is_active(off));
+        }
+    }
+
+    #[test]
+    fn a_check_label_follows_its_box_in_a_row_cell() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Checks", Theme::default(), rtl);
+            ui.min_width = 600.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let check = |label: &str| Kind::Check {
+                label: label.into(),
+                active: false,
+            };
+            let bold = ui.add(row, check("Bold"));
+            ui.add(row, check("A much longer label"));
+            ui.layout();
+            let widget = ui.widget(bold);
+            let width = widget.text.as_ref().expect("a laid-out label").width();
+            assert!(width > 0.0);
+            let (r, gap) = (widget.rect, ui.theme.gap);
+            let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
+            assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
+            let x = label_x(r, mark, rtl, false, gap, width);
+            if rtl {
+                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
+            } else {
+                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
+            }
+            // A switch keeps the far edge.
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            let x = label_x(r, track, rtl, true, gap, width);
+            assert_eq!(if rtl { x + width } else { x }, if rtl { r.x + r.w } else { r.x });
         }
     }
 
@@ -1368,5 +1856,395 @@ mod tests {
         ui.set_description(app, None);
         ui.set_tooltip(app, None);
         assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+    }
+
+    fn slider(min: f64, max: f64, step: f64, value: f64, rtl: bool) -> (Ui, WidgetId) {
+        let mut ui = Ui::new("Slider", Theme::default(), rtl);
+        let id = ui
+            .slider(Ui::ROOT, "Level", min, max, step, value)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        ui.set_focus(Some(id));
+        (ui, id)
+    }
+
+    #[test]
+    fn a_slider_refuses_a_broken_range() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        let (inf, nan) = (f64::INFINITY, f64::NAN);
+        for (min, max, step, value) in [
+            (0.0, 10.0, 0.0, 0.0),
+            (0.0, 10.0, nan, 0.0),
+            (0.0, 10.0, -1.0, 0.0),
+            (10.0, 0.0, 1.0, 0.0),
+            (5.0, 5.0, 1.0, 5.0),
+            (-inf, 10.0, 1.0, 0.0),
+            (0.0, inf, 1.0, 0.0),
+            (0.0, 10.0, inf, 0.0),
+            (0.0, 10.0, 1.0, nan),
+            (0.0, 10.0, 1.0, inf),
+        ] {
+            assert_eq!(ui.slider(Ui::ROOT, "Level", min, max, step, value), None);
+        }
+        assert_eq!(ui.len(), 1, "a refused slider adds nothing");
+    }
+
+    #[test]
+    fn a_slider_refuses_a_range_it_cannot_count_or_draw() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        // The span overflows, and the steps do not fit comfortably.
+        assert_eq!(ui.slider(Ui::ROOT, "L", -1e308, 1e308, 1.0, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 100.0, 1e-300, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 1e12, 1.0, 0.0), None);
+        assert_eq!(ui.len(), 1);
+        // The most steps is still a slider, and its keys cannot overflow.
+        let id = ui.slider(Ui::ROOT, "L", 0.0, 2e9, 1.0, 2e9);
+        assert!(id.is_some());
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.step_value(id, i64::MAX), None);
+        assert_eq!(ui.step_value(id, i64::MAX).or(ui.step_value(id, -1)), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(2e9 - 1.0));
+    }
+
+    #[test]
+    fn a_slider_ends_on_max() {
+        let (mut ui, id) = slider(0.0, 10.0, 3.0, 0.0, false);
+        assert_eq!(ui.key(Key::End), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.key(Key::Left), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(9.0));
+        assert_eq!(ui.key(Key::Right), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.set_value(id, 5.0), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(6.0));
+        assert_eq!(ui.set_value(id, 9.6), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_slider_stays_on_its_steps_within_its_range() {
+        let (mut ui, id) = slider(0.0, 10.0, 2.0, 0.0, false);
+        for (set, value) in [(11.0, 10.0), (-3.0, 0.0), (3.1, 4.0), (f64::INFINITY, 10.0)] {
+            ui.set_value(id, set);
+            assert_eq!(ui.value(id), Some(value), "set to {set}");
+        }
+        ui.set_value(id, 4.0);
+        assert_eq!(ui.set_value(id, f64::NAN), None);
+        assert_eq!(ui.value(id), Some(4.0));
+        // A value that rounds to where it is moves nothing.
+        assert_eq!(ui.set_value(id, 4.2), None);
+
+        for (key, moved, value) in [
+            (Key::Right, true, 6.0),
+            (Key::Up, true, 8.0),
+            (Key::Left, true, 6.0),
+            (Key::Down, true, 4.0),
+            (Key::PageUp, true, 10.0),
+            (Key::PageUp, false, 10.0),
+            (Key::PageDown, true, 0.0),
+            (Key::PageDown, false, 0.0),
+            (Key::Left, false, 0.0),
+            (Key::End, true, 10.0),
+            (Key::End, false, 10.0),
+            (Key::Home, true, 0.0),
+            (Key::Home, false, 0.0),
+        ] {
+            let event = ui.key(key.clone());
+            let expected = moved.then_some(Event::Changed(id));
+            assert_eq!(event, expected, "{key:?}");
+            assert_eq!(ui.value(id), Some(value), "{key:?}");
+        }
+        // Only a slider has a value.
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        assert_eq!((ui.value(label), ui.set_value(label, 1.0)), (None, None));
+    }
+
+    #[test]
+    fn a_mirrored_slider_follows_what_is_seen() {
+        let seen = |rtl| {
+            let (mut ui, id) = slider(0.0, 10.0, 1.0, 5.0, rtl);
+            let r = ui.widget(id).rect;
+            let font = ui.theme.font_size;
+            let min = slider_knob_x(r, rtl, font, 0.0);
+            let max = slider_knob_x(r, rtl, font, 1.0);
+            assert_eq!(min < max, !rtl, "rtl {rtl}: min is at the start edge");
+            // The pointer at the min end gives min, at the max end gives max.
+            ui.click(min, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(0.0));
+            ui.click(max, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(10.0));
+            ui.set_value(id, 5.0);
+            ui.key(Key::Right);
+            ui.value(id)
+        };
+        assert_eq!(seen(false), Some(6.0));
+        assert_eq!(seen(true), Some(4.0));
+    }
+
+    #[test]
+    fn a_slider_follows_a_press_and_a_drag() {
+        let (mut ui, id) = slider(0.0, 100.0, 1.0, 0.0, false);
+        let r = ui.widget(id).rect;
+        let (y, font) = (r.y + r.h / 2.0, ui.theme.font_size);
+        let at = |f| slider_knob_x(r, false, font, f);
+        let press = ui.pointer_press(at(0.5), y, PointerButton::Primary);
+        assert_eq!(press, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(50.0));
+        // A drag keeps moving the knob, past the drag threshold and outside the widget, and
+        // never starts a drag of its own.
+        let moved = ui.pointer_motion(at(0.75), y + 40.0);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(75.0));
+        let moved = ui.pointer_motion(r.x + r.w + 50.0, y);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(100.0));
+        assert_eq!(ui.pointer_release(at(1.0), y, PointerButton::Primary), None);
+        assert_eq!(ui.pointer_motion(at(0.1), y), None, "the button is up");
+        assert_eq!(ui.value(id), Some(100.0));
+    }
+
+    /// A button, a list of `rows` rows in a scroll `height` logical pixels high, and a button.
+    fn long_list(rows: usize, height: f32, rtl: bool) -> (Ui, [WidgetId; 4], Vec<WidgetId>) {
+        let mut ui = Ui::new("List", Theme::default(), rtl);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let scroll = ui.scroll(Ui::ROOT, height);
+        let list = ui.list(scroll, "Rows");
+        let rows = (1..=rows)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        (ui, [before, scroll, list, after], rows)
+    }
+
+    /// Whether `row` lies wholly inside the viewport of `scroll`.
+    fn in_view(ui: &Ui, scroll: WidgetId, row: WidgetId) -> bool {
+        let (view, r) = (ui.widget(scroll).rect, ui.widget(row).rect);
+        r.y >= view.y && r.bottom() <= view.bottom()
+    }
+
+    #[test]
+    fn the_focused_row_stays_in_view() {
+        let (mut ui, [before, scroll, list, after], rows) = long_list(1000, 200.0, false);
+        assert_eq!(ui.widget(scroll).rect.h, 200.0);
+        let last = rows[999];
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[0]));
+        assert!(!in_view(&ui, scroll, last));
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(last)));
+        assert_eq!((ui.focus(), ui.selected(list)), (Some(last), Some(last)));
+        assert!(in_view(&ui, scroll, last), "End scrolls to the last row");
+        ui.layout();
+        assert!(in_view(&ui, scroll, last), "a layout keeps the scroll");
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert!(in_view(&ui, scroll, rows[0]), "Home scrolls back");
+
+        // Tab out, scroll the selected row away, and Tab back in: it is in view again.
+        ui.key(Key::End);
+        assert_eq!((ui.key(Key::Tab), ui.focus()), (None, Some(after)));
+        let view = ui.widget(scroll).rect;
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, last) && in_view(&ui, scroll, rows[0]));
+        ui.key(Key::BackTab);
+        assert_eq!(ui.focus(), Some(last));
+        assert!(
+            in_view(&ui, scroll, last),
+            "Tab back in scrolls to the selected row"
+        );
+    }
+
+    #[test]
+    fn a_list_is_one_tab_stop_walked_by_arrows() {
+        let (mut ui, [before, scroll, list, after], rows) = long_list(50, 200.0, false);
+        assert_eq!(crate::focus::chain(&ui), [before, rows[0], after]);
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[0]), "Tab enters on the first row");
+        assert_eq!(ui.selected(list), None, "focus alone selects nothing");
+        assert_eq!(ui.key(Key::Down), Some(Event::Selected(rows[1])));
+        assert_eq!(ui.key(Key::Down), Some(Event::Selected(rows[2])));
+        assert_eq!(ui.key(Key::Up), Some(Event::Selected(rows[1])));
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[1]), Some(rows[1]))
+        );
+
+        // Page Down moves by a viewport: to the row a viewport below the selected row's middle.
+        let r = ui.widget(rows[1]).rect;
+        let below = r.y + r.h / 2.0 + ui.widget(scroll).rect.h;
+        let paged = rows.iter().position(|&row| {
+            let c = ui.widget(row).rect;
+            c.y <= below && below < c.bottom()
+        });
+        let paged = paged.map_or(Ui::ROOT, |i| rows[i]);
+        assert!(paged != rows[1] && paged != Ui::ROOT);
+        assert_eq!(ui.key(Key::PageDown), Some(Event::Selected(paged)));
+        assert!(in_view(&ui, scroll, paged));
+        assert_eq!(ui.key(Key::PageUp), Some(Event::Selected(rows[1])));
+        assert_eq!(ui.key(Key::PageUp), Some(Event::Selected(rows[0])));
+        assert_eq!(ui.key(Key::PageUp), None, "nothing above the first row");
+
+        // Tab leaves the list, and comes back to its selected row.
+        ui.key(Key::Down);
+        assert_eq!(crate::focus::chain(&ui), [before, rows[1], after]);
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(after));
+        ui.key(Key::BackTab);
+        assert_eq!(ui.focus(), Some(rows[1]));
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[1]), "Tab enters on the selected row");
+
+        // At the ends, Up and Down leave the list as Shift+Tab and Tab, as GTK's ListBox does.
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[49])));
+        assert_eq!(ui.key(Key::End), None);
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+        ui.key(Key::BackTab);
+        ui.key(Key::Home);
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+        assert_eq!(ui.selected(list), Some(rows[0]));
+
+        // Enter and Space choose the focused row, as a click does.
+        ui.key(Key::Tab);
+        assert_eq!(ui.key(Key::Enter), Some(Event::Selected(rows[0])));
+        let r = ui.widget(rows[2]).rect;
+        assert_eq!(
+            ui.click(r.x + 1.0, r.y + 1.0),
+            Some(Event::Selected(rows[2]))
+        );
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[2]), Some(rows[2]))
+        );
+    }
+
+    #[test]
+    fn up_and_down_leave_a_list_only_toward_a_widget() {
+        // The list is the window's last widget: Down on its last row stays there, as GTK's
+        // directional focus does not wrap round to the first widget.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let rows: Vec<WidgetId> = (1..=20)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        ui.layout();
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[19])));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(rows[19])));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+
+        // The list is the first widget: Up on its first row stays there.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let first = ui.list_row(list, "Row 1");
+        ui.list_row(list, "Row 2");
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        ui.set_focus(Some(first));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(first)));
+        ui.key(Key::End);
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+    }
+
+    #[test]
+    fn the_arrows_reach_a_list_whose_selected_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        assert_eq!(ui.activate(rows[39]), Some(Event::Selected(rows[39])));
+        let view = ui.widget(scroll).rect;
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[39]));
+        ui.set_focus(Some(before));
+        ui.key(Key::Down);
+        assert_eq!(ui.focus(), Some(rows[39]), "Down from above enters the list");
+        assert!(in_view(&ui, scroll, rows[39]));
+
+        // And from below, with the first row selected and the list scrolled to its end.
+        ui.activate(rows[0]);
+        ui.set_focus(Some(after));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        ui.key(Key::Up);
+        assert_eq!(ui.focus(), Some(rows[0]), "Up from below enters the list");
+        assert!(in_view(&ui, scroll, rows[0]));
+    }
+
+    #[test]
+    fn the_arrows_leave_a_list_whose_focused_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        let view = ui.widget(scroll).rect;
+        ui.set_focus(Some(rows[0]));
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[49])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[49]));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+
+        ui.set_focus(Some(rows[49]));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+    }
+
+    #[test]
+    fn a_scroll_clips_its_content_and_follows_the_wheel() {
+        for rtl in [false, true] {
+            let (mut ui, [_, scroll, list, after], rows) = long_list(50, 200.0, rtl);
+            let view = ui.widget(scroll).rect;
+            let a = ui.widget(after).rect;
+            assert!(
+                a.y >= view.bottom(),
+                "rtl {rtl}: the next widget is under the viewport"
+            );
+            // Rows run on under the viewport, where the pointer finds none of them.
+            let hidden = rows
+                .iter()
+                .copied()
+                .find(|&r| ui.widget(r).rect.y > view.bottom());
+            assert!(hidden.is_some(), "rtl {rtl}: a row lies under the viewport");
+            let h = ui.widget(hidden.unwrap_or(Ui::ROOT)).rect;
+            assert!(!rows.contains(&ui.hit(h.x + 1.0, h.y + 1.0).unwrap_or(Ui::ROOT)));
+
+            // The wheel scrolls the list under the pointer, and only there.
+            assert!(!ui.pointer_axis(a.x + 1.0, a.y + 1.0, 40.0), "rtl {rtl}");
+            assert!(
+                ui.pointer_axis(view.x + 1.0, view.y + 1.0, 40.0),
+                "rtl {rtl}"
+            );
+            assert_eq!(ui.widget(rows[0]).rect.y, view.y - 40.0, "rtl {rtl}");
+            assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -100.0), "rtl {rtl}");
+            assert_eq!(
+                ui.widget(rows[0]).rect.y,
+                view.y,
+                "rtl {rtl}: not above the top"
+            );
+            assert!(!ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1.0), "rtl {rtl}");
+            assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+            let last = ui.widget(rows[49]).rect;
+            assert_eq!(
+                last.bottom(),
+                view.bottom(),
+                "rtl {rtl}: not past the bottom"
+            );
+            assert!(!ui.pointer_axis(view.x + 1.0, view.y + 1.0, 10.0));
+            ui.layout();
+            assert_eq!(
+                ui.widget(rows[49]).rect.bottom(),
+                view.bottom(),
+                "rtl {rtl}"
+            );
+
+            // A visible row takes a click; its list fills the width, its text at the start edge.
+            let at = (last.x + 1.0, last.y + 1.0);
+            assert_eq!(ui.click(at.0, at.1), Some(Event::Selected(rows[49])));
+            assert_eq!(ui.selected(list), Some(rows[49]));
+            let margin = ui.theme.margin;
+            assert_eq!((view.x, view.w), (margin, ui.size().0 - 2.0 * margin));
+        }
     }
 }

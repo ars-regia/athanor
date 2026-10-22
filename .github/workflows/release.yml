@@ -30,7 +30,7 @@ jobs:
     defaults:
       run:
         shell: bash
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -38,8 +38,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: 🌿 Release only from iso-v0
         run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
+      - name: 📦 rpm, to read the RPM databases of the images (PL55)
+        run: sudo apt-get install --yes --no-install-recommends rpm
       - name: 👤 Who dispatched this release
         run: echo "Dispatched by ${GITHUB_TRIGGERING_ACTOR}." >> "${GITHUB_STEP_SUMMARY}"
       - name: 🧾 Check the request against the build run (scripts/ci/release_candidate.py)
@@ -48,6 +51,19 @@ jobs:
           GH_REPO: ${{ github.repository }}
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: python3 -B scripts/ci/release_candidate.py check --out "${RUNNER_TEMP}/out" | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: 📜 One release statement per image (scripts/ci/release_attestation.py, PB4b)
+        run: python3 -B scripts/ci/release_attestation.py write --candidate "${RUNNER_TEMP}/out/release-candidate.json" --out "${RUNNER_TEMP}/out/attestations"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      # A re-run whose class changed would add an attestation that contradicts the first, and
+      # the image would never verify again (ADR-0127): refuse it here, before anything is signed.
+      # It reads the registry, so retry.sh outlasts a dropped connection; a refusal is the same
+      # on every attempt, writes nothing, and costs the 45 s of the backoff. Worst case, a cosign
+      # that hangs: 3 attempts x 3 images x 2 keys x 30 s + 15 s + 30 s = 585 s, under half of
+      # the 30 minutes of this job, so retry.sh fails it with its own error, not the job timeout.
+      - name: 📜 No image already carries another release statement (scripts/ci/release_attestation.py)
+        env:
+          RETRY_ATTEMPTS: "3"
+        run: bash forge/scripts/retry.sh python3 -B scripts/ci/release_attestation.py prior --timeout 30 --dir "${RUNNER_TEMP}/out/attestations" --keys-dir system/keys | tee -a "${GITHUB_STEP_SUMMARY}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-candidate
@@ -59,7 +75,9 @@ jobs:
     # The only job of release.yml that receives COSIGN_* (D43). It runs the steps of the
     # Orchestrator's sign-system-images on the files of release-candidate, which candidate
     # checked against the build run: the images and the kernel artefacts without the project
-    # key signature (ADR-0096). It builds nothing and verifies nothing: verify-images does.
+    # key signature (ADR-0096), then attests each image with its release statement (PB4b). It
+    # builds nothing and verifies nothing: verify-images does. The cosign installer is the one
+    # third-party action it runs, and COSIGN_* reaches only the sign step (ADR-0127).
     needs: [candidate]
     runs-on: ubuntu-24.04
     # Image key rotation (docs/operations/secrets.md section 4.1): `signing` until step 3,
@@ -81,17 +99,25 @@ jobs:
         with:
           name: release-candidate
           path: artifacts
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: 🔑 Login to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: 🔏 Sign by digest (system/sign-images.sh)
+      # cosign reads the docker config its own login writes, not the auth file of skopeo login
+      # (go-containerregistry authn.DefaultKeychain): cosign attest pushes the attestations.
+      - name: 🔑 Login to the registry for cosign attest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: 🔏 Sign and attest by digest (system/sign-images.sh)
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
-        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+        run: bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
 
   verify-images:
     name: 🔎 Verify the signatures as a machine does
@@ -118,14 +144,15 @@ jobs:
         with:
           name: release-candidate
           path: artifacts
-      - name: 🔎 Pull each image through the shipped policy (system/verify-images.sh)
+      - name: 🔎 Pull each image through the shipped policy and verify its attestation (system/verify-images.sh)
         env:
           BUILD_RUN_ID: ${{ inputs.build_run_id }}
         run: |
           set -euo pipefail
           builder=$(jq -r .request.builder_content_hash artifacts/release-candidate.json)
           bash system/verify-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --builder "${builder}" \
-            --evidence evidence --build-run-id "${BUILD_RUN_ID}" artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
+            --evidence evidence --build-run-id "${BUILD_RUN_ID}" --attestations artifacts/attestations \
+            artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: 🔎 Kernel artefacts carry the project key signature (ADR-0096)
         run: bash system/kernel-artifacts.sh verify-key artifacts/kernel-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: 📎 Hand the signature evidence to the promotion, named by the build run (PL56)

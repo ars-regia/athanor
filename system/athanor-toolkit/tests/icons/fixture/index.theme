@@ -1,0 +1,17 @@
+[Icon Theme]
+Name=Fixture
+Comment=A theme for the icon lookup's unit test
+Inherits=base
+Directories=16x16/apps,scalable/apps
+
+[16x16/apps]
+Size=16
+Context=Applications
+Type=Fixed
+
+[scalable/apps]
+Size=64
+MinSize=16
+MaxSize=512
+Context=Applications
+Type=Scalable
