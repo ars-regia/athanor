@@ -66,21 +66,25 @@ pub struct TextField {
     /// The horizontal position moves up and down keep, from the first of them to the next other
     /// change of the caret or the text.
     column: Option<f32>,
+    /// Whether the text keeps its newlines, as a text area's does.
+    multiline: bool,
 }
 
 impl TextField {
-    /// A field named `name` for assistive technologies, holding `text` at `size` logical pixels; `rtl` sets the base reading direction.
+    /// A field named `name` for assistive technologies, holding the characters of `text` a field
+    /// keeps at `size` logical pixels; `rtl` sets the base reading direction.
     pub fn new(name: &str, text: &str, size: f32, rtl: bool) -> Self {
         let mut editor = PlainEditor::new(size);
         editor.edit_styles().insert(GenericFamily::SansSerif.into());
         editor.set_base_direction(base_direction(rtl));
-        editor.set_text(text);
+        editor.set_text(&printable(text, false));
         Self {
             name: name.to_owned(),
             editor,
             lines: 1,
             offset: 0.0,
             column: None,
+            multiline: false,
         }
     }
 
@@ -92,7 +96,9 @@ impl TextField {
         width: f32,
         lines: usize,
     ) -> Self {
-        let mut area = Self::new(name, text, size, rtl);
+        let mut area = Self::new(name, "", size, rtl);
+        area.multiline = true;
+        area.set_text(text);
         area.editor.set_width(Some(width));
         area.lines = lines.max(1);
         area
@@ -190,10 +196,11 @@ impl TextField {
         self.editor.is_composing()
     }
 
-    /// Replaces the whole text, as an assistive technology's SetValue does.
+    /// Replaces the whole text, as an assistive technology's SetValue does, with the characters
+    /// of `text` the field keeps: a `\r` of a `\r\n` goes, so the text's only newline is `\n`.
     pub fn set_text(&mut self, text: &str) {
         self.column = None;
-        self.editor.set_text(text);
+        self.editor.set_text(&printable(text, self.multiline));
     }
 
     /// Moves the caret to the end of the text.
@@ -485,6 +492,16 @@ mod tests {
         assert_eq!(caret_at(&mut cx, &mut area).1, 1);
         area.down(&mut cx);
         assert_eq!(caret_at(&mut cx, &mut area).0, end + 1 + column6);
+    }
+
+    #[test]
+    fn a_field_holds_only_the_newlines_it_keeps() {
+        let mut area = TextField::area("Notes", "a\r\nb", (15.0, false), 300.0, 3);
+        assert_eq!(area.text(), "a\nb");
+        area.set_text("c\r\nd");
+        assert_eq!(area.text(), "c\nd");
+        let field = TextField::new("Name", "a\r\nb", 15.0, false);
+        assert_eq!(field.text(), "ab");
     }
 
     #[test]
