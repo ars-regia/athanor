@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:71.fc43}
+Release:        %{?autorelease}%{!?autorelease:72.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -84,6 +84,11 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+- athanor-session stops athanor-compositor.service, where its package is installed, and
+  removes ATHANOR_PREVIEW_SESSION and XKB_DEFAULT_* from the user manager: what a preview
+  session killed before its exit handler leaves (doc_session.md, SN15).
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
   bwrap's read-only remount of devtmpfs is refused to xdm_t, and the greeter never started

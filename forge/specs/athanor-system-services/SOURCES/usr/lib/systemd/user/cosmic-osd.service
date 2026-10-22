@@ -4,6 +4,11 @@ Documentation=https://github.com/pop-os/cosmic-osd
 After=graphical-session.target athanor-desktop.service
 Requisite=athanor-desktop.service
 PartOf=graphical-session.target
+# Not in the preview session on the own compositor (doc_session.md, SN15), whose script alone
+# sets ATHANOR_PREVIEW_SESSION in the user manager. This is the polkit agent, and its overlay
+# surface has no line in that compositor's allow-list: an agent that registers and cannot
+# draw leaves each request waiting on a prompt nobody sees.
+ConditionEnvironment=!ATHANOR_PREVIEW_SESSION
 
 [Service]
 # W^X cannot hold for a GL client: Mesa JIT-compiles shaders on the CPU wherever there
