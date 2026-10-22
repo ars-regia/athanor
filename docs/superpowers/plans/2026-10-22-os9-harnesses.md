@@ -215,7 +215,7 @@ Under the allow-list only the bar keeps its top layer; the dock and the launcher
   - a binary target counts when its package's spec installs it to `/usr/bin` (`install ... target/release/<bin> %{buildroot}/usr/bin/<bin>`), so `athanor-dock-toolkit`, which the dock's spec does not install, is skipped;
   - a target's sources are the files under its `path`'s directory, minus those under the directory of another `[[bin]]` of the same crate (the dock's `src/toolkit/` belongs to `athanor-dock-toolkit`), minus `#[cfg(test)]` modules and `tests/`;
   - a target's sources include those of the workspace crates it depends on by `path =` in its crate's `[dependencies]`, followed transitively, so the dock's `ext_foreign_toplevel_list_v1`, bound in `system/athanor-compositor-client`, counts for the dock; an `optional = true` dependency is followed only when the feature set the package's spec builds with enables it, so the dock's optional `athanor-toolkit` is not followed and `athanor-dock-toolkit` stays out;
-  - the check fails only when a counted target asks for the top or overlay layer (`set_layer(Layer::Top)`, `set_layer(Layer::Overlay)`, `layer: Layer::Top` or `Layer::Overlay`) or names a `privileged` row of `data/globals`, and `/usr/bin/<bin>` has no line at all; and when a line names an executable no spec installs. It never proposes or derives a line's interfaces: every interface in a line is a privilege grant, which comes from the maintainer's review (C1 results, section 10 item 1);
+  - the check fails only when a counted target asks for the top or overlay layer (`set_layer(Layer::Top)`, `set_layer(Layer::Overlay)`, `layer: Layer::Top` or `Layer::Overlay`) or names a `privileged` row of `data/globals`, and `/usr/bin/<bin>` has no line at all; when a target that asks for the top or overlay layer has a line that does not name `zwlr_layer_shell_v1` (the failure of #683: the surface is closed); and when a line names an executable no spec installs. Apart from that presence check on one name, it never proposes or derives a line's interfaces: every interface in a line is a privilege grant, which comes from the maintainer's review (C1 results, section 10 item 1);
   - a named constant `PENDING_OPEN_QUESTION_3` lists the greeter's binary, `athanor-greeter-ui`, with a comment citing open question 3: its missing line is reported as a note, not a failure. When the maintainer answers open question 3 the constant is emptied and the line added.
 
 - [ ] **Step 1: Write the failing tests**
@@ -229,7 +229,8 @@ def test_a_line_for_an_executable_nothing_installs_fails(self): ...
 def test_a_test_module_asking_for_the_top_layer_is_ignored(self): ...  # #[cfg(test)] and tests/
 def test_a_bind_in_a_path_dependency_counts(self): ...                 # athanor-compositor-client
 def test_a_disabled_optional_dependency_is_not_followed(self): ...     # the dock's athanor-toolkit
-def test_a_target_with_a_line_passes_whatever_its_interfaces(self): ...
+def test_a_top_layer_target_whose_line_omits_layer_shell_fails(self): ...
+def test_a_target_with_a_line_passes_whatever_its_other_interfaces(self): ...  # any names beside zwlr_layer_shell_v1
 def test_a_pending_binary_is_a_note_not_a_failure(self): ...
 def test_pending_holds_only_the_greeter_lock_or_polkit_agent(self): ...
     # PENDING_OPEN_QUESTION_3 is a subset of the greeter, the lock screen and the polkit agent.
