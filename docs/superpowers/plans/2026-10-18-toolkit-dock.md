@@ -4,7 +4,7 @@
 
 **Goal:** the dock drawn by `athanor-toolkit` replaces the GTK4 dock once Orca says no less than it says for the GTK dock (OS8) and its goldens match the GTK dock's in the rig's twelve cases, each difference explained.
 
-**Architecture:** the toolkit's driver grows from one xdg-toplevel to the shell's surfaces: layer-shell surfaces, one per output and tracked as outputs come and go, popups for menus and tooltips, and the pointer the dock needs (hover, right button, drag inside a surface). The dock's logic that has no GTK type stays and is shared: `placement.rs` and `autohide.rs` in `athanor-dock`, `model.rs` and `favorites.rs` in `athanor-apps`, and the launch path behind a security context in `athanor-compositor-client`. Only the view is rewritten. GLib and GIO stay: the launch path, the favourites' desktop entries and the appearance settings are built on them, they are not GTK, and they leave the image only if a later change says so; `gtk4`, `gdk4` and `gtk4-layer-shell` are what the toolkit dock drops. The toolkit dock is a second binary of `athanor-dock`, built behind a feature, until the switch of task 9 deletes the GTK view.
+**Architecture:** the toolkit's driver grows from one xdg-toplevel to the shell's surfaces: layer-shell surfaces, one per output and tracked as outputs come and go, popups for menus and tooltips, and the pointer the dock needs (hover, right button, drag inside a surface). The dock's logic that has no GTK type stays and is shared: `placement.rs` and `autohide.rs` in `athanor-dock`, `model.rs` and `favorites.rs` in `athanor-apps`, and the launch path behind a security context in `athanor-compositor-client`. Only the view is rewritten. GLib and GIO stay: the launch path, the favourites' desktop entries and the appearance settings are built on them, they are not GTK, and they leave the image only if a later change says so; `gtk4`, `gdk4` and `gtk4-layer-shell` are what the toolkit dock drops. The toolkit dock is a second binary of `athanor-dock`, built behind a feature, until the switch of task 10 deletes the GTK view.
 
 **Tech Stack:** Rust, smithay-client-toolkit, calloop, Parley, AccessKit and `accesskit_unix`, `vello_cpu` (the default renderer, maintainer decision of 2026-10-18), the rig and the compositor fixture of OS6.
 
@@ -14,11 +14,11 @@
 
 - Branch from `origin/iso-v0`, report its commit. Built and tested in the rig's podman image with `-j 4`, on the reference laptop first.
 - Parity, not new features: the toolkit dock does what the GTK dock does and nothing more. A behaviour the GTK dock lacks is a separate change after the switch. The GTK dock gets fixes only (decision of 2026-10-18: nothing new is born in GTK).
-- The GTK dock stays the shipped one until task 9. Every task before it leaves the image unchanged.
+- The GTK dock stays the shipped one until task 10. Every task before it leaves the image unchanged.
 - The toolkit stays `MIT OR Apache-2.0`; the dock stays `GPL-3.0-or-later`. A new dependency's licence is in `deny.toml`'s allow-list before it is added.
 - The strings come from the GTK dock's catalogue (`po/`); nothing is retranslated.
 - No new `unwrap`, `expect` or `panic!` outside tests (`verify.py panics`).
-- `doc_bar.md` BR7 and `doc_shell.md` SH4 name GTK's Cairo renderer and the GTK shim for the dock: task 9 needs approved revisions of both documents that name the toolkit. Their text is proposed to the maintainer before task 9 starts.
+- `doc_bar.md` BR7 and `doc_shell.md` SH4 name GTK's Cairo renderer and the GTK shim for the dock: task 10 needs approved revisions of both documents that name the toolkit. Their text is proposed to the maintainer before task 10 starts.
 
 ## Review Focus
 
@@ -94,8 +94,22 @@ GTK goes; GLib and GIO stay. The launch path (`launch.rs`: `gio::AppInfo`, `Desk
 - [ ] The lines the dock's view took, and the lines the driver and the widgets gained.
 - [ ] The results go into `docs/spikes/t1-own-toolkit.md` as a dock section.
 
-### Task 9: the switch
+### Task 9: the dock of visual language revision 3
+
+- [ ] Before it starts: the revision of `doc_bar.md` (BR7) and of `doc_shell_standard.md` (ST6) that ADR-0124 requires before the toolkit surface is built, approved by the maintainer. It carries ADR-0124 decisions 6 and 9: icons of 48 px, 40 px on small screens, and the `auto-hide` knob meaning intellihide, the dock hiding only while a window overlaps it, with the default still visible.
+- [ ] The toolkit dock draws the approved sizes and hides by intellihide, as the revision words them.
+- [ ] Check: the toolkit dock's goldens replaced, the commit naming why; `dock_e2e.py` and the revised ST6 scenarios of `scripts/shell-bench/scenarios.py` pass against it.
+
+### Task 10: the switch
 
 - [ ] Before it starts: the revision of `doc_bar.md` that names the toolkit for the dock, approved by the maintainer.
 - [ ] The toolkit dock becomes `athanor-dock`; the GTK view, its `gtk` feature and the dock's GTK dependencies are deleted; the unit, the preset and the package are unchanged for the user.
 - [ ] Check: `just check`; the rig's dock jobs and the dev VM's `dock-acceptance.sh` pass against the shipped dock.
+
+## Follow-ups
+
+Left open by task 6, to close before task 10:
+
+- The toolkit dock does not hold a single instance: the GTK dock's `GApplication` makes a second start hand over to the first, while a second toolkit dock runs beside it.
+- The context menu stacks a window's row, Minimise and Close vertically; the GTK dock lays them on one line.
+- The audit's finding at `toolkit/dock.rs:303` (the rebuild of a surface when only a window's title changes) is left as it is.

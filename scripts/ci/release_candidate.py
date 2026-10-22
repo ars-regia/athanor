@@ -298,7 +298,7 @@ def check(out):
     notes = [f"- {r['repository']}: class_reason `{r['class_reason']}`\n" for r in records if r["class_reason"]]
     if notes and os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-            f.write("Class derived by fallback (PL55):\n" + "".join(notes))
+            f.write("Class derived by fallback (PL55) or across a change of Fedora release (#681):\n" + "".join(notes))
     else:
         sys.stderr.write("".join(notes))
     candidate = {

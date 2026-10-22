@@ -147,6 +147,7 @@ impl State {
             let size = window.geometry().size;
             let read = match &mut self.backend {
                 Backend::Headless(headless) => headless.read_window(&window),
+                Backend::Drm(drm) => drm.read_window(&window),
                 Backend::Nested(nested) => {
                     read_window::<_, GlesTexture>(nested.backend.renderer(), &window)
                 }

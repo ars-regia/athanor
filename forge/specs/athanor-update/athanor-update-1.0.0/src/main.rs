@@ -1,7 +1,7 @@
 //! `athanor-update`: checks for, downloads and applies system image updates, and publishes
 //! the trust state (docs/architecture/doc_update_trust.md). One binary, run by four units:
-//! `check` by the timer, `check --offline` at boot, `serve` by D-Bus activation, `migrate`
-//! once per machine. `recover-key` is the administrator's command of UT2, and `go-back` the
+//! `check` by the timer, `check --offline` at boot and `shutdown` at its stop, `serve` by
+//! D-Bus activation, `migrate` once per machine. `recover-key` is the administrator's command of UT2, and `go-back` the
 //! administrator's way to `GoBack()` from a console.
 mod attestation;
 mod check;
@@ -36,6 +36,8 @@ enum Command {
         #[arg(long)]
         offline: bool,
     },
+    /// Unlock a staged security update whose postpone expired, so this shutdown applies it.
+    Shutdown,
     /// Serve os.athanor.Update1 on the system bus until idle.
     Serve,
     /// Move this machine onto the signed reference, once.
@@ -89,6 +91,10 @@ fn main() -> ExitCode {
                 Err(failure) => failed("the check", failure.code),
             }
         }
+        Command::Shutdown => match check::at_shutdown(&ctx) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(failure) => failed("the evaluation at shutdown", failure.code),
+        },
         Command::Serve => {
             let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 Ok(runtime) => runtime,

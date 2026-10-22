@@ -21,7 +21,7 @@ use athanor_unit::notify;
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib};
 
-use crate::i18n::{self, tr};
+use athanor_dock::i18n::{self, tr};
 use surface::Surface;
 
 pub struct Dock {

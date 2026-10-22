@@ -95,9 +95,19 @@ def fedora_version(containerfile=None):
     return int(m.group(1))
 
 
-def fedora_releases():
-    """(F{N}, F{N+1}), in order of preference for the same patch level."""
-    n = fedora_version()
+def fedora_of(nvr):
+    """N of the `.fcN` dist tag of a kernel NVR (`7.2.11-300.fc45` -> 45)."""
+    m = re.search(r"-\d+\.fc(\d+)", nvr)
+    if not m:
+        sys.exit(f"kernel: {nvr} names no Fedora release (.fcN)")
+    return int(m.group(1))
+
+
+def fedora_releases(pinned_nvr):
+    """The kernel's (F{N}, F{N+1}), in order of preference for the same patch level. N is the
+    newer of FEDORA_VERSION and the release of the pinned FEDORA_KERNEL_NVR: the kernel source
+    may run ahead of the image (an fc45 kernel on an F43 image) and never moves back."""
+    n = max(fedora_version(), fedora_of(pinned_nvr))
     return (f"F{n}", f"F{n + 1}")
 
 
@@ -148,10 +158,10 @@ def read_pins():
 # --- kernel -----------------------------------------------------------------------
 
 
-def fedora_kernels():
+def fedora_kernels(pinned_nvr):
     """{patch level: NVR} of the stable kernel builds; F{N} before F{N+1} for the same version."""
     found = {}
-    for release in fedora_releases():
+    for release in fedora_releases(pinned_nvr):
         page, pages = 1, 1
         while page <= pages:
             query = {
@@ -191,7 +201,7 @@ def cachyos_releases():
 
 def kernel_pair(pins, notes):
     """(version, Fedora NVR, CachyOS tag, release date) of the chosen pair, or None."""
-    fedora, cachy = fedora_kernels(), cachyos_releases()
+    fedora, cachy = fedora_kernels(pins["FEDORA_KERNEL_NVR"]), cachyos_releases()
     common = sorted(set(fedora) & set(cachy), key=vtuple)
     if pins["KERNEL_CHANNEL"] == "lts":
         common = [v for v in common if series(v) == LTS_SERIES]
@@ -492,6 +502,14 @@ def kernel_pins(pins, new, notes, locks):
         version, nvr, tag, published = pair
         if nvr != pins["FEDORA_KERNEL_NVR"] or tag != pins["CACHYOS_RELEASE"]:
             new["FEDORA_KERNEL_NVR"], new["CACHYOS_RELEASE"] = nvr, tag
+        # bump.py never rewrites FEDORA_KEY_FPR: a pair from the next Fedora release needs
+        # that release's key, set by a person, or build.sh's SRPM signature check fails.
+        if fedora_of(nvr) != fedora_of(pins["FEDORA_KERNEL_NVR"]):
+            notes.append(
+                f"kernel: {nvr} is a Fedora {fedora_of(nvr)} build and FEDORA_KEY_FPR still names the "
+                f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key; set it to the Fedora {fedora_of(nvr)} key "
+                "before merging, or build.sh's SRPM signature check fails"
+            )
         # The linux-cachyos config in force at the release date: the one CachyOS shipped
         # that kernel with, not today's head, which may belong to the next series.
         config = head_commit(

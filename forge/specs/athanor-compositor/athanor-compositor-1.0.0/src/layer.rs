@@ -3,10 +3,12 @@
 //! placed in what the zones leave (`State::window_area`). The keyboard follows each surface's
 //! `keyboard_interactivity`, as register row 1 of CO3 asks: an exclusive surface on the top or
 //! overlay layer holds the keyboard while it is mapped, an on-demand one takes it when clicked,
-//! and one with none never has it.
+//! and one with none never has it. Super+Escape takes the keyboard from an exclusive
+//! surface (`escape_exclusive`), and the layers of an output that goes are closed
+//! (`close_layers`).
 
 use crate::identity::Privilege;
-use crate::state::{granted, State};
+use crate::state::{granted, identity_of, State};
 use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::desktop::{
     find_popup_root_surface, layer_map_for_output, LayerSurface, WindowSurfaceType,
@@ -37,8 +39,6 @@ impl WlrLayerShellHandler for State {
             .as_ref()
             .and_then(Output::from_resource)
             .or_else(|| self.space.outputs().next().cloned());
-        // ponytail: no output is removed yet; task 8 (output hot-plug) closes or moves the layers
-        // of an output that goes, which today would stay in its map, unseen and never closed.
         let Some(output) = output else {
             // Nothing to show it on: the protocol's answer is `closed`.
             surface.send_close();
@@ -161,7 +161,8 @@ impl State {
     }
 
     /// The surface that holds the keyboard exclusively: the top one of the mapped exclusive
-    /// surfaces of the overlay layer, else of the top layer.
+    /// surfaces of the overlay layer, else of the top layer, of a client the escape key has not
+    /// taken the keyboard from.
     // ponytail: the outputs in order, not the one the user is on; per output with several.
     pub fn exclusive_layer(&self) -> Option<WlSurface> {
         [Layer::Overlay, Layer::Top].into_iter().find_map(|layer| {
@@ -169,10 +170,60 @@ impl State {
                 layer_map_for_output(output)
                     .layers_on(layer)
                     .rev()
-                    .find(|surface| holds_exclusively(surface))
+                    .find(|surface| {
+                        holds_exclusively(surface) && !self.escaped(surface.wl_surface())
+                    })
                     .map(|surface| surface.wl_surface().clone())
             })
         })
+    }
+
+    /// Super+Escape: the keyboard back from the surface that holds it exclusively, and from its
+    /// popup's grab, to the next exclusive surface or the top window, at the press, whether or
+    /// not a lock client takes the lock that follows. A client granted the top layers can map a
+    /// transparent exclusive surface that never ends; the user still gets the keyboard back.
+    /// The escape holds for the identity the grant went to (executable and unit), not for the
+    /// connection or the surface: no exclusive surface of it, on any connection, remapped or
+    /// new, takes the keyboard until the user clicks on one of its layer surfaces that takes
+    /// the keyboard (`click_focus`). A client that exits and starts again stays escaped.
+    pub fn escape_exclusive(&mut self) {
+        let Some(surface) = self.exclusive_layer() else {
+            return;
+        };
+        tracing::info!("Super+Escape took the keyboard back from an exclusive surface");
+        if let Some(identity) = surface.client().and_then(|client| identity_of(&client)) {
+            if !self.escaped.contains(&identity) {
+                self.escaped.push(identity);
+            }
+        }
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            if keyboard.is_grabbed() {
+                keyboard.unset_grab(self);
+            }
+        }
+        self.focus_top();
+    }
+
+    /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
+    /// keyboard leaves them.
+    // ponytail: closed, not moved to another output; a shell maps them again where it wants.
+    pub fn close_layers(&mut self, output: &Output) {
+        let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        for layer in &layers {
+            layer_map_for_output(output).unmap_layer(layer);
+            layer.layer_surface().send_close();
+        }
+        for layer in &layers {
+            self.refocus(layer.wl_surface());
+        }
+    }
+
+    /// Whether Super+Escape took the keyboard from the client of `surface`.
+    pub fn escaped(&self, surface: &WlSurface) -> bool {
+        surface
+            .client()
+            .and_then(|client| identity_of(&client))
+            .is_some_and(|identity| self.escaped.contains(&identity))
     }
 
     /// Whether `surface` can hold the keyboard: a window can, and a layer surface unless its
@@ -189,12 +240,20 @@ impl State {
     }
 
     /// A click on `layer`: it takes the keyboard if it asks for it on demand and no surface
-    /// holds the keyboard exclusively.
+    /// holds the keyboard exclusively. A click on a surface of the client whose surface holds
+    /// it gives that surface the keyboard, which the escape key may have taken.
     pub fn focus_layer(&mut self, layer: &LayerSurface) {
-        if !layer.can_receive_keyboard_focus() || self.exclusive_layer().is_some() {
+        if !layer.can_receive_keyboard_focus() {
             return;
         }
-        self.set_keyboard_focus(Some(layer.wl_surface().clone()));
+        let client = |surface: &WlSurface| surface.client().map(|client| client.id());
+        match self.exclusive_layer() {
+            Some(exclusive) if client(&exclusive) == client(layer.wl_surface()) => {
+                self.focus_exclusive(exclusive)
+            }
+            Some(_) => {}
+            None => self.set_keyboard_focus(Some(layer.wl_surface().clone())),
+        }
     }
 }
 
