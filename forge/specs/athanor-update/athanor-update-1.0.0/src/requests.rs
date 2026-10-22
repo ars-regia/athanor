@@ -244,15 +244,19 @@ pub fn set_automatic<T: Tools>(ctx: &Context<'_, T>, enabled: bool) -> (bool, Re
     // what was just locked when it still reads on.
     republish(ctx);
     match written {
-        Ok(()) => (previous != Some(enabled), Ok(())),
+        Ok(()) => (changed(previous, Some(enabled), enabled), Ok(())),
         Err(err) => {
             tracing::error!(%err, "cannot write the opt-out of automatic security updates");
             // The write fails after its rename when the directory cannot be synced: the value
             // read back says whether it changed.
-            let changed = previous != Some(enabled) && ctx.store.automatic_security_updates().ok() == Some(enabled);
-            (changed, Err(Refusal::Failed))
+            (changed(previous, ctx.store.automatic_security_updates().ok(), enabled), Err(Refusal::Failed))
         }
     }
+}
+
+/// Whether the opt-out went from `previous` to `enabled`, by the value `now` on disk.
+fn changed(previous: Option<bool>, now: Option<bool>, enabled: bool) -> bool {
+    previous != Some(enabled) && now == Some(enabled)
 }
 
 /// `GoBack()`: the immediately previous deployment, the digest left recorded as held, a reboot.
@@ -760,14 +764,22 @@ mod tests {
 
     #[test]
     fn a_failed_write_of_the_opt_out_is_no_change() {
-        use std::os::unix::fs::PermissionsExt;
         let (machine, tools) = staged_for_shutdown("automatic-write-fails", security(), &Lineage::default());
         machine.store.set_automatic_security_updates(false).expect("write");
-        std::fs::set_permissions(&machine.store.var, std::fs::Permissions::from_mode(0o555)).expect("chmod");
-        let result = set_automatic(&machine.ctx(&tools, NOW), true);
-        std::fs::set_permissions(&machine.store.var, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-        assert_eq!(result, (false, Err(Refusal::Failed)));
+        // A directory at the temporary name fails the write before its rename, root included.
+        std::fs::create_dir(machine.store.var.join(format!(".automatic-security-updates.{}", std::process::id()))).expect("mkdir");
+        assert_eq!(set_automatic(&machine.ctx(&tools, NOW), true), (false, Err(Refusal::Failed)));
         assert!(!machine.store.automatic_security_updates().expect("read"), "the opt-out is unchanged");
+    }
+
+    #[test]
+    fn a_change_is_judged_by_the_value_read_back() {
+        // A write that failed after its rename: the value on disk is the new one.
+        assert!(changed(Some(true), Some(false), false));
+        assert!(changed(None, Some(false), false), "an unreadable opt-out rewritten");
+        assert!(!changed(Some(true), Some(true), false), "failed before the rename");
+        assert!(!changed(Some(true), None, false), "unreadable afterwards");
+        assert!(!changed(Some(false), Some(false), false), "the same value");
     }
 
     #[tokio::test]
