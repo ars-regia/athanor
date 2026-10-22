@@ -1,4 +1,6 @@
 src/ui/mod.rs
 src/ui/surface.rs
+src/toolkit/dock.rs
+../../../../system/athanor-apps/src/entries.rs
 ../../../../system/athanor-apps/src/openers.rs
 ../../../../system/athanor-apps/src/row.rs
