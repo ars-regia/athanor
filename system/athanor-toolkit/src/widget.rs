@@ -785,6 +785,8 @@ impl Ui {
             return false;
         }
         field.compose(&mut self.text, "", None);
+        // A preedit that scrolled a text area leaves the view past the shorter text.
+        field.scroll_by(&mut self.text, 0.0);
         true
     }
 
@@ -2375,6 +2377,47 @@ mod tests {
         let most = field.layout(&mut ui.text).height() - field.view_height(&mut ui.text);
         let offset = field.offset;
         assert!(most > 0.0 && (offset - most).abs() < 0.5, "offset {offset} of {most}");
+    }
+
+    #[test]
+    fn a_text_area_that_ends_a_composition_scrolls_back_into_its_text() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let notes = ui.text_area(Ui::ROOT, "Notes", "a", 3);
+        ui.layout();
+        let offset = |ui: &Ui| match &ui.widgets[notes].kind {
+            Kind::TextArea(area) => area.offset,
+            _ => f32::NAN,
+        };
+        let preedit = "word ".repeat(60);
+        // The area loses the focus, then its window loses the text input.
+        for leave in [false, true] {
+            ui.set_focus(Some(notes));
+            ui.compose(&preedit, None);
+            assert!(offset(&ui) > 0.0, "the preedit did not scroll");
+            if leave {
+                assert!(ui.end_composition());
+            } else {
+                ui.set_focus(Some(name));
+            }
+            assert_eq!(offset(&ui), 0.0, "leave {leave}");
+        }
+    }
+
+    #[test]
+    fn hiding_a_composing_field_ends_its_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        let other = ui.field(Ui::ROOT, "Other", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        ui.set_visible(name, false);
+        assert_eq!(ui.focus(), Some(other));
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
     }
 
     #[test]
