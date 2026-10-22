@@ -175,7 +175,7 @@ msgstr "Dispositivi vicini"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348 src/ui/power.rs:110
-#: src/ui/shield.rs:596
+#: src/ui/shield.rs:608
 msgid "Cancel"
 msgstr "Annulla"
 
@@ -428,12 +428,12 @@ msgstr "Spegnere ora?"
 msgid "Power"
 msgstr "Alimentazione"
 
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:566
-#: src/ui/shield.rs:665
+#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:578
+#: src/ui/shield.rs:677
 msgid "Restart to update"
 msgstr "Riavvia per aggiornare"
 
-#: src/ui/power.rs:154 src/ui/shield.rs:664
+#: src/ui/power.rs:154 src/ui/shield.rs:676
 msgid "Restart and install the update now?"
 msgstr "Riavviare e installare l'aggiornamento adesso?"
 
@@ -585,88 +585,88 @@ msgstr "Questo aggiornamento di sicurezza è già stato rimandato una volta, o n
 msgid "Only security updates can be postponed"
 msgstr "Si possono rimandare solo gli aggiornamenti di sicurezza"
 
-#: src/ui/shield.rs:449
+#: src/ui/shield.rs:457
 #, rust-format
 msgid "Version {version}"
 msgstr "Versione {version}"
 
-#: src/ui/shield.rs:454
+#: src/ui/shield.rs:462
 #, rust-format
 msgid "Built on {date}"
 msgstr "Compilata il {date}"
 
-#: src/ui/shield.rs:460
+#: src/ui/shield.rs:468
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Ultimo controllo il {date}"
 
-#: src/ui/shield.rs:461
+#: src/ui/shield.rs:469
 msgid "Never checked"
 msgstr "Mai controllato"
 
-#: src/ui/shield.rs:467
+#: src/ui/shield.rs:475
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:471
+#: src/ui/shield.rs:479
 msgid "Signature policy in force"
 msgstr "Policy delle firme in vigore"
 
-#: src/ui/shield.rs:473
+#: src/ui/shield.rs:481
 msgid "Signature policy not in force"
 msgstr "Policy delle firme non in vigore"
 
-#: src/ui/shield.rs:476
+#: src/ui/shield.rs:484
 msgid "The policy is the one Athanor ships"
 msgstr "La policy è quella fornita da Athanor"
 
-#: src/ui/shield.rs:478
+#: src/ui/shield.rs:486
 msgid "The policy was changed on this machine"
 msgstr "La policy è stata modificata su questa macchina"
 
-#: src/ui/shield.rs:481
+#: src/ui/shield.rs:489
 msgid "Secure Boot on"
 msgstr "Secure Boot attivo"
 
-#: src/ui/shield.rs:483
+#: src/ui/shield.rs:491
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot disattivo: questa macchina funziona nella modalità degradata dichiarata"
 
-#: src/ui/shield.rs:487
+#: src/ui/shield.rs:495
 msgid "Automatic security updates are off: security fixes wait until someone installs them."
 msgstr "Gli aggiornamenti di sicurezza automatici sono disattivati: le correzioni di sicurezza aspettano che qualcuno le installi."
 
-#: src/ui/shield.rs:491
+#: src/ui/shield.rs:500
 #, rust-format
-msgid "Postponed until {date}"
-msgstr "Rimandato fino al {date}"
+msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
+msgstr "L'aggiornamento di sicurezza è rimandato, al massimo fino al {time}; poi si installa al prossimo spegnimento o riavvio."
 
-#: src/ui/shield.rs:568
+#: src/ui/shield.rs:580
 msgid "Postpone"
 msgstr "Rimanda"
 
-#: src/ui/shield.rs:570
+#: src/ui/shield.rs:582
 msgid "Go back to the previous version"
 msgstr "Torna alla versione precedente"
 
-#: src/ui/shield.rs:572
+#: src/ui/shield.rs:584
 msgid "Automatic security updates"
 msgstr "Aggiornamenti di sicurezza automatici"
 
-#: src/ui/shield.rs:640
+#: src/ui/shield.rs:652
 msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
 msgstr "Disattivare gli aggiornamenti di sicurezza automatici? Le correzioni di sicurezza aspetteranno che qualcuno le installi, e fino ad allora questo computer resta esposto. Vale per tutti gli utenti di questo computer."
 
-#: src/ui/shield.rs:641
+#: src/ui/shield.rs:653
 msgid "Turn Off"
 msgstr "Disattiva"
 
-#: src/ui/shield.rs:670
+#: src/ui/shield.rs:682
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Tornare alla versione precedente e riavviare? Serve la password di un amministratore."
 
-#: src/ui/shield.rs:671
+#: src/ui/shield.rs:683
 msgid "Go back"
 msgstr "Torna indietro"
 

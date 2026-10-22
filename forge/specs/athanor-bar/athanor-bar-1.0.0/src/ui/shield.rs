@@ -384,6 +384,14 @@ fn date(epoch: i64) -> String {
         .map_or_else(|_| epoch.to_string(), |text| text.to_string())
 }
 
+/// The expiry as UT13 words it: local day, month and hour, "28 October, 14:30", in the
+/// session's language.
+fn local_time(epoch: i64) -> String {
+    glib::DateTime::from_unix_local(epoch)
+        .and_then(|time| time.format("%-d %B, %H:%M"))
+        .map_or_else(|_| epoch.to_string(), |text| text.to_string())
+}
+
 fn note(text: &str) -> gtk4::Label {
     let label = gtk4::Label::new(Some(text));
     label.set_wrap(true);
@@ -488,7 +496,11 @@ fn append_rows(content: &gtk4::Box, rows: &Rows) {
         )));
     }
     if let Some(until) = rows.postponed_until {
-        content.append(&note(&tr_with("Postponed until {date}", "date", &date(until))));
+        content.append(&note(&tr_with(
+            "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart.",
+            "time",
+            &local_time(until),
+        )));
     }
 }
 
