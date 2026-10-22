@@ -2,14 +2,24 @@
 //! not depend on the reading direction; the arrows walk the visual order, from the laid-out
 //! rectangles, so they follow the mirrored layout in right-to-left.
 
-use crate::widget::{Key, Ui, WidgetId};
+use crate::widget::{Key, Kind, Ui, WidgetId};
 
-/// The visible, focusable widgets in logical order: the tree, depth first.
+/// The visible, focusable widgets in logical order: the tree, depth first. A list is one stop,
+/// on its focused row, else its selected row, else its first.
 pub fn chain(ui: &Ui) -> Vec<WidgetId> {
     let mut out = Vec::new();
     let mut stack = vec![Ui::ROOT];
     while let Some(id) = stack.pop() {
         if !ui.widget(id).visible {
+            continue;
+        }
+        if let Kind::List { selected, .. } = ui.widget(id).kind {
+            let rows = ui.visible_children(id);
+            let stop = [ui.focus(), selected]
+                .into_iter()
+                .flatten()
+                .find(|r| rows.contains(r));
+            out.extend(stop.or(rows.first().copied()));
             continue;
         }
         if ui.widget(id).is_focusable() {
@@ -52,17 +62,29 @@ fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
     Some(chain[i])
 }
 
+/// Where the arrows find `id`, and start from it: a list's stop, wherever its row is scrolled, at
+/// the part of its list in view.
+fn place(ui: &Ui, id: WidgetId) -> crate::widget::Rect {
+    match ui.widget(id).parent {
+        Some(list) if matches!(ui.widget(list).kind, Kind::List { .. }) => {
+            let r = ui.widget(list).rect;
+            ui.clip(list).map_or(r, |c| r.intersect(c))
+        }
+        _ => ui.widget(id).rect,
+    }
+}
+
 /// The nearest focusable widget on screen in the arrow's direction, if any.
 pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
     let chain = chain(ui);
     let Some(from) = ui.focus() else {
         return chain.first().copied();
     };
-    let r = ui.widget(from).rect;
+    let r = place(ui, from);
     let candidates = chain
         .into_iter()
         .filter(|&id| id != from)
-        .map(|id| (id, ui.widget(id).rect));
+        .map(|id| (id, place(ui, id)));
     let dx = |c: &crate::widget::Rect| (c.center_x() - r.center_x()).abs();
     // Each candidate gets a key that is smaller the better it fits: the gap along the arrow's
     // axis, then the distance across it.
@@ -106,7 +128,6 @@ pub fn arrow(ui: &Ui, key: &Key) -> Option<WidgetId> {
 mod tests {
     use super::*;
     use crate::theme::Theme;
-    use crate::widget::Kind;
 
     /// A row of three toggles, a field under it and a button under that.
     fn form(rtl: bool) -> (Ui, [WidgetId; 5]) {
