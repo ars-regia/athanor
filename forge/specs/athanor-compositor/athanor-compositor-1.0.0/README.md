@@ -439,9 +439,10 @@ minutes, put the real unit on the vendor layout; clear it before the `start` lin
 
 ### 7. How defects are recorded
 
-The plan (task 9) puts every defect with its log lines into the results:
-`docs/spikes/c1-own-compositor.md`, section 7, which has the laptop's session and keeps the
-NVIDIA desktop's rows for its own. Each defect goes there as machine, time, what was seen, and
-the verbatim lines of the compositor log, the journal and `dmesg`, and becomes an issue or goes
-into the pull request that fixes it. A suspend
-or an unplug that resets the desktop is not a defect of this work: it is #604.
+The plan (task 9) puts every defect with its log lines into the results,
+`docs/spikes/c1-own-compositor.md`: a session's defects in section 7.3, a row each with the
+machine, what was seen and where its lines are in the session's archive (the compositor log, the
+journal, `dmesg`, with the time); NVIDIA's defects also in section 8. The laptop's session is
+recorded there; the desktop's rows wait for its session. Each defect also becomes an issue or goes
+into the pull request that fixes it. A suspend or an unplug that resets the desktop is not a
+defect of this work: it is #604.
