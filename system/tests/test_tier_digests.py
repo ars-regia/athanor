@@ -353,6 +353,27 @@ class TierDigests(unittest.TestCase):
                 self.assertNotIn("not protected", r.stderr)
                 self.assertFalse(self.out.exists())
 
+    def test_a_base_branch_name_outside_the_branch_alphabet_dies(self):
+        """A name that would widen the identity regex never reaches the trust list or the API."""
+        for base in ("rebase/x|.*", "rebase/(x)", "rebase/x y", "rebase/$x"):
+            with self.subTest(base=base):
+                self.env["GITHUB_REF"] = "refs/pull/7/merge"
+                self.env["GITHUB_BASE_REF"] = base
+                self.publish(
+                    "ghcr.io/ars-regia",
+                    signers={f"tier{n}": f"{WORKFLOW}@refs/heads/{base}" for n in range(4)},
+                    api={f"/repos/ars-regia/athanor/rules/branches/{base}": PROTECTED},
+                    **DIGESTS,
+                )
+                (self.dir / "calls.log").unlink(missing_ok=True)
+                r = self.resolve("resolve")
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(f"the base branch '{base}' is not a branch name", r.stderr)
+                log = self.dir / "calls.log"
+                tools = [json.loads(l)[0] for l in log.read_text().splitlines()] if log.exists() else []
+                self.assertEqual(tools, [])
+                self.assertFalse(self.out.exists())
+
     def test_iso_v0_and_main_as_base_need_no_api_call(self):
         for base in ("iso-v0", "main"):
             with self.subTest(base=base):
