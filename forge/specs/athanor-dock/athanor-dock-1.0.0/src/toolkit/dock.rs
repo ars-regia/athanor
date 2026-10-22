@@ -170,10 +170,10 @@ enum MenuAct {
     Unpin(String),
 }
 
-/// The pin row of the menu of the entry with the desktop id `id`, from the favourites as
-/// they are now rather than as the row was last drawn: a menu holds the row, so a change
-/// another writer made to the file shows in the next menu all the same. Pinning needs the
-/// favourites and a desktop id; without either there is no row.
+/// The pin row of the menu of the entry with the desktop id `id`, from the favourites file
+/// read as the menu opens rather than from the row as it was last drawn: a menu holds the
+/// row, so a change another writer made to the file shows in the next menu all the same.
+/// Pinning needs the favourites and a desktop id; without either there is no row.
 fn pin_act(favourites: Option<Vec<String>>, id: Option<String>) -> Option<MenuAct> {
     let (ids, id) = (favourites?, id?);
     Some(if ids.contains(&id) {
@@ -722,6 +722,9 @@ impl Dock {
             };
             let row = ui.add(list, Kind::Button(open));
             acts.push((row, MenuAct::Launch(info.clone())));
+            // The file as it is now, not as the watch's debounce last read it: one small
+            // read, bounded by favorites::MAX_FILE_BYTES, per menu.
+            self.favorites.reload();
             if let Some(act) = pin_act(self.favorites.ids(), entry.desktop_id.clone()) {
                 let label = match act {
                     MenuAct::Unpin(_) => tr("Unpin from Dock"),
