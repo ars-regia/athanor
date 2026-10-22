@@ -135,7 +135,7 @@ def switch_node(app, Atspi):
     def visit(accessible):
         try:
             if (
-                accessible.get_role_name() in ("switch", "toggle button")
+                accessible.get_role_name() in ("switch", "toggle button", "check box")
                 and accessible.get_name() == "Automatic security updates"
                 and showing(accessible, Atspi)
             ):
@@ -467,6 +467,10 @@ def main():
         ),
     )
     check("Cancel backs out", press(app, Atspi, "Cancel"))
+    check(
+        "and the switch is on again",
+        wait_for(lambda: switch_on(app, Atspi) is True, 3),
+    )
     check(
         "and calls nothing",
         never(lambda: logged("SetAutomaticSecurityUpdates False"), 2),
