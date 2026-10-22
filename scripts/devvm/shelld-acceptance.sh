@@ -109,10 +109,11 @@ stage_deploy() {
             "$BIN/athanor-shelld:/usr/bin/athanor-shelld" \
             "$DATA/athanor-shelld.service:/usr/lib/systemd/user/athanor-shelld.service" > /dev/null
     fi
-    # The image has no dbus-daemon binary (Fedora 45 ships dbus-broker only), and
-    # dbus-broker-launch refuses to bind a socket itself ("No listener socket inherited"):
-    # it only runs under real systemd socket activation. A same-named .socket/.service
-    # pair gets that, the same way the image's own dbus-broker.service does.
+    # Found on the Fedora 43 image, not yet rechecked on Fedora 45 (whose repositories do
+    # package dbus-daemon): the image has no dbus-daemon binary, and dbus-broker-launch
+    # refuses to bind a socket itself ("No listener socket inherited"): it only runs under
+    # real systemd socket activation. A same-named .socket/.service pair gets that, the
+    # same way the image's own dbus-broker.service does.
     printf '%s\n' '[Socket]' "ListenStream=%t/$BUS_UNIT" |
         in_session "mkdir -p ~/.config/systemd/user && cat > ~/.config/systemd/user/$BUS_UNIT.socket"
     printf '%s\n' '[Unit]' "Requires=$BUS_UNIT.socket" "After=$BUS_UNIT.socket" '' '[Service]' \
