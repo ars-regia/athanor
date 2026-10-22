@@ -263,8 +263,16 @@ def start_shelld():
         f"/out/{os.environ.get('RIG_TAG', 'bar')}-shelld.log", "a", encoding="utf-8"
     )
     shelld = subprocess.Popen([SHELLD], env=env, stderr=log)
-    SHELLD_PID_FILE.write_text(f"{shelld.pid}\n", encoding="utf-8")
+    write_pid(SHELLD_PID_FILE, shelld.pid)
     return shelld
+
+
+def write_pid(path, pid):
+    """Writes `pid` to `path` under a temporary name and renames it over the old one: the e2e
+    scripts poll the file while the bar restarts, and an in-place write lets them read it empty."""
+    staged = path.with_name(f".{path.name}.new")
+    staged.write_text(f"{pid}\n", encoding="utf-8")
+    staged.replace(path)
 
 
 def rig_log(name):
@@ -296,7 +304,7 @@ def start_bar(client, env, log, unit):
     binary = BIN / client
     command = as_unit(binary) if unit else [binary]
     bar = subprocess.Popen(command, env=env, stderr=rig_log(binary.name) if log else None)
-    PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
+    write_pid(PID_FILE, bar.pid)
     return bar
 
 
