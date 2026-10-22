@@ -87,7 +87,9 @@ class Manager:
                 argv,
                 [f"{k}={v}" for k, v in environment.items()],
                 directory,
-                # STDOUT_TO_DEV_NULL trips a GLib assertion in PyGObject's spawn_async on Fedora 45; the child's output goes to the log.
+                # STDOUT_TO_DEV_NULL trips a GLib assertion in PyGObject's spawn_async on Fedora 45, so the
+                # child inherits the fake's stdout: a pipe its caller reads only for "ready". A unit started
+                # here must send its output elsewhere, as compositor_e2e's does, or it blocks once the pipe fills.
                 GLib.SpawnFlags.DO_NOT_REAP_CHILD,
             )
         except GLib.Error as err:
