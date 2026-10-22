@@ -1799,7 +1799,14 @@ impl PointerHandler for App {
                             .pointer_release(at.0, at.1, PointerButton::Primary);
                         self.changed(id, event);
                     }
-                    PointerEventKind::Axis { .. } => self.hide_tooltip(),
+                    // wl_pointer's axis values are in surface coordinates: logical pixels.
+                    PointerEventKind::Axis { vertical, .. } => {
+                        let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+                        self.hide_tooltip();
+                        if moved {
+                            self.changed(id, None);
+                        }
+                    }
                     _ => {}
                 }
             }

@@ -13,7 +13,7 @@ const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 3] = ["buttons", "choices", "values"];
+const PAGES: [&str; 4] = ["buttons", "choices", "values", "lists"];
 
 /// The command line.
 struct Options {
@@ -103,6 +103,14 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), Str
         "values" => {
             ui.slider(group, t("slider")?, 0.0, 100.0, 1.0, 50.0)
                 .ok_or("the slider's range is broken")?;
+        }
+        "lists" => {
+            let scroll = ui.scroll(group, 200.0);
+            let list = ui.list(scroll, t("list")?);
+            let row = t("row")?;
+            for n in 1..=50 {
+                ui.list_row(list, &format!("{row} {n}"));
+            }
         }
         _ => return Err(format!("no page {name:?}")),
     }
