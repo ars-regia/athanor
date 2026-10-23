@@ -1,0 +1,6 @@
+# The rig's own grants, appended by session.sh to the shipped allow-list
+# (forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients) where the
+# compositor reads it in the rig, never in the image (test_rig_lines_never_ship). Same format:
+#   <executable under /usr> <systemd unit> <interface>...
+# grim captures each output through the compositor, run by in-unit.sh as rig-grim.service.
+/usr/bin/grim rig-grim.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
