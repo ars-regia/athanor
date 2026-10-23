@@ -3,11 +3,20 @@
 use std::collections::HashMap;
 
 use smithay::backend::allocator::Fourcc;
-use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
-use smithay::input::pointer::{CursorIcon, CursorImageStatus};
+use smithay::backend::renderer::element::memory::{
+    MemoryRenderBuffer, MemoryRenderBufferRenderElement,
+};
+use smithay::backend::renderer::element::surface::{
+    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+};
+use smithay::backend::renderer::element::{render_elements, Kind};
+use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
+use smithay::desktop::utils::bbox_from_surface_tree;
+use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Buffer, Logical, Point, Size, Transform};
+use smithay::utils::{Logical, Point, Size, Transform};
+use smithay::wayland::compositor::with_states;
 
 use crate::state::State;
 
@@ -18,13 +27,21 @@ const DEFAULT_SIZE: u32 = 24;
 const FALLBACK_SIDE: i32 = 12;
 const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
 
+/// The largest cursor surface a client may set, in logical pixels a side: a larger one gets
+/// the default cursor, so that no client covers the screen with its cursor.
+const MAX_CLIENT_CURSOR: i32 = 256;
+
+render_elements! {
+    pub PointerElement<R> where R: ImportAll + ImportMem;
+    Memory=MemoryRenderBufferRenderElement<R>,
+    Surface=WaylandSurfaceRenderElement<R>,
+}
+
 /// One cursor image, ready to draw.
 pub struct CursorImage {
     pub buffer: MemoryRenderBuffer,
     /// The point of the image at the pointer's location, in logical pixels.
     pub hotspot: Point<i32, Logical>,
-    /// `MemoryRenderBuffer` has no size accessor, so the image keeps the one it was built with.
-    pub size: Size<i32, Buffer>,
 }
 
 /// The cursor theme, with the images loaded so far.
@@ -151,7 +168,6 @@ fn load(theme: &str, icon: CursorIcon, size: u32, scale: i32) -> CursorImage {
                     None,
                 ),
                 hotspot: Point::from((hotspot.0 / scale, hotspot.1 / scale)),
-                size: Size::from((width, height)),
             })
         });
     found.unwrap_or_else(|| {
@@ -176,13 +192,89 @@ fn fallback() -> CursorImage {
             None,
         ),
         hotspot: Point::from((0, 0)),
-        size: Size::from((FALLBACK_SIDE, FALLBACK_SIDE)),
     }
+}
+
+/// The pointer's elements on an output at `scale`, `at` relative to the output, all drawn as
+/// cursors: the cursor `status` names, or the theme's default in place of a client's surface
+/// too large to be a cursor. An image the renderer cannot take is left out: the frame is drawn
+/// without the pointer rather than not at all.
+pub fn pointer_elements<R>(
+    renderer: &mut R,
+    cursor: &mut Cursor,
+    status: &CursorImageStatus,
+    at: Point<f64, Logical>,
+    scale: f64,
+) -> Vec<PointerElement<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let icon = match status {
+        CursorImageStatus::Hidden => return Vec::new(),
+        CursorImageStatus::Surface(surface)
+            if drawable(bbox_from_surface_tree(surface, (0, 0)).size) =>
+        {
+            let hotspot = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<CursorImageSurfaceData>()
+                    .map(|attributes| {
+                        attributes.lock().map_or_else(
+                            |poisoned| poisoned.into_inner().hotspot,
+                            |attributes| attributes.hotspot,
+                        )
+                    })
+            })
+            .unwrap_or_default();
+            let location = (at - hotspot.to_f64()).to_physical(scale).to_i32_round();
+            return render_elements_from_surface_tree(
+                renderer,
+                surface,
+                location,
+                scale,
+                1.0,
+                Kind::Cursor,
+            )
+            .into_iter()
+            .map(PointerElement::Surface)
+            .collect();
+        }
+        CursorImageStatus::Surface(_) => CursorIcon::Default,
+        CursorImageStatus::Named(icon) => *icon,
+    };
+    let image = cursor.image(icon, scale);
+    let location = (at - image.hotspot.to_f64()).to_physical(scale);
+    match MemoryRenderBufferRenderElement::from_buffer(
+        renderer,
+        location,
+        &image.buffer,
+        None,
+        None,
+        None,
+        Kind::Cursor,
+    ) {
+        Ok(element) => vec![PointerElement::Memory(element)],
+        Err(error) => {
+            tracing::warn!(%error, "the pointer's image cannot be drawn");
+            Vec::new()
+        }
+    }
+}
+
+/// Whether a client's cursor surface of `size` is drawn.
+fn drawable(size: Size<i32, Logical>) -> bool {
+    size.w <= MAX_CLIENT_CURSOR && size.h <= MAX_CLIENT_CURSOR
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smithay::backend::renderer::damage::OutputDamageTracker;
+    use smithay::backend::renderer::element::Element;
+    use smithay::backend::renderer::pixman::PixmanRenderer;
+    use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
+    use smithay::utils::Rectangle;
 
     /// An image of nominal size `size`, `size`x`size` pixels, as a theme's file holds it.
     fn image(size: u32) -> xcursor::parser::Image {
@@ -221,8 +313,48 @@ mod tests {
     fn a_missing_theme_falls_back_to_the_square() {
         let mut cursor = Cursor::new("athanor-no-such-theme", 24);
         let image = cursor.image(CursorIcon::Default, 1.0);
+        // The fallback is the 12-pixel light square C1 drew, whose pixels
+        // `the_pointer_is_drawn_at_its_hotspot` reads.
         assert_eq!(image.hotspot, Point::from((0, 0)));
-        // The fallback is the 12-pixel light square C1 drew.
-        assert_eq!(image.size, Size::from((12, 12)));
+    }
+
+    #[test]
+    fn the_pointer_is_drawn_at_its_hotspot() {
+        let mut renderer = PixmanRenderer::new().expect("pixman");
+        let mut cursor = Cursor::new("athanor-no-such-theme", 24);
+        let at = Point::from((40.0, 30.0));
+        let named = CursorImageStatus::default_named();
+        let elements = pointer_elements(&mut renderer, &mut cursor, &named, at, 1.0);
+        assert!(!elements.is_empty(), "the pointer is drawn");
+        assert!(elements.iter().all(|e| e.kind() == Kind::Cursor));
+
+        let mut buffer = renderer
+            .create_buffer(Fourcc::Abgr8888, (64, 64).into())
+            .expect("a buffer");
+        let mut target = renderer.bind(&mut buffer).expect("bound");
+        let mut damage = OutputDamageTracker::new((64, 64), 1.0, Transform::Normal);
+        damage
+            .render_output(&mut renderer, &mut target, 0, &elements, [0.0; 4])
+            .expect("drawn");
+        let region = Rectangle::from_size((64, 64).into());
+        let mapping = renderer
+            .copy_framebuffer(&target, region, Fourcc::Abgr8888)
+            .expect("read back");
+        let pixels = renderer.map_texture(&mapping).expect("mapped");
+        let pixel = |x: usize, y: usize| <[u8; 4]>::try_from(&pixels[(y * 64 + x) * 4..][..4]).ok();
+        assert_eq!(pixel(40, 30), Some(FALLBACK_RGBA), "the hotspot");
+        assert_eq!(pixel(51, 41), Some(FALLBACK_RGBA), "the square's last pixel");
+        assert_eq!(pixel(39, 30), Some([0; 4]), "left of the hotspot");
+        assert_eq!(pixel(52, 30), Some([0; 4]), "right of the square");
+
+        let hidden = CursorImageStatus::Hidden;
+        assert!(pointer_elements(&mut renderer, &mut cursor, &hidden, at, 1.0).is_empty());
+    }
+
+    #[test]
+    fn a_large_cursor_is_not_drawn() {
+        assert!(drawable((256, 256).into()));
+        assert!(!drawable((257, 16).into()));
+        assert!(!drawable((16, 257).into()));
     }
 }
