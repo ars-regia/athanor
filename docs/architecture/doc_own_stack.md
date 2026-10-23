@@ -9,7 +9,7 @@ outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measu
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
 2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12
-to 15 in ADR-0126. Text marked "(decision N)" is what the maintainer chose for decision N of
+to 15 in ADR-0126, and decisions 16 to 26 in section 7. Text marked "(decision N)" is what the maintainer chose for decision N of
 section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -40,7 +40,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each milestone reads them
 again before it relies on them. The measurements revision 2 adds were read on 2026-10-23 from the
-results the status line names.
+results the paragraph above names.
 
 ## 1. Context
 
@@ -196,8 +196,8 @@ is a barrier against it.
   grab is dropped, a virtual keyboard's keys aimed at the lock surface are dropped (question 12),
   and no capture is served.
 - **The keyboard monitor answers Orca** (AX4): it admits only a client whose cgroup is
-  `orca.service`'s, as AX4 says, and, added by the own compositor, whose executable is Orca's under
-  `/usr`, at every call; an integrity check, as AX4 says, not a barrier against unconfined code. It
+  `orca.service`'s, at every call; an integrity check, as AX4 says, not a barrier against
+  unconfined code. It
   is written in the compositor over zbus; milestone C1 estimated about 500 lines for the monitor,
   the key filter and AX4's admission (C1 results, section 10, item 6). Whether the image's session
   bus returns `ProcessFD` is AX4's open doubt 9, answered before the acceptance. Until the
@@ -270,17 +270,21 @@ and `.resize` start an interactive grab, so a press on a title bar the client dr
 (C1 results, section 7.3, T9-8). The compositor serves the maximise, minimise and full-screen
 requests of `xdg_toplevel`, and the actions the shell gives the user through the private manager of
 OS5: activate, minimise, unminimise and close. The model is the one OS2 keeps: floating windows, and
-per workspace the tiling state the bar's toggle sets; with tiling on, each new window splits the
-focused one along its longer side, and with it off the windows float (OS2: the bar's toggle is
-shipped behaviour, F-bar-34). Any other model enters through the register (CO2).
+per workspace the automatic tiling the bar's toggle turns on and off, as cosmic-comp tiles today
+(OS2: the bar's toggle is shipped behaviour, F-bar-34). How the own compositor's tiling lays out
+windows is written in the plan that implements it, against cosmic-comp's as the reference, and any
+departure from it is an entry in the register. Any other model enters through the register (CO2).
 
 **OS13. Key bindings.** The compositor binds by default the keys the approved documents name: Super
 for the launcher and Super+A for the application library (`doc_launcher.md` LA8); Super+C and
 Super+N (`doc_control_center.md` CC9) and Super+V (CC10); Super+W and Super+1 to Super+0
-(`doc_overview.md` OV1, OV13); Super+Space for the input source (`doc_languages.md` LN9);
-Super+Escape and Super+Alt+Escape (`doc_lock_and_prompts.md` LP10); Super+Alt+S, and Super+Alt+A
-with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7); the keys of `doc_osd.md` OD3; and the switch to
-a text console. The bindings a user assigns in Settings, system actions and custom commands, keep
+(`doc_overview.md` OV1, OV13), with OV13's Super+Shift and the same keys to move the window,
+Super+Ctrl with the arrows or h, j, k, l to step, Super+Shift+Ctrl to carry the window, and its
+four-finger swipes; Super+Space for the input source (`doc_languages.md` LN9); Super+Escape
+(`doc_lock_and_prompts.md` section 1 and its acceptance, item 1) and Super+Alt+Escape (LP10);
+Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7), and the
+magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
+decision 26); the keys of `doc_osd.md` OD3; and the switch to a text console. The bindings a user assigns in Settings, system actions and custom commands, keep
 `athanor_compositor_client::shortcuts` as their interface (OS5, `doc_settings.md`). While the
 session is locked only the actions `doc_lock_and_prompts.md` allows then act (section 1; L14). Each
 default binding has a fixture test (`doc_session.md` SN16, gap 7).
@@ -329,8 +333,9 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 (section 6, step 4) when each of the following holds, recorded in the pull request that makes it the
 default session:
 
-1. **Every surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
-   `rig.sh golden-report` passes every case of `cases.py`, the 243 of today's 18 surfaces and layouts and
+1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
+   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's (the toolkit chooser
+   and the galleries, which have their own gate, OS8), the 243 of today's 18 surfaces and layouts and
    the 24 of the lock screen and the polkit agent once installed, against cosmic-comp's goldens;
    each difference has its cause and its issue in `athanor-differences.toml`, and a second set of
    goldens is recorded only when cosmic-comp leaves the image (OS9 plan, questions 1 and 2). The
@@ -352,7 +357,8 @@ default session:
    14). The fixture runs headless on the desktop's NVIDIA render node with explicit sync and a
    Vulkan client, which milestone C1 did not record (C1 results, section 8).
 5. **Frame times within their thresholds** on each console run, per output (decision
-   24): a mean draw under 2 ms; a longest draw under one refresh period of the output; and a
+   24, set from the desktop's console session and the laptop's unattended run, in place of the
+   attended laptop run the OS9 plan's question 6 named): a mean draw under 2 ms; a longest draw under one refresh period of the output; and a
    client that animates on an otherwise idle output committing at a median interval within 10 % of
    the refresh period. Milestone C1's console runs met the first two, with longest draws of 4.20 ms
    on the laptop and 3.67 ms on the desktop, and not the third on NVIDIA, where Firefox committed a
