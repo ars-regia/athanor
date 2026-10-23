@@ -130,7 +130,7 @@ class CiMode(unittest.TestCase):
         """A guest whose check settled on UPDATE with the candidate downloaded and logged
         JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply()."""
         g = self.dir / "guest"
-        g.mkdir()
+        g.mkdir(exist_ok=True)
         state = {
             "update": update,
             "downloaded": {"digest": DIGEST},
@@ -171,6 +171,35 @@ class CiMode(unittest.TestCase):
         result = self.run_sh("--ci", "upgrade", env=self.ci)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("names no class", result.stderr)
+
+    def test_upgrade_boots_a_security_candidate_unlocked_for_the_shutdown(self):
+        # UT13: with automatic updates on, the default, the check unlocks a security candidate
+        # itself, and Apply() refuses one that is unlocked already: the shutdown applies it.
+        self.guest("will-apply-at-next-shutdown", SECURITY_LINE, serial_session=False)
+        security = {**self.ci, "ATHANOR_UPDATE_CLASS": "security"}
+        result = self.run_sh("--ci", "upgrade", env=security)
+        self.assertIn(
+            "PASS  UD18 4: the security candidate boots at the next shutdown",
+            result.stdout,
+            result.stderr,
+        )
+        # The stage passed: the next one starts, and stops on what this guest cannot answer.
+        self.assertIn("== check", result.stdout)
+
+    def test_upgrade_holds_each_class_to_its_state(self):
+        for cls, line, update in (
+            ("security", SECURITY_LINE, "downloaded"),
+            ("feature", FEATURE_LINE, "will-apply-at-next-shutdown"),
+        ):
+            with self.subTest(cls):
+                self.guest(update, line)
+                result = self.run_sh(
+                    "--ci", "upgrade", env={**self.ci, "ATHANOR_UPDATE_CLASS": cls}
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f"the check did not settle the {cls} candidate", result.stderr
+                )
 
     def test_ci_mode_rejects_an_unknown_class(self):
         result = self.run_sh("--ci", env={**self.ci, "ATHANOR_UPDATE_CLASS": "urgent"})

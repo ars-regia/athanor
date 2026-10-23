@@ -571,7 +571,7 @@ ci_stage_seed() { # UD18 2
 }
 
 ci_stage_upgrade() { # UD18 3 and 4
-  local since journal class ttys
+  local since journal class settled=downloaded ttys
   disk_floor
   printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
     "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
@@ -597,9 +597,19 @@ ci_stage_upgrade() { # UD18 3 and 4
   [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
     die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
   pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
-  [[ $(state .update) == downloaded && $(state .downloaded.digest) == "$ATHANOR_UPDATE_TO" ]] ||
-    die "FAIL  UD18 4: the check did not download the candidate: update '$(state .update)', digest '$(state .downloaded.digest)', last_error '$(state .last_error)' from '$(state .last_error_host)'"
-  pass "UD18 4: the client's own check downloads the candidate from the mirror"
+  # UT13: with automatic updates on, the default, the check unlocks a security candidate for
+  # the next shutdown itself (check.rs settle_security); a feature candidate waits for Apply().
+  [[ $class == feature ]] || settled=will-apply-at-next-shutdown
+  [[ $(state .update) == "$settled" && $(state .downloaded.digest) == "$ATHANOR_UPDATE_TO" ]] ||
+    die "FAIL  UD18 4: the check did not settle the $class candidate as $settled: update '$(state .update)', digest '$(state .downloaded.digest)', last_error '$(state .last_error)' from '$(state .last_error_host)'"
+  pass "UD18 4: the client's own check downloads the $class candidate from the mirror and settles it as $settled"
+  if [[ $class == security ]]; then
+    # Apply() unlocks a download-only deployment, and refuses this one, unlocked already, as
+    # NothingDownloaded (requests.rs): the shutdown applies it.
+    reboot_into_digest guest_ssh "sudo systemd-run --quiet --on-active=2 systemctl reboot" "$ATHANOR_UPDATE_TO" \
+      "UD18 4: the security candidate boots at the next shutdown"
+    return
+  fi
   # A login on the serial console is a second session of the user: Apply() would ask.
   ttys=$(guest_ssh loginctl list-sessions --json=short | jq -r '[.[].tty // empty] | join(" ")')
   [[ " $ttys " != *" ttyS0 "* ]] || die "FAIL  UD18 4: a session on ttyS0 is open, and Apply() would ask for an administrator"
