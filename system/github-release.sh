@@ -35,7 +35,9 @@ die() {
 }
 
 [[ -n ${GITHUB_REPOSITORY:-} ]] || usage
-root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# No command substitution nests another: the inner one's failure would be lost.
+here=$(dirname "${BASH_SOURCE[0]}")
+root=$(cd "$here/.." && pwd)
 notes_dir=${RELEASE_NOTES_DIR:-$root/docs/releases}
 branch=${RELEASE_BRANCH:-iso-v0}
 repo=$GITHUB_REPOSITORY
@@ -69,11 +71,12 @@ release_view() { # release_view TAG -> the Release at TAG, draft or not; nothing
 }
 
 tag_commit() { # tag_commit TAG -> the commit TAG names; nothing when the tag does not exist
-    local ref sha
+    local ref sha type
     ref=$(gh_or_absent api "/repos/$repo/git/ref/tags/$1")
     [[ -n $ref ]] || return 0
     sha=$(jq -r '.object.sha' <<< "$ref")
-    if [[ $(jq -r '.object.type' <<< "$ref") == tag ]]; then
+    type=$(jq -r '.object.type' <<< "$ref")
+    if [[ $type == tag ]]; then
         sha=$(gh_must api "/repos/$repo/git/tags/$sha" | jq -r '.object.sha')
     fi
     echo "$sha"
@@ -87,7 +90,7 @@ other_build() { # other_build RELEASE_JSON RUN -> the build run of an evidence a
 # check_version_tag WHAT TAG REVISION -> the subject of the tag's message. ADR-0131 decisions 3
 # and 7: an annotated tag on REVISION, verified by GitHub, by the maintainer's email.
 check_version_tag() {
-    local what="$1 $2" tag=$2 revision=$3 ref object type commit verified email
+    local what="$1 $2" tag=$2 revision=$3 ref sha object type commit verified email
     [[ -n ${MAINTAINER_TAG_EMAIL:-} ]] ||
         die "$what names $revision and MAINTAINER_TAG_EMAIL is not set: no v0.x tag can be checked as the maintainer's (ADR-0131 decision 3)"
     ref=$(gh_or_absent api "/repos/$repo/git/ref/tags/$tag")
@@ -95,7 +98,8 @@ check_version_tag() {
     type=$(jq -r '.object.type' <<< "$ref")
     [[ $type == tag ]] ||
         die "$what is a lightweight tag: a 0.x release is the maintainer's signed, annotated tag (ADR-0131 decision 7); see the recovery in docs/operations/github-settings.md section 9"
-    object=$(gh_must api "/repos/$repo/git/tags/$(jq -r '.object.sha' <<< "$ref")")
+    sha=$(jq -r '.object.sha' <<< "$ref")
+    object=$(gh_must api "/repos/$repo/git/tags/$sha")
     commit=$(jq -r 'if .object.type == "commit" then .object.sha else "" end' <<< "$object")
     [[ $commit == "$revision" ]] || die "$what names commit '$commit' (object.sha), not the revision $revision"
     verified=$(jq -r '.verification.verified' <<< "$object")
@@ -141,7 +145,7 @@ on_branch() { # on_branch REVISION: REVISION is in the history of the release br
 field() { jq -er "$1 | select(. != null) | tostring" "$2" || die "$2 has no $1"; }
 
 plan() {
-    local dir=$1 run version revision refs lines name type sha tag title latest subject release other fallback=null
+    local dir=$1 run version revision refs lines name type sha tag title latest subject release draft other fallback=null
     local -a tags=()
     run=$(field .run_id "$dir/promotion.json")
     version=$(field .version "$dir/promotion.json")
@@ -164,21 +168,25 @@ plan() {
         # Published Releases only: the plan's token cannot be relied on to see drafts (decision 7 of the plan).
         release=$(release_view "${tags[0]}")
         other=''
-        if [[ -n $release && $(jq -r '.isDraft' <<< "$release") == false ]]; then other=$(other_build "$release" "$run"); fi
+        draft=''
+        if [[ -n $release ]]; then draft=$(jq -r '.isDraft' <<< "$release"); fi
+        if [[ $draft == false ]]; then other=$(other_build "$release" "$run"); fi
         if [[ -n $other ]]; then
             echo "${0##*/}: the Release of ${tags[0]} holds the evidence of build run $other: build run $run gets its own, promoted-$run" >&2
         else
             tag=${tags[0]} title="$subject ($version)" latest=true
             check_promotion_tag "promoted-$run" "$revision"
             notes "$dir" "promoted-$run" "$work/fallback.md"
-            fallback=$(jq -n --arg tag "promoted-$run" --arg title "$version" --arg sha "$(sha256sum < "$work/fallback.md" | cut -d' ' -f1)" \
+            sha=$(sha256sum < "$work/fallback.md" | cut -d' ' -f1)
+            fallback=$(jq -n --arg tag "promoted-$run" --arg title "$version" --arg sha "$sha" \
                 '{tag: $tag, title: $title, latest: false, notes_sha256: $sha}')
         fi
     fi
     if [[ $tag != v* ]]; then check_promotion_tag "$tag" "$revision"; fi
     notes "$dir" "$tag" "$work/notes.md"
+    sha=$(sha256sum < "$work/notes.md" | cut -d' ' -f1)
     jq -n -S --indent 2 --arg tag "$tag" --arg title "$title" --argjson latest "$latest" \
-        --arg sha "$(sha256sum < "$work/notes.md" | cut -d' ' -f1)" --argjson fallback "$fallback" \
+        --arg sha "$sha" --argjson fallback "$fallback" \
         '{tag: $tag, title: $title, latest: $latest, notes_sha256: $sha} + (if $fallback == null then {} else {fallback: $fallback} end)' \
         > "$work/release.json"
     mv "$work/release.json" "$dir/release.json"
@@ -266,9 +274,10 @@ publish_state() {
 # read_back TAG NAME SHA REVISION TITLE LATEST NOTES: the Release is published, is the approved
 # one, holds the asset and its tag names REVISION.
 read_back() {
-    local release at fields prior
+    local release at fields prior draft have url
     release=$(gh_must release view "$1" -R "$repo" --json "$RELEASE_FIELDS")
-    [[ $(jq -r '.isDraft' <<< "$release") == false ]] || die "the Release at $1 is still a draft after it was published"
+    draft=$(jq -r '.isDraft' <<< "$release")
+    [[ $draft == false ]] || die "the Release at $1 is still a draft after it was published"
     prior=$(earlier_promotion "$release" "$2")
     if [[ -n $prior ]]; then
         # An earlier promotion's notes name its own asset: only the title is this promotion's.
@@ -278,14 +287,16 @@ read_back() {
     fi
     [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
     jq -e --arg name "$2" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null || die "the Release at $1 does not hold $2"
-    [[ $(asset_sha "$1" "$2") == "$3" ]] || die "the Release at $1 holds $2 with other bytes than this bundle's ($3)"
+    have=$(asset_sha "$1" "$2")
+    [[ $have == "$3" ]] || die "the Release at $1 holds $2 with SHA-256 $have, not this bundle's $3"
     at=$(tag_commit "$1")
     [[ $at == "$4" ]] || die "the tag $1 names ${at:-nothing}, not the revision $4"
-    echo "GitHub Release: [$5]($(jq -r '.url' <<< "$release")), asset \`$2\` (SHA-256 \`$3\`)"
+    url=$(jq -r '.url' <<< "$release")
+    echo "GitHub Release: [$5]($url), asset \`$2\` (SHA-256 \`$3\`)"
 }
 
 publish() {
-    local dir=$1 run trigger revision tag title latest approved key='' other asset sha
+    local dir=$1 run trigger revision tag chosen title latest approved key='' release other asset sha
     [[ -n ${RUN_ID:-} && -n ${GITHUB_RUN_ID:-} && -n ${GITHUB_SERVER_URL:-} ]] || usage
     # verify-dir proves the bundle is signed, not that it is this run's.
     run=$(field .run_id "$dir/promotion.json")
@@ -299,11 +310,12 @@ publish() {
     if [[ $tag =~ $VERSION_TAG ]]; then
         # The tag is checked first: a bad v0.x tag fails closed even beside another build's Release.
         check_version_tag "release.json tag" "$tag" "$revision" > /dev/null
-        other=$(other_build "$(release_view "$tag")" "$run")
+        release=$(release_view "$tag")
+        other=$(other_build "$release" "$run")
         if [[ -n $other ]]; then
-            key=.fallback
+            key=.fallback chosen=$tag
             tag=$(field .fallback.tag "$dir/release.json")
-            echo "The Release of $(field .tag "$dir/release.json") holds the evidence of build run $other: build run $run is published at $tag, the fallback the release approval covered (ADR-0131 decision 6)."
+            echo "The Release of $chosen holds the evidence of build run $other: build run $run is published at $tag, the fallback the release approval covered (ADR-0131 decision 6)."
         fi
     fi
     [[ $tag =~ $VERSION_TAG || $tag == "promoted-$run" ]] || die "release.json$key names the tag $tag, neither a v0.x tag nor promoted-$run"

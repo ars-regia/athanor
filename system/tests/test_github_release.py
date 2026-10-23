@@ -589,6 +589,14 @@ class Publish(GithubRelease):
         self.fx["release_bodies_lost"] = True
         self.refused(self.publish(bundle), "promoted-412", "body")
 
+    def test_a_failed_view_of_the_version_release_fails_the_job(self):
+        self.tag()
+        bundle = self.planned()
+        self.fx["gh_errors_once"] = ["release view v0.9.0"]
+        self.refused(self.publish(bundle), "release view v0.9.0", "HTTP 502")
+        self.nothing_published()
+        self.assertEqual(self.fx["releases"], {})
+
     def test_a_draft_without_the_asset_is_completed(self):
         bundle = self.planned()
         self.release("promoted-412", draft=True)

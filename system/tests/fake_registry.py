@@ -56,6 +56,7 @@ Fixture keys:
                 on the draft's target. (`tags` holds registry tags.)
   gh_errors     ["text", ...]  a `gh` call whose arguments, joined by spaces, contain the text fails
                 with a server error
+  gh_errors_once ["text", ...]  the same for the first such call only: the entry is then removed
   release_edits_lost  true: `gh release edit` succeeds and changes nothing
   release_bodies_lost true: `gh release create` succeeds and stores an empty body
 """
@@ -296,6 +297,11 @@ def release(args, fx):
 def gh(args, fx):
     for text in fx.get("gh_errors", []):
         if text in " ".join(args):
+            return fail("gh: Server Error (HTTP 502)")
+    for text in fx.get("gh_errors_once", []):
+        if text in " ".join(args):
+            fx["gh_errors_once"].remove(text)
+            save(fx)
             return fail("gh: Server Error (HTTP 502)")
     if args[0] == "release":
         return release(args, fx)
