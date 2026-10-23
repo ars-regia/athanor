@@ -117,12 +117,13 @@ at the end.
    - the notes file is missing or its first heading names another version.
 5. **Notes of a promotion without a 0.x tag.** The promotion and evidence part of the text the
    `release` approval covers, printed by a new mode `system/evidence-bundle.sh summary --promotion
-   ARTIFACTS_DIR`, followed by the commands that verify the bundle. The full `summary` cannot be
+   ARTIFACTS_DIR TAG`, followed by the commands that verify the bundle. The full `summary` cannot be
    used: it prints `notes_sha256` from `release.json`, which does not exist yet when `plan` builds
    the notes, and the notes would hash themselves. `--promotion` reads only `promotion.json` and
    the evidence, so `plan` and `publish` build the same bytes from the same bundle. The verify
    commands name the tag the asset is downloaded from (`gh release download <tag>`), so the
-   fallback's notes of decision 7 are built with `promoted-<run_id>`, and its `notes_sha256`
+   mode takes that tag as its parameter: the chosen notes are built with the chosen tag, and
+   the fallback's notes of decision 7 with `promoted-<run_id>`, and its `notes_sha256`
    is the hash of those notes, not of the `v*` notes. No
    notes file is needed, so an hourly promotion (UD5) never waits for one. Its Release is marked
    `--latest=false`.
@@ -177,10 +178,12 @@ at the end.
    uploaded it. If the Release is a draft that holds only this run's asset
    (`gh release view <tag> -R ars-regia/athanor --json isDraft,assets`), the maintainer
    deletes that draft with `gh release delete <tag> -R ars-regia/athanor`, without
-   `--cleanup-tag`, and re-runs the `github-release` job. A published asset is never
-   replaced.
+   `--cleanup-tag`, and re-runs the `github-release` job. If the Release is published, there
+   is no automatic recovery: the published asset is never replaced, the job fails naming both
+   SHA-256 values, and the maintainer investigates, since it means the bundle changed after
+   publication.
 
-   The one exception to "never delete another build's draft or Release" is the recovery from
+   The one exception to the rule of decision 7 that a draft holding another run's `evidence-*` asset is never stray and never deleted is the recovery from
    a mistaken `v*` tag on the wrong commit (Task 3, Step 4), which deletes the Release at that
    tag before the tag itself.
 
@@ -283,7 +286,7 @@ at the end.
 
 **Files:**
 - Create: `system/github-release.sh`
-- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it, and the fallback's when there is one. A new mode, `summary --promotion ARTIFACTS_DIR`, prints only the promotion and evidence part and reads no `release.json` (decision 5). The existing `create` tests of `test_evidence_bundle.py` gain a `release.json` in their fixtures.
+- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it, and the fallback's when there is one. A new mode, `summary --promotion ARTIFACTS_DIR TAG`, prints only the promotion and evidence part, with verify commands naming `TAG`, and reads no `release.json` (decision 5). `github-release.sh` calls it for both the chosen and the fallback notes. The existing `create` tests of `test_evidence_bundle.py` gain a `release.json` in their fixtures.
 - Modify: `system/tests/fake_registry.py`. Add `gh release` and the `gh api` paths of decision 9, with the state kept in the fixture. Document two new fixture keys in its docstring:
   - `releases`: `{tag: {"draft": bool, "latest": bool, "target": sha, "title": str, "body": str, "assets": {name: sha256}}}`;
   - `git_tags`: `{name: {"sha": object sha, "type": "commit"|"tag", "commit": sha, "message": str, "tagger_email": str, "verified": bool}}`. The existing key `tags` already holds registry tags.
@@ -345,13 +348,13 @@ at the end.
     - `test_a_promotion_tag_choice_has_no_fallback`
     - `test_an_unverified_version_tag_with_another_builds_draft_fails_closed_and_names_the_tag`. It asserts exit status 1, the tag in stderr, and no `create`, `upload` or `edit` in the log.
     - `test_the_fallback_notes_name_the_promotion_tag`
-    - `test_trees_with_different_modes_pack_to_identical_bytes`
+    - `test_trees_with_different_modes_pack_to_identical_bytes`. It asserts first that both assets exist and are not empty.
     - `test_the_release_is_created_as_a_draft_then_published_with_its_latest_flag`
     - `test_a_promotion_release_is_published_with_latest_false`
     - `test_a_draft_without_the_asset_is_completed`
     - `test_a_draft_holding_the_same_asset_is_published`
     - `test_a_rerun_with_the_same_asset_changes_nothing`. It asserts exit status 0 and no `create`, `upload` or `edit` in the log.
-    - `test_an_existing_asset_with_other_bytes_is_refused_and_not_replaced`
+    - `test_an_existing_asset_with_other_bytes_is_refused_and_not_replaced`, for a draft and for a published Release. It asserts exit status 1 and that stderr names both SHA-256 values and, for the draft, the recovery, or, for the published Release, that there is no automatic recovery.
     - `test_a_second_promotion_of_the_same_build_adds_its_own_asset`
     - `test_a_promotion_tag_at_another_commit_publishes_nothing`
     - `test_the_tar_is_byte_identical_across_runs`. It asserts first that the asset exists and is not empty.
@@ -389,7 +392,7 @@ decision 8). The maintainer applies the settings; the agent only edits the files
   - `gh variable set MAINTAINER_TAG_EMAIL -R ars-regia/athanor`, which reads the value from the prompt.
 - [ ] **Step 4: Document the recovery from a mistaken `v*` tag** in `docs/operations/github-settings.md` section 9 (exact-match script), and commit it with Step 2. `version-tags-immutable` has no bypass actor, so a wrong `v0.x.y` (lightweight, unsigned, or on the wrong commit) blocks every `plan` of that commit and cannot be removed. The maintainer, from their own machine:
   - sets `"enforcement": "disabled"` on `version-tags-immutable` in a local, uncommitted `rulesets.json`, runs `python3 scripts/github-settings/ghsettings.py apply` (one `PUT …/rulesets/<id>`, no `DESTRUCTIVE` line), then `apply --yes`;
-  - if a Release exists at the tag (a valid tag on the wrong commit gets one published), deletes it first with `gh release delete v0.x.y -R ars-regia/athanor`. This is the one stated exception to "never delete another build's draft or Release" (decision 7);
+  - if a Release exists at the tag (a valid tag on the wrong commit gets one published), deletes it first with `gh release delete v0.x.y -R ars-regia/athanor`. This is the one stated exception to the rule of decision 7 that a draft holding another run's `evidence-*` asset is never stray and never deleted;
   - deletes the tag with `git push origin --delete v0.x.y`;
   - restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes` again, then `diff`, which must print no drift for `rulesets`;
   - pushes the corrected signed tag, which `version-tags-create` lets the admin create.
