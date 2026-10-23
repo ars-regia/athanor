@@ -74,7 +74,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -122,8 +122,9 @@ pub struct State {
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
     /// The keys each virtual keyboard holds that went past the input method's grab, whose
-    /// release goes past it too.
-    pub past_grab_keys: HashMap<VirtualKeyboardDevice, Vec<Keycode>>,
+    /// release goes past it too. Only evdev's key codes are kept, each once, so an entry holds
+    /// at most 768.
+    pub past_grab_keys: HashMap<VirtualKeyboardDevice, HashSet<Keycode>>,
     /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
     /// none while the seat has its own (`with_keymap_of`).
     pub virtual_keymap: Option<crate::input::VirtualKeymap>,

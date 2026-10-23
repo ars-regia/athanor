@@ -5231,3 +5231,72 @@ fn os9_a_forwarded_key_held_when_the_input_method_goes_is_let_go_for_the_window(
     );
     run.stop();
 }
+
+/// A key the input method forwards past its grab is kept once, however often it is pressed: a
+/// press repeated before the release leaves nothing held past the grab after it.
+#[test]
+fn os9_a_forwarded_key_pressed_twice_is_let_go_once() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    assert!(
+        run.state.past_grab_keys.values().all(|held| held.is_empty()),
+        "no key is held past the grab"
+    );
+    // A code past evdev's last key, KEY_MAX, is not kept.
+    forwarder.key(&mut ime, &mut run, 0x300, true);
+    assert!(
+        run.state.past_grab_keys.values().all(|held| held.is_empty()),
+        "a code past KEY_MAX is not kept"
+    );
+    run.stop();
+}
+
+/// A key pressed twice past one input method's grab, then let go, leaves nothing behind that
+/// would send a later release past another's: the next input method's grab, which sees the
+/// first one's keyboard press the key, sees it let go too.
+#[test]
+fn os9_a_key_let_go_past_the_grab_is_not_let_go_past_the_next_one() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    method.method.send("destroy", vec![]);
+    ime.roundtrip(&mut run);
+    let mut next = Local::connect(&mut run, None);
+    let mut successor = SimulatedInputMethod::new(&mut next, &mut run);
+    successor.grab_keyboard(&mut next, &mut run);
+
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    next.roundtrip(&mut run);
+    let states: Vec<String> = successor.grabs[0]
+        .events()
+        .into_iter()
+        .filter_map(|(name, args)| match (name, &args[..]) {
+            ("key", [_, _, key, state]) if key == "30" => Some(state.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(states, ["1", "0"], "the next grab sees the press and the release");
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.released, [30], "the window sees no second release");
+    run.stop();
+}

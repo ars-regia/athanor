@@ -422,10 +422,10 @@ impl VirtualKeyboardHandler for State {
                 // to the surface that saw the press, even once the grab or its client is gone:
                 // smithay lets go of a gone keyboard's keys when its client may be gone too.
                 let forwarded = key_state == KeyState::Released
-                    && self.past_grab_keys.get_mut(&device).is_some_and(|held| {
-                        let at = held.iter().position(|key| *key == code);
-                        at.map(|at| held.swap_remove(at)).is_some()
-                    });
+                    && self
+                        .past_grab_keys
+                        .get_mut(&device)
+                        .is_some_and(|held| held.remove(&code));
                 // While locked a press is dropped before anything, and a release lets go of a
                 // key the seat holds under the keymap the seat has: no client is sent this
                 // client's keymap, and the idle timers keep running.
@@ -441,8 +441,9 @@ impl VirtualKeyboardHandler for State {
                 self.with_keymap_of(&device, |state| {
                     state.typed(code, key_state, time, device.source(), past_grab)
                 });
-                if past_grab && key_state == KeyState::Pressed {
-                    self.past_grab_keys.entry(device).or_default().push(code);
+                // A code outside evdev's keys is not kept: its release takes the grab's way.
+                if past_grab && key_state == KeyState::Pressed && KEYS.contains(&code.raw()) {
+                    self.past_grab_keys.entry(device).or_default().insert(code);
                 }
             }
             InputEvent::Special(VirtualKeyboardSpecialEvent::Modifiers {
@@ -570,6 +571,9 @@ impl VirtualPointerHandler for State {
 
 /// The evdev codes of buttons, BTN_MISC to KEY_MAX.
 const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
+
+/// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
+const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
 
 /// A key the compositor keeps for itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
