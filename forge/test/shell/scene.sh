@@ -57,11 +57,12 @@ frozen="@2026-09-18 10:00:00"
 export FAKETIME_DONT_FAKE_MONOTONIC=1
 
 wait_for() { # wait_for <seconds> <command...>: poll four times a second
-    local tries=$(($1 * 4))
+    # A deadline on the shell's clock, not a count of tries: a try that itself takes seconds
+    # (timeout 5 wayland-info) does not stretch the bound.
+    local deadline=$((SECONDS + $1))
     shift
     until "$@"; do
-        tries=$((tries - 1))
-        if [ "$tries" -le 0 ]; then
+        if ((SECONDS >= deadline)); then
             echo "scene.sh: timed out waiting for: $*" >&2
             return 1
         fi
