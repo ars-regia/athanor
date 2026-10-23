@@ -45,7 +45,8 @@ Fixture keys:
   api           {"/repos/owner/repo/actions/runs/N": {...}}  the JSON `gh api` prints for that path (`--jq .a.b` prints that key path)
   run_artifacts {"run id": {"artifact name": {"relative path": "text"}}}  what `gh run download` writes
   releases      {tag: {"draft": bool, "latest": bool, "target": sha, "title": str, "body": str,
-                "assets": {name: sha256}}}  the GitHub Releases `gh release` reads and writes; the
+                "assets": {name: sha256}, "prerelease": bool (optional, false)}}  the GitHub
+                Releases `gh release` reads and writes, and `gh api .../releases/latest` names; the
                 bytes of an asset are the file release-assets/<sha256> beside the fixture, which
                 `create` and `upload` write and `download` reads
   git_tags      {name: {"sha": object sha, "type": "commit"|"tag", "commit": sha, "message": str,
@@ -56,6 +57,7 @@ Fixture keys:
   gh_errors     ["text", ...]  a `gh` call whose arguments, joined by spaces, contain the text fails
                 with a server error
   release_edits_lost  true: `gh release edit` succeeds and changes nothing
+  release_bodies_lost true: `gh release create` succeeds and stores an empty body
 """
 
 import base64
@@ -205,6 +207,9 @@ def assets_dir():
 def git_api(path, fx):
     """The git tag endpoints: the JSON for PATH, or None when PATH is not one of them."""
     tags = fx.get("git_tags", {})
+    if re.fullmatch(r"/repos/[^/]+/[^/]+/releases/latest", path):
+        latest = [tag for tag, rel in fx.get("releases", {}).items() if rel["latest"] and not rel["draft"]]
+        return {"tag_name": latest[0]} if latest else False
     match = re.fullmatch(r"/repos/[^/]+/[^/]+/git/(matching-refs/tags/|ref/tags/|tags/)(.*)", path)
     if not match:
         return None
@@ -244,7 +249,8 @@ def release(args, fx):
             return fail(f"a release with the same tag name already exists: {tag}")
         name, sha = store(args[3])
         releases[tag] = {"draft": "--draft" in flags, "latest": False, "target": value("--target"),
-                         "title": value("--title"), "body": pathlib.Path(value("--notes-file")).read_text(),
+                         "title": value("--title"),
+                         "body": "" if fx.get("release_bodies_lost") else pathlib.Path(value("--notes-file")).read_text(),
                          "assets": {name: sha}}
         save(fx)
         return 0
@@ -253,6 +259,7 @@ def release(args, fx):
     rel = releases[tag]
     if verb == "view":
         print(json.dumps({"isDraft": rel["draft"], "tagName": tag, "name": rel["title"], "targetCommitish": rel["target"],
+                          "body": rel["body"], "isPrerelease": rel.get("prerelease", False),
                           "url": f"https://github.com/ars-regia/athanor/releases/tag/{tag}",
                           "assets": [{"name": name, "size": 1} for name in sorted(rel["assets"])]}))
         return 0
@@ -272,6 +279,9 @@ def release(args, fx):
                                                            "message": "", "tagger_email": "", "verified": False})
         if "--latest" in flags:
             rel["latest"] = flags["--latest"] is True or flags["--latest"] == "true"
+            for other in releases.values():
+                if rel["latest"] and other is not rel:
+                    other["latest"] = False
         save(fx)
         return 0
     if verb == "download":

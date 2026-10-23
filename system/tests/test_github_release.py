@@ -129,15 +129,20 @@ class GithubRelease(Tool):
             "verified": verified,
         }
 
-    def release(self, tag, draft=False, title=VERSION, target=REVISION, assets=None):
+    def release(self, tag, draft=False, title=VERSION, target=REVISION, assets=None, body=None, latest=False):
+        """A Release already at TAG; its body defaults to the notes the plan approves for TAG."""
         self.fx["releases"][tag] = {
             "draft": draft,
-            "latest": False,
+            "latest": latest,
             "target": target,
             "title": title,
-            "body": "",
+            "body": self.approved_notes(tag) if body is None else body,
             "assets": assets or {},
         }
+
+    def approved_notes(self, tag):
+        notes = self.promotion_notes(tag)
+        return NOTES + "\n" + notes if tag.startswith("v") else notes
 
     def blob(self, data):
         store = self.dir / "release-assets"
@@ -546,6 +551,43 @@ class Publish(GithubRelease):
             (False, False, VERSION),
         )
         self.assertEqual(self.fx["git_tags"]["promoted-412"]["commit"], REVISION)
+
+    def test_a_published_release_the_job_did_not_create_is_refused(self):
+        self.tag()
+        bundle = self.planned()
+        self.release("v0.9.0", title="Forged title", body="forged notes")
+        self.refused(self.publish(bundle), "v0.9.0", "title", "body", f"gh release delete v0.9.0 -R {REPO}")
+        self.nothing_published()
+        self.assertEqual(self.fx["releases"]["v0.9.0"]["assets"], {})
+        self.assertEqual(self.fx["releases"]["v0.9.0"]["body"], "forged notes")
+
+    def test_a_draft_with_the_approved_title_and_a_forged_body_is_refused(self):
+        bundle = self.planned()
+        self.release("promoted-412", draft=True, body="forged notes")
+        self.refused(self.publish(bundle), "promoted-412", "body", f"gh release delete promoted-412 -R {REPO}")
+        self.nothing_published()
+        self.assertTrue(self.fx["releases"]["promoted-412"]["draft"])
+
+    def test_an_existing_release_must_match_the_approved_one_field_by_field(self):
+        self.tag()
+        bundle = self.planned()
+        for field, change in (("title", {"title": "Athanor 0.9"}), ("target", {"target": OTHER}),
+                              ("prerelease", {"prerelease": True}), ("latest", {"latest": False}),
+                              ("body", {"body": NOTES})):
+            with self.subTest(field=field):
+                self.release("v0.9.0", title=TITLE, latest=True)
+                self.fx["releases"]["v0.9.0"].update(change)
+                self.refused(self.publish(bundle), "v0.9.0", field)
+                self.nothing_published()
+        self.release("v0.9.0", title=TITLE, latest=True, body=self.approved_notes("v0.9.0").replace("\n", "\r\n").rstrip())
+        r = self.publish(bundle)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([c[2] for c in self.writes()], ["upload"])
+
+    def test_the_read_back_checks_the_title_and_the_body(self):
+        bundle = self.planned()
+        self.fx["release_bodies_lost"] = True
+        self.refused(self.publish(bundle), "promoted-412", "body")
 
     def test_a_draft_without_the_asset_is_completed(self):
         bundle = self.planned()

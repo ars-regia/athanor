@@ -63,8 +63,9 @@ gh_or_absent() { # gh_or_absent ARGS... -> gh's output, nothing when it answers 
     }
 }
 
+RELEASE_FIELDS=isDraft,isPrerelease,tagName,name,targetCommitish,body,assets,url
 release_view() { # release_view TAG -> the Release at TAG, draft or not; nothing when there is none
-    gh_or_absent release view "$1" -R "$repo" --json isDraft,tagName,name,targetCommitish,assets,url
+    gh_or_absent release view "$1" -R "$repo" --json "$RELEASE_FIELDS"
 }
 
 tag_commit() { # tag_commit TAG -> the commit TAG names; nothing when the tag does not exist
@@ -195,9 +196,40 @@ asset_sha() { # asset_sha TAG NAME -> the SHA-256 of the asset NAME already on t
     sha256sum < "$into/$2" | cut -d' ' -f1
 }
 
+body_sha() { # body_sha < TEXT -> the SHA-256 of TEXT without carriage returns and with one final newline
+    local text
+    text=$(tr -d '\r')
+    printf '%s\n' "$text" | sha256sum | cut -d' ' -f1
+}
+
+earlier_promotion() { # earlier_promotion RELEASE NAME -> an evidence asset of the Release that is not NAME
+    jq -r --arg name "$2" '[.assets[].name | select(startswith("evidence-") and . != $name)] | first // empty' <<< "$1"
+}
+
+# differs RELEASE TAG TITLE LATEST NOTES REVISION -> what in the Release at TAG is not the approved
+# Release; nothing when it is the approved one exactly.
+differs() {
+    local release=$1 tag=$2 title=$3 latest=$4 notes=$5 revision=$6 fields have want draft current latest_tag
+    fields=$(jq -r --arg title "$title" --arg revision "$revision" '[
+        if .name != $title then "title \(.name | @json)" else empty end,
+        if .targetCommitish != $revision then "target \(.targetCommitish)" else empty end,
+        if .isPrerelease then "prerelease" else empty end] | join(", ")' <<< "$release")
+    have=$(jq -j '.body // ""' <<< "$release" | body_sha)
+    want=$(body_sha < "$notes")
+    if [[ $have != "$want" ]]; then fields+="${fields:+, }body (SHA-256 $have, approved $want)"; fi
+    draft=$(jq -r '.isDraft' <<< "$release")
+    if [[ $draft == false && $tag =~ $VERSION_TAG && $latest == true ]]; then
+        current=$(gh_or_absent api "/repos/$repo/releases/latest")
+        latest_tag=$(jq -r '.tag_name // empty' <<< "$current")
+        if [[ $latest_tag != "$tag" ]]; then fields+="${fields:+, }latest (the latest Release is ${latest_tag:-none})"; fi
+    fi
+    echo "$fields"
+}
+
 # publish_state TAG TITLE LATEST NOTES ASSET SHA REVISION: the table of decision 7 of the plan.
 publish_state() {
-    local tag=$1 title=$2 latest=$3 notes=$4 asset=$5 sha=$6 revision=$7 release name have flag=--latest=false recovery
+    local tag=$1 title=$2 latest=$3 notes=$4 asset=$5 sha=$6 revision=$7 release name have='' draft kind fields
+    local flag=--latest=false recovery prior
     name=${asset##*/}
     if [[ $latest == true ]]; then flag=--latest; fi
     recovery="gh release delete $tag -R $repo (without --cleanup-tag), then re-run the github-release job: gh run rerun $GITHUB_RUN_ID --job <job id> -R $repo"
@@ -207,29 +239,44 @@ publish_state() {
         gh_must release edit "$tag" -R "$repo" --draft=false "$flag"
         return
     fi
-    have=''
+    draft=$(jq -r '.isDraft' <<< "$release")
+    kind=published
+    if [[ $draft == true ]]; then kind=draft; fi
+    prior=$(earlier_promotion "$release" "$name")
+    # A published Release with an earlier promotion's evidence gets this promotion's asset and
+    # nothing else (ADR-0131 decision 6). Any other Release at the tag is this job's from an
+    # interrupted run, or stray: anyone with contents: write can make one, so it must be the
+    # approved Release exactly before the signed asset goes on it.
+    if [[ $draft == true || -z $prior ]]; then
+        fields=$(differs "$release" "$tag" "$title" "$latest" "$notes" "$revision")
+        [[ -z $fields ]] ||
+            die "the $kind Release at $tag is not the approved one ('$title' on $revision): $fields. Recovery, by the maintainer only: $recovery"
+    fi
     if jq -e --arg name "$name" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null; then have=$(asset_sha "$tag" "$name"); fi
-    if [[ $(jq -r '.isDraft' <<< "$release") == true ]]; then
-        [[ $(jq -r '.name' <<< "$release") == "$title" && $(jq -r '.targetCommitish' <<< "$release") == "$revision" ]] ||
-            die "a draft Release at $tag, titled '$(jq -r '.name' <<< "$release")' on $(jq -r '.targetCommitish' <<< "$release"), is not the approved one ('$title' on $revision). Recovery, by the maintainer only: $recovery"
-        if [[ -z $have ]]; then
-            gh_must release upload "$tag" "$asset" -R "$repo"
-        elif [[ $have != "$sha" ]]; then
-            die "the draft Release at $tag already holds $name with SHA-256 $have, not this bundle's $sha. Recovery, by the maintainer only, if the draft holds only this run's asset (gh release view $tag -R $repo --json isDraft,assets): $recovery"
-        fi
-        gh_must release edit "$tag" -R "$repo" --draft=false "$flag"
-    elif [[ -z $have ]]; then
-        # A second promotion of the same build adds its own asset (ADR-0131 decision 6).
+    if [[ -z $have ]]; then
         gh_must release upload "$tag" "$asset" -R "$repo"
+    elif [[ $have != "$sha" && $draft == true ]]; then
+        die "the draft Release at $tag already holds $name with SHA-256 $have, not this bundle's $sha. Recovery, by the maintainer only, if the draft holds only this run's asset (gh release view $tag -R $repo --json isDraft,assets): $recovery"
     elif [[ $have != "$sha" ]]; then
         die "the published Release at $tag already holds $name with SHA-256 $have, not this bundle's $sha: there is no automatic recovery, a published asset is never replaced; the bundle changed after publication, investigate"
     fi
+    if [[ $draft == true ]]; then gh_must release edit "$tag" -R "$repo" --draft=false "$flag"; fi
 }
 
-read_back() { # read_back TAG NAME SHA REVISION TITLE: the Release is published, holds the asset and names REVISION
-    local release at
-    release=$(gh_must release view "$1" -R "$repo" --json isDraft,tagName,name,targetCommitish,assets,url)
+# read_back TAG NAME SHA REVISION TITLE LATEST NOTES: the Release is published, is the approved
+# one, holds the asset and its tag names REVISION.
+read_back() {
+    local release at fields prior
+    release=$(gh_must release view "$1" -R "$repo" --json "$RELEASE_FIELDS")
     [[ $(jq -r '.isDraft' <<< "$release") == false ]] || die "the Release at $1 is still a draft after it was published"
+    prior=$(earlier_promotion "$release" "$2")
+    if [[ -n $prior ]]; then
+        # An earlier promotion's notes name its own asset: only the title is this promotion's.
+        fields=$(jq -r --arg title "$5" 'if .name != $title then "title \(.name | @json)" else "" end' <<< "$release")
+    else
+        fields=$(differs "$release" "$1" "$5" "$6" "$7" "$4")
+    fi
+    [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
     jq -e --arg name "$2" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null || die "the Release at $1 does not hold $2"
     [[ $(asset_sha "$1" "$2") == "$3" ]] || die "the Release at $1 holds $2 with other bytes than this bundle's ($3)"
     at=$(tag_commit "$1")
@@ -272,7 +319,7 @@ publish() {
     pack "$dir" "$asset"
     sha=$(sha256sum < "$asset" | cut -d' ' -f1)
     publish_state "$tag" "$title" "$latest" "$work/notes.md" "$asset" "$sha" "$revision"
-    read_back "$tag" "${asset##*/}" "$sha" "$revision" "$title"
+    read_back "$tag" "${asset##*/}" "$sha" "$revision" "$title" "$latest" "$work/notes.md"
 }
 
 case ${1:-} in
