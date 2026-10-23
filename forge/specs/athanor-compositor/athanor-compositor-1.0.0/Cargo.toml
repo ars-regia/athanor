@@ -17,6 +17,8 @@ libc = { workspace = true }
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# The pointer's themed cursor (`cursor.rs`); already in the build through wayland-cursor.
+xcursor = { workspace = true }
 
 [dev-dependencies]
 wayland-client = { workspace = true }

@@ -67,6 +67,7 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
         }
+        self.fit_maximised();
         self.refocus(wl_surface);
     }
 }
@@ -90,6 +91,7 @@ impl State {
             return;
         };
         layer.layer_surface().send_pending_configure();
+        self.fit_maximised();
 
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
