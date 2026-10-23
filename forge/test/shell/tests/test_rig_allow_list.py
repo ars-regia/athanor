@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,6 +23,30 @@ def grantable():
     }
 
 
+def packaged_inputs():
+    """What builds a package or an image: every spec and Containerfile under forge/ and system/,
+    the rig's own under forge/test/ aside, and the compositor's shipped data/."""
+    inputs = [
+        path
+        for top in ("forge", "system")
+        for pattern in ("*.spec", "Containerfile*")
+        for path in (ROOT / top).rglob(pattern)
+        if not path.relative_to(ROOT).as_posix().startswith("forge/test/")
+    ]
+    return inputs + [path for path in DATA.iterdir() if path.is_file()]
+
+
+def rig_references(paths):
+    """The lines of `paths` that name the rig's allow-list or the rig's directory."""
+    needles = (RIG_LIST.name, "forge/test/shell")
+    return [
+        f"{path}:{number}: {line.strip()}"
+        for path in paths
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+        if any(needle in line for needle in needles)
+    ]
+
+
 class TestRigAllowList(unittest.TestCase):
     """The rig's own grants (grim, wtype, the toolkit's test input method) never ship."""
 
@@ -32,11 +57,21 @@ class TestRigAllowList(unittest.TestCase):
             self.assertNotIn(fields, shipped)
             self.assertNotIn(fields[0], shipped_executables)
 
-    def test_the_rig_list_is_under_no_packaged_path(self):
-        relative = RIG_LIST.relative_to(ROOT).as_posix()
-        self.assertTrue(relative.startswith("forge/test/shell/"), relative)
-        for packaged in ("forge/specs/", "system/"):
-            self.assertFalse(relative.startswith(packaged), relative)
+    def test_no_packaged_input_names_the_rig(self):
+        inputs = packaged_inputs()
+        self.assertTrue(any(path.name.endswith(".spec") for path in inputs))
+        self.assertTrue(any(path.name.startswith("Containerfile") for path in inputs))
+        self.assertEqual(rig_references(inputs), [])
+
+    def test_a_packaged_input_naming_the_rig_list_is_found(self):
+        spec = next(path for path in packaged_inputs() if path.name.endswith(".spec"))
+        with tempfile.TemporaryDirectory() as scratch:
+            copy = Path(scratch) / spec.name
+            copy.write_text(
+                spec.read_text(encoding="utf-8") + f"install -m 0644 {RIG_LIST.name} %{{buildroot}}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(len(rig_references([copy])), 1)
 
     def test_rig_lines_parse(self):
         lines = grants(RIG_LIST)

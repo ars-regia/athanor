@@ -118,13 +118,22 @@ elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
     export RIG_CAPTURE_OUTPUT=${outputs[0]}
     grim=(/repo/forge/test/shell/in-unit.sh rig-grim.service /usr/bin/grim)
     /repo/forge/test/shell/session.sh "${arguments[@]}" &
-    wait_for 30 any_display
+    session=$!
+    compositor_display() { # any_display, failing the scene at once if the compositor exited
+        if ! kill -0 "$session" 2> /dev/null; then
+            echo "scene.sh: athanor-compositor exited before its socket; see /out/$tag-compositor.log" >&2
+            exit 1
+        fi
+        any_display
+    }
+    wait_for 30 compositor_display
     shopt -s nullglob
     wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
     shopt -u nullglob
     WAYLAND_DISPLAY=$(basename "${wayland_displays[0]}")
     export WAYLAND_DISPLAY
-    wait_for 20 wayland-info > /dev/null
+    # timeout: a compositor that accepts the connection and never answers fails the wait.
+    wait_for 20 timeout 5 wayland-info > /dev/null
     sleep 1
 else
     outputs=(WINIT-0)
@@ -180,14 +189,22 @@ if [ -n "${RIG_HOLD:-}" ]; then
 fi
 
 # 5. One PNG, from inside the compositor; two or more outputs side by side, left to right.
+grab() { # grab <output> <png>: grim, bounded, so a capture that never completes fails the scene
+    local rc=0
+    timeout 10 "${grim[@]}" -o "$1" "$2" || rc=$?
+    if [ "$rc" = 124 ]; then
+        echo "scene.sh: grim -o $1 did not finish in 10 seconds" >&2
+    fi
+    return "$rc"
+}
 capture() { # capture <png>
     if [ "${#outputs[@]}" = 1 ]; then
-        "${grim[@]}" -o "${outputs[0]}" "$1"
+        grab "${outputs[0]}" "$1"
         return
     fi
     local output parts=()
     for output in "${outputs[@]}"; do
-        "${grim[@]}" -o "$output" "$scratch/$output.png"
+        grab "$output" "$scratch/$output.png"
         parts+=("$scratch/$output.png")
     done
     magick "${parts[@]}" +append "$1"

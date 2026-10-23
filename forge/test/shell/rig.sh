@@ -582,17 +582,30 @@ build-toolkit)
 compositor-globals)
     # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1 and 2: what a client of athanor-compositor binds.
     # session.sh installs the shipped allow-list and the rig's lines, but wayland-info is listed
-    # in neither and runs in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
-    # the grant.
+    # in neither and runs in no unit, so it is granted none of the privileged globals of task 5;
+    # the fixture checks the grant. The compositor runs headless: linux-dmabuf is offered with a
+    # render node and never without one, when Pixman draws and clients draw into wl_shm
+    # (headless.rs); its log says which.
     require athanor-compositor build-compositor
-    rm -f "$out/compositor-globals.txt"
+    rm -f "$out/compositor-globals.txt" "$out/compositor-globals-compositor.log"
     in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 compositor-globals -- \
         bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
     missing=()
-    for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
-        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
-        wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1; do
+    standard=(wl_compositor wl_shm wl_seat wl_output xdg_wm_base wp_viewporter
+        wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1
+        wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1)
+    if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
+        dmabuf="no linux-dmabuf, as Pixman draws without a render node"
+        ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
+    elif grep -q 'explicit sync: .* render node' "$out/compositor-globals-compositor.log"; then
+        dmabuf="linux-dmabuf on the render node"
+        standard+=(zwp_linux_dmabuf_v1)
+    else
+        echo "compositor-globals: $out/compositor-globals-compositor.log names no renderer" >&2
+        exit 1
+    fi
+    for interface in "${standard[@]}"; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
@@ -607,7 +620,7 @@ compositor-globals)
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 15 standard globals, a seat with pointer and keyboard, and none of the 7 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 7 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
