@@ -251,8 +251,12 @@ def peer_pid(path):
 
 def compositor():
     """Which compositor serves the session: the executable behind the Wayland socket."""
-    display = pathlib.Path(os.environ["XDG_RUNTIME_DIR"]) / os.environ["WAYLAND_DISPLAY"]
-    exe = os.readlink(f"/proc/{peer_pid(str(display))}/exe")
+    runtime, name = os.environ.get("XDG_RUNTIME_DIR"), os.environ.get("WAYLAND_DISPLAY")
+    if not runtime or not name:
+        raise Failed(
+            "XDG_RUNTIME_DIR and WAYLAND_DISPLAY are not set: run matrix.py from inside the session"
+        )
+    exe = os.readlink(f"/proc/{peer_pid(str(pathlib.Path(runtime) / name))}/exe")
     return ("pass" if exe == "/usr/bin/athanor-compositor" else "fail"), exe
 
 

@@ -2,7 +2,10 @@
 
 import contextlib
 import importlib.util
+import os
 import pathlib
+import socket
+import tempfile
 import unittest
 from unittest import mock
 
@@ -149,11 +152,7 @@ class Checks(unittest.TestCase):
         written = []
         with (
             mock.patch.object(matrix, "read_record", return_value=old),
-            mock.patch.object(
-                matrix,
-                "write_record",
-                side_effect=lambda r, m, rec: written.append(dict(rec["rows"])),
-            ),
+            mock.patch.object(matrix, "write_record", side_effect=lambda r, m, rec: written.append(dict(rec["rows"]))),
             mock.patch.object(matrix, "host", return_value={}),
             mock.patch.object(matrix, "attempt", return_value=("pass", "seen")),
         ):
@@ -210,12 +209,29 @@ class Checks(unittest.TestCase):
             self.assertIn(path, got[1])
 
     def test_compositor_without_a_wayland_socket_is_a_failure(self):
-        self.assertEqual(self.compositor({})[0], "fail")
+        got = self.compositor({})
+        self.assertEqual(got[0], "fail")
+        self.assertIn("XDG_RUNTIME_DIR and WAYLAND_DISPLAY are not set", got[1])
 
     def test_compositor_with_a_dead_peer_is_a_failure(self):
         gone = mock.Mock(side_effect=FileNotFoundError("/proc/42/exe"))
         got = self.compositor(self.SESSION, lambda s: 42, gone)
         self.assertEqual(got[0], "fail")
+        self.assertIn("/proc/42/exe", got[1])
+
+    def test_compositor_without_a_listener_is_a_failure(self):
+        with tempfile.TemporaryDirectory() as run:
+            got = self.compositor({**self.SESSION, "XDG_RUNTIME_DIR": run})
+        self.assertEqual(got[0], "fail")
+        self.assertIn("could not check", got[1])
+
+    def test_peer_pid_reads_the_listener_on_a_real_socket(self):
+        with tempfile.TemporaryDirectory() as run:
+            path = os.path.join(run, "wayland-0")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                server.bind(path)
+                server.listen(1)
+                self.assertEqual(matrix.peer_pid(path), os.getpid())
 
     def test_an_exception_is_recorded_as_a_failure(self):
         gone = mock.Mock(side_effect=FileNotFoundError("gone"))
