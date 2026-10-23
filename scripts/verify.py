@@ -2094,7 +2094,9 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
 # What a spec puts under these directories is an executable a line can name.
-EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_libexecdir}": "/usr/libexec", "%{_prefix}": "/usr"}
+EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_sbindir}": "/usr/sbin", "%{_libexecdir}": "/usr/libexec",
+             "%{_prefix}": "/usr"}
+EXEC_ROOTS = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/")
 INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
@@ -2119,11 +2121,14 @@ def top_layer(files):
 
 
 def spec_installs(spec):
-    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin or
-    /usr/libexec: continued lines joined, a target directory given by -t or as the last
-    argument, a destination directory given with or without its trailing slash."""
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
+    /usr/sbin or /usr/libexec: continued lines joined, a command after `do`, `then` or `else`,
+    quoted words, a target directory given by -t or as the last argument, a destination
+    directory given with or without its trailing slash."""
     for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
-        words = command.split()
+        words = [w.strip("\"'") for w in command.split()]
+        if words[:1] in (["do"], ["then"], ["else"]):
+            words = words[1:]
         if not words or words[0] not in INSTALL | COPY:
             continue
         args, directory, i = [], None, 1
@@ -2159,14 +2164,14 @@ def spec_installs(spec):
             *sources, directory = args
             if len(sources) == 1 and not directory.endswith("/") and \
                     executable_path(directory) not in EXEC_DIRS.values():
-                if executable_path(directory).startswith(("/usr/bin/", "/usr/libexec/")):
+                if executable_path(directory).startswith(EXEC_ROOTS):
                     yield sources[0], executable_path(directory)
                 continue
         else:
             sources = args
         for source in sources:
             executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
-            if executable.startswith(("/usr/bin/", "/usr/libexec/")):
+            if executable.startswith(EXEC_ROOTS):
                 yield source, executable
 
 
@@ -2174,6 +2179,7 @@ def executable_path(destination):
     """`destination` of a spec's %install as the path it has on the installed system."""
     for root in ("%{buildroot}", "%buildroot", "${RPM_BUILD_ROOT}", "$RPM_BUILD_ROOT"):
         destination = destination.replace(root, "")
+    destination = re.sub(r"%(_\w+)", r"%{\1}", destination)  # %_bindir is %{_bindir}
     for macro, value in EXEC_DIRS.items():
         destination = destination.replace(macro, value)
     return re.sub(r"/+", "/", destination.strip("\"'")).rstrip("/") or "/"
@@ -2285,15 +2291,20 @@ def target_files(crate, entry, features, defaults, root):
     todo = [(crate.resolve(), entry.parent.resolve(), entry.resolve(), set(features), defaults)]
     while todo:
         crate, start, entry, features, defaults = todo.pop()
-        before = done.get(crate)
+        before = done.get((crate, start))
         if before and features <= before[0] and (before[1] or not defaults):
             continue
         features = features | (before[0] if before else set())
         defaults = defaults or bool(before and before[1])
-        done[crate] = (features, defaults)
+        done[(crate, start)] = (features, defaults)
         manifest = tomllib.loads(read(crate / "Cargo.toml"))
         sources = crate_sources(crate, start, entry)
         files.update(sources)
+        # A bin target outside the library's directory (src/bin/*.rs) is built with the
+        # package's own library, which its code reaches by the package's name.
+        lib = crate / manifest.get("lib", {}).get("path", "src/lib.rs")
+        if entry is not None and lib.is_file() and lib not in dict(sources):
+            todo.append((crate, lib.parent, None, features, defaults))
         code = "\n".join(text for _, text in sources)
         on, sub = enabled_dependencies(manifest, features, defaults)
         for name, entry, dep in path_dependencies(crate, manifest, root):
@@ -2367,7 +2378,7 @@ def allow_list_problems(root=None, notes=None, outside=None):
         in_tree = any(walk(spec_path.parent, "Cargo.toml"))
         for source, executable in spec_installs(spec):
             installed.add(executable)
-            built = re.search(r"(?:^|/)release/([\w.+-]+)$", source)
+            built = re.search(r"(?:^|/)release/([^/\s]+)$", source)
             if built:
                 targets.append((built.group(1), executable, spec, spec_path, in_tree))
 

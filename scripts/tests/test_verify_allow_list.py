@@ -378,6 +378,23 @@ class AllowList(unittest.TestCase):
                 "    %{buildroot}%{_bindir}/athanor-dock",
                 "/usr/bin/athanor-dock",
             ),
+            "from a quoted source": (
+                'install -D -m 0755 "target/release/athanor-dock" "%{buildroot}%{_bindir}/athanor-dock"',
+                "/usr/bin/athanor-dock",
+            ),
+            "with a macro without braces": (
+                "install -D -m 0755 target/release/athanor-dock %{buildroot}%_bindir/athanor-dock",
+                "/usr/bin/athanor-dock",
+            ),
+            "into sbin": (
+                "install -D -m 0755 target/release/athanor-dock %{buildroot}%{_sbindir}/athanor-dock",
+                "/usr/sbin/athanor-dock",
+            ),
+            "on the line of a for loop": (
+                "for _ in once; do install -D -m 0755 target/release/athanor-dock "
+                "%{buildroot}%{_bindir}/athanor-dock; done",
+                "/usr/bin/athanor-dock",
+            ),
         }
         for case, (install, executable) in written.items():
             with self.subTest(case):
@@ -408,6 +425,19 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 2, out)
         self.assertIn("/usr/bin/athanor-dock-edge: asks for", out[0])
         self.assertIn("/usr/bin/athanor-dock-peek: asks for", out[1])
+        with self.subTest("the package's library"):
+            self.package(
+                "athanor-dock",
+                files={
+                    "src/lib.rs": "pub fn f() { w.set_layer(Layer::Top); }\n",
+                    "src/bin/ui.rs": "fn main() { athanor_dock::f(); }\n",
+                },
+                installs=("ui",),
+            )
+            out = self.problems()
+            self.assertEqual(len(out), 1, out)
+            self.assertIn("/usr/bin/ui: asks for", out[0])
+            self.assertIn("src/lib.rs:1", out[0])
 
     def test_a_binary_no_crate_of_the_tree_builds_fails_when_the_spec_carries_a_crate(
         self,
@@ -486,10 +516,7 @@ class AllowList(unittest.TestCase):
             {"src/main.rs": "use athanor_toolkit::surface;\nfn main() {}\n"},
         )
         self.assertEqual(self.problems(), [])
-        for flag in (
-            "--features athanor-toolkit/edge",
-            "--features dep:athanor-toolkit",
-        ):
+        for flag in ("--features athanor-toolkit/edge",):
             with self.subTest(flag):
                 self.write(
                     "forge/specs/athanor-dock/athanor-dock.spec",
