@@ -2385,8 +2385,13 @@ def allow_list_problems(root=None, notes=None, outside=None):
     for built, executable, spec, spec_path, in_tree in targets:
         if built not in bins:
             # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
-            # carries a crate: then no bin target of the tree has the name it installs.
-            if in_tree:
+            # carries a crate: then no bin target of the tree has the name it installs, or
+            # the name is a shell variable, a glob or a macro this check cannot expand.
+            if in_tree and re.search(r"[$*?\[{%`]", built):
+                problems.append(f"{spec_path.relative_to(root)}: an install of target/release/{built} "
+                                "names its binary through a shell variable, a glob or a macro the check "
+                                "cannot expand: name each binary in the spec")
+            elif in_tree:
                 problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
                                 f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
             continue

@@ -451,6 +451,22 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 1, out)
         self.assertIn("athanor-dock-gone", out[0])
 
+    def test_an_install_source_the_check_cannot_expand_fails_as_such(self):
+        written = {
+            "a shell variable": "for b in athanor-dock; do install -D -m 0755 target/release/$b "
+            "%{buildroot}%{_bindir}/$b; done",
+            "a glob": "install -D -m 0755 -t %{buildroot}%{_bindir} target/release/*",
+            "an unknown macro": "install -D -m 0755 target/release/%{binary} %{buildroot}%{_bindir}/athanor-dock",
+        }
+        for case, install in written.items():
+            with self.subTest(case):
+                self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
+                self.spec("athanor-dock", install)
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("cannot expand", out[0])
+                self.assertIn("name each binary", out[0])
+
     def test_every_line_of_an_executable_is_checked(self):
         self.package(
             "athanor-dock",
