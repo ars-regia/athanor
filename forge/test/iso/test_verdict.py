@@ -1036,7 +1036,8 @@ def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
     """A second upgrade case in the same OUTPUT_DIR starts from none of the files the stages
     leave: a stale `ready` would start the stages on the installer, a stale status would judge
     them, the phases are appended to, and a known_hosts names the last guest's host key. They
-    are gone before the VM starts; here ssh-keygen fails, the step after them."""
+    are gone before anything on the host can fail; here the run fails after them, at the
+    firmware lookup on a host without OVMF or at ssh-keygen."""
     out = tmp / "rerun"
     stale = ["ready", "upgrade-status", "upgrade-phases.txt", "acceptance-state/known_hosts"]
     for name in stale + ["kept.png"]:
