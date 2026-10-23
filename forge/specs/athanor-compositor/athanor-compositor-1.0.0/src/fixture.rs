@@ -2743,6 +2743,12 @@ fn another_clients_cursor_is_not_shown() {
     let pointer = local.pointer.clone().expect("a pointer");
     pointer.set_cursor(serial, None, 0, 0);
     local.roundtrip(&mut run);
+    let id = local.id.clone().expect("an id");
+    assert_eq!(
+        run.state.cursor_status,
+        (CursorImageStatus::Hidden, Some(id.clone())),
+        "a cursor without a surface belongs to the client the pointer is over"
+    );
     assert_eq!(
         run.state.shown_cursor(),
         CursorImageStatus::Hidden,
@@ -2750,7 +2756,6 @@ fn another_clients_cursor_is_not_shown() {
     );
 
     // The client's window moves off the fixture's, which the pointer is then over.
-    let id = local.id.clone().expect("an id");
     let area = run.state.window_area().expect("an area");
     run.state
         .space
@@ -2764,8 +2769,8 @@ fn another_clients_cursor_is_not_shown() {
     run.state
         .pointer_to(over.to_f64() + Point::from((20.0, 10.0)), InputTime::now());
     // Smithay resets the cursor when the focus changes: the client's is put back, as if it had
-    // been set late.
-    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id));
+    // been set late, here and over the background.
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id.clone()));
     assert_eq!(
         run.state.shown_cursor(),
         CursorImageStatus::default_named(),
@@ -2775,6 +2780,7 @@ fn another_clients_cursor_is_not_shown() {
     let corner = (area.loc + area.size - Size::from((1, 1))).to_f64();
     assert!(run.state.surface_under(corner).is_none(), "the background");
     run.state.pointer_to(corner, InputTime::now());
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id));
     assert_eq!(
         run.state.shown_cursor(),
         CursorImageStatus::default_named(),
