@@ -8,7 +8,7 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorImageStatus, Focus};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
@@ -514,6 +514,24 @@ impl SeatHandler for State {
 
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
+    }
+
+    /// A client set the cursor with `wl_pointer.set_cursor` or `wp_cursor_shape_v1`, or Smithay
+    /// reset it to the default when the pointer's focus changed. Its owner is the client of the
+    /// cursor surface, else the client the pointer is over.
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        let owner = match &image {
+            CursorImageStatus::Surface(surface) => surface.client(),
+            // Smithay resets from inside the pointer's motion, which holds the pointer: asking
+            // it for its focus there deadlocks, and the default needs no owner.
+            _ if image == CursorImageStatus::default_named() => None,
+            _ => seat
+                .get_pointer()
+                .and_then(|pointer| pointer.current_focus())
+                .and_then(|surface| surface.client()),
+        };
+        self.cursor_status = (image, owner.map(|client| client.id()));
+        self.request_redraw();
     }
 
     /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of

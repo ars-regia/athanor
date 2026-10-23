@@ -4,8 +4,12 @@ use std::collections::HashMap;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
-use smithay::input::pointer::CursorIcon;
+use smithay::input::pointer::{CursorIcon, CursorImageStatus};
+use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Buffer, Logical, Point, Size, Transform};
+
+use crate::state::State;
 
 /// The cursor size when `XCURSOR_SIZE` names none, libXcursor's default.
 const DEFAULT_SIZE: u32 = 24;
@@ -56,6 +60,34 @@ impl Cursor {
         self.images
             .entry((icon, scale))
             .or_insert_with(|| load(theme, icon, size, scale))
+    }
+}
+
+impl State {
+    /// The cursor the pointer shows now: `effective` of the status a client set, with the
+    /// client the pointer is over.
+    pub fn shown_cursor(&self) -> CursorImageStatus {
+        let focus = self
+            .seat
+            .get_pointer()
+            .and_then(|pointer| pointer.current_focus())
+            .and_then(|surface| surface.client())
+            .map(|client| client.id());
+        let (status, owner) = &self.cursor_status;
+        effective(status, owner.as_ref(), focus.as_ref())
+    }
+}
+
+/// `status` while its owner holds the pointer's focus, else the default: a client's cursor is
+/// never shown over another client's surface or over the background.
+pub fn effective(
+    status: &CursorImageStatus,
+    owner: Option<&ClientId>,
+    focus: Option<&ClientId>,
+) -> CursorImageStatus {
+    match owner {
+        Some(owner) if focus == Some(owner) => status.clone(),
+        _ => CursorImageStatus::default_named(),
     }
 }
 

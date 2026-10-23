@@ -26,7 +26,9 @@ use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server:
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::utils::{Point, SERIAL_COUNTER};
+use smithay::backend::input::InputTime;
+use smithay::input::pointer::CursorImageStatus;
+use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -40,8 +42,8 @@ use std::time::{Duration, Instant};
 use wayland_client::backend::protocol::{Argument, Interface, Message};
 use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
+    wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, Proxy, QueueHandle, WEnum,
@@ -182,6 +184,10 @@ struct Client {
     configured: Option<&'static str>,
     /// The last preferred scale of wp-fractional-scale, in 120ths.
     fractional_scale: Option<u32>,
+    /// The serial of the last `wl_pointer.enter` the client was sent.
+    pointer_enter: Option<u32>,
+    /// The serial of the last `wl_pointer.button` press the client was sent.
+    button: Option<u32>,
 }
 
 /// A head of wlr-output-management as the client has seen it: its name, its last scale and its
@@ -372,6 +378,27 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
                 client.modifiers.push(mods_depressed);
             }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
+            wl_pointer::Event::Button {
+                serial,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => client.button = Some(serial),
             _ => {}
         }
     }
@@ -2055,6 +2082,9 @@ struct Local {
     id: Option<ClientId>,
     /// The buffers' files, open while their buffers are.
     files: Vec<std::fs::File>,
+    /// The seat and its pointer, once `toplevel` has bound them.
+    seat: Option<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
 }
 
 impl Local {
@@ -2084,9 +2114,48 @@ impl Local {
             client: Client::default(),
             id,
             files: Vec::new(),
+            seat: None,
+            pointer: None,
         };
         local.roundtrip(run);
         local
+    }
+
+    /// Binds the seat and its pointer, maps a `WIDTH`x`HEIGHT` window and gives it the keyboard.
+    /// The fixture's own window holds the keyboard, so `place` leaves the new window at the
+    /// bottom, exactly under the fixture's: raised, the new window is the one under the pointer,
+    /// and `fixture_window`, the bottom element, is the fixture's again.
+    fn toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        self.pointer = Some(seat.get_pointer(&qh, ()));
+        self.seat = Some(seat);
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg.get_toplevel(&qh, ());
+        self.client.configure = None;
+        surface.commit();
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        xdg.ack_configure(self.client.configure.expect("a configure"));
+        let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        let id = self.id.clone().expect("an id");
+        // The window is in the space from its first commit; it is placed once it has a size.
+        self.pump(run, "the window is placed", |_, state| {
+            state
+                .space
+                .elements()
+                .any(|window| owned_by(window, &id) && !window.geometry().is_empty())
+        });
+        let window = window_of(run, &id);
+        run.state.focus(&window);
+        toplevel
     }
 
     /// Runs the compositor and the client in turn until `done` holds.
@@ -2250,6 +2319,114 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
         .expect("the fixture's client")
         .id();
     (window, id)
+}
+
+/// Whether `window` belongs to the client `id`.
+fn owned_by(window: &smithay::desktop::Window, id: &ClientId) -> bool {
+    window
+        .toplevel()
+        .and_then(|t| t.wl_surface().client())
+        .is_some_and(|client| client.id() == *id)
+}
+
+/// The mapped window of the client `id`.
+fn window_of(run: &Running, id: &ClientId) -> smithay::desktop::Window {
+    run.state
+        .space
+        .elements()
+        .find(|window| owned_by(window, id))
+        .expect("the client's window")
+        .clone()
+}
+
+/// Where the window of the client `id` is in the space.
+fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical> {
+    run.state
+        .space
+        .element_location(&window_of(run, id))
+        .expect("a location")
+}
+
+/// A client with its own window and the pointer over it: the serial of the pointer's enter.
+fn pointed_at(run: &mut Running, local: &mut Local) -> u32 {
+    local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    run.state.pointer_to(at, InputTime::now());
+    local.pump(run, "the pointer enters the window", |client, _| {
+        client.pointer_enter.is_some()
+    });
+    local.client.pointer_enter.expect("an enter")
+}
+
+/// A cursor a client sets is shown only while that client holds the pointer's focus: over
+/// another client's window, and over the background, the default is drawn (OS15).
+#[test]
+fn another_clients_cursor_is_not_shown() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, None, 0, 0);
+    local.roundtrip(&mut run);
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::Hidden,
+        "over its own window"
+    );
+
+    // The client's window moves off the fixture's, which the pointer is then over.
+    let id = local.id.clone().expect("an id");
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .space
+        .map_element(window_of(&run, &id), area.loc, true);
+    let (other, _) = fixture_window(&run);
+    let over = run.state.space.element_location(&other).expect("a location");
+    run.state
+        .pointer_to(over.to_f64() + Point::from((20.0, 10.0)), InputTime::now());
+    // Smithay resets the cursor when the focus changes: the client's is put back, as if it had
+    // been set late.
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id));
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over another client's window"
+    );
+
+    let corner = (area.loc + area.size - Size::from((1, 1))).to_f64();
+    assert!(run.state.surface_under(corner).is_none(), "the background");
+    run.state.pointer_to(corner, InputTime::now());
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over the background"
+    );
+    run.stop();
+}
+
+/// A cursor surface is sent its frame callbacks while the pointer is over its output, as a
+/// window is.
+#[test]
+fn task_pointer_a_cursor_surface_gets_its_frame_callbacks() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let cursor = compositor.create_surface(&qh, ());
+    let (buffer, _) = local.buffer(&shm, 16, 16, [255, 255, 255, 255]);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, Some(&cursor), 0, 0);
+    cursor.attach(Some(&buffer), 0, 0);
+    cursor.frame(&qh, ());
+    local.client.frame_done = false;
+    cursor.commit();
+    local.pump(&mut run, "the cursor's frame callback", |client, _| {
+        client.frame_done
+    });
+    run.stop();
 }
 
 /// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and

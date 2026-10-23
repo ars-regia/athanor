@@ -34,6 +34,7 @@ use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
@@ -144,6 +145,9 @@ pub struct State {
     /// Why the compositor must end with an error: set by `fail`, read by `main` once the loop
     /// has stopped.
     pub fatal: Option<String>,
+    /// The cursor a client set last and that client, or the default and no client: shown only
+    /// while that client holds the pointer's focus (`shown_cursor`).
+    pub cursor_status: (CursorImageStatus, Option<ClientId>),
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -301,6 +305,7 @@ impl State {
             escaped: Vec::new(),
             lock_requests: 0,
             fatal: None,
+            cursor_status: (CursorImageStatus::default_named(), None),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -589,6 +594,20 @@ impl State {
                 throttle,
                 surface_primary_scanout_output,
             );
+        }
+        // The cursor surface is not among the space's elements: its frames go to the output
+        // the pointer is over.
+        if let CursorImageStatus::Surface(surface) = self.shown_cursor() {
+            let over = self.seat.get_pointer().is_some_and(|pointer| {
+                self.space
+                    .output_under(pointer.current_location())
+                    .any(|under| under == output)
+            });
+            if over {
+                send_frames_surface_tree(&surface, output, frame_target, throttle, |_, _| {
+                    Some(output.clone())
+                });
+            }
         }
     }
 
