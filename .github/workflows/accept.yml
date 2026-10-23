@@ -82,18 +82,8 @@ jobs:
       - name: 💽 Fetch the ISO
         run: |
           set -euo pipefail
-
-          # The ISO ships inside a scratch image with one file in it, so a container of
-          # that image is the only thing to unpack.
-          podman pull "$(<target/iso-ref)"
-          ctr=$(podman create "$(<target/iso-ref)" /bin/true)
-          mkdir -p iso
-          podman cp "${ctr}:/." iso/
-          podman rm "$ctr" > /dev/null
-          iso=$(find iso -name '*.iso' -type f | head -n 1)
-          [[ -n $iso ]] || { echo "the published image contains no .iso" >&2; exit 1; }
+          iso=$(bash forge/test/iso/fetch_iso.sh "$(<target/iso-ref)" iso)
           echo "ISO_PATH=${iso}" >> "${GITHUB_ENV}"
-          echo "installing $(basename "$iso"), $(du -h "$iso" | cut -f1)"
 
       - name: 🖥️ Install unattended and restart into the system
         env:
