@@ -8,6 +8,7 @@
 #   #737: cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none
 #   #738: cosmic-comp places a client window at the top left with a focus outline; athanor-compositor centres it without the outline
 #   #739: the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve
+#   #742: the bar draws notification toasts over the open notification centre; the golden shows only the centre
 #   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
 
 [[difference]]
@@ -1451,6 +1452,246 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, inpu
 issue = 739
 
 [[difference]]
+case = "bar-notifications-light-1.0-en"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.0-en"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.0-en"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.0-en"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-light-1.0-de"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.0-de"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.0-de"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.0-de"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-light-1.0-rtl"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.0-rtl"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.0-rtl"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.0-rtl"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-light-1.5-en"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.5-en"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.5-en"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.5-en"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-light-1.5-de"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.5-de"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.5-de"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.5-de"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-light-1.5-rtl"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-light-1.5-rtl"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-light-1.5-rtl"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-light-1.5-rtl"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.0-en"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.0-en"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.0-en"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.0-en"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.0-de"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.0-de"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.0-de"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.0-de"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.0-rtl"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.0-rtl"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.0-rtl"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.0-rtl"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.5-en"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.5-en"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.5-en"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.5-en"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.5-de"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.5-de"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.5-de"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.5-de"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
+case = "bar-notifications-dark-1.5-rtl"
+cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
+issue = 736
+
+[[difference]]
+case = "bar-notifications-dark-1.5-rtl"
+cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
+issue = 737
+
+[[difference]]
+case = "bar-notifications-dark-1.5-rtl"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+issue = 739
+
+[[difference]]
+case = "bar-notifications-dark-1.5-rtl"
+cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
+issue = 742
+
+[[difference]]
 case = "bar-tray-light-1.0-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2741,51 +2982,6 @@ cause = "the launcher draws a text caret in its search entry that the cosmic-com
 issue = 740
 
 [[difference]]
-case = "launcher-light-1.5-en"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-en"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
 case = "launcher-dark-1.0-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2816,51 +3012,6 @@ cause = "the launcher draws a text caret in its search entry that the cosmic-com
 issue = 740
 
 [[difference]]
-case = "launcher-dark-1.5-en"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "launcher-dark-1.5-de"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-de"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
 case = "layout-float-top-visible-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2887,36 +3038,6 @@ issue = 739
 
 [[difference]]
 case = "layout-float-top-visible-1o-1.5-land"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.0-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.0-land"
-cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
-issue = 737
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.5-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.5-land"
 cause = "cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none"
 issue = 737
 
@@ -2941,26 +3062,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, inpu
 issue = 739
 
 [[difference]]
-case = "layout-bar-bottom-2o-1.0-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.5-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-top-none-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2977,26 +3078,6 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.0-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.5-land"
-cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.5-land"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
