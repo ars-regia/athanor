@@ -113,6 +113,9 @@ pub struct State {
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
+    /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
+    /// none while the seat has its own (`with_keymap_of`).
+    pub virtual_keymap: Option<crate::input::VirtualKeymap>,
     /// The buttons each virtual pointer holds, whose release goes on while the session is
     /// locked; a pointer's entry goes with it. Only evdev's button codes are counted, so an entry
     /// holds at most 512.
@@ -271,6 +274,7 @@ impl State {
             last_input_serial: None,
             kept_keys: Vec::new(),
             virtual_modifiers: HashMap::new(),
+            virtual_keymap: None,
             virtual_buttons: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,

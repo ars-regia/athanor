@@ -104,10 +104,12 @@ on an offered global without a row (`os9_every_global_is_classified`). `ext_work
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
 plan): the bar's line carries the workspaces, and the output manager is the control center's.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
-takes the hardware's path, so the compositor's keys and the layer focus apply to it: a virtual
-keyboard's keymap applies to its own keys only, the seat's returning after each; its modifiers
-apply to its own keys as well; a virtual pointer stays on the outputs, its absolute motion
-spanning the output it names or all of them. While the session is locked, or paused on another
+takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
+keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
+keymap is sent to the clients at its first key after another keyboard's, so a held virtual key
+repeats under it, and a hardware key gives the seat its own keymap back first. A virtual
+keyboard's modifiers apply to its own keys; a virtual pointer stays on the outputs, its absolute
+motion spanning the output it names or all of them. While the session is locked, or paused on another
 virtual terminal, a virtual key press reaches no client (open question 12), and neither does a virtual pointer's motion, button press
 or scrolling, nor a virtual keyboard's keymap; the release of a key or button held from before
 the lock still goes on, so that nothing stays held after unlock. The hardware keyboard and

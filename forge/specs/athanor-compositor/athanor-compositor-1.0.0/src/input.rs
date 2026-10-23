@@ -13,7 +13,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
@@ -23,7 +23,7 @@ use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardSpecialEvent,
 };
 use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHandler};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
@@ -60,6 +60,10 @@ impl State {
         // session locked is let go, or a window would see it held after unlock.
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
+        }
+        // A hardware key is read under the seat's keymap, which its clients are sent first.
+        if source == KeyboardSource::Physical {
+            self.restore_seat_keymap();
         }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
@@ -229,58 +233,128 @@ impl State {
             .collect()
     }
 
-    /// Runs `input` under `device`'s keymap and modifiers, then gives the seat back its own: what
-    /// a virtual keyboard uploads applies to its own keys only, never to the hardware's, and the
-    /// clients are sent the seat's keymap again.
+    /// Runs `input` under `device`'s keymap and modifiers. The keymap follows the keyboard that
+    /// sent the last key, as wlroots has it: a virtual keyboard's own keymap is loaded, and sent
+    /// to the clients, at its first key after another keyboard's, and stays until a key of
+    /// another keyboard, so that a client repeating a held key reads it under the keymap it was
+    /// pressed with; what a virtual keyboard uploads never reads a hardware key. A virtual
+    /// keyboard with no keymap of its own types under the seat's, and its modifiers apply to its
+    /// own keys only, the seat's coming back after each.
     fn with_keymap_of(&mut self, device: &VirtualKeyboardDevice, input: impl FnOnce(&mut Self)) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let seat_keymap = keyboard.with_xkb_state(self, |context| keymap_text(context.xkb()));
-        let own = device.keymap().filter(|keymap| **keymap != *seat_keymap);
+        if !self.load_keymap_of(device, &keyboard) {
+            return;
+        }
         let modifiers = self.virtual_modifiers.get(device).copied();
-        if own.is_none() && modifiers.is_none() {
-            return input(self);
-        }
-        let saved = keyboard.modifier_state().serialized;
-        if let Some(keymap) = &own {
-            if let Err(error) = keyboard.set_keymap_from_string(self, keymap.to_string()) {
-                tracing::warn!(
-                    ?error,
-                    "a virtual keyboard's keymap did not load: its key is dropped"
-                );
-                return;
-            }
-        }
+        let seat_modifiers = (self.virtual_keymap.is_none() && modifiers.is_some())
+            .then(|| keyboard.modifier_state().serialized);
         if let Some([depressed, latched, locked, group]) = modifiers {
             keyboard.with_xkb_state(self, |mut context| {
                 context.set_modifier_mask(depressed, latched, locked, group)
             });
         }
         input(self);
-        if own.is_some() {
-            if let Err(error) = keyboard.set_keymap_from_string(self, seat_keymap) {
-                // The seat's configuration, as `State::new` gives it, so that the seat never
-                // stays on a client's keymap.
-                tracing::error!(
-                    ?error,
-                    "the seat's keymap did not load again: back to the default"
-                );
-                if let Err(error) = keyboard.set_xkb_config(self, XkbConfig::default()) {
-                    tracing::error!(?error, "the default keymap did not load");
-                }
+        if let Some(saved) = seat_modifiers {
+            keyboard.with_xkb_state(self, |mut context| {
+                context.set_modifier_mask(
+                    saved.depressed,
+                    saved.latched,
+                    saved.locked,
+                    saved.layout_effective,
+                )
+            });
+        }
+    }
+
+    /// Gives the seat `device`'s keymap unless it has it already, or the seat's own when
+    /// `device` has none of its own; false when `device`'s keymap does not load, and its key is
+    /// dropped.
+    fn load_keymap_of(
+        &mut self,
+        device: &VirtualKeyboardDevice,
+        keyboard: &KeyboardHandle<Self>,
+    ) -> bool {
+        let Some(keymap) = device.keymap() else {
+            self.restore_seat_keymap();
+            return true;
+        };
+        let current = self.virtual_keymap.as_ref();
+        if current.is_some_and(|current| current.device == *device && current.keymap == keymap) {
+            return true;
+        }
+        let (seat_keymap, seat_modifiers) = match current {
+            Some(current) => (current.seat_keymap.clone(), current.seat_modifiers),
+            None => {
+                let saved = keyboard.modifier_state().serialized;
+                (
+                    keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                    [
+                        saved.depressed,
+                        saved.latched,
+                        saved.locked,
+                        saved.layout_effective,
+                    ],
+                )
+            }
+        };
+        if *keymap == *seat_keymap {
+            self.restore_seat_keymap();
+            return true;
+        }
+        if let Err(error) = keyboard.set_keymap_from_string(self, keymap.to_string()) {
+            tracing::warn!(
+                ?error,
+                "a virtual keyboard's keymap did not load: its key is dropped"
+            );
+            return false;
+        }
+        self.virtual_keymap = Some(VirtualKeymap {
+            device: device.clone(),
+            keymap,
+            seat_keymap,
+            seat_modifiers,
+        });
+        true
+    }
+
+    /// Gives the seat its own keymap and modifiers back when a virtual keyboard's is current:
+    /// before a hardware key, before a key of a virtual keyboard with no keymap of its own, and
+    /// when that virtual keyboard goes.
+    fn restore_seat_keymap(&mut self) {
+        let (Some(current), Some(keyboard)) =
+            (self.virtual_keymap.take(), self.seat.get_keyboard())
+        else {
+            return;
+        };
+        if let Err(error) = keyboard.set_keymap_from_string(self, current.seat_keymap) {
+            // The seat's configuration, as `State::new` gives it, so that the seat never stays
+            // on a client's keymap.
+            tracing::error!(
+                ?error,
+                "the seat's keymap did not load again: back to the default"
+            );
+            if let Err(error) = keyboard.set_xkb_config(self, XkbConfig::default()) {
+                tracing::error!(?error, "the default keymap did not load");
             }
         }
         // A new keymap starts with no modifier locked: the seat's Caps Lock and layout return.
+        let [depressed, latched, locked, layout] = current.seat_modifiers;
         keyboard.with_xkb_state(self, |mut context| {
-            context.set_modifier_mask(
-                saved.depressed,
-                saved.latched,
-                saved.locked,
-                saved.layout_effective,
-            )
+            context.set_modifier_mask(depressed, latched, locked, layout)
         });
     }
+}
+
+/// A virtual keyboard's keymap the seat has in place of its own (`State::with_keymap_of`).
+pub struct VirtualKeymap {
+    device: VirtualKeyboardDevice,
+    keymap: Arc<str>,
+    /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
+    /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
+    seat_keymap: String,
+    seat_modifiers: [u32; 4],
 }
 
 /// The keymap of `xkb`, as the clients are sent it.
@@ -300,8 +374,8 @@ impl VirtualKeyboardHandler for State {
                 let (code, key_state, time) =
                     (event.key_code(), event.state(), Event::time(&event));
                 // While locked a press is dropped before anything, and a release lets go of a
-                // key the seat holds under the seat's keymap: no client is sent this client's
-                // keymap, and the idle timers keep running.
+                // key the seat holds under the keymap the seat has: no client is sent this
+                // client's keymap, and the idle timers keep running.
                 if self.drops_virtual_input() {
                     if key_state == KeyState::Released {
                         self.key_input(code, key_state, time, device.source());
@@ -326,6 +400,13 @@ impl VirtualKeyboardHandler for State {
             }
             InputEvent::DeviceRemoved { device } => {
                 self.virtual_modifiers.remove(&device);
+                if self
+                    .virtual_keymap
+                    .as_ref()
+                    .is_some_and(|current| current.device == device)
+                {
+                    self.restore_seat_keymap();
+                }
             }
             _ => {}
         }

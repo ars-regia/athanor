@@ -158,6 +158,10 @@ struct Client {
     entered_keys: Vec<u32>,
     /// The keymaps the client was sent.
     keymaps: usize,
+    /// The size of the last keymap the client was sent, which tells two keymaps apart.
+    keymap_size: u32,
+    /// The size of the keymap each key of `keys` was read under.
+    keys_under: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -335,12 +339,18 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
-            } => client.keys.push(key),
+            } => {
+                client.keys.push(key);
+                client.keys_under.push(client.keymap_size);
+            }
             wl_keyboard::Event::Enter { keys, .. } => {
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
             }
-            wl_keyboard::Event::Keymap { .. } => client.keymaps += 1,
+            wl_keyboard::Event::Keymap { size, .. } => {
+                client.keymaps += 1;
+                client.keymap_size = size;
+            }
             _ => {}
         }
     }
@@ -3347,8 +3357,8 @@ fn seat_keymap(state: &mut State) -> String {
 /// typed with a keymap of its own, takes the keyboard back from an exclusive top surface and asks
 /// for the lock, as `task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock` does with a
 /// hardware key; the surface sees Super go down, never the Escape. The keymap applies to its own
-/// keys only: the seat's is the same afterwards, and the same codes on the hardware keyboard, A
-/// and S, ask for nothing.
+/// keys only: the same codes on the hardware keyboard, A and S, ask for nothing, and the seat's
+/// keymap is its own again.
 #[test]
 fn os9_a_virtual_key_takes_the_hardware_path() {
     let mut run = Running::start(None);
@@ -3398,15 +3408,15 @@ fn os9_a_virtual_key_takes_the_hardware_path() {
         [31],
         "the surface saw Super go down, never the Escape"
     );
-    assert_eq!(
-        seat_keymap(&mut run.state),
-        keymap,
-        "the seat's keymap is the seat's again"
-    );
     chord(&mut run.state, &[31, 30]);
     assert_eq!(
         run.state.lock_requests, 1,
         "S and A on the hardware keyboard are S and A"
+    );
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "a hardware key gives the seat its keymap back"
     );
 
     drop(steps);
@@ -3414,6 +3424,116 @@ fn os9_a_virtual_key_takes_the_hardware_path() {
         .join()
         .expect("the shell's thread")
         .expect("the shell's client");
+    run.stop();
+}
+
+/// The keymap follows the keyboard that sent the last key, as wlroots has it (OS9 task 6 audit):
+/// from a virtual key's press to its release the focused client has the virtual keyboard's
+/// keymap, so that its own key repeat reads the held key under it; a second virtual key sends no
+/// keymap again; a hardware key after them is sent the seat's keymap first.
+#[test]
+fn os9_the_keymap_follows_the_last_keyboard() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    local.pump(&mut run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = local.id.clone().expect("a client the fixture inserted");
+    let ours = |state: &State| {
+        state
+            .space
+            .elements()
+            .find(|w| {
+                w.toplevel()
+                    .and_then(|t| t.wl_surface().client())
+                    .map(|c| c.id())
+                    == Some(id.clone())
+            })
+            .cloned()
+    };
+    local.pump(&mut run, "the window is mapped", |_, state| {
+        ours(state).is_some()
+    });
+    let window = ours(&run.state).expect("the window");
+    run.state.focus(&window);
+    local.pump(&mut run, "the window has the keyboard", |client, state| {
+        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
+        client.keymaps > 0 && focus.and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+    let seat_size = local.client.keymap_size;
+    let keymap = seat_keymap(&mut run.state);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    let keymaps = local.client.keymaps;
+
+    // Escape, in the virtual keyboard's keymap, held.
+    typist.key(&mut local, &mut run, 30, true);
+    let own_size = local.client.keymap_size;
+    assert_ne!(own_size, seat_size, "the client has the virtual keymap");
+    assert_eq!(
+        local.client.keys_under,
+        [own_size],
+        "the press is read under it"
+    );
+    assert_ne!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat keeps it while the key is held"
+    );
+    typist.key(&mut local, &mut run, 30, false);
+    typist.key(&mut local, &mut run, 31, true);
+    typist.key(&mut local, &mut run, 31, false);
+    assert_eq!(
+        local.client.keymaps,
+        keymaps + 1,
+        "two virtual keys in a row send the keymap once"
+    );
+
+    // A, on the hardware keyboard.
+    chord(&mut run.state, &[30]);
+    local.roundtrip(&mut run);
+    assert_eq!(
+        local.client.keys_under,
+        [own_size, own_size, seat_size],
+        "a hardware key is read under the seat's keymap, sent before it"
+    );
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat has its keymap back"
+    );
+
+    // A virtual keyboard that goes while the seat has its keymap gives the seat its own back.
+    let mut leaving = Local::connect(&mut run, None);
+    let gone = VirtualKeyboard::new(&mut leaving, &mut run, Some(SWAPPED_KEYMAP));
+    gone.chord(&mut leaving, &mut run, &[30]);
+    assert!(
+        run.state.virtual_keymap.is_some(),
+        "the seat has the leaving keyboard's keymap"
+    );
+    drop(gone);
+    drop(leaving);
+    run.until("the gone keyboard's keymap goes with it", |state| {
+        state.virtual_keymap.is_none()
+    });
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat has its keymap back once more"
+    );
     run.stop();
 }
 
