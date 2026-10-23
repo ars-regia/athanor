@@ -142,7 +142,8 @@ class EvidenceBundle(Tool):
 
     def test_the_summary_names_what_the_approval_covers(self):
         (self.artifacts / "promotion.json").write_text(json.dumps({
-            "run_id": 412, "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
+            "run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+            "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
             "skipped": [{"name": "athanor-system-nvidia-legacy", "reason": "not promoted before 0.9"}],
             "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64,
             "overrides": ["athanor-system-nvidia"], "builder_content_hash": "b" * 64}))
@@ -156,9 +157,34 @@ class EvidenceBundle(Tool):
                      "Installer ISO (athanor-iso:stable after the system images): `sha256:" + "c" * 64 + "`"):
             self.assertIn(text, r.stdout)
 
+    def plan(self, **fields):
+        plan = {"run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+                "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
+                "skipped": [], "overrides": [], "builder_content_hash": "b" * 64,
+                "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64}
+        plan.update(fields)
+        (self.artifacts / "promotion.json").write_text(json.dumps({k: v for k, v in plan.items() if v is not None}))
+        (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps({
+            "gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-09T10:00:00Z"}))
+
+    def test_summary_names_the_version_and_commit(self):
+        self.plan()
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Version: 43.20261024.5123 (commit " + "f" * 40 + ")", r.stdout)
+
+    def test_summary_refuses_a_plan_without_a_version(self):
+        for field in ("version", "revision"):
+            with self.subTest(field=field):
+                self.plan(**{field: None})
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+
     def test_the_summary_refuses_a_missing_field(self):
         # A plan without overrides would read "Hardware override: none" in the approval.
-        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64,
+        plan = {"run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+                "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64,
                 "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64}
         evidence = {"gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "t"}
         for name, document, field in (("promotion.json", plan, "overrides"),
