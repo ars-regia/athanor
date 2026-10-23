@@ -19,8 +19,9 @@ cargo clippy --manifest-path system/athanor-toolkit/gallery/Cargo.toml --locked 
 
 # --config is explicit: cargo-deny would otherwise look for a deny.toml next to the
 # manifest and fall back to its defaults.
-# The toolkit's gallery has a workspace and a lockfile of its own, so it is audited beside the root's.
+# The toolkit's gallery and fuzz/ have a workspace and a lockfile of their own, so they are audited
+# beside the root's.
 : > "$out/deny.log"
-for manifest in Cargo.toml system/athanor-toolkit/gallery/Cargo.toml; do
+for manifest in Cargo.toml system/athanor-toolkit/gallery/Cargo.toml fuzz/Cargo.toml; do
     cargo deny --manifest-path "$manifest" --config deny.toml check advisories 2>&1 | tee -a "$out/deny.log"
 done
