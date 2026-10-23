@@ -42,8 +42,17 @@ class GateShapeTest(unittest.TestCase):
         self.assertEqual(gate["if"], "${{ always() }}")
         self.assertNotIn("name", gate)
 
+    def test_check_jobs_always_run_and_wait_for_nothing(self):
+        # gate.py treats `skipped` as a pass: a check job with an `if:` or a `needs:` could be skipped.
+        checks = [name for name in self.jobs if name.startswith("check-")]
+        self.assertTrue(checks)
+        for name in checks:
+            with self.subTest(job=name):
+                self.assertNotIn("if", self.jobs[name])
+                self.assertNotIn("needs", self.jobs[name])
+
     def test_every_build_job_is_named_after_its_area(self):
-        build_jobs = set(self.jobs) - {"changes", "check", "gate"}
+        build_jobs = set(self.jobs) - {"changes", "check-static", "check-system", "check-other", "check-rust", "gate"}
         self.assertLessEqual(build_jobs, set(changes.AREAS))
         for name in build_jobs:
             with self.subTest(job=name):
