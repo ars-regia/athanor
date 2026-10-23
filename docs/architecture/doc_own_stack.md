@@ -334,9 +334,11 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
-   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's (the toolkit chooser
-   and the galleries, which have their own gate, OS8), the 243 of today's 18 surfaces and layouts and
-   the 24 of the lock screen and the polkit agent once installed, against cosmic-comp's goldens;
+   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's (OS10 compares those
+   with their GTK twins): the 243 of today's 18 surfaces and layouts, the greeter's 12 included, which
+   the report leaves out while the greeter runs on cosmic-comp in greetd's session (`doc_session.md`
+   SN12; section 6, step 5), and the 24 of the lock screen and the polkit agent once installed,
+   against cosmic-comp's goldens;
    each difference has its cause and its issue in `athanor-differences.toml`, and a second set of
    goldens is recorded only when cosmic-comp leaves the image (OS9 plan, questions 1 and 2). The
    eight causes milestone C1 listed are tied to cases there (C1 results, section 3).
