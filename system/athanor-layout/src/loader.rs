@@ -114,9 +114,23 @@ impl Source {
         }
     }
 
+    /// Arms `arm` on every directory whose changes can change the layout, then reads the
+    /// layout. In this order a write made while a program starts is either in the layout
+    /// read or reported by a watch, never lost between the two. `arm` returns `None` for a
+    /// directory it cannot watch.
+    pub fn watch<W>(&self, arm: impl FnMut(&Path) -> Option<W>) -> (Layout, Vec<W>) {
+        let watches = self
+            .watched()
+            .iter()
+            .map(PathBuf::as_path)
+            .filter_map(arm)
+            .collect();
+        (self.layout(), watches)
+    }
+
     /// The directories whose changes can change the layout. The user's directory also
     /// holds the favourites file.
-    pub fn watched(&self) -> Vec<PathBuf> {
+    fn watched(&self) -> Vec<PathBuf> {
         match self {
             Source::Live(paths) => {
                 let mut dirs = vec![paths.vendor_dir.clone(), paths.policy_dir.clone()];
@@ -280,6 +294,26 @@ mod tests {
             Source::Vendor(paths.vendor_dir.clone()).watched(),
             vec![paths.vendor_dir]
         );
+    }
+
+    #[test]
+    fn a_write_while_the_watches_are_armed_is_in_the_layout_read() {
+        // The bar's first-session pick writes the user's file while the dock starts: a
+        // write that lands once a watch is armed must be in the layout `watch` returns,
+        // or no later event brings it.
+        let paths = paths("source-watch-order");
+        let user_dir = paths.user_file.parent().expect("parent").to_path_buf();
+        let (layout, watches) = Source::Live(paths.clone()).watch(|dir| {
+            if dir == user_dir {
+                write(
+                    &paths.user_file,
+                    "schema = 1\n[output.\"*\"]\npreset = \"bar\"\n",
+                );
+            }
+            Some(dir.to_path_buf())
+        });
+        assert_eq!(layout, Preset::Bar.factory());
+        assert_eq!(watches, Source::Live(paths).watched());
     }
 
     #[test]
