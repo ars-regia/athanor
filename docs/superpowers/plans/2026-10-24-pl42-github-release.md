@@ -120,7 +120,10 @@ at the end.
    ARTIFACTS_DIR`, followed by the commands that verify the bundle. The full `summary` cannot be
    used: it prints `notes_sha256` from `release.json`, which does not exist yet when `plan` builds
    the notes, and the notes would hash themselves. `--promotion` reads only `promotion.json` and
-   the evidence, so `plan` and `publish` build the same bytes from the same bundle. No
+   the evidence, so `plan` and `publish` build the same bytes from the same bundle. The verify
+   commands name the tag the asset is downloaded from (`gh release download <tag>`), so the
+   fallback's notes of decision 7 are built with `promoted-<run_id>`, and its `notes_sha256`
+   is the hash of those notes, not of the `v*` notes. No
    notes file is needed, so an hourly promotion (UD5) never waits for one. Its Release is marked
    `--latest=false`.
 6. **One asset per promotion run:** `evidence-<run_id>-<promotion run id>.tar`. Both ids come
@@ -129,8 +132,9 @@ at the end.
    directory as it is, including `release.json`, `bundle.sha256` and
    `bundle.sha256.sigstore.json`, so `evidence-bundle.sh verify-dir` works on the extracted
    tree. The archive is deterministic:
-   `tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu`. A re-run
-   produces the same bytes.
+   `tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --mode='u=rwX,go=rX'
+   --format=gnu`. A re-run produces the same bytes, and so does a local recovery under
+   another umask, since `--mode` fixes the file modes.
 7. **Idempotence and second promotions** (ADR-0131 decision 6). `release_of`, in both
    subcommands, reads only published Releases. GitHub lists drafts only to a token with push
    access, so the `plan` job (`contents: read`) never sees one, and a choice that read drafts
@@ -158,7 +162,7 @@ at the end.
    | A draft that holds no `evidence-*` asset of another build run, with another title or target (a stray draft) | Stops and names the draft and the recovery below |
    | A published Release without this asset (a second promotion of the same build) | Uploads the asset |
    | A published Release with this asset, same SHA-256 (a re-run) | Does nothing and succeeds |
-   | This asset with a different SHA-256 | Stops; it never uses `--clobber` |
+   | This asset with a different SHA-256 | Stops, naming the recovery below; it never uses `--clobber` |
    | The tag already points at another commit | Stops |
 
    **Recovery from a stray draft** (destructive, the maintainer only; never for a draft that
@@ -167,6 +171,18 @@ at the end.
    `gh run rerun <promotion run> --job <job id> -R ars-regia/athanor`. A new `plan` is not a
    recovery: once `promote` has moved `:stable`, a new plan finds nothing to promote
    (`scripts/ci/promotion-record.sh`).
+
+   **Recovery from this asset with a different SHA-256** (destructive, the maintainer only).
+   The asset name carries the promotion run id, so only this same promotion run can have
+   uploaded it. If the Release is a draft that holds only this run's asset
+   (`gh release view <tag> -R ars-regia/athanor --json isDraft,assets`), the maintainer
+   deletes that draft with `gh release delete <tag> -R ars-regia/athanor`, without
+   `--cleanup-tag`, and re-runs the `github-release` job. A published asset is never
+   replaced.
+
+   The one exception to "never delete another build's draft or Release" is the recovery from
+   a mistaken `v*` tag on the wrong commit (Task 3, Step 4), which deletes the Release at that
+   tag before the tag itself.
 
    A second build run of a commit that carries a `v0.x` tag, such as the nightly rebuild of
    PQ18, does not join the `v*` Release. A `v*` Release takes assets only from the build run of
@@ -181,7 +197,10 @@ at the end.
    - `publish` does not recompute the whole choice: once `promote` has moved `:stable`, a choice
      that differs could never be published, because a re-run would refuse again and a new plan
      finds nothing to promote. It checks that the approved choice in `release.json` still
-     holds, and refuses with a message naming the field otherwise:
+     holds, and refuses with a message naming the field otherwise. Whenever the approved tag is
+     a `v*` tag, its checks below run first, before the fallback is considered: a `v*` tag that
+     fails them fails closed, naming the tag, even when another build's asset sits on its
+     Release (ADR-0131 decision 7).
      - for a `v*` tag: the tag still points at `revision`, `verification.verified` is still true
        and the tagger email still equals `MAINTAINER_TAG_EMAIL`;
      - for a `promoted-*` tag, chosen or the fallback: the tag is absent or points at `revision`;
@@ -324,6 +343,9 @@ at the end.
     - `test_a_published_version_release_of_another_build_sends_the_bundle_to_the_fallback`
     - `test_the_fallback_is_named_in_the_summary_with_the_other_run`
     - `test_a_promotion_tag_choice_has_no_fallback`
+    - `test_an_unverified_version_tag_with_another_builds_draft_fails_closed_and_names_the_tag`. It asserts exit status 1, the tag in stderr, and no `create`, `upload` or `edit` in the log.
+    - `test_the_fallback_notes_name_the_promotion_tag`
+    - `test_trees_with_different_modes_pack_to_identical_bytes`
     - `test_the_release_is_created_as_a_draft_then_published_with_its_latest_flag`
     - `test_a_promotion_release_is_published_with_latest_false`
     - `test_a_draft_without_the_asset_is_completed`
@@ -367,6 +389,7 @@ decision 8). The maintainer applies the settings; the agent only edits the files
   - `gh variable set MAINTAINER_TAG_EMAIL -R ars-regia/athanor`, which reads the value from the prompt.
 - [ ] **Step 4: Document the recovery from a mistaken `v*` tag** in `docs/operations/github-settings.md` section 9 (exact-match script), and commit it with Step 2. `version-tags-immutable` has no bypass actor, so a wrong `v0.x.y` (lightweight, unsigned, or on the wrong commit) blocks every `plan` of that commit and cannot be removed. The maintainer, from their own machine:
   - sets `"enforcement": "disabled"` on `version-tags-immutable` in a local, uncommitted `rulesets.json`, runs `python3 scripts/github-settings/ghsettings.py apply` (one `PUT …/rulesets/<id>`, no `DESTRUCTIVE` line), then `apply --yes`;
+  - if a Release exists at the tag (a valid tag on the wrong commit gets one published), deletes it first with `gh release delete v0.x.y -R ars-regia/athanor`. This is the one stated exception to "never delete another build's draft or Release" (decision 7);
   - deletes the tag with `git push origin --delete v0.x.y`;
   - restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes` again, then `diff`, which must print no drift for `rulesets`;
   - pushes the corrected signed tag, which `version-tags-create` lets the admin create.
@@ -431,12 +454,14 @@ given as a command to paste:
 - [ ] For 0.9, after the checks above passed on an ordinary promotion: the maintainer's signed `v0.9.0` is on the promoted commit before the promotion is dispatched (ADR-0131 decision 5); the plan summary names `v0.9.0` and the notes hash; the Release shows the notes of Task 5 and is marked latest.
 
 **Recovery for a promotion whose `publish` cannot run in the job** (the maintainer, from their own
-machine and their own `gh` login, in a checkout of the commit the promotion was dispatched on, so
-the notes hash the same):
+machine and their own `gh` login). It skips `needs: [iso]`, and the maintainer sets the run ids the
+script checks, so it first proves the promotion itself succeeded:
 
+- `gh run view <promotion run> -R ars-regia/athanor --json jobs,headBranch,headSha`: the jobs `promote` and `iso` are `success` and `headBranch` is `iso-v0`; otherwise stop, the promotion was rejected or failed and is not published;
+- check out `headSha` of that run, so the notes hash the same as in the job;
 - `gh run download <promotion run> -n promotion-<run_id> -D /var/tmp/pl42-approved -R ars-regia/athanor`;
 - `bash system/evidence-bundle.sh verify-dir /var/tmp/pl42-approved /var/tmp/pl42-approved`, which needs `cosign`;
-- `GITHUB_REPOSITORY=ars-regia/athanor GITHUB_SERVER_URL=https://github.com GITHUB_RUN_ID=<promotion run> RUN_ID=<run_id> MAINTAINER_TAG_EMAIL=<the variable's value> bash system/github-release.sh publish /var/tmp/pl42-approved`. These are the names of the `publish` interface in Task 2; the implementer checks them against the script and corrects this line if they differ.
+- `GITHUB_REPOSITORY=ars-regia/athanor GITHUB_SERVER_URL=https://github.com GITHUB_RUN_ID=<the id of the promotion run viewed above> RUN_ID=<run_id> MAINTAINER_TAG_EMAIL=<the variable's value> bash system/github-release.sh publish /var/tmp/pl42-approved`. These are the names of the `publish` interface in Task 2; the implementer checks them against the script and corrects this line if they differ.
 
 ## Decisions (ADR-0131)
 
