@@ -5162,3 +5162,28 @@ fn os9_a_forwarded_key_carries_the_modifiers_the_grab_saw() {
     );
     run.stop();
 }
+
+/// The input method's edits are kept only while it serves a text input: a string it sends while
+/// none is active is dropped, and a field enabled afterwards never receives it.
+#[test]
+fn os9_an_edit_sent_with_no_active_field_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let field = text_input(&mut window, &mut run);
+    method.method.send("commit_string", vec![text("x")]);
+    ime.roundtrip(&mut run);
+    enable(&field, &mut window, &mut run, "caf");
+    ime.pump(&mut run, "the input method is activated", |_, _| {
+        method.method.names_after(0).contains(&"activate")
+    });
+    window.roundtrip(&mut run);
+    let before = field.events().len();
+    method.commit(&mut ime, &mut run);
+    window.pump(&mut run, "the field is done", |_, _| {
+        field.names_after(before).contains(&"done")
+    });
+    assert_eq!(field.names_after(before), ["done"]);
+    run.stop();
+}

@@ -127,6 +127,9 @@ impl State {
         if composing.focus == surface {
             return;
         }
+        if let Some(method) = &mut composing.method {
+            method.edits = Edits::default();
+        }
         if composing.active.take().is_some() {
             if let Some(method) = &mut composing.method {
                 method.deactivate();
@@ -276,9 +279,11 @@ impl Composing {
         self.method.as_ref().is_some_and(|m| m.object == *object)
     }
 
-    /// The pending edits of `object`, if it is the seat's input method.
+    /// The pending edits of `object`, if it is the seat's input method and serves a text
+    /// input: with none active, what it sends is meant for no one and is dropped.
     fn edits(&mut self, object: &ZwpInputMethodV2) -> Option<&mut Edits> {
         let method = self.method.as_mut().filter(|m| m.object == *object)?;
+        self.active.as_ref()?;
         Some(&mut method.edits)
     }
 }
@@ -527,6 +532,7 @@ fn commit(composing: &mut Composing, resource: &ZwpTextInputV3, pending: Pending
     match pending.enable {
         Some(true) => {
             composing.active = Some(resource.clone());
+            method.edits = Edits::default();
             method.object.activate();
         }
         Some(false) => {
