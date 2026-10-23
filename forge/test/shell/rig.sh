@@ -62,10 +62,15 @@
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)|toolkit-gallery (the same)|gtk-gallery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
+#   rig.sh golden-report [surface...]   RIG_COMPOSITOR=athanor only: every case of the surfaces (all but the toolkit's, and the layout cases) under
+#                           athanor-compositor against cosmic-comp's goldens, into <out>/golden-report.md with each difference's cause and issue;
+#                           fails on a difference without an explanation in golden/athanor-differences.toml, and on an explanation without a difference
+#                           (run build-greeter, build-layout, build-bar, build-dock, build-launcher, build-shelld and build-compositor first)
 #
 # RIG_COMPOSITOR=athanor runs a scene under athanor-compositor on its headless backend, with
 # RIG_HEADLESS_OUTPUTS (default 1) outputs side by side in each capture; `surface layout` sets
-# it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors.
+# it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors. Under it every capture
+# client runs as its unit (bar_session.py --unit, in-unit.sh), for the compositor's allow-list.
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
@@ -173,6 +178,20 @@ stage_greeter_icons() {
 # container's /etc/passwd, so the default card is Rig's.
 with_account=(bash -c 'echo "rig:x:1000:1000:Rig:/home/rig:/bin/bash" >> /etc/passwd && exec "$@"' with-account)
 
+# Under athanor-compositor a client runs as its unit (OS4): the flag of bar_session.py, and
+# unit_words <binary> [args...], which sets UNIT_CMD to the command that runs a binary the scene
+# starts itself.
+session_unit=()
+if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+    session_unit=(--unit)
+fi
+unit_words() {
+    UNIT_CMD=("$@")
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        UNIT_CMD=(/repo/forge/test/shell/in-unit.sh "${1##*/}.service" "$@")
+    fi
+}
+
 # Each capture_<surface> runs every case of its surface and appends the tags to $tags.
 capture_greeter() {
     # Test-only catalogs: German for length, the pseudo-language for right-to-left.
@@ -193,7 +212,7 @@ capture_greeter() {
         in_rig "$(rig_image)" "${with_account[@]}" env ATHANOR_GREETER_VARIANT="$variant" RIG_LOCALE="$locale" \
             RIG_DATA_OVERLAY=/out/greeter-icons "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 "$scale" "$tag" -- \
-            python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui
+            python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui "${session_unit[@]}"
     done < <(python3 -B "$rig/cases.py" greeter)
 }
 
@@ -250,7 +269,7 @@ capture_layout() {
         in_rig "$(rig_image)" env "${compositor[@]}" RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY="$bar_overlay" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh "$width" "$height" "$scale" "$tag" -- \
-            python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock
+            python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock "${session_unit[@]}"
     done < <(python3 -B "$rig/cases.py" layout --outputs "${RIG_LAYOUT_OUTPUTS:-1}")
 }
 
@@ -270,6 +289,7 @@ stage_chooser_catalogs() {
 # ATHANOR_CHOOSER_BIN runs another chooser in the GTK chooser's scenes, athanor-toolkit's
 # (doc_own_stack.md, T1 task 4); its captures then differ from the GTK goldens by design.
 capture_chooser() {
+    unit_words "${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}"
     stage_chooser_catalogs
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
@@ -281,7 +301,7 @@ capture_chooser() {
         in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
-            "${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}"
+            "${UNIT_CMD[@]}"
     done < <(python3 -B "$rig/cases.py" chooser)
 }
 
@@ -368,6 +388,7 @@ capture_bar() { # capture_bar <surface>
     # update so Restart to update and every row of the sheet show.
     bar-shield) preset=bar panel=bottom dock=- open=shield session+=(--trust-state downloaded) ;;
     esac
+    session+=("${session_unit[@]}")
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
         mkdir -p /out/locale/bar
@@ -413,7 +434,7 @@ capture_dock() {
         in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
-            python3 /repo/forge/test/shell/bar_session.py --client "$dock_bin" --window
+            python3 /repo/forge/test/shell/bar_session.py --client "$dock_bin" --window "${session_unit[@]}"
     done < <(python3 -B "$rig/cases.py" dock)
 }
 
@@ -442,8 +463,56 @@ capture_launcher() {
             ATHANOR_LAUNCHER_SHOW="cc window" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             bash -c "python3 /repo/forge/test/shell/launcher_fixtures.py \
-                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --log"
+                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --log ${session_unit[*]}"
     done < <(python3 -B "$rig/cases.py" launcher)
+}
+
+capture_surface() { # capture_surface <surface>: every case of it, its tags appended to $tags
+    case "$1" in
+    greeter) capture_greeter ;;
+    layout) capture_layout ;;
+    chooser) capture_chooser ;;
+    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$1" ;;
+    dock) capture_dock ;;
+    launcher) capture_launcher ;;
+    toolkit-chooser) capture_toolkit_chooser ;;
+    toolkit-gallery | gtk-gallery) capture_gallery "$1" ;;
+    *)
+        echo "rig.sh: unknown surface '$1'" >&2
+        exit 2
+        ;;
+    esac
+}
+
+# GTK keeps exporting the tree of a surface the compositor closed, so an atspi walk alone passes
+# a client that is not on screen; the compositor's log says when it closed a surface (src/layer.rs).
+# A missing or empty log fails too: grep would find nothing in it.
+atspi_not_closed() { # atspi_not_closed <surface> <scene tag>: only under athanor-compositor
+    local log="$out/$2-compositor.log"
+    if [ "${RIG_COMPOSITOR:-}" != athanor ]; then
+        return 0
+    fi
+    if [ ! -s "$log" ]; then
+        echo "atspi $1: no compositor log at $log" >&2
+        exit 1
+    fi
+    if grep -q "not granted them was closed" "$log"; then
+        echo "atspi $1: athanor-compositor closed the surface of $1; see $log" >&2
+        exit 1
+    fi
+}
+
+# The binaries a surface's cases run, built by the recipes the usage names.
+require_for() { # require_for <surface>
+    case "$1" in
+    greeter) require athanor-greeter-ui build-greeter ;;
+    chooser) require athanor-layout-chooser build-layout ;;
+    layout) require athanor-layout-chooser build-layout ;;
+    bar-tray) require athanor-bar build-bar && require athanor-shelld build-shelld ;;
+    dock) require athanor-dock build-dock ;;
+    launcher) require athanor-launcher build-launcher ;;
+    bar*) require athanor-bar build-bar ;;
+    esac
 }
 
 case "${1:-}" in
@@ -990,7 +1059,8 @@ atspi)
             ATSPI_REQUIRED_NAME="${required:-System image verified}" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui ${session_unit[*]}"
+        atspi_not_closed greeter atspi-greeter
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
@@ -999,12 +1069,14 @@ atspi)
         # all the reference holds: the GTK chooser's, recorded (OS8).
         # To record it again, copy <out>/atspi-chooser[-it].json of a GTK run into golden/atspi/.
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
+        unit_words "$bin"
         transcript=atspi-chooser${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
-            bash -c "$enable && exec $bin"
+            bash -c "$enable && exec $(printf '%q ' "${UNIT_CMD[@]}")"
+        atspi_not_closed chooser atspi-chooser
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1054,31 +1126,22 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
-        # GTK keeps exporting the tree of a surface the compositor closed, so the walk alone
-        # passes a bar that is not on screen; the compositor's log says when it closed one
-        # (src/layer.rs). A missing or empty log fails too: grep would find nothing in it.
-        if [ -n "$unit" ]; then
-            log="$out/atspi-bar-compositor.log"
-            if [ ! -s "$log" ]; then
-                echo "atspi bar: no compositor log at $log" >&2
-                exit 1
-            fi
-            if grep -q "not granted them was closed" "$log"; then
-                echo "atspi bar: athanor-compositor closed the bar's surface; see $log" >&2
-                exit 1
-            fi
-        fi
+        atspi_not_closed bar atspi-bar
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
+        # Under athanor-compositor 10: as in `bar`, the input source and tiling buttons are missing.
+        widgets=12
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
             RIG_DATA_OVERLAY="$bar_overlay" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar 12" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures ${session_unit[*]}"
+        atspi_not_closed bar-modules atspi-bar-modules
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
@@ -1091,7 +1154,8 @@ atspi)
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin")"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
+        atspi_not_closed dock atspi-dock
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1105,7 +1169,8 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
-                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher"
+                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher ${session_unit[*]}"
+        atspi_not_closed launcher atspi-launcher
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2
@@ -1268,20 +1333,7 @@ surface | update-goldens)
         exit 1
     fi
     tags=()
-    case "$surface" in
-    greeter) capture_greeter ;;
-    layout) capture_layout ;;
-    chooser) capture_chooser ;;
-    bar | bar-power | bar-input | bar-calendar | bar-accessibility | bar-tiling | bar-popups | bar-notifications | bar-tray | bar-network | bar-bluetooth | bar-audio | bar-battery | bar-shield) capture_bar "$surface" ;;
-    dock) capture_dock ;;
-    launcher) capture_launcher ;;
-    toolkit-chooser) capture_toolkit_chooser ;;
-    toolkit-gallery | gtk-gallery) capture_gallery "$surface" ;;
-    *)
-        echo "rig.sh $1: unknown surface '$surface'" >&2
-        exit 2
-        ;;
-    esac
+    capture_surface "$surface"
     if [ "$1" = update-goldens ]; then
         mkdir -p "$golden"
         for tag in "${tags[@]}"; do
@@ -1293,6 +1345,42 @@ surface | update-goldens)
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/compare.py \
             "/repo/forge/test/shell/golden/$surface" /out "${tags[@]}"
     fi
+    ;;
+golden-report)
+    # Every case runs in a scene of its own, about 20 seconds each: the whole report takes more than an hour.
+    if [ "${RIG_COMPOSITOR:-}" != athanor ]; then
+        echo "rig.sh golden-report: run it as RIG_COMPOSITOR=athanor rig.sh golden-report" >&2
+        exit 2
+    fi
+    mapfile -t known < <(python3 -B "$rig/golden_report.py" surfaces)
+    if [ "$#" -gt 1 ]; then
+        surfaces=("${@:2}")
+        for surface in "${surfaces[@]}"; do
+            if ! printf '%s\n' "${known[@]}" | grep -qxF -- "$surface"; then
+                echo "rig.sh golden-report: not a surface of the report: $surface (known: ${known[*]})" >&2
+                exit 2
+            fi
+        done
+    else
+        surfaces=("${known[@]}")
+    fi
+    require athanor-compositor build-compositor
+    started=$SECONDS
+    since=$(date +%s)
+    tags=()
+    for surface in "${surfaces[@]}"; do
+        require_for "$surface"
+        if [ "$surface" = layout ]; then
+            # The 21 one-output cases and the 6 two-output ones.
+            for outputs in 1 2; do
+                RIG_LAYOUT_OUTPUTS=$outputs capture_layout
+            done
+        else
+            capture_surface "$surface"
+        fi
+    done
+    in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/golden_report.py report \
+        --out /out --since "$since" --elapsed "$((SECONDS - started))" "${@:2}"
     ;;
 *)
     sed -n '2,/^set -euo pipefail$/{/^#/p}' "${BASH_SOURCE[0]}" >&2

@@ -52,7 +52,8 @@ appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program
 
 --unit runs the client as its unit would for athanor-compositor's allow-list (doc_own_stack.md
 OS4): from /usr/bin/<client>, a copy of /out/bin/<client>, inside the cgroup <client>.service,
-which it joins before it runs, so that the compositor reads that unit when it connects. It needs
+which it joins before it runs, so that the compositor reads that unit when it connects; each
+--beside program does the same as its own unit. It needs
 a writable cgroup tree: rig.sh's in_rig runs the container in systemd mode for
 RIG_COMPOSITOR=athanor.
 
@@ -434,8 +435,9 @@ def main():
                 beside_env = {k: v for k, v in env.items() if k != "NOTIFY_SOCKET"}
                 for program in args.beside:
                     path = program if "/" in program else str(BIN / program)
+                    command = as_unit(Path(path)) if args.unit else [path]
                     stderr = rig_log(Path(program).name) if args.log else None
-                    helpers.append(subprocess.Popen([path], env=beside_env, stderr=stderr))
+                    helpers.append(subprocess.Popen(command, env=beside_env, stderr=stderr))
         return True
 
     GLib.io_add_watch(
