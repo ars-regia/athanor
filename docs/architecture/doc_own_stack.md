@@ -335,11 +335,10 @@ default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
    `rig.sh golden-report` passes every case of `cases.py` except the toolkit's, which pass the gates
-   of OS8 and OS9 in the gallery (OS10): the 243 of today's 18 surfaces and layouts, the greeter's 12 included, which
-   the report leaves out while the greeter runs on cosmic-comp in greetd's session (`doc_session.md`
-   SN12; section 6, step 5), and the 24 of the lock screen and the polkit agent once installed,
-   against cosmic-comp's goldens;
-   each difference has its cause and its issue in `athanor-differences.toml`, and a second set of
+   of OS8 and OS9 in the gallery (OS10): the 243 of today's 18 surfaces and layouts, the greeter's
+   12 included, which the report leaves out while the greeter runs on cosmic-comp in greetd's
+   session (`doc_session.md` SN12; section 6, step 5), and the 24 of the lock screen and the polkit
+   agent once installed, against cosmic-comp's goldens; each difference has its cause and its issue in `athanor-differences.toml`, and a second set of
    goldens is recorded only when cosmic-comp leaves the image (OS9 plan, questions 1 and 2). The
    eight causes milestone C1 listed are tied to cases there (C1 results, section 3).
 2. **OS4 and OS5 tested in the fixture of OS6:** each requirement of OS4, OS5 and OS12 to OS17 has a
