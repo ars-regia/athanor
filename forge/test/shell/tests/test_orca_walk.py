@@ -3,6 +3,7 @@
 
 import contextlib
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -50,7 +51,7 @@ class PressesTest(unittest.TestCase):
 
 
 class WalkTest(unittest.TestCase):
-    def run_walk(self, orca, run):
+    def run_walk(self, orca, run, keys=("Tab*2",)):
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:
             for target, value in [
                 ("subprocess.Popen", mock.Mock(return_value=orca)),
@@ -60,8 +61,33 @@ class WalkTest(unittest.TestCase):
             ]:
                 stack.enter_context(mock.patch(f"orca_walk.{target}", value))
             stderr = stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
-            status = walk.main([f"{out}/orca.txt", "Tab*2"])
+            status = walk.main([f"{out}/orca.txt", *keys])
         return status, stderr.getvalue()
+
+    def test_wtype_runs_in_its_rig_unit(self):
+        for compositor, prefix in [
+            ("athanor", ["/repo/forge/test/shell/in-unit.sh", "rig-wtype.service", "/usr/bin/wtype"]),
+            ("cosmic", ["wtype"]),
+            (None, ["wtype"]),
+        ]:
+            commands = []
+
+            def record(command, **_):
+                commands.append(command)
+                return done(0)
+
+            env = {} if compositor is None else {"RIG_COMPOSITOR": compositor}
+            with mock.patch.dict("os.environ", env, clear=False):
+                if compositor is None:
+                    os.environ.pop("RIG_COMPOSITOR", None)
+                self.run_walk(FakeOrca(), record, ("Tab", "shift+F10"))
+            presses = [c for c in commands if c[: len(prefix)] == prefix]
+            self.assertEqual(
+                [c[len(prefix) :] for c in presses],
+                [["-k", "Tab"], ["-M", "shift", "-k", "F10", "-m", "shift"]],
+                compositor,
+            )
+            self.assertEqual(len(presses), len([c for c in commands if "Quit" not in c]), compositor)
 
     def test_a_failed_quit_kills_orca_and_says_why(self):
         orca = FakeOrca()

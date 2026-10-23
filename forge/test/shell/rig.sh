@@ -44,11 +44,11 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
-#   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <greeter|chooser|bar|dock|launcher> it   the same in Italian, with the shipped catalog
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-compositor)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
@@ -487,17 +487,17 @@ capture_surface() { # capture_surface <surface>: every case of it, its tags appe
 # GTK keeps exporting the tree of a surface the compositor closed, so an atspi walk alone passes
 # a client that is not on screen; the compositor's log says when it closed a surface (src/layer.rs).
 # A missing or empty log fails too: grep would find nothing in it.
-atspi_not_closed() { # atspi_not_closed <surface> <scene tag>: only under athanor-compositor
-    local log="$out/$2-compositor.log"
+surface_not_closed() { # surface_not_closed <recipe> <surface> <scene tag>: only under athanor-compositor
+    local log="$out/$3-compositor.log"
     if [ "${RIG_COMPOSITOR:-}" != athanor ]; then
         return 0
     fi
     if [ ! -s "$log" ]; then
-        echo "atspi $1: no compositor log at $log" >&2
+        echo "$1 $2: no compositor log at $log" >&2
         exit 1
     fi
     if grep -q "not granted them was closed" "$log"; then
-        echo "atspi $1: athanor-compositor closed the surface of $1; see $log" >&2
+        echo "$1 $2: athanor-compositor closed the surface of $2; see $log" >&2
         exit 1
     fi
 }
@@ -1026,6 +1026,12 @@ EOF
     echo "look at $out/bar-preview-*.png"
     ;;
 atspi)
+    # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
+    # its reference is recorded under cosmic-comp only.
+    if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        echo "rig.sh atspi: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        exit 2
+    fi
     # A screen reader announces itself by setting IsEnabled; GTK exports its tree then.
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     # In Italian as well as English (doc_shell.md, section 7 item 3 and section 8 item 6): the
@@ -1043,7 +1049,7 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
-            [dock]="athanor-dock Applicazioni")
+            [dock]="athanor-dock Applicazioni" [launcher]="athanor-launcher Cerca")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$2]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
@@ -1056,11 +1062,13 @@ atspi)
         # chips; and the seal, which names the badge a verified state backs (doc_shell.md,
         # section 7, item 3).
         in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="${required:-System image verified}" \
+            ATSPI_REQUIRED_NAME="${required:-System image verified}" ATSPI_TRANSCRIPT="/out/atspi-greeter${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui ${session_unit[*]}"
-        atspi_not_closed greeter atspi-greeter
+        surface_not_closed atspi greeter atspi-greeter
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-greeter${3:+-$3}.json" "/out/atspi-greeter${3:+-$3}.json"
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
@@ -1076,7 +1084,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec $(printf '%q ' "${UNIT_CMD[@]}")"
-        atspi_not_closed chooser atspi-chooser
+        surface_not_closed atspi chooser atspi-chooser
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1123,10 +1131,15 @@ atspi)
         seed_bar "$out/seed-atspi-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
+            ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
-        atspi_not_closed bar atspi-bar
+        surface_not_closed atspi bar atspi-bar
+        # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
+        # athanor-compositor it names each line the bar lacks (Input source and Tiling, C1).
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
@@ -1141,7 +1154,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures ${session_unit[*]}"
-        atspi_not_closed bar-modules atspi-bar-modules
+        surface_not_closed atspi bar-modules atspi-bar-modules
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
@@ -1155,7 +1168,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
-        atspi_not_closed dock atspi-dock
+        surface_not_closed atspi dock atspi-dock
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1163,14 +1176,17 @@ atspi)
         # 1 interactive widget by atspi_check.py's list of roles: the entry, named "Search".
         # The list ("Results") and its rows are not in that list, and a header row has no
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
+        # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
-            ATHANOR_LAUNCHER_SHOW="cc window" \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
+            ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
                      && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher ${session_unit[*]}"
-        atspi_not_closed launcher atspi-launcher
+        surface_not_closed atspi launcher atspi-launcher
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-launcher${3:+-$3}.json" "/out/atspi-launcher${3:+-$3}.json"
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2
@@ -1179,18 +1195,37 @@ atspi)
     esac
     ;;
 orca)
+    # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
+    # its reference is recorded under cosmic-comp only.
+    if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        echo "rig.sh orca: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        exit 2
+    fi
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
     # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
     # athanor-toolkit's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
     # of the Containerfile's rig stage.
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
+    # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
+    # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-compositor, the clients
+    # with a grant as their units and orca_walk.py's wtype as rig-wtype.service, and
+    # orca_compare.py names each poorer line. The chooser and the gallery are windows, which need
+    # no grant, so they run as they are.
     case "${2:-}" in
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
     gallery) component= ;;
-    *) echo "rig.sh orca: the surface is 'chooser', 'dock' or 'gallery', not '${2:-}'" >&2; exit 2 ;;
+    bar) component=athanor-bar ;;
+    launcher) component=athanor-launcher ;;
+    greeter) component=athanor-greeter-ui ;;
+    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'launcher' or 'greeter', not '${2:-}'" >&2; exit 2 ;;
     esac
+    unit=
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+        unit=--unit
+    fi
     lang=(RIG_LOCALE=en_US.UTF-8)
     case "${3:-}" in
     '') ;;
@@ -1247,7 +1282,52 @@ orca)
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
             RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable --respawn"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
+        surface_not_closed orca dock orca-dock
+        ;;
+    bar)
+        # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
+        # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
+        # the bar lacks Input source and Tiling, C1). Tab skips Input source (#751), so the
+        # seventh Tab comes back round to the first; the eighth once Tab reaches it.
+        stage_greeter_icons
+        seed_bar "$out/seed-orca-bar" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
+            RIG_DATA_OVERLAY="$bar_overlay" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+        # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
+        # the walk alone would read a bar that is not on screen.
+        surface_not_closed orca bar orca-bar
+        ;;
+    launcher)
+        # One control, the entry (the rows are not focusable and Tab opens the result menu, so
+        # the walk is the arrows): "cc window" lists two results under a header, CC Window and
+        # the web search; Down goes down them, Up back to the first. Orca presents no result yet,
+        # and cosmic-comp in the rig never activates the launcher, so its reference is
+        # athanor-compositor's transcript (#751).
+        seed_bar "$out/seed-orca-launcher" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
+            ATHANOR_LAUNCHER_SHOW="cc window" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Down*2 Up*2" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-launcher -- \
+            bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
+                     && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-launcher"
+        surface_not_closed orca launcher orca-launcher
+        ;;
+    greeter)
+        # The card of the rig's one account opens with the password focused. Seven controls are
+        # focusable: Back to the list, the password, Sign in, High contrast, Suspend, Restart,
+        # Shut down (the seal and the layout chip take no focus). Tab goes round the first three
+        # only, the password, Sign in and Back to the list (#751), so three Tabs end on the
+        # password; seven once Tab reaches them all.
+        stage_greeter_icons
+        in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            RIG_DATA_OVERLAY=/out/greeter-icons \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*3" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-greeter -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-greeter-ui"
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \

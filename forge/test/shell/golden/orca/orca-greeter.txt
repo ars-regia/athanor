@@ -1,0 +1,7 @@
+Screen reader on.
+Athanor
+Password for Rig password text.
+Sign in button.
+Back to the list button.
+Password for Rig password text.
+Screen reader off.
