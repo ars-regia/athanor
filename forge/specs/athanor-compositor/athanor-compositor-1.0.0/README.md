@@ -138,8 +138,8 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
 - The bottom and background layers of `wlr-layer-shell` stay offered inside a security context.
   Revision 2 decides.
-- Input-method, virtual keyboard and pointer, data control and the private interface are not
-  offered yet; each joins the allow-list's interfaces when it is.
+- Input-method, data control and the private interface are not offered yet; each joins the
+  allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape
   for the user, until task 8 added one (below).
 - The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
@@ -183,8 +183,9 @@ Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibil
   application through the virtual keyboard and, by these signs, not the monitor; cosmic-comp's
   source was not traced to confirm it.
 - Orca's own commands need it. Under this compositor nothing owns `org.freedesktop.a11y.Manager`,
-  so Orca's commands do not reach Orca, and the rig cannot walk any surface yet: `wtype` stops at
-  "Compositor does not support the virtual keyboard protocol".
+  so Orca's commands do not reach Orca. A client the allow-list grants them gets the virtual
+  keyboard and pointer (OS9 task 6); what `wtype` lacks to walk a surface in the rig is its line
+  in the allow-list (OS9 task 7).
 - The size of the work: the monitor on the session bus (`GrabKeyboard`, `UngrabKeyboard`,
   `WatchKeyboard`, `UnwatchKeyboard`, `SetKeyGrabs`, the `KeyEvent` signal) through zbus, already
   a dependency of the workspace, on a thread of its own that talks to calloop through a channel;
@@ -193,10 +194,10 @@ Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibil
   `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
   `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
   checks. Whether the image's session bus returns `ProcessFD` is unverified
-  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). For the rig to test it,
-  `zwp_virtual_keyboard_v1` (Smithay's `VirtualKeyboardManagerState`), whose keys must go through
-  the same filter, which cosmic-comp's do not: about 100 lines more (an estimate). Then
-  `rig.sh orca` can run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
+  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). The virtual keyboard's
+  keys take the hardware's path (OS9 task 6), so they will pass through that filter as well,
+  which cosmic-comp's do not. With `wtype`'s allow-list line (OS9 task 7), `rig.sh orca` can
+  then run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected
