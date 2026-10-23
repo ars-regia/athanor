@@ -190,7 +190,7 @@ git commit -am "feat(compositor): draw the themed or client cursor where the cur
 ### Task 4: Maximising a window
 
 **Files:**
-- Modify: `src/handlers.rs` (`maximize_request`, `unmaximize_request`, `CompositorHandler::commit`), `src/state.rs` (`maximise`, `restore`)
+- Modify: `src/handlers.rs` (`maximize_request`, `unmaximize_request`, `CompositorHandler::commit`), `src/state.rs` (`maximise`, `restore`), `src/layer.rs` (`layer_commit`)
 - Test: `src/fixture.rs`
 
 **Interfaces:**
@@ -224,7 +224,7 @@ git commit -am "feat(compositor): maximise a window to the area the bar leaves"
 **Interfaces:**
 - Consumes: Task 4's `State::restore`.
 - Produces: `pub struct MoveGrab { start: GrabStartData<State>, window: Window, from: Point<i32, Logical> }` implementing `PointerGrab<State>`; `pub fn kept_reachable(area: Rectangle<i32, Logical>, at: Point<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical>`: `at` with `y` at least `area.loc.y` and at most `area.loc.y + area.size.h - 1`, and `x` such that at least 32 logical pixels of the window stay inside the area horizontally.
-- Fixture helpers, in `fixture.rs`, used by Tasks 5 and 6: `Local::toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel`, which binds `wl_seat`, gets its pointer, maps a `WIDTH`x`HEIGHT` window and returns once the compositor has mapped it; a field `Local::seat: Option<wl_seat::WlSeat>`, set by `toplevel`; a field `Client::button: Option<u32>`, the serial of the last `wl_pointer.button` press the client received; `fn window_of(run: &Running, id: &ClientId) -> smithay::desktop::Window`, the mapped window of that client; `fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical>`, its location in the space; `fn press(run: &mut Running, at: Point<f64, Logical>)`, which moves the pointer to `at` with `pointer_to` and presses `BTN_LEFT` (0x110) with `button_input`; `fn release(run: &mut Running)`; `fn moved(run: &mut Running, local: &mut Local) -> (ClientId, Point<f64, Logical>)`, the steps of the first test up to a granted move, returning the client's id and where the press was.
+- Fixture helpers, in `fixture.rs`, used by Tasks 5 and 6: `Local::toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel`, which binds `wl_seat`, gets its pointer, maps a `WIDTH`x`HEIGHT` window, waits until the compositor has mapped it and gives it the keyboard with `run.state.focus` (the fixture's own window holds the keyboard, so `place` leaves a new window at the bottom, exactly under the fixture's: raised, the new window is the one under the pointer, and `fixture_window`, the bottom element, is the fixture's again); a field `Local::seat: Option<wl_seat::WlSeat>`, set by `toplevel`; a field `Client::button: Option<u32>`, the serial of the last `wl_pointer.button` press the client received, recorded by a new `impl Dispatch<wl_pointer::WlPointer, ()> for Client` (the fixture dispatches no pointer events yet); `fn moving(run: &Running) -> bool`, `pointer.with_grab(|_, grab| grab.is::<MoveGrab>()).unwrap_or(false)`: any press installs Smithay's `ClickGrab`, so `is_grabbed()` cannot tell a move from a click; `fn window_of(run: &Running, id: &ClientId) -> smithay::desktop::Window`, the mapped window of that client; `fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical>`, its location in the space; `fn press(run: &mut Running, at: Point<f64, Logical>)`, which moves the pointer to `at` with `pointer_to` and presses `BTN_LEFT` (0x110) with `button_input`; `fn release(run: &mut Running)`; `fn moved(run: &mut Running, local: &mut Local) -> (ClientId, Point<f64, Logical>)`, the steps of the first test up to a granted move, returning the client's id and where the press was.
 
 - [ ] **Step 1: Write the failing tests** in `fixture.rs`:
 
@@ -236,13 +236,12 @@ fn a_move_needs_the_clients_own_button_press() {
     let toplevel = local.toplevel(&mut run);
     let id = local.id.clone().expect("an id");
     let seat = local.seat.clone().expect("a seat");
-    let pointer = run.state.seat.get_pointer().expect("a pointer");
     let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
 
     // A serial no press sent the client.
     toplevel._move(&seat, SERIAL_COUNTER.next_serial().into());
     local.roundtrip(&mut run);
-    assert!(!pointer.is_grabbed(), "a serial no press sent is refused");
+    assert!(!moving(&run), "a serial no press sent is refused");
 
     // An older press's serial.
     press(&mut run, at);
@@ -253,21 +252,22 @@ fn a_move_needs_the_clients_own_button_press() {
     local.pump(&mut run, "the second press", |client, _| client.button.is_some());
     toplevel._move(&seat, older);
     local.roundtrip(&mut run);
-    assert!(!pointer.is_grabbed(), "an older press's serial is refused");
+    assert!(!moving(&run), "an older press's serial is refused");
 
     // The current press's serial, recorded as sent to another client.
     let current = local.client.button.expect("a press");
     let (_, other) = fixture_window(&run);
+    assert_ne!(other, id, "the fixture's window belongs to another client");
     run.state.grab_serials.button = Some((current.into(), other));
     toplevel._move(&seat, current);
     local.roundtrip(&mut run);
-    assert!(!pointer.is_grabbed(), "a press sent to another client is refused");
+    assert!(!moving(&run), "a press sent to another client is refused");
 
     // The current press, sent to this client: granted.
     run.state.grab_serials.button = Some((current.into(), id));
     toplevel._move(&seat, current);
     local.roundtrip(&mut run);
-    assert!(pointer.is_grabbed(), "the client's own press grants the move");
+    assert!(moving(&run), "the client's own press grants the move");
     run.stop();
 }
 
@@ -276,12 +276,11 @@ fn a_window_follows_the_pointer_while_moved() {
     let mut run = Running::start(None);
     let mut local = Local::connect(&mut run, None);
     let (id, at) = moved(&mut run, &mut local);
-    let pointer = run.state.seat.get_pointer().expect("a pointer");
     let before = location_of(&run, &id);
     run.state.pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
     assert_eq!(location_of(&run, &id), before + Point::from((100, 50)));
     release(&mut run);
-    assert!(!pointer.is_grabbed(), "the release ends the move");
+    assert!(!moving(&run), "the release ends the move");
     run.state.pointer_to(at, InputTime::now());
     assert_eq!(location_of(&run, &id), before + Point::from((100, 50)), "the window stays");
     run.stop();
@@ -306,14 +305,13 @@ fn the_lock_ends_a_move() {
     let mut run = Running::start(None);
     let mut local = Local::connect(&mut run, None);
     let (id, at) = moved(&mut run, &mut local);
-    let pointer = run.state.seat.get_pointer().expect("a pointer");
     let before = location_of(&run, &id);
     // A locker locks the session, as `task4_the_lock_hides_and_takes_the_keyboard` does.
     let mut locker = Local::connect(&mut run, None);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
     let _lock = locks.lock(&locker.queue.handle(), ());
     locker.pump(&mut run, "the session is locked", |client, _| client.locked);
-    assert!(!pointer.is_grabbed(), "the lock ends the move");
+    assert!(!moving(&run), "the lock ends the move");
     run.state.pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
     assert_eq!(location_of(&run, &id), before, "the window stays");
     run.stop();
