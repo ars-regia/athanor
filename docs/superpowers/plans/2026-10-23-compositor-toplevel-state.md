@@ -94,6 +94,7 @@ git commit -m "feat(compositor): describe and offer the private toplevel manager
   - `a_minimised_window_can_be_destroyed`: its client destroys the toplevel: `minimised` is empty and the list sends `closed`; with a disconnect instead: the same.
   - `a_window_restored_after_its_output_left_is_centred`: two outputs, a window on the second, minimised, the second output removed; restored, it is centred in `window_area()`.
   - `a_maximised_window_restored_fits_the_area`: maximised, then minimised; a layer surface with an exclusive zone of 30 maps; restored, the window gets a configure with the new area's size, and at the commit answering it its geometry is that area.
+  - `a_hidden_minimised_window_stays_minimised`: a minimised window commits a null buffer, as an app hiding into the tray does; an `xdg_activation_v1` token for it leaves it in `minimised`, out of the space, and the keyboard focus unchanged (fails without the `shown` guard of `unminimise`; the manager's `activate` and `unset_minimized` reach the same guard in Task 3).
   - `a_token_restores_nothing_while_locked`: a minimised window, the session locked (`lock_session`); token activation leaves it in `minimised` and the keyboard on the lock surface.
   - `the_state_follows_focus_and_minimise`: a state object gets `state(activated)`, `output_enter`, `done` at once; another window focused: `state(0)`, `done`; minimised: `state(minimized)`, `output_leave`, `done`, and its client's last configure no longer holds `activated`.
   - `outputs_follow_the_window`: two outputs; `State::move_window` from the first to the second gives `output_leave(first)`, `output_enter(second)`, `done`, and nothing on the next frame; a second client that makes its state object before binding `wl_output` gets `output_enter` and `done` once it binds.
@@ -127,10 +128,9 @@ git commit -m "feat(compositor): minimise a window and send its state and output
   - `the_dock_raises_minimises_and_closes_a_window`: the bar-identity client with the manager and the list; two windows of another client; `activate(first)` raises it with the keyboard; `set_minimized(first)` hides it; `unset_minimized(first)` brings it back focused; `close(second)` sends `xdg_toplevel.close`.
   - `activation_respects_the_lock_and_an_exclusive_layer`: locked, `activate` and `set_minimized` change neither stack nor keyboard; with a layer surface holding the keyboard exclusively, `activate` raises the window and the keyboard stays with the layer.
   - `a_closed_or_undrawn_window_is_left_alone`: the four requests on a destroyed window's handle, and `activate` on a placed window that committed a null buffer, change neither stack nor keyboard; then `activate` on a live window raises it and gives it the keyboard (fails until this task).
-  - `a_hidden_minimised_window_stays_minimised`: a minimised window commits a null buffer; `activate` and `unset_minimized` on it leave it in `minimised`, out of the space, and the keyboard focus unchanged (guards Task 2's `unminimise`).
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `cargo test -p athanor-compositor -- the_dock_raises activation_respects closed_or_undrawn hidden_minimised`
+Run: `cargo test -p athanor-compositor -- the_dock_raises activation_respects closed_or_undrawn`
 Expected: FAIL at run time, `activate` has not raised the window.
 
 - [ ] **Step 3: Implement** the requests as the Interfaces block says.
