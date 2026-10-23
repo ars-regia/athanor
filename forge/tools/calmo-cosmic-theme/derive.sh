@@ -7,6 +7,7 @@
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+bash "$root/forge/test/shell/rig.sh" build-image # builds the stage, or pulls the pinned one and checks its inputs
 image=$(bash "$root/forge/test/shell/rig.sh" build-image-ref)
 generated=$root/system/athanor-style/calmo/generated
 
