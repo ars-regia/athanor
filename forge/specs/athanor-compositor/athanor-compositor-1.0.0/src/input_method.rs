@@ -429,7 +429,9 @@ impl Dispatch2<ZwpTextInputV3, State> for InputMethods {
                 width,
                 height,
             } => {
-                pending.cursor = Some(Rectangle::new((x, y).into(), (width, height).into()));
+                // A negative size is taken as none: smithay's sizes are never negative.
+                let size = (width.max(0), height.max(0));
+                pending.cursor = Some(Rectangle::new((x, y).into(), size.into()));
             }
             zwp_text_input_v3::Request::Commit => {
                 let pending = std::mem::take(pending);

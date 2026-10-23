@@ -18,7 +18,7 @@ use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interf
 };
 use smithay::reexports::wayland_protocols_misc::zwp_input_method_v2::server::__interfaces::{
     ZWP_INPUT_METHOD_KEYBOARD_GRAB_V2_INTERFACE, ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE,
-    ZWP_INPUT_METHOD_V2_INTERFACE,
+    ZWP_INPUT_METHOD_V2_INTERFACE, ZWP_INPUT_POPUP_SURFACE_V2_INTERFACE,
 };
 use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server::__interfaces::{
     ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE, ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE,
@@ -4592,6 +4592,22 @@ impl SimulatedInputMethod {
         local.roundtrip(run);
     }
 
+    /// A popup surface of its own, on a new `wl_surface` of `local`.
+    fn popup(&self, local: &mut Local, run: &mut Running) -> (wl_surface::WlSurface, Raw) {
+        let compositor: wl_compositor::WlCompositor = local.bind(4);
+        let surface = compositor.create_surface(&local.queue.handle(), ());
+        let popup = self.method.create(
+            "get_input_popup_surface",
+            vec![
+                Argument::NewId(ObjectId::null()),
+                Argument::Object(surface.id()),
+            ],
+            &ZWP_INPUT_POPUP_SURFACE_V2_INTERFACE,
+        );
+        local.roundtrip(run);
+        (surface, popup)
+    }
+
     /// The evdev codes of the keys pressed on its grabs.
     fn keys(&self) -> Vec<u32> {
         self.grabs
@@ -4929,5 +4945,21 @@ fn os9_a_second_input_method_is_unavailable() {
         field.names_after(before).contains(&"done")
     });
     assert_eq!(field.names_after(before), ["commit_string", "done"]);
+    run.stop();
+}
+
+/// A cursor rectangle of negative size, which a client may send, is taken as an empty one: the
+/// input method's popup is told the cursor's place with a size of zero.
+#[test]
+fn os9_a_negative_cursor_rectangle_is_empty() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let at = |n: i32| Argument::Int(n);
+    field.send("set_cursor_rectangle", vec![at(5), at(6), at(-1), at(-1)]);
+    field.send("commit", vec![]);
+    window.roundtrip(&mut run);
+    let (_surface, popup) = method.popup(&mut ime, &mut run);
+    let rectangle = ["5", "6", "0", "0"].map(String::from).to_vec();
+    assert_eq!(popup.events(), [("text_input_rectangle", rectangle)]);
     run.stop();
 }
