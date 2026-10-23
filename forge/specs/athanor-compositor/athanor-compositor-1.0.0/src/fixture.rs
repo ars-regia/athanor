@@ -3532,6 +3532,49 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
     run.stop();
 }
 
+/// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
+/// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
+/// beside it, which `confine` alone accepts.
+#[test]
+fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer_with_output(
+        Some(&seat),
+        Some(&output),
+        &local.queue.handle(),
+        (),
+    );
+    pointer.motion_absolute(0, 100, 50, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .and_then(|output| run.state.space.output_geometry(output))
+        .expect("the first output");
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        at,
+        Point::from((
+            f64::from(first.loc.x + first.size.w - 1),
+            f64::from(first.loc.y + first.size.h / 2)
+        )),
+        "on the first output's last column"
+    );
+    run.stop();
+}
+
 /// Absolute and relative motion of a virtual pointer past the edge of the fixture's two outputs
 /// leaves the pointer on an output (OS9 task 6), as
 /// `task8_an_output_that_shrinks_strands_no_window_and_no_pointer` requires of the hardware one.

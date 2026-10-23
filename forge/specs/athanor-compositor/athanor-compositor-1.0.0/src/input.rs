@@ -404,7 +404,12 @@ impl VirtualPointerHandler for State {
         let (Some(area), Some(pointer)) = (area, self.seat.get_pointer()) else {
             return;
         };
-        let to = event.position_transformed(area.size) + area.loc.to_f64();
+        // Clamped first: the far edge, x == x_extent, maps to the first column past the area,
+        // which a neighbouring output holds.
+        let to = clamp_into(
+            area,
+            event.position_transformed(area.size) + area.loc.to_f64(),
+        );
         if let Some(location) = confine(&outputs, pointer.current_location(), to) {
             self.pointer_to(location, event.time());
         }
@@ -453,11 +458,16 @@ pub(crate) fn confine(
         .iter()
         .find(|area| area.to_f64().contains(from))
         .or_else(|| outputs.first())?;
+    Some(clamp_into(*area, to))
+}
+
+/// The point of `area` nearest `to`: from its first pixel to its last, never its far edge.
+fn clamp_into(area: Rectangle<i32, Logical>, to: Point<f64, Logical>) -> Point<f64, Logical> {
     let (min, max) = (area.loc.to_f64(), (area.loc + area.size).to_f64());
-    Some(Point::from((
+    Point::from((
         to.x.clamp(min.x, max.x - 1.0),
         to.y.clamp(min.y, max.y - 1.0),
-    )))
+    ))
 }
 
 #[cfg(test)]
