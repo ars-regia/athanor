@@ -2,8 +2,8 @@
 
 Task 10 of `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md`, written on
 2026-10-22 against `origin/iso-v0` at `071feaa8` (tasks 1 to 8 merged; #684, the console commands of task 9, also merged). The crate's `src/` and `data/` are unchanged since `f12b0cc7`, the base of the first version of this document, so the counts below were taken at that commit and hold at this one (`git diff --stat f12b0cc7 071feaa8 -- forge/specs/athanor-compositor` shows `README.md` only). Task 9, the console
-sessions, has run on the laptop only (2026-10-22, section 7); the NVIDIA desktop's session has not
-run, and its rows stay empty. Every figure names its source; a figure with no source was not measured, and
+sessions, has run on the laptop (2026-10-22) and on the NVIDIA desktop (2026-10-23, 13 minutes,
+stopped on its defects); both are in section 7. Every figure names its source; a figure with no source was not measured, and
 the text says so. The crate is `forge/specs/athanor-compositor/athanor-compositor-1.0.0/`; "README"
 below means its `README.md`.
 
@@ -208,8 +208,7 @@ No figure here comes from a monitor: the figures on a monitor are in section 7.
 The laptop's session ran on 2026-10-22, from 21:54 to 22:56 CEST. It was a scripted, unattended
 run: nobody looked at the screen, so it shows that the compositor ran, kept its clients and
 reported draws on the DRM backend, not what those draws looked like. The NVIDIA desktop's
-session, which is the maintainer's at the console, has not run, and its cells stay empty on
-purpose.
+session, the maintainer's at the console, is described after the laptop's.
 
 **How the laptop's session ran, and where it departs from the README.** The README's "Console
 sessions" section (#684) is written for someone at the console. This run followed its order over
@@ -240,12 +239,34 @@ SSH, driven by a script:
 - **Archive.** `~/c1/c1-task9-athanor.tar.gz` on the laptop holds the compositor's log, the journal,
   the GPU lines of `dmesg` and the script's events.
 
+**How the desktop's session ran.** The maintainer ran it at the console on 2026-10-23, from
+18:38:02 to 18:51:05 CEST, and stopped it after 13 minutes because the session was not usable
+(T9-3 to T9-5). It followed the README's steps 1, 2, 5 and 6 through two scripts kept in `~/c1`
+(`start.sh`, `stop.sh`), which run the README's commands unchanged.
+
+- **Machine.** The desktop, Azoth `7.2.9-100.azoth.fc43`, NVIDIA 615.71.09, Mesa 25.3.6. The
+  compositor drew on the GeForce RTX 4070 Ti SUPER (`card1`, `renderD128`), the boot GPU, which
+  drives the two monitors connected that day: `HDMI-A-1` 1920x1080 at 60.000 Hz and `DP-1`
+  1920x1080 at 59.934 Hz. The plan names three outputs; two were connected. The RTX 3060
+  (`card0`) drove nothing.
+- **Binary.** Built by `rig.sh build-compositor` on the laptop from `912a83ce`, SHA-256
+  `122ba4da9af2a28bf1778c3872e94f76f26d6794d3c73c7ea16b9a8665dd5276`. Its compositor sources
+  are those of `origin/iso-v0` at `b8331550` (`git diff 726d21e8 b8331550 --
+  forge/specs/athanor-compositor` is empty, and so is the diff to `912a83ce`).
+- **Session.** VT3, logged in by the maintainer; cosmic-comp's session on VT1 stayed alive in the
+  background, its bar and dock stopped as step 2 says.
+- **Allow-list.** The README's list, the bar and the dock lines, under `bootc usr-overlay`.
+- **Clients.** The bar and the dock as `c1-bar` and `c1-dock` with `GSK_RENDERER=cairo`, `ptyxis
+  --standalone`, and Firefox, started twice from the shell (18:38:13 and 18:47:51).
+- **Archive.** `~/c1/c1-task9-athanor.tar.gz` on the desktop: `log/compositor-2026-10-23-1838.log`,
+  `log/journal.txt`, `log/dmesg-gpu.txt`, `log/terminal.log`.
+
 **7.1 Frame times on a console**
 
 | Machine | Outputs | Duration | Draws per 10 s (mean, min, max) | Mean and longest draw | Client commit interval (median) | Source (log path) |
 | --- | --- | --- | --- | --- | --- | --- |
 | Laptop (`i915`, `eDP-1` 1920x1080) | 1 | 365 reports, about 61 min awake (62 min of wall time, 62 s of it suspended) | 6.6, 0, 68 (2422 draws) | 0.97 ms mean (weighted by draws); longest 4.20 ms, and 2.31 ms at the 95th percentile of each report's longest | the bar: 6.0 s (median of its 239 reports); the terminals: 0.6 s over their first seconds, then idle. No client animates. | `log/compositor-2026-10-22-2154.log` |
-| NVIDIA desktop, three outputs | 3 | 1 h | | | | |
+| NVIDIA desktop (RTX 4070 Ti SUPER, `HDMI-A-1` and `DP-1` 1920x1080) | 2 | 78 reports, 13 min | 46.3, 0, 600 (3615 draws); the 11 reports with 100 draws or more, while Firefox drew, hold 112 to 600 | 0.39 ms mean (weighted by draws); longest 3.67 ms, and 2.20 ms at the 95th percentile of each report's longest | Firefox (dmabuf with an acquire point): 27.4 ms mean over 310 frames (16:38:23Z), 47.0 ms over 193 frames (16:48:03Z), single intervals of 0.8 to 1.3 s (T9-4); the bar: idle, one commit every 2 to 18 s | `log/compositor-2026-10-23-1838.log` |
 
 **7.2 Events**
 
@@ -254,7 +275,8 @@ SSH, driven by a script:
 | Laptop | one suspend and resume, by `rtcwake -m mem -s 60` (22:54:17 to 22:55:19 CEST) rather than the README's `systemctl suspend` and the power button, so logind's sleep signal was not exercised | the compositor, the bar and the dock were still running 20 s after the resume, and the compositor logged no warning or error. The output drew 2 and 2 times in the two reports wholly after the resume; the report that spans the suspend (11 draws) cannot be split. The nine input devices were logged only now (T9-2). | `log/compositor-2026-10-22-2154.log` from 20:55:19Z; `log/events.txt` |
 | Laptop | the only output unplugged and plugged back | the panel cannot be unplugged, so `card1-eDP-1/status` was forced `off` for 10 s and back to `detect`; udev reported the change. The compositor logged "a monitor was unplugged" and "a monitor was plugged in" at 1920x1080, then drew again (5 draws, longest 2.85 ms); the units stayed active. With one output, moving windows to the remaining output was not tested. | `log/compositor-2026-10-22-2154.log` at 20:55:40Z and 20:55:50Z |
 | Laptop | switch to a text console and back | not run: it needs someone at the console | |
-| Both | Super+Escape with the bar, dock and a terminal | not run on the laptop, for the same reason; the desktop has not run | |
+| Both | Super+Escape with the bar, dock and a terminal | not run on the laptop, for the same reason; not run on the desktop, whose session stopped early | |
+| Desktop | explicit sync on NVIDIA | negotiated: "explicit sync: linux-drm-syncobj-v1 on the GPU" at start; every Firefox frame came with an acquire point (`syncobj` equal to `dmabuf` in each report) | `log/compositor-2026-10-23-1838.log` at 16:38:03Z |
 | Laptop | explicit sync on `i915` | negotiated: "explicit sync: linux-drm-syncobj-v1 on the GPU" at start. The 31 `ptyxis` processes committed dmabufs with an acquire point (62 of the 303 client reports); the bar and the dock committed shared memory. | `log/compositor-2026-10-22-2154.log` at 19:54:03Z |
 
 Suspend and resume and output unplugging are not run on the NVIDIA desktop: the maintainer decided on
@@ -267,6 +289,11 @@ bus (#604). The desktop gets one hour of three-output use only.
 | --- | --- | --- | --- | --- |
 | T9-1 | Laptop | `grim` cannot capture an output: "compositor doesn't support the screen capture protocol". The compositor offers capture of windows only (section 4) and no output capture source, which explains the message; the compositor's log has no line about the request, so a refused grant cannot be ruled out. Either way no screenshot of the session exists and a screenshot tool does not work under it. | journal, `c1-grim-start.service` at 21:54:15 CEST | 11: an output capture source, behind an allow-list line of its own |
 | T9-2 | Laptop | No input device logged for the first hour. libinput was initialised at 19:54:03Z and logged no device until 20:55:19Z, just after the resume, when it logged nine at once. The devices were open all along. A reproduction on the laptop with the same start order found the session active and every device granted by logind. libinput queues a "device added" event for each device it opens on taking the seat, and the queue does not make its file descriptor readable. smithay's backend reads libinput only when that descriptor is readable, so the events waited for the first key, a hot-plug or, here, the wake-up's uevents. A uinput device plugged in during the reproduction released the nine at once in the same way. `rtcwake` does not touch the logind session, so `pause()` and `resume()` rightly never ran. The same queue follows a pause and a resume. Whether a key reached a client in that hour is not recorded: nobody typed. Fixed by having the compositor hand its input handler what libinput queued, at the start, after a pause and after a resume (`State::take_queued_input`). | `log/compositor-2026-10-22-2154.log` at 19:54:03Z and 20:55:19Z | 13: closed by the fix; the laptop's next console run checks the start's log |
+| T9-3 | Desktop | No pointer on screen for the whole session (the maintainer's account). The DRM backend draws the pointer as a 12-pixel solid square of kind `Cursor` (`udev.rs:63`, `render`), and `FrameFlags::DEFAULT` lets smithay's DRM compositor put such an element on the cursor plane. The log has no line about the pointer, so where it went is not known; the next step is a build that composites it on the primary plane. Nobody looked at the laptop's screen, so whether `i915` shows it is not known either. | none: the log does not record the pointer | 10 |
+| T9-4 | Desktop | The session lagged (the maintainer's account). Firefox, drawing with dmabufs and acquire points, committed one frame every 27 to 47 ms on average while in use, about 30 a second or fewer, with single intervals of 0.8 to 1.3 s; the two outputs drew at most 600 times in 10 s together, 30 a second each. The draws themselves took 0.39 ms on average. What halves the rate (a frame queued after its VBlank, the wait on the acquire point, or the pacing at six tenths of a period, `udev.rs` `vblank`) is not traced. | `log/compositor-2026-10-23-1838.log`, the reports from 16:38:13Z to 16:39:13Z and from 16:47:53Z to 16:48:13Z | 6 |
+| T9-5 | Desktop | Applications did not open (the maintainer's account). Firefox did open under the compositor: it was started through the compositor's security context, as the units `app-athanor-org.mozilla.firefox@…` (18:38:13 and 18:47:51 CEST), and it drew from 16:38:13Z until the session ended. The bar's launcher and application-library buttons (`Client::open`, `system/athanor-compositor-client/src/launch.rs`) start `cosmic-launcher` or `cosmic-app-library` under the compositor only when its bus name has no owner, and otherwise call the owner. The COSMIC session on VT1 kept them: `cosmic-app-library` had run there since 2026-10-21, and the journal shows neither started nor an error, so a press opened them on VT1, out of sight. The README starts neither under the compositor. The dock could not raise a window: "cannot activate the window error=the compositor does not offer zcosmic_toplevel_manager_v1", four times. Without a pointer (T9-3) no window could be clicked either. | journal, `c1-dock.service` at 18:39:06 and 18:47:49 to 18:47:50 CEST; the Firefox units at 18:38:13 and 18:47:51 CEST | 3, and the README's step 2 |
+| T9-6 | Desktop | The bar's Workspaces button started `cosmic-workspaces`, whose overview the compositor closed as a client without the top layers ("not granted them was closed", namespace `cosmic-workspace-overview`); the process then ended on SIGSEGV, as on NVIDIA under cosmic-comp. | `log/compositor-2026-10-23-1838.log` at 16:48:10Z; journal, `app-athanor-com.system76.CosmicWorkspaces@…` at 18:48:10 CEST | 3 |
+| T9-7 | Desktop | smithay logged "surface missing from known popups" 15 times, in bursts while the bar's menus were used. A popup's surface reached the shell without the popup being known to the compositor's popup manager; what the menus showed meanwhile is not recorded. | `log/compositor-2026-10-23-1838.log`, 16:38:17Z to 16:39:04Z and 16:47:51Z to 16:48:08Z | 4 (#734) |
 
 Two warnings from smithay were met; neither stopped drawing:
 
@@ -277,16 +304,17 @@ Two warnings from smithay were met; neither stopped drawing:
 
 ## 8. NVIDIA defects
 
-Recorded on NVIDIA so far, with the sources. The compositor has not drawn on NVIDIA's DRM
-backend (that is task 9): only headless (task 2), nested (task 6) and the VM (task 8) have run
-on NVIDIA. The laptop's console session drew on `i915` (section 7).
+Recorded on NVIDIA so far, with the sources. Headless (task 2), nested (task 6) and the VM
+(task 8) ran on NVIDIA first; the desktop's console session of 2026-10-23 is the first draw on
+NVIDIA's DRM backend (section 7, T9-3 to T9-7). The laptop's console session drew on `i915`.
 
 | Defect | Where | Status | Source |
 | --- | --- | --- | --- |
 | Idle redraw loop: a nested redraw that drew nothing asked for the next one at once and kept a core busy, 1,350,007 draws per 10 s | nested on NVIDIA's EGL | fixed in #646 (a frame-period timer, one pending at a time); after the fix, 598 to 600 draws per report | #646 |
 | One report stalled for a second, the compositor and the client together, at 18:34:58 in the one-hour soak | nested in cosmic-comp | cause inferred, not traced: cosmic-comp's throttle of a covered surface. No repository source states the throttling: it is an inference from the stall alone (README line on this compositor's own 1 Hz callbacks for an unshown surface concerns the DRM backend, not cosmic-comp) | #646 |
 | Headless on NVIDIA's render node, with `linux-drm-syncobj-v1` and a Vulkan client (`vkcube --wsi wayland`), ten minutes | task 2 check | not recorded: #586 reports the 600 s soak on the desktop on Pixman and llvmpipe, and `headless_on_a_render_node` is `#[ignore]`d; no run on NVIDIA's node with explicit sync is in the merged pull requests | #586, `src/fixture.rs:890` |
-| Explicit sync on NVIDIA | review focus 4 of the plan | negotiated state not recorded; the log is meant to name the syncobj path or its absence, and no NVIDIA log is in the pull requests | plan, Review Focus |
+| Explicit sync on NVIDIA | review focus 4 of the plan | negotiated on the DRM backend: "explicit sync: linux-drm-syncobj-v1 on the GPU", and Firefox's frames came with acquire points (section 7.2) | `log/compositor-2026-10-23-1838.log` of the desktop's session |
+| No pointer on screen; frames at about half the refresh rate | DRM backend on the RTX 4070 Ti SUPER | open: T9-3 and T9-4 | section 7.3 |
 | The bar's and dock's top-layer surfaces were closed during the one-hour run, so no shell surface was drawn on NVIDIA | nested | by design (no allow-list in the rig); drawing them is task 9 | #646 |
 
 ## 9. Known limits marked `ponytail:` in the code
@@ -379,8 +407,9 @@ Each item names the finding that makes it necessary.
 
 ## 11. Not measured
 
-- Frame times on the NVIDIA desktop's monitors; anything seen on the laptop's screen (section 7).
-- Anything on NVIDIA's DRM backend; explicit sync on NVIDIA's render node with a Vulkan client.
+- An hour on the NVIDIA desktop's monitors: its session stopped after 13 minutes (section 7);
+  anything seen on the laptop's screen.
+- Explicit sync on NVIDIA's render node with a Vulkan client.
 - `tokei` counts (section 2 states the method used).
 - A per-case account of the golden differences (section 3).
 - The cause of the one-second stall in the one-hour nested run (section 8).
