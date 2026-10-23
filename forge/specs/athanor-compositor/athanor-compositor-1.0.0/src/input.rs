@@ -130,6 +130,34 @@ impl State {
         pointer.frame(self);
     }
 
+    /// A button pressed or released: a press first focuses what is under the pointer.
+    pub fn button_input(&mut self, button: u32, button_state: ButtonState, time: InputTime) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
+            self.click_focus(pointer.current_location());
+        }
+        // After the focus: the button's serial is then newer than the keyboard's enter, so a
+        // token made from the click that focused a window is in range.
+        let serial = SERIAL_COUNTER.next_serial();
+        self.last_input_serial = Some(serial);
+        if button_state == ButtonState::Pressed {
+            let to = pointer.current_focus().and_then(|surface| surface.client());
+            self.grab_serials.button = to.map(|client| (serial, client.id()));
+        }
+        pointer.button(
+            self,
+            &ButtonEvent {
+                button,
+                state: button_state,
+                serial,
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
     /// Input from the backend; it may change what is on screen, the pointer or the stacking.
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         self.activity();
@@ -162,30 +190,7 @@ impl State {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                let Some(pointer) = self.seat.get_pointer() else {
-                    return;
-                };
-                if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-                    self.click_focus(pointer.current_location());
-                }
-                // After the focus: the button's serial is then newer than the keyboard's enter,
-                // so a token made from the click that focused a window is in range.
-                let serial = SERIAL_COUNTER.next_serial();
-                self.last_input_serial = Some(serial);
-                if event.state() == ButtonState::Pressed {
-                    let to = pointer.current_focus().and_then(|surface| surface.client());
-                    self.grab_serials.button = to.map(|client| (serial, client.id()));
-                }
-                pointer.button(
-                    self,
-                    &ButtonEvent {
-                        button: event.button_code(),
-                        state: event.state(),
-                        serial,
-                        time: event.time(),
-                    },
-                );
-                pointer.frame(self);
+                self.button_input(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => {
                 let Some(pointer) = self.seat.get_pointer() else {
@@ -312,9 +317,13 @@ impl VirtualKeyboardHandler for State {
 }
 
 impl VirtualPointerHandler for State {
-    /// A virtual pointer's motion, buttons and scrolling take the hardware's path; its absolute
-    /// motion spans the output it names, or all of them, and stays on the outputs.
+    /// A virtual pointer's motion, buttons and scrolling take the hardware's path, unless the
+    /// session is locked (`drops_virtual_input`); its absolute motion spans the output it names,
+    /// or all of them, and stays on the outputs.
     fn process_virtual_pointer_event(&mut self, event: InputEvent<VirtualPointerBackend>) {
+        if self.drops_virtual_input() {
+            return;
+        }
         let InputEvent::PointerMotionAbsolute { event } = event else {
             return self.process_input_event(event);
         };

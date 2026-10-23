@@ -3503,6 +3503,36 @@ fn os9_a_virtual_pointer_stays_inside_the_outputs() {
     run.stop();
 }
 
+/// Locks the session for a new client, with a lock surface on the first output that has the
+/// keyboard, and returns the client, which records its keys, and its lock.
+fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLockV1) {
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let mut locker = Local::connect(run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let lock = locks.lock(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(run, "the lock surface is configured", |client, _| {
+        client.locked && client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = locker.id.clone().expect("a client the fixture inserted");
+    locker.pump(run, "the lock surface has the keyboard", |_, state| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+    (locker, lock)
+}
+
 /// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
 /// lock surface focused, a granted client's virtual key reaches neither the lock surface nor any
 /// other client; a hardware key reaches it; after unlock the same virtual key reaches the window
@@ -3516,29 +3546,7 @@ fn os9_a_virtual_key_is_dropped_while_locked() {
         focus(state).as_ref() == Some(&window)
     });
 
-    let mut locker = Local::connect(&mut run, None);
-    let compositor: wl_compositor::WlCompositor = locker.bind(4);
-    let shm: wl_shm::WlShm = locker.bind(1);
-    let output: wl_output::WlOutput = locker.bind(4);
-    let seat: wl_seat::WlSeat = locker.bind(1);
-    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
-    let qh = locker.queue.handle();
-    let _keyboard = seat.get_keyboard(&qh, ());
-    let lock = locks.lock(&qh, ());
-    let surface = compositor.create_surface(&qh, ());
-    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
-    locker.pump(&mut run, "the lock surface is configured", |client, _| {
-        client.locked && client.lock_configure.is_some()
-    });
-    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
-    lock_surface.ack_configure(serial);
-    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
-    surface.attach(Some(&buffer), 0, 0);
-    surface.commit();
-    let id = locker.id.clone().expect("a client the fixture inserted");
-    locker.pump(&mut run, "the lock surface has the keyboard", |_, state| {
-        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
-    });
+    let (mut locker, lock) = lock_session(&mut run);
 
     let mut typist = Local::connect(&mut run, None);
     let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
@@ -3576,5 +3584,96 @@ fn os9_a_virtual_key_is_dropped_while_locked() {
         "after unlock the virtual key reaches the window"
     );
     assert_eq!(locker.client.keys, [30], "and not the locker");
+    run.stop();
+}
+
+/// Moves `pointer` by `(dx, dy)` and clicks its left button.
+fn virtual_click(
+    pointer: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
+    local: &mut Local,
+    run: &mut Running,
+    (dx, dy): (f64, f64),
+) {
+    use wayland_client::protocol::wl_pointer::ButtonState;
+    pointer.motion(0, dx, dy);
+    pointer.frame();
+    // BTN_LEFT.
+    pointer.button(0, 0x110, ButtonState::Pressed);
+    pointer.button(0, 0x110, ButtonState::Released);
+    pointer.frame();
+    local.roundtrip(run);
+}
+
+/// A virtual pointer while the session is locked (the maintainer's decision of 2026-10-23): a
+/// granted client's virtual motion and click over the lock surface reach nothing; a hardware
+/// click reaches the lock surface; after unlock the same virtual click reaches the window.
+#[test]
+fn os9_a_virtual_pointer_is_dropped_while_locked() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    let mut run = Running::start(None);
+    let (window, window_client) = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &clicker.queue.handle(), ());
+    let (mut locker, lock) = lock_session(&mut run);
+    let locker_id = locker.id.clone().expect("a client the fixture inserted");
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    // The red half of the window, centred on the first output.
+    let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
+    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    let to_target = |at: Point<f64, smithay::utils::Logical>| (target.x - at.x, target.y - at.y);
+
+    let at = seat_pointer.current_location();
+    run.state.grab_serials.button = None;
+    virtual_click(&pointer, &mut clicker, &mut run, to_target(at));
+    assert_eq!(
+        seat_pointer.current_location(),
+        at,
+        "the pointer did not move"
+    );
+    assert_eq!(
+        run.state.grab_serials.button, None,
+        "no client was sent a button"
+    );
+
+    run.state
+        .button_input(0x110, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(0x110, ButtonState::Released, InputTime::now());
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&locker_id),
+        "a hardware click reaches the lock surface"
+    );
+
+    lock.unlock_and_destroy();
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| focus(state).as_ref() == Some(&window),
+    );
+    run.state.grab_serials.button = None;
+    let at = seat_pointer.current_location();
+    virtual_click(&pointer, &mut clicker, &mut run, to_target(at));
+    assert_eq!(
+        seat_pointer.current_location(),
+        target,
+        "moved by its delta"
+    );
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "after unlock the virtual click reaches the window"
+    );
     run.stop();
 }

@@ -108,7 +108,8 @@ takes the hardware's path, so the compositor's keys and the layer focus apply to
 keyboard's keymap applies to its own keys only, the seat's returning after each; its modifiers
 apply to its own keys as well; a virtual pointer stays on the outputs, its absolute motion
 spanning the output it names or all of them. While the session is locked a virtual key reaches
-no client (open question 12), and a hardware key still reaches the lock surface.
+no client (open question 12), and neither does a virtual pointer's motion, button or scrolling;
+the hardware keyboard and pointer still reach the lock surface.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
