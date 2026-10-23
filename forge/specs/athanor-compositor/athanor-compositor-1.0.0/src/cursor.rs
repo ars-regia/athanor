@@ -15,7 +15,7 @@ use smithay::desktop::utils::bbox_from_surface_tree;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Rectangle, Size, Transform};
+use smithay::utils::{Logical, Point, Rectangle, Transform};
 use smithay::wayland::compositor::with_states;
 
 use crate::state::State;
@@ -283,6 +283,7 @@ mod tests {
     use smithay::backend::renderer::element::Element;
     use smithay::backend::renderer::pixman::PixmanRenderer;
     use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
+    use smithay::utils::Size;
 
     /// An image of nominal size `size`, `size`x`size` pixels, as a theme's file holds it.
     fn image(size: u32) -> xcursor::parser::Image {
