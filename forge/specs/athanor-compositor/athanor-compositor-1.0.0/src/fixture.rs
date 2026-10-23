@@ -3485,6 +3485,53 @@ fn os9_a_virtual_pointer_moves_and_clicks() {
     run.stop();
 }
 
+/// A virtual pointer's code outside evdev's buttons (BTN_MISC to KEY_MAX) is no button (OS9 task
+/// 6 audit): it reaches no client and is not counted as held, so a pointer cannot grow its held
+/// set without bound; a button code goes on.
+#[test]
+fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
+    use wayland_client::protocol::wl_pointer::ButtonState;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    run.state.last_input_serial = None;
+    for code in [0, 0xff, 0x300, u32::MAX] {
+        pointer.button(0, code, ButtonState::Pressed);
+    }
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.last_input_serial.is_none(),
+        "no press reached the seat"
+    );
+    assert!(
+        run.state.virtual_buttons.values().all(Vec::is_empty),
+        "no code is held"
+    );
+    // BTN_LEFT and KEY_MAX, the range's last code.
+    for code in [0x110, 0x2ff] {
+        pointer.button(0, code, ButtonState::Pressed);
+    }
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.last_input_serial.is_some(),
+        "a button reached the seat"
+    );
+    assert_eq!(
+        run.state
+            .virtual_buttons
+            .values()
+            .flatten()
+            .collect::<Vec<_>>(),
+        [&0x110, &0x2ff],
+        "both buttons are held"
+    );
+    run.stop();
+}
+
 /// Absolute and relative motion of a virtual pointer past the edge of the fixture's two outputs
 /// leaves the pointer on an output (OS9 task 6), as
 /// `task8_an_output_that_shrinks_strands_no_window_and_no_pointer` requires of the hardware one.

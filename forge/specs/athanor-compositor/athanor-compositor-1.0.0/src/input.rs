@@ -351,6 +351,11 @@ impl VirtualPointerHandler for State {
             }
             InputEvent::PointerButton { event } => {
                 let (device, button) = (event.device(), event.button_code());
+                // A code outside evdev's buttons is no button: neither the seat nor the count
+                // takes it, so a pointer holds at most every button.
+                if !BUTTONS.contains(&button) {
+                    return;
+                }
                 let holds = self
                     .virtual_buttons
                     .get(&device)
@@ -405,6 +410,9 @@ impl VirtualPointerHandler for State {
         }
     }
 }
+
+/// The evdev codes of buttons, BTN_MISC to KEY_MAX.
+const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
 
 /// A key the compositor keeps for itself.
 #[derive(Clone, Copy, Debug, PartialEq)]

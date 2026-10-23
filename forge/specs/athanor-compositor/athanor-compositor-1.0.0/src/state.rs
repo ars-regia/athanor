@@ -114,7 +114,8 @@ pub struct State {
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
     /// The buttons each virtual pointer holds, whose release goes on while the session is
-    /// locked; a pointer's entry goes with it.
+    /// locked; a pointer's entry goes with it. Only evdev's button codes are counted, so an entry
+    /// holds at most 512.
     pub virtual_buttons: HashMap<VirtualPointerDevice, Vec<u32>>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
