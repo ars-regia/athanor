@@ -322,5 +322,6 @@ revision. The maintainer, from their own machine:
 5. Re-runs the `github-release` job of the promotion run.
 
 A tag on the right commit with a forged Release at it is no recovery case: `github-release.sh`
-publishes only on a Release that is the approved one exactly, or that holds verified evidence
-of an earlier promotion of that tag and commit, and refuses any other, naming the recovery.
+publishes only on a Release that is this promotion's approved one exactly (title, notes hash,
+target, no prerelease, `latest`), whatever assets it already holds, and refuses any other,
+naming the recovery.
