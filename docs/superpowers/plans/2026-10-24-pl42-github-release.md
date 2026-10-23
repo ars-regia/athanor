@@ -38,7 +38,8 @@ are needed:
   second step runs `system/github-release.sh publish` with the token and nothing else. That
   step:
   - checks that the bundle is this run's;
-  - recomputes the choice and refuses on any difference from `release.json`;
+  - checks that the approved choice in `release.json` still holds, and refuses, naming the
+    field, when it does not;
   - packs the bundle into one deterministic tar;
   - publishes the Release as a draft first and then for real.
 
@@ -104,7 +105,9 @@ at the end.
 
    `system/github-release.sh plan` fails the `plan` job, before the approval and before any
    bundle is signed, in each of these cases. The error names the tag.
-   - `MAINTAINER_TAG_EMAIL` is unset;
+   - a `v*` tag points at `revision` and `MAINTAINER_TAG_EMAIL` is unset. The error names the
+     variable. The variable is read only when such a tag exists, so a promotion without one,
+     the hourly promotion of UD5 included, never needs it;
    - `revision` is not in the history of `iso-v0`, checked through the `branches` and `compare`
      endpoints as `system/trusted-run.sh` checks a run. ADR-0105 item 2 defines a 0.x release
      as a signed tag on `iso-v0`, so a tag elsewhere is no release;
@@ -112,8 +115,12 @@ at the end.
      (ADR-0131 decision 7);
    - more than one `v*` tag points at the commit;
    - the notes file is missing or its first heading names another version.
-5. **Notes of a promotion without a 0.x tag.** The text the `release` approval covered
-   (`system/evidence-bundle.sh summary`), followed by the commands that verify the bundle. No
+5. **Notes of a promotion without a 0.x tag.** The promotion and evidence part of the text the
+   `release` approval covers, printed by a new mode `system/evidence-bundle.sh summary --promotion
+   ARTIFACTS_DIR`, followed by the commands that verify the bundle. The full `summary` cannot be
+   used: it prints `notes_sha256` from `release.json`, which does not exist yet when `plan` builds
+   the notes, and the notes would hash themselves. `--promotion` reads only `promotion.json` and
+   the evidence, so `plan` and `publish` build the same bytes from the same bundle. No
    notes file is needed, so an hourly promotion (UD5) never waits for one. Its Release is marked
    `--latest=false`.
 6. **One asset per promotion run:** `evidence-<run_id>-<promotion run id>.tar`. Both ids come
@@ -124,18 +131,29 @@ at the end.
    tree. The archive is deterministic:
    `tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu`. A re-run
    produces the same bytes.
-7. **Idempotence and second promotions** (ADR-0131 decision 6). `publish` handles each state as
-   follows:
+7. **Idempotence and second promotions** (ADR-0131 decision 6). `release_of`, in both
+   subcommands, reads only published Releases. GitHub lists drafts only to a token with push
+   access, so the `plan` job (`contents: read`) never sees one, and a choice that read drafts
+   would differ between `plan` and `publish` without anyone's error. `publish` then handles the
+   Release at the approved tag, draft or published, as follows:
 
    | State found | What `publish` does |
    | --- | --- |
    | No Release | Creates a draft with the asset, then publishes it with its `latest` flag |
-   | A draft without this asset | Uploads the asset, then publishes |
-   | A draft with this asset, same SHA-256 | Publishes |
+   | A draft with the approved title and target, without this asset | Uploads the asset, then publishes |
+   | A draft with the approved title and target, holding this asset with the same SHA-256 | Publishes |
+   | A draft with another title or target (a stray draft) | Stops and names the draft and the recovery below |
    | A published Release without this asset (a second promotion of the same build) | Uploads the asset |
    | A published Release with this asset, same SHA-256 (a re-run) | Does nothing and succeeds |
+   | A published `v*` Release whose first asset is of another build run | Stops: the approved choice no longer holds |
    | This asset with a different SHA-256 | Stops; it never uses `--clobber` |
    | The tag already points at another commit | Stops |
+
+   **Recovery from a stray draft** (destructive, the maintainer only): `gh release delete <tag>
+   -R ars-regia/athanor`, without `--cleanup-tag`, then re-run the `github-release` job with
+   `gh run rerun <promotion run> --job <job id> -R ars-regia/athanor`. A new `plan` is not a
+   recovery: once `promote` has moved `:stable`, a new plan finds nothing to promote
+   (`scripts/ci/promotion-record.sh`).
 
    A second build run of a commit that carries a `v0.x` tag, such as the nightly rebuild of
    PQ18, does not join the `v*` Release. A `v*` Release takes assets only from the build run of
@@ -146,7 +164,14 @@ at the end.
      `$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID`. `verify-dir` alone
      proves the bundle is signed, not that it is this run's; `system/promote-iso.sh` checks
      `run_id` the same way.
-   - The tag, title, `latest` flag and notes SHA-256 it recomputes must equal `release.json`.
+   - `publish` does not recompute the whole choice: once `promote` has moved `:stable`, a choice
+     that differs could never be published, because a re-run would refuse again and a new plan
+     finds nothing to promote. It checks that the approved choice in `release.json` still
+     holds, and refuses with a message naming the field otherwise:
+     - for a `v*` tag: the tag still points at `revision`, `verification.verified` is still true
+       and the tagger email still equals `MAINTAINER_TAG_EMAIL`;
+     - for a `promoted-*` tag: the tag is absent or points at `revision`;
+     - the notes it builds hash to `notes_sha256`.
    - Any `gh` error other than "release not found" stops the script; it is never read as
      "absent".
    - After it publishes, `publish` reads the Release back. It must not be a draft, it must hold
@@ -154,7 +179,8 @@ at the end.
 
    A failed `github-release` job leaves `:stable` where `promote` put it, because the Release
    follows the promotion and does not gate it. Everything that could make every re-run fail (the
-   notes file, the tag) is checked in `plan`, before the approval. The run shows red, and the
+   notes file, the tag) is checked in `plan`, before the approval, and the checks of `publish`
+   fail only when something changed after the approval. The run shows red, and the
    alert of PL51 fires once PB2 adds it. The off-GitHub copy, checked before `:stable` moved,
    stays the store that fails closed (ADR-0106 item 4).
 9. **Testing without GitHub.** `fake_registry.py` already stands in for `gh` on `PATH`. It gains:
@@ -185,7 +211,7 @@ at the end.
 - **[TRUST]** Task 4: the job's `permissions:` block (`contents: write` only), its lack of an environment (ADR-0131 decision 1), that no step of it has `id-token` or a registry login, and that the step holding the token runs no nix and no cosign.
 - **[TRUST]** Task 4: the step `plan` gains, in a job that holds `id-token: write`. It holds `GH_TOKEN` and runs no nix.
 - **[TRUST]** Task 1: `version` and `revision` added to `promotion.json`. The apply compares the recomputed record with the signed plan, so a plan made before the merge and applied after it fails with "plan again". That is fail-closed, and acceptable once.
-- **[TRUST]** Task 2: `release.json` enters the signed bundle and the approved summary, and `publish` refuses any difference from it. The bundle identity is unchanged (`promote-stable.yml@refs/heads/${RELEASE_BRANCH:-iso-v0}`).
+- **[TRUST]** Task 2: `release.json` enters the signed bundle and the approved summary, and `publish` refuses, naming the field, when the approved choice no longer holds (decision 8). The bundle identity is unchanged (`promote-stable.yml@refs/heads/${RELEASE_BRANCH:-iso-v0}`).
 - **[TRUST]** Task 2: the 0.x tag check (ADR-0131 decisions 3 and 7). A lightweight or unverified `v*` tag, or one tagged by another email, fails `plan` and names the tag; it is never treated as "no tag".
 - **[SETTINGS]** Task 3: the tag rulesets and their single bypass actor.
 - Every place where `gh` can fail must stop the script. "Not found" is the only state read as absence.
@@ -222,7 +248,7 @@ at the end.
 
 **Files:**
 - Create: `system/github-release.sh`
-- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it.
+- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it. A new mode, `summary --promotion ARTIFACTS_DIR`, prints only the promotion and evidence part and reads no `release.json` (decision 5). The existing `create` tests of `test_evidence_bundle.py` gain a `release.json` in their fixtures.
 - Modify: `system/tests/fake_registry.py`. Add `gh release` and the `gh api` paths of decision 9, with the state kept in the fixture. Document two new fixture keys in its docstring:
   - `releases`: `{tag: {"draft": bool, "latest": bool, "target": sha, "title": str, "body": str, "assets": {name: sha256}}}`;
   - `git_tags`: `{name: {"sha": object sha, "type": "commit"|"tag", "commit": sha, "message": str, "tagger_email": str, "verified": bool}}`. The existing key `tags` already holds registry tags.
@@ -237,7 +263,7 @@ at the end.
   - Output: on standard output, the Markdown line with the Release URL, for `$GITHUB_STEP_SUMMARY`.
 - Exit status of both subcommands: 0 done or already done, 1 refused, 2 usage.
 - Internal functions, one job each:
-  - `release_of` returns tag, title, `latest` and the notes file built from the record, the tags at `revision` and the existing `v*` Release (decisions 4, 5 and 7). `plan` and `publish` both call it;
+  - `release_of` returns tag, title, `latest` and the notes file built from the record, the tags at `revision` and the published `v*` Release (decisions 4, 5 and 7). It reads only published Releases. `plan` calls it; `publish` calls only its tag and notes checks (decision 8);
   - `on_branch` runs the `branches` and `compare` check of decision 4;
   - `run_check` performs the check of decision 8;
   - `pack` writes the tar of decision 6;
@@ -254,10 +280,13 @@ at the end.
   - `test_evidence_bundle.py`:
     - `test_create_refuses_a_plan_without_release_json`
     - `test_summary_names_the_release_tag_title_and_notes_hash`
+    - `test_summary_promotion_mode_reads_no_release_json`
   - `test_github_release.py`, `plan`:
     - `test_plan_names_the_promotion_tag_and_the_version_without_a_version_tag`
     - `test_plan_names_a_maintainer_version_tag_with_its_notes_and_latest`
-    - `test_plan_refuses_without_maintainer_tag_email`
+    - `test_plan_refuses_a_version_tag_without_maintainer_tag_email_and_names_the_variable`
+    - `test_plan_without_a_version_tag_needs_no_maintainer_tag_email`
+    - `test_plan_does_not_see_a_draft`
     - `test_plan_refuses_a_revision_not_on_the_release_branch`
     - `test_plan_refuses_a_lightweight_version_tag_and_names_it`
     - `test_plan_refuses_an_unverified_version_tag_and_names_it`
@@ -267,25 +296,30 @@ at the end.
     - `test_plan_refuses_a_version_tag_without_its_notes_file`
     - `test_plan_refuses_notes_whose_first_heading_names_another_version`
     - `test_plan_sends_another_build_of_a_tagged_commit_to_its_promotion_tag`
-    - `test_a_gh_error_other_than_not_found_is_not_taken_for_absent`
+    - `test_a_gh_error_other_than_not_found_is_not_taken_for_absent`. It asserts exit status 1 and the message naming the failed call.
   - `test_github_release.py`, `publish`:
     - `test_publish_refuses_a_bundle_of_another_build_run`
     - `test_publish_refuses_a_bundle_of_another_promotion_run`
-    - `test_publish_refuses_when_the_recomputed_release_differs_from_release_json`
+    - `test_publish_refuses_a_version_tag_moved_since_the_plan_and_names_the_field`
+    - `test_publish_refuses_a_version_tag_no_longer_verified_and_names_the_field`
+    - `test_publish_refuses_notes_whose_hash_differs_from_release_json`
+    - `test_a_stray_draft_publishes_nothing_and_names_the_recovery`
+    - `test_a_version_release_taken_by_another_build_since_the_plan_publishes_nothing`
     - `test_the_release_is_created_as_a_draft_then_published_with_its_latest_flag`
     - `test_a_promotion_release_is_published_with_latest_false`
     - `test_a_draft_without_the_asset_is_completed`
     - `test_a_draft_holding_the_same_asset_is_published`
-    - `test_a_rerun_with_the_same_asset_changes_nothing`
+    - `test_a_rerun_with_the_same_asset_changes_nothing`. It asserts exit status 0 and no `create`, `upload` or `edit` in the log.
     - `test_an_existing_asset_with_other_bytes_is_refused_and_not_replaced`
     - `test_a_second_promotion_of_the_same_build_adds_its_own_asset`
     - `test_a_promotion_tag_at_another_commit_publishes_nothing`
-    - `test_the_tar_is_byte_identical_across_runs`
+    - `test_the_tar_is_byte_identical_across_runs`. It asserts first that the asset exists and is not empty.
     - `test_the_published_release_is_read_back`
     - `test_no_call_uses_clobber`. It asserts that the log holds a `release create` or `upload` and no `--clobber`.
 - [ ] **Step 2: Implement** the script, the `evidence-bundle.sh` change and the fake. Two claims are unverified; check both with the real `gh` on a scratch repository before the pull request:
   - **Unverified:** `gh release view <tag>` finds a draft whose tag does not exist yet. gh resolves a draft by listing releases when the tags endpoint answers 404. If it does not, `release_of` looks the draft up with `gh api /repos/…/releases --paginate` and matches `tag_name`.
-  - **Unverified:** a `contents: read` token, which is what the `plan` job holds, sees draft Releases. If it does not, a draft left by a failed `github-release` job is invisible to `plan`. Its recomputation in `publish` then differs from `release.json`, and `publish` refuses, which is fail-closed. The fix is to re-run from `plan`.
+  - **Unverified:** GitHub lists drafts only to a token with push access. The design does not rely on it either way: `release_of` reads only published Releases (decision 7).
+  - **Unverified:** the `GITHUB_TOKEN` with `contents: write` can create a Release, and with it the tag `promoted-<run_id>`, on a commit whose `.github/workflows/` differs from the default branch's head. GitHub may require the `workflows` permission for that, which `GITHUB_TOKEN` cannot hold. Task 6 checks it. If it fails, the implementer stops and reports; there is no fallback to another token.
 - [ ] **Step 3: Checks:** run `bash -n` and `shellcheck` on both scripts, then `python3 -B -m unittest discover -s system/tests`.
 - [ ] **Step 4: Commit** `feat(release): name and publish the GitHub Release of a promotion (PL42)`.
 
@@ -295,19 +329,20 @@ This task comes before the job is wired (ADR-0131 decision 8). The maintainer ap
 settings; the agent only edits the files.
 
 **Files:**
-- Modify: `.github/settings/rulesets.json`. Add two rulesets with `"target": "tag"` and `"enforcement": "active"`:
-  - `version-tags`: `refs/tags/v*`, rules `creation`, `update` and `deletion`. Its only bypass actor is the repository admin role: `{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}`.
+- Modify: `.github/settings/rulesets.json`. Add three rulesets with `"target": "tag"` and `"enforcement": "active"`. A bypass actor bypasses every rule of its ruleset, so the rule only the admin may pass sits alone in its own ruleset:
+  - `version-tags-create`: `refs/tags/v*`, rule `creation`. Its only bypass actor is the repository admin role: `{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}`.
+  - `version-tags-immutable`: `refs/tags/v*`, rules `update` and `deletion`, and no bypass actor.
   - `promotion-tags`: `refs/tags/promoted-*`, rules `update` and `deletion`, and no bypass actor.
-  - The App is never a bypass actor: no `Integration` actor in either ruleset.
+  - The App is never a bypass actor: no `Integration` actor in any of them.
 - Modify: `.github/settings/actions.json` `variables`. Add `MAINTAINER_TAG_EMAIL`.
 - Modify (exact-match script): `docs/operations/secrets.md`. Add a row `VAR11 | MAINTAINER_TAG_EMAIL | none; set by the maintainer | promote-stable.yml plan and github-release, through system/github-release.sh: the tagger email a v0.x tag must carry (ADR-0131 decision 3)`.
-- Modify (exact-match script): `docs/architecture/doc_ci.md`, the table of secrets and variables (the rows near `EVIDENCE_REGISTRY`, around line 411). Add a row: `MAINTAINER_TAG_EMAIL` | variable, no default: unset, `plan` fails closed (ADR-0131 decision 3) | repository, set by the maintainer | CI11.
-- Modify (exact-match script): `docs/operations/github-settings.md`, the "Desired state ahead of GitHub" table (around line 228). The `rulesets.json` row names `version-tags` and `promotion-tags` with their rules and bypass actor; the `actions.json` row names the variable `MAINTAINER_TAG_EMAIL`, with "not set" in its live column until the maintainer sets it.
+- Modify (exact-match script): `docs/architecture/doc_ci.md`, the table of secrets and variables (the rows near `EVIDENCE_REGISTRY`, around line 411). Add a row: `MAINTAINER_TAG_EMAIL` | variable, no default: unset, the promotion of a commit carrying a `v*` tag fails closed (ADR-0131 decision 3) | repository, set by the maintainer | CI11.
+- Modify (exact-match script): `docs/operations/github-settings.md`, the "Desired state ahead of GitHub" table (around line 228). The `rulesets.json` row names `version-tags-create`, `version-tags-immutable` and `promotion-tags` with their rules and bypass actor; the `actions.json` row names the variable `MAINTAINER_TAG_EMAIL`, with "not set" in its live column until the maintainer sets it.
 
 - [ ] **Step 1: Edit the files.** **Unverified:** that `actor_id` 5 is the admin role, and that `ghsettings.py` round-trips a `tag` target. Check both with the plan that `apply` prints (Step 3) and with `python3 -B -m unittest discover -s scripts/tests` (`test_ghsettings.py`).
 - [ ] **Step 2: Commit** `chore(settings): protect the tags a GitHub Release names (ADR-0131)`.
 - [ ] **Step 3: [M] The maintainer applies the settings** after the merge, from their own machine. The commands are the ones `docs/operations/github-settings.md` gives:
-  - `python3 scripts/github-settings/ghsettings.py apply`, then read the plan: two `POST …/rulesets` and no `DESTRUCTIVE` line;
+  - `python3 scripts/github-settings/ghsettings.py apply`, then read the plan: three `POST …/rulesets` and no `DESTRUCTIVE` line;
   - `python3 scripts/github-settings/ghsettings.py apply --yes`;
   - `python3 scripts/github-settings/ghsettings.py diff`, which must print no drift for `rulesets`;
   - `gh variable set MAINTAINER_TAG_EMAIL -R ars-regia/athanor`, which reads the value from the prompt.
@@ -337,7 +372,7 @@ settings; the agent only edits the files.
 
   `RUN_ID` already comes from the workflow `env`. bash runs with `-eo pipefail`, as the file's `defaults` comment states.
 
-- [ ] **Step 1: Show the diff to the maintainer before the push** (a workflow with jobs in `release`, and a step added to the job that signs the bundle).
+- [ ] **Step 1: Show the diff to the maintainer before the push** (a workflow with jobs in `release`, and a step added to the job that signs the bundle). Preconditions before its merge: Task 3 is applied (`ghsettings.py diff` shows no drift for `rulesets`) and `gh variable list -R ars-regia/athanor` lists `MAINTAINER_TAG_EMAIL`.
 - [ ] **Step 2: Implement.** Run `actionlint` and `python3 scripts/verify.py workflows ci docs registry`. `verify.py workflows` must stay green: no job runs `promote.sh` or writes `:stable` (PL60 rule, `STABLE_WRITER`).
 - [ ] **Step 3: Commit** `ci(release): publish the GitHub Release after the promotion (PL42)`.
 
@@ -363,7 +398,8 @@ Not code. The maintainer runs these after the next promotion. Each is given as a
 - [ ] `gh release list -R ars-regia/athanor --limit 3` shows a Release whose title is the promoted version.
 - [ ] `gh release download <tag> -R ars-regia/athanor -p 'evidence-*.tar' -D /var/tmp/pl42-check`, then `tar -xf` into an empty directory, then `cosign verify-blob --bundle bundle.sha256.sigstore.json --certificate-identity https://github.com/ars-regia/athanor/.github/workflows/promote-stable.yml@refs/heads/iso-v0 --certificate-oidc-issuer https://token.actions.githubusercontent.com bundle.sha256` and `sha256sum --strict -c bundle.sha256` in that directory. Both pass (the PB9 acceptance).
 - [ ] Re-run the `github-release` job (`gh run rerun <promotion run> --job <job id> -R ars-regia/athanor`). It ends green, and `gh release view <tag> -R ars-regia/athanor --json assets` lists the same asset with the same size.
-- [ ] `gh api /repos/ars-regia/athanor/rulesets --jq '.[].name'` lists `version-tags` and `promotion-tags` (Task 3).
+- [ ] `gh api /repos/ars-regia/athanor/rulesets --jq '.[].name'` lists `version-tags-create`, `version-tags-immutable` and `promotion-tags` (Task 3).
+- [ ] **Unverified point of Task 2:** a Release is created and published on a promoted commit that is an ancestor of the head of `iso-v0` with a change under `.github/workflows/` between them (`git diff --stat <revision> origin/iso-v0 -- .github/workflows/` is not empty). If the job fails on the `workflows` permission, the implementer stops and reports; there is no fallback to another token.
 - [ ] For 0.9: the maintainer's signed `v0.9.0` is on the promoted commit before the promotion is dispatched (ADR-0131 decision 5); the plan summary names `v0.9.0` and the notes hash; the Release shows the notes of Task 5 and is marked latest.
 
 ## Decisions (ADR-0131)
@@ -377,4 +413,4 @@ Decided by the maintainer on 2026-10-24; ADR-0131 records them and amends ADR-01
 5. The maintainer pushes the signed `v0.x.y` tag before dispatching the promotion of that build. The order is ADR-0131's own rule; ADR-0105 item 2 only defines a 0.x release as a signed tag plus a `:stable` promotion.
 6. A second promotion of a build adds its bundle to the build's Release as an asset of its own, named after the promotion run; a re-run of a promotion run changes nothing.
 7. A `v0.x` tag on the promoted commit that fails decision 3 fails the job closed, naming the tag; there is no fallback to `promoted-<build run id>`.
-8. The tag rulesets protect `refs/tags/v*` (creation, update, deletion; the admin role is the only bypass) and `refs/tags/promoted-*` (update, deletion) in 0.9; the maintainer applies them, and the App is never a bypass actor.
+8. The tag rulesets protect `refs/tags/v*` (creation, update, deletion; the admin role bypasses creation only) and `refs/tags/promoted-*` (update, deletion) in 0.9; the maintainer applies them, and the App is never a bypass actor. Since a bypass actor bypasses every rule of its ruleset, this plan splits `v*` into `version-tags-create` and `version-tags-immutable` (Task 3).
