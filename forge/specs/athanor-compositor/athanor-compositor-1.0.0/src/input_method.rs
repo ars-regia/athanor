@@ -70,6 +70,7 @@ struct Method {
     done: u32,
     /// Its keyboard grab while installed.
     grab: Option<ZwpInputMethodKeyboardGrabV2>,
+    edits: Edits,
 }
 
 impl Method {
@@ -77,6 +78,21 @@ impl Method {
         self.done = self.done.wrapping_add(1);
         self.object.done();
     }
+
+    /// Stops serving the active text input: what it sent for that one is dropped.
+    fn deactivate(&mut self) {
+        self.object.deactivate();
+        self.edits = Edits::default();
+        self.done();
+    }
+}
+
+/// What the input method sends for the active text input, applied at its next `commit`.
+#[derive(Default)]
+struct Edits {
+    preedit: Option<(String, i32, i32)>,
+    commit: Option<String>,
+    delete: Option<(u32, u32)>,
 }
 
 struct TextInput {
@@ -113,8 +129,7 @@ impl State {
         }
         if composing.active.take().is_some() {
             if let Some(method) = &mut composing.method {
-                method.object.deactivate();
-                method.done();
+                method.deactivate();
             }
         }
         if composing.method.is_some() {
@@ -233,13 +248,14 @@ impl Composing {
         }
     }
 
-    /// The active text input, while the input method lives.
-    fn active(&self) -> Option<&ZwpTextInputV3> {
-        self.method.as_ref().and(self.active.as_ref())
-    }
-
     fn is_method(&self, object: &ZwpInputMethodV2) -> bool {
         self.method.as_ref().is_some_and(|m| m.object == *object)
+    }
+
+    /// The pending edits of `object`, if it is the seat's input method.
+    fn edits(&mut self, object: &ZwpInputMethodV2) -> Option<&mut Edits> {
+        let method = self.method.as_mut().filter(|m| m.object == *object)?;
+        Some(&mut method.edits)
     }
 }
 
@@ -464,8 +480,7 @@ impl Dispatch2<ZwpTextInputV3, State> for InputMethods {
         if composing.active.as_ref() == Some(resource) {
             composing.active = None;
             if let Some(method) = &mut composing.method {
-                method.object.deactivate();
-                method.done();
+                method.deactivate();
             }
         }
     }
@@ -492,8 +507,7 @@ fn commit(composing: &mut Composing, resource: &ZwpTextInputV3, pending: Pending
         }
         Some(false) => {
             composing.active = None;
-            method.object.deactivate();
-            method.done();
+            method.deactivate();
             return;
         }
         None if composing.active.is_none() => return,
@@ -560,6 +574,7 @@ impl Dispatch2<ZwpInputMethodManagerV2, State> for InputMethods {
             object,
             done: 0,
             grab: None,
+            edits: Edits::default(),
         });
         composing.each_focused(|text_input, focus| text_input.enter(focus));
     }
@@ -578,8 +593,8 @@ impl Dispatch2<ZwpInputMethodV2, State> for InputMethods {
         let current = state.composing.is_method(resource);
         match request {
             zwp_input_method_v2::Request::CommitString { text } => {
-                if let (true, Some(active)) = (current, state.composing.active()) {
-                    active.commit_string(Some(text));
+                if let Some(edits) = state.composing.edits(resource) {
+                    edits.commit = Some(text);
                 }
             }
             zwp_input_method_v2::Request::SetPreeditString {
@@ -587,36 +602,44 @@ impl Dispatch2<ZwpInputMethodV2, State> for InputMethods {
                 cursor_begin,
                 cursor_end,
             } => {
-                if let (true, Some(active)) = (current, state.composing.active()) {
-                    active.preedit_string(Some(text), cursor_begin, cursor_end);
+                if let Some(edits) = state.composing.edits(resource) {
+                    edits.preedit = Some((text, cursor_begin, cursor_end));
                 }
             }
             zwp_input_method_v2::Request::DeleteSurroundingText {
                 before_length,
                 after_length,
             } => {
-                if let (true, Some(active)) = (current, state.composing.active()) {
-                    active.delete_surrounding_text(before_length, after_length);
+                if let Some(edits) = state.composing.edits(resource) {
+                    edits.delete = Some((before_length, after_length));
                 }
             }
             zwp_input_method_v2::Request::Commit { serial } => {
-                let composing = &state.composing;
-                let (true, Some(active), Some(method)) =
-                    (current, composing.active(), &composing.method)
-                else {
+                let composing = &mut state.composing;
+                let Some(edits) = composing.edits(resource).map(std::mem::take) else {
                     return;
                 };
+                // A commit made before the input method saw the latest state is dropped, with
+                // its edits: they were meant for a state, or a text input, that is gone.
+                let (Some(method), Some(active)) = (&composing.method, &composing.active) else {
+                    return;
+                };
+                if serial != method.done {
+                    return;
+                }
                 let Some(entry) = composing.text_inputs.iter().find(|e| e.object == *active) else {
                     return;
                 };
-                // A commit made before the input method saw the latest state is discarded: the
-                // text input is told a serial that is not its own.
-                let commits = if serial == method.done {
-                    entry.commits
-                } else {
-                    0
-                };
-                active.done(commits);
+                if let Some((text, begin, end)) = edits.preedit {
+                    active.preedit_string(Some(text), begin, end);
+                }
+                if let Some(text) = edits.commit {
+                    active.commit_string(Some(text));
+                }
+                if let Some((before, after)) = edits.delete {
+                    active.delete_surrounding_text(before, after);
+                }
+                active.done(entry.commits);
             }
             zwp_input_method_v2::Request::GetInputPopupSurface { id, surface } => {
                 let popup = data_init.init(id, InputMethods);

@@ -5019,3 +5019,49 @@ fn os9_a_client_s_33rd_text_input_is_inert() {
     assert_eq!(fields[32].names_after(0), [] as [&str; 0], "the 33rd");
     run.stop();
 }
+
+/// What an input method sends waits for its `commit`, and a commit that names an old serial
+/// applies none of it: a string sent for one window, then committed after the keyboard moved to
+/// another client's field, reaches neither field, nor does a later commit carry it over.
+#[test]
+fn os9_a_stale_input_method_commit_reaches_no_field() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let dones = |raw: &Raw| raw.names_after(0).iter().filter(|n| **n == "done").count();
+    let stale = u32::try_from(dones(&method.method)).expect("serial");
+    window.roundtrip(&mut run);
+    let before = field.events().len();
+    method.method.send("commit_string", vec![text("x")]);
+    ime.roundtrip(&mut run);
+
+    let (mut other, _) = focused_window(&mut run);
+    let other_field = text_input(&mut other, &mut run);
+    enable(&other_field, &mut other, &mut run, "caf");
+    ime.pump(&mut run, "the input method serves the other field", |_, _| {
+        method
+            .method
+            .names_after(0)
+            .iter()
+            .filter(|name| **name == "activate")
+            .count()
+            == 2
+    });
+    let other_before = other_field.events().len();
+    method.method.send("commit", vec![Argument::Uint(stale)]);
+    ime.roundtrip(&mut run);
+    other.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(field.names_after(before), ["leave"], "the first field");
+    assert_eq!(
+        other_field.names_after(other_before),
+        [] as [&str; 0],
+        "the other field"
+    );
+
+    method.commit(&mut ime, &mut run);
+    other.pump(&mut run, "the other field is done", |_, _| {
+        other_field.names_after(other_before).contains(&"done")
+    });
+    assert_eq!(other_field.names_after(other_before), ["done"]);
+    run.stop();
+}
