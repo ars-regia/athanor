@@ -1,3 +1,6 @@
+import fnmatch
+import json
+import posixpath
 import re
 import tempfile
 import unittest
@@ -39,36 +42,90 @@ def packaged_inputs():
         for path in (ROOT / top).rglob(pattern)
     )
     inputs += sorted((ROOT / "system").rglob("*.sh"))
+    inputs += rust_sources()
     return inputs + [path for path in DATA.iterdir() if path.is_file()]
+
+
+def rust_sources():
+    return sorted(path for top in ("forge/specs", "system", "forge/tools") for path in (ROOT / top).rglob("*.rs"))
 
 
 def containerfiles():
     return outside_the_rig(path for top in ("forge", "system") for path in (ROOT / top).rglob("Containerfile*"))
 
 
-def broad_copies(containerfile):
-    """The COPY and ADD lines of the final stage of `containerfile` that take the build context's
-    root, forge/ whole, or anything under forge/test/: each would carry forge/test/shell into
-    the image. An earlier stage reaches the image only through the final stage's COPY --from."""
-    # ponytail: a COPY --from of an earlier stage's whole tree is not followed; read the stage
-    # if one ever takes more than built files.
+# The one stage allowed to copy forge/ whole: the builder of forge/build/Containerfile compiles
+# the workspace from it, and its runtime stage takes only `COPY --from=builder /out/bin/`.
+EXEMPT_STAGES = {("forge/build/Containerfile", "builder")}
+# The rig's allow-list and every directory that holds it: a source equal to one of these, or a
+# glob that matches one, carries the rig's files into the stage.
+RIG_PREFIXES = ("forge", "forge/test", "forge/test/shell", f"forge/test/shell/{RIG_LIST.name}")
+
+
+def instructions(containerfile):
+    """The logical instructions of `containerfile` as (first line number, stage, text): comment
+    and blank lines dropped, continuation lines joined, heredoc bodies skipped. The stage is the
+    name after AS of the FROM that opens it, or its index when it has none."""
     lines = containerfile.read_text(encoding="utf-8").splitlines()
-    final = max((number for number, line in enumerate(lines) if re.match(r"\s*FROM\b", line, re.I)), default=0)
-    found = []
-    for number, line in enumerate(lines[final:], final + 1):
-        words = line.split()
-        if not words or words[0].upper() not in ("COPY", "ADD"):
+    stage, stages, index = None, 0, 0
+    while index < len(lines):
+        number, text = index + 1, lines[index]
+        index += 1
+        if not text.strip() or text.lstrip().startswith("#"):
             continue
-        flags = [word for word in words[1:] if word.startswith("--")]
-        if any(flag.startswith("--from") for flag in flags):
-            continue
-        sources = [word for word in words[1:] if not word.startswith("--")][:-1]
-        for source in sources:
-            path = source.removeprefix("./").rstrip("/")
-            if path in ("", ".", "forge") or path == "forge/test" or path.startswith("forge/test/"):
-                found.append(f"{containerfile}:{number}: {line.strip()}")
-                break
-    return found
+        while text.rstrip().endswith("\\") and index < len(lines):
+            text = text.rstrip()[:-1] + " " + lines[index]
+            index += 1
+        # A heredoc body (RUN <<EOF ... EOF) is data, never an instruction: a FROM or COPY
+        # inside one is skipped with it.
+        for marker in re.findall(r"<<-?\s*[\"']?(\w+)[\"']?", text):
+            while index < len(lines) and lines[index].strip() != marker:
+                index += 1
+            index += 1
+        words = text.split()
+        if words[0].upper() == "FROM":
+            named = [word for position, word in enumerate(words) if position > 0 and words[position - 1].upper() == "AS"]
+            stage = named[0] if named else str(stages)
+            stages += 1
+        yield number, stage, text.strip()
+
+
+def copy_sources(text):
+    """The sources of a COPY or ADD instruction, in its shell or its JSON form; none for
+    COPY --from, whose sources come from another stage or image."""
+    words = text.split()
+    if words[0].upper() not in ("COPY", "ADD"):
+        return []
+    rest = text.strip()[len(words[0]) :].strip()
+    while rest.startswith("--"):
+        flag, _, rest = rest.partition(" ")
+        if flag.startswith("--from"):
+            return []
+        rest = rest.strip()
+    arguments = json.loads(rest) if rest.startswith("[") else rest.split()
+    return arguments[:-1]
+
+
+def carries_the_rig(source):
+    """Whether a COPY source names the context's root, forge/ whole, anything under
+    forge/test/, or a glob that can match one of them."""
+    path = posixpath.normpath(source.lstrip("/")) if source.strip("/") else "."
+    if path == "." or path.startswith(".."):
+        return True
+    if any(character in path for character in "*?["):
+        # fnmatch lets * cross a slash, unlike the builder's match: it flags more, never less.
+        return any(fnmatch.fnmatchcase(prefix, path) for prefix in RIG_PREFIXES)
+    return path in ("forge", "forge/test") or path.startswith("forge/test/")
+
+
+def broad_copies(containerfile):
+    """The COPY and ADD instructions of every stage of `containerfile` that would carry
+    forge/test/shell into it, as (stage, "path:line: text")."""
+    return [
+        (stage, f"{containerfile}:{number}: {text}")
+        for number, stage, text in instructions(containerfile)
+        if any(carries_the_rig(source) for source in copy_sources(text))
+    ]
 
 
 def rig_includes(paths):
@@ -91,6 +148,8 @@ def rig_references(paths):
         for path in paths
         for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
         if any(needle in line for needle in needles)
+        # A Rust comment names the rig's scripts for the reader and never reaches a binary.
+        and not (path.suffix == ".rs" and line.lstrip().startswith("//"))
     ]
 
 
@@ -113,23 +172,66 @@ class TestRigAllowList(unittest.TestCase):
     def test_no_containerfile_copies_the_rig(self):
         files = containerfiles()
         self.assertIn(ROOT / "system/Containerfile", files)
-        self.assertEqual([line for path in files for line in broad_copies(path)], [])
+        found, exempted = [], set()
+        for path in files:
+            for stage, line in broad_copies(path):
+                key = (path.relative_to(ROOT).as_posix(), stage)
+                if key in EXEMPT_STAGES:
+                    exempted.add(key)
+                else:
+                    found.append(line)
+        self.assertEqual(found, [])
+        # An exemption that no longer matches anything is removed, not kept as a blind spot.
+        self.assertEqual(exempted, EXEMPT_STAGES)
 
     def test_no_rust_source_includes_the_rig(self):
-        sources = [path for top in ("forge/specs", "system") for path in (ROOT / top).rglob("*.rs")]
+        sources = rust_sources()
         self.assertTrue(sources)
         self.assertEqual(rig_includes(sources), [])
 
-    def test_a_broad_copy_in_the_final_stage_is_found(self):
+    def lines_found(self, text):
         with tempfile.TemporaryDirectory() as scratch:
             containerfile = Path(scratch) / "Containerfile"
-            containerfile.write_text(
-                "FROM builder AS build\nCOPY forge/ forge/\n"
-                "FROM runtime\nCOPY --from=build /out/bin/ /usr/bin/\nCOPY --chmod=0644 ./ /src/\n",
+            containerfile.write_text(text, encoding="utf-8")
+            return [line.split(": ", 1)[0].rsplit(":", 1)[1] for _, line in broad_copies(containerfile)]
+
+    def test_a_broad_copy_in_any_stage_is_found(self):
+        # system/Containerfile's shape: the content lives in a named stage that later stages
+        # reach through a build argument, never in the final one.
+        found = self.lines_found(
+            "FROM base AS system\nCOPY system/scripts/ /scripts/\nCOPY forge/ /src/forge/\n"
+            "FROM ${SYSTEM_IMAGE} AS gpu-none\nFROM gpu-${GPU} AS final\n"
+            "COPY --from=system /out/bin/ /usr/bin/\nCOPY --chmod=0644 ./ /src/\n"
+        )
+        self.assertEqual(found, ["3", "7"])
+
+    def test_copy_forms_are_parsed(self):
+        found = self.lines_found(
+            "FROM base\n"
+            "COPY system/keys/ \\\n    forge/test/shell/ /src/\n"
+            'COPY ["forge/test/shell/rig-privileged-clients", "/etc/"]\n'
+            "COPY forge/* /src/\n"
+            "COPY system/* /src/\n"
+            "ADD forge/./test /src/\n"
+            "COPY forge/config/packages.json /usr/share/\n"
+        )
+        self.assertEqual(found, ["2", "4", "5", "7"])
+
+    def test_a_heredoc_body_is_not_read_as_instructions(self):
+        found = self.lines_found(
+            "FROM base AS one\nRUN <<EOF\nFROM other AS two\nCOPY . /src/\nEOF\nCOPY system/ /system/\n"
+        )
+        self.assertEqual(found, [])
+
+    def test_a_rust_string_naming_the_rig_is_found(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch) / "lib.rs"
+            source.write_text(
+                "//! Run forge/test/shell/rig.sh to see it.\n"
+                'const RIG: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../forge/test/shell/x"));\n',
                 encoding="utf-8",
             )
-            self.assertEqual(len(broad_copies(containerfile)), 1)
-            self.assertIn(":5: ", broad_copies(containerfile)[0])
+            self.assertEqual(len(rig_references([source])), 1)
 
     def test_an_include_of_the_rig_is_found(self):
         with tempfile.TemporaryDirectory() as scratch:
