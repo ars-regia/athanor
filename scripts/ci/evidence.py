@@ -13,10 +13,15 @@ import pathlib
 import re
 import sys
 
-GATES = ("iso-acceptance", "signature")
+GATES = ("iso-acceptance", "signature", "upgrade-acceptance")
 # The checks a gate's verdict files must hold, each true in one of them: the ISO acceptance is
-# a pass only with the case run on Secure Boot firmware (#252, #145).
-REQUIRED_CHECKS = {"iso-acceptance": ("secure-boot",)}
+# a pass only with the case run on Secure Boot firmware (#252, #145), and the upgrade
+# acceptance only with its stages passed and Secure Boot enforced on the candidate and on the
+# deployment GoBack() returns to (doc_update_delivery.md UD4, UD18).
+REQUIRED_CHECKS = {
+    "iso-acceptance": ("secure-boot",),
+    "upgrade-acceptance": ("secure-boot", "upgrade-stages", "upgraded-secure-boot", "rolled-back-secure-boot"),
+}
 FIELDS = {"gate", "image", "digest", "run_id", "verdict", "workflow_run_url", "finished_at"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 IMAGE = re.compile(r"^athanor-[a-z0-9-]+$")
