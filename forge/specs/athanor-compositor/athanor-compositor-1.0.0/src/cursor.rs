@@ -15,7 +15,7 @@ use smithay::desktop::utils::bbox_from_surface_tree;
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Size, Transform};
+use smithay::utils::{Logical, Point, Rectangle, Size, Transform};
 use smithay::wayland::compositor::with_states;
 
 use crate::state::State;
@@ -27,8 +27,9 @@ const DEFAULT_SIZE: u32 = 24;
 const FALLBACK_SIDE: i32 = 12;
 const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
 
-/// The largest cursor surface a client may set, in logical pixels a side: a larger one gets
-/// the default cursor, so that no client covers the screen with its cursor.
+/// The largest cursor surface a client may set, in logical pixels a side: a larger one, or
+/// one whose hotspot lies off it, gets the default cursor, so that no client covers the screen
+/// with its cursor or draws it away from the pointer.
 const MAX_CLIENT_CURSOR: i32 = 256;
 
 render_elements! {
@@ -197,7 +198,8 @@ fn fallback() -> CursorImage {
 
 /// The pointer's elements on an output at `scale`, `at` relative to the output, all drawn as
 /// cursors: the cursor `status` names, or the theme's default in place of a client's surface
-/// too large to be a cursor. An image the renderer cannot take is left out: the frame is drawn
+/// too large to be a cursor or with its hotspot off it. An image the renderer cannot take is
+/// left out: the frame is drawn
 /// without the pointer rather than not at all.
 pub fn pointer_elements<R>(
     renderer: &mut R,
@@ -212,9 +214,7 @@ where
 {
     let icon = match status {
         CursorImageStatus::Hidden => return Vec::new(),
-        CursorImageStatus::Surface(surface)
-            if drawable(bbox_from_surface_tree(surface, (0, 0)).size) =>
-        {
+        CursorImageStatus::Surface(surface) => {
             let hotspot = with_states(surface, |states| {
                 states
                     .data_map
@@ -227,20 +227,23 @@ where
                     })
             })
             .unwrap_or_default();
-            let location = (at - hotspot.to_f64()).to_physical(scale).to_i32_round();
-            return render_elements_from_surface_tree(
-                renderer,
-                surface,
-                location,
-                scale,
-                1.0,
-                Kind::Cursor,
-            )
-            .into_iter()
-            .map(PointerElement::Surface)
-            .collect();
+            if !drawable(bbox_from_surface_tree(surface, (0, 0)), hotspot) {
+                CursorIcon::Default
+            } else {
+                let location = (at - hotspot.to_f64()).to_physical(scale).to_i32_round();
+                return render_elements_from_surface_tree(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    1.0,
+                    Kind::Cursor,
+                )
+                .into_iter()
+                .map(PointerElement::Surface)
+                .collect();
+            }
         }
-        CursorImageStatus::Surface(_) => CursorIcon::Default,
         CursorImageStatus::Named(icon) => *icon,
     };
     let image = cursor.image(icon, scale);
@@ -262,9 +265,15 @@ where
     }
 }
 
-/// Whether a client's cursor surface of `size` is drawn.
-fn drawable(size: Size<i32, Logical>) -> bool {
-    size.w <= MAX_CLIENT_CURSOR && size.h <= MAX_CLIENT_CURSOR
+/// Whether a client's cursor surface tree, `bbox` around it, is drawn with `hotspot`: it is no
+/// larger than `MAX_CLIENT_CURSOR` a side, and the hotspot lies on it, edges included, so that
+/// an empty surface hides the pointer.
+fn drawable(bbox: Rectangle<i32, Logical>, hotspot: Point<i32, Logical>) -> bool {
+    let on = |at: i32, from: i32, length: i32| (from..=from.saturating_add(length)).contains(&at);
+    bbox.size.w <= MAX_CLIENT_CURSOR
+        && bbox.size.h <= MAX_CLIENT_CURSOR
+        && on(hotspot.x, bbox.loc.x, bbox.size.w)
+        && on(hotspot.y, bbox.loc.y, bbox.size.h)
 }
 
 #[cfg(test)]
@@ -274,7 +283,6 @@ mod tests {
     use smithay::backend::renderer::element::Element;
     use smithay::backend::renderer::pixman::PixmanRenderer;
     use smithay::backend::renderer::{Bind, ExportMem, Offscreen};
-    use smithay::utils::Rectangle;
 
     /// An image of nominal size `size`, `size`x`size` pixels, as a theme's file holds it.
     fn image(size: u32) -> xcursor::parser::Image {
@@ -353,8 +361,23 @@ mod tests {
 
     #[test]
     fn a_large_cursor_is_not_drawn() {
-        assert!(drawable((256, 256).into()));
-        assert!(!drawable((257, 16).into()));
-        assert!(!drawable((16, 257).into()));
+        let bbox = |w, h| Rectangle::from_size(Size::from((w, h)));
+        let origin = Point::from((0, 0));
+        assert!(drawable(bbox(256, 256), origin));
+        assert!(!drawable(bbox(257, 16), origin));
+        assert!(!drawable(bbox(16, 257), origin));
+    }
+
+    #[test]
+    fn a_cursor_is_not_drawn_away_from_its_hotspot() {
+        let bbox = Rectangle::from_size(Size::from((16, 16)));
+        assert!(drawable(bbox, (16, 16).into()), "the far corner");
+        assert!(!drawable(bbox, (-1500, 900).into()));
+        assert!(!drawable(bbox, (17, 0).into()));
+        assert!(!drawable(bbox, (0, -1).into()));
+        assert!(
+            drawable(Rectangle::default(), (0, 0).into()),
+            "an empty surface hides the pointer"
+        );
     }
 }
