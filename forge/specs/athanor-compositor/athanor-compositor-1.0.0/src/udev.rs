@@ -6,6 +6,7 @@
 //! client's request or commit, input, an output or the lock), at most once a refresh, and not
 //! at all while idle.
 
+use crate::capture::Target;
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -282,11 +283,16 @@ impl Drm {
         Ok(())
     }
 
-    /// Draws `window` off screen at scale 1 and reads it back (`capture::read_window`).
-    pub fn read_window(&mut self, window: &Window) -> Result<Vec<u8>, Error> {
-        crate::capture::read_window::<_, GlesTexture>(
+    /// Draws what a capture source names off screen and reads it back (`capture::read_back`).
+    pub fn read_back(
+        &mut self,
+        what: &Target,
+        space: &smithay::desktop::Space<Window>,
+    ) -> Result<Vec<u8>, Error> {
+        crate::capture::read_back::<_, GlesTexture>(
             gles(&mut self.gpus, &self.render_node)?,
-            window,
+            what,
+            space,
         )
     }
 }
