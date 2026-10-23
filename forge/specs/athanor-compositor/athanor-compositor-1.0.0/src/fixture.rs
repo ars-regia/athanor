@@ -2677,7 +2677,10 @@ fn maximising_ends_a_resize() {
     run.state
         .pointer_to(at + Point::from((90.0, 60.0)), InputTime::now());
     local.roundtrip(&mut run);
-    assert!(local.client.configure.is_none(), "no resizing configure follows");
+    assert!(
+        local.client.configure.is_none(),
+        "no resizing configure follows"
+    );
     assert_eq!(location_of(&run, &id), area.loc, "the window stays");
     release(&mut run);
     run.stop();
