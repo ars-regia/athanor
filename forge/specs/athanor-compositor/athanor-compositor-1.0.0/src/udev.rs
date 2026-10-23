@@ -372,7 +372,9 @@ impl State {
             }
             match backend_event(event) {
                 Some(event) => self.process_input_event(event),
-                None => tracing::debug!("a queued input event the compositor does not act on"),
+                // As `process_input_event` does for every event: a touch, a gesture or a
+                // tablet event keeps the session awake although the handler does not act on it.
+                None => self.activity(),
             }
         }
         Ok(())
