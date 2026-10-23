@@ -120,21 +120,22 @@ elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
     grim=(/repo/forge/test/shell/in-unit.sh rig-grim.service /usr/bin/grim)
     /repo/forge/test/shell/session.sh "${arguments[@]}" &
     session=$!
-    compositor_display() { # any_display, failing the scene at once if the compositor exited
+    compositor_alive() { # fails the scene at once if the compositor exited
         if ! kill -0 "$session" 2> /dev/null; then
-            echo "scene.sh: athanor-compositor exited before its socket; see /out/$tag-compositor.log" >&2
+            echo "scene.sh: athanor-compositor exited during its start; see /out/$tag-compositor.log" >&2
             exit 1
         fi
-        any_display
     }
+    compositor_display() { compositor_alive && any_display; }
+    # timeout: a compositor that accepts the connection and never answers fails the wait.
+    compositor_answers() { compositor_alive && timeout 5 wayland-info > /dev/null; }
     wait_for 30 compositor_display
     shopt -s nullglob
     wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
     shopt -u nullglob
     WAYLAND_DISPLAY=$(basename "${wayland_displays[0]}")
     export WAYLAND_DISPLAY
-    # timeout: a compositor that accepts the connection and never answers fails the wait.
-    wait_for 20 timeout 5 wayland-info > /dev/null
+    wait_for 20 compositor_answers
     sleep 1
 else
     outputs=(WINIT-0)
