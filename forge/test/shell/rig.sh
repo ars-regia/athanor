@@ -1142,9 +1142,11 @@ orca)
     # athanor-toolkit's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
     # of the Containerfile's rig stage.
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
-    # The reference is always the cosmic-comp transcript: under RIG_COMPOSITOR=athanor the same
-    # command runs the walk under athanor-compositor, the clients with a grant as their units
-    # and orca_walk.py's wtype as rig-wtype.service, and orca_compare.py names each poorer line.
+    # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
+    # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-compositor, the clients
+    # with a grant as their units and orca_walk.py's wtype as rig-wtype.service, and
+    # orca_compare.py names each poorer line. The chooser and the gallery are windows, which need
+    # no grant, so they run as they are.
     case "${2:-}" in
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
@@ -1229,6 +1231,19 @@ orca)
             RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+        # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
+        # the walk alone would read a bar that is not on screen.
+        if [ -n "$unit" ]; then
+            log="$out/orca-bar-compositor.log"
+            if [ ! -s "$log" ]; then
+                echo "orca bar: no compositor log at $log" >&2
+                exit 1
+            fi
+            if grep -q "not granted them was closed" "$log"; then
+                echo "orca bar: athanor-compositor closed the bar's surface; see $log" >&2
+                exit 1
+            fi
+        fi
         ;;
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
