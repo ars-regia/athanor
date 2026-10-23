@@ -2,8 +2,8 @@
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
 (`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). No package ships it yet. Once
-milestone C1's DRM backend has passed the console sessions, the image may offer it as an optional
-session at the greeter (decision 10), and cosmic-comp stays the default session until this one
+milestone C1's DRM backend has passed the console sessions, the image ships it as an optional
+session at the greeter, under the conditions of decision 10, and cosmic-comp stays the default session until this one
 passes the acceptance of the specification's revision 2 (OS19).
 
 ## Smithay
@@ -147,8 +147,8 @@ What the check does not cover, and what revision 2 of `doc_own_stack.md` decided
 - **The identity is the one read at connect.** A client that `exec`s another program after
   connecting keeps what it connected as, and one that connected as another program gains
   nothing by `exec`ing the bar (`task5_exec_after_connect_keeps_the_connect_identity`). The
-  same holds for a connection handed to another process. Revision 2 accepts it, without a check at
-  each bind (decision 17).
+  same holds for a connection handed to another process. For programs under `/usr` revision 2
+  accepts it, without a check at each bind (decision 17).
 - A client that names the bar's path and unit, from its own mount namespace with a stalled FUSE
   mount at that path, still blocks the compositor in the `stat` of its executable. Revision 2
   asks for `statx` with `AT_STATX_DONT_SYNC`, which reads the device and inode without asking the
@@ -194,7 +194,7 @@ shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tilin
 replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies (decision 19).
 
 Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
-requires (OS5):
+requires (OS4):
 
 - The rig's Orca walks (`rig.sh orca`) do not need it. In the rig under cosmic-comp, which owns
   `org.freedesktop.a11y.Manager` with the monitor on the scene's bus, Orca's debug log records no
