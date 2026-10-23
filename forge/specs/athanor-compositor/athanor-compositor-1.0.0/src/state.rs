@@ -41,6 +41,7 @@ use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -75,6 +76,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
@@ -494,6 +496,95 @@ impl State {
         })?;
         let zone = layer_map_for_output(output).non_exclusive_zone();
         Some(inset(area, laid_out, zone))
+    }
+
+    /// Maximises `window` to `window_area`, or fits a maximised one to it again: a configure
+    /// with the `maximized` state and the area's size, and the window moves into the area at
+    /// the commit that answers it. The geometry it had before is kept for `restore`.
+    pub fn maximise(&mut self, window: &Window) {
+        let (Some(toplevel), Some(area)) = (window.toplevel(), self.window_area()) else {
+            return;
+        };
+        let maximised = window.user_data().get_or_insert(Maximised::default);
+        let before = match maximised.0.get() {
+            Some(kept) => kept.before,
+            None => self.space.element_geometry(window).unwrap_or_default(),
+        };
+        maximised.0.set(Some(Kept { before, area }));
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Maximized);
+            state.size = Some(area.size);
+        });
+        // Before its first commit the initial configure carries the state.
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        relocate(window, area.loc, serial);
+    }
+
+    /// Restores a maximised `window`: a configure without the `maximized` state and with the
+    /// size it had, and the window moves back at the commit that answers it. The geometry it
+    /// had, or `None` when it is not maximised. A window maximised before it had a size picks
+    /// its own and stays where it is.
+    pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        let toplevel = window.toplevel()?;
+        let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
+        toplevel.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Maximized);
+            state.size = (!kept.is_empty()).then_some(kept.size);
+        });
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        if !kept.is_empty() {
+            relocate(window, kept.loc, serial);
+        }
+        Some(kept)
+    }
+
+    /// Fits the maximised windows to `window_area` again, after the layer surfaces' exclusive
+    /// zones changed it.
+    pub fn fit_maximised(&mut self) {
+        let Some(area) = self.window_area() else {
+            return;
+        };
+        let stale: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|window| {
+                window
+                    .user_data()
+                    .get::<Maximised>()
+                    .and_then(|maximised| maximised.0.get())
+                    .is_some_and(|kept| kept.area != area)
+            })
+            .cloned()
+            .collect();
+        for window in &stale {
+            self.maximise(window);
+        }
+    }
+
+    /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
+    /// waits for, so that the window moves with its new size, not before.
+    pub fn relocated(&mut self, window: &Window) {
+        let Some(relocate) = window.user_data().get::<Relocate>() else {
+            return;
+        };
+        let Some(Destination { to, serial }) = relocate.0.get() else {
+            return;
+        };
+        if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
+            let acked = toplevel.with_cached_state(|state| {
+                state.last_acked.as_ref().map(|configure| configure.serial)
+            });
+            if acked.is_none_or(|acked| acked < serial) {
+                return;
+            }
+        }
+        relocate.0.set(None);
+        self.space
+            .relocate_element(window, to - window.geometry().loc);
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -945,6 +1036,36 @@ impl ClientData for ClientState {
 }
 
 /// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
+/// Where a window's geometry goes, at the commit that answers the configure of the serial, or
+/// at its next commit without one (`State::relocated`).
+#[derive(Default)]
+pub struct Relocate(Cell<Option<Destination>>);
+
+#[derive(Clone, Copy)]
+struct Destination {
+    to: Point<i32, Logical>,
+    serial: Option<Serial>,
+}
+
+/// Asks for `window` to move its geometry to `to` at the commit that answers `serial`.
+pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>) {
+    window
+        .user_data()
+        .get_or_insert(Relocate::default)
+        .0
+        .set(Some(Destination { to, serial }));
+}
+
+/// A maximised window's geometry before it was maximised, and the area it was maximised to.
+#[derive(Default)]
+struct Maximised(Cell<Option<Kept>>);
+
+#[derive(Clone, Copy)]
+struct Kept {
+    before: Rectangle<i32, Logical>,
+    area: Rectangle<i32, Logical>,
+}
+
 pub fn centred(
     area: Rectangle<i32, Logical>,
     geometry: Rectangle<i32, Logical>,

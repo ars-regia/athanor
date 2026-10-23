@@ -111,6 +111,7 @@ impl CompositorHandler for State {
             if let Some(window) = self.window_for(&root) {
                 window.on_commit();
                 self.place(&window);
+                self.relocated(&window);
             }
         }
         self.layer_commit(surface);
@@ -407,6 +408,18 @@ impl XdgShellHandler for State {
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.maximise(&window);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.restore(&window);
+        }
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {

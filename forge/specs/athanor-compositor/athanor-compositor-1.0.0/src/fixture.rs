@@ -137,6 +137,8 @@ struct Client {
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
+    /// The width, height and states of the last configure of a toplevel.
+    toplevel_configure: Option<(i32, i32, Vec<u32>)>,
     /// The serial, width and height of the last configure of a layer surface.
     layer_configure: Option<(u32, u32, u32)>,
     /// A layer surface was closed by the compositor.
@@ -298,6 +300,32 @@ impl Dispatch<wl_callback::WlCallback, ()> for Client {
     }
 }
 
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        event: xdg_toplevel::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_toplevel::Event::Configure {
+            width,
+            height,
+            states,
+        } = event
+        {
+            let states = states
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|state| u32::from_ne_bytes(*state))
+                .collect();
+            client.toplevel_configure = Some((width, height, states));
+        }
+    }
+}
+
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
     fn event(
         client: &mut Self,
@@ -325,7 +353,6 @@ delegate_noop!(Client: wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
-delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 delegate_noop!(Client: xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
@@ -2085,6 +2112,8 @@ struct Local {
     /// The seat and its pointer, once `toplevel` has bound them.
     seat: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
+    /// The surface of the window `toplevel` mapped.
+    window: Option<(wl_surface::WlSurface, xdg_surface::XdgSurface)>,
 }
 
 impl Local {
@@ -2116,6 +2145,7 @@ impl Local {
             files: Vec::new(),
             seat: None,
             pointer: None,
+            window: None,
         };
         local.roundtrip(run);
         local
@@ -2155,7 +2185,69 @@ impl Local {
         });
         let window = window_of(run, &id);
         run.state.focus(&window);
+        // The configure that activates it is not one a test waits for.
+        self.roundtrip(run);
+        self.client.configure = None;
+        self.window = Some((surface, xdg));
         toplevel
+    }
+
+    /// Waits for the next configure of the window `toplevel` mapped, acknowledges it and draws
+    /// a buffer of the size it names, or of the fixture's size when it leaves the size to the
+    /// client: the configure's width, height and states.
+    fn redraw(&mut self, run: &mut Running) -> (i32, i32, Vec<u32>) {
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        let (surface, xdg) = self.window.clone().expect("a window");
+        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let (width, height, states) = self
+            .client
+            .toplevel_configure
+            .take()
+            .expect("a toplevel configure");
+        let shm: wl_shm::WlShm = self.bind(1);
+        let (buffer, _) = self.buffer(
+            &shm,
+            if width > 0 { width } else { WIDTH },
+            if height > 0 { height } else { HEIGHT },
+            [0, 0, 0, 255],
+        );
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        (width, height, states)
+    }
+
+    /// Maps a bar: a surface on the top layer along the output's top edge, `height` high, with
+    /// an exclusive zone of its height.
+    fn bar(&mut self, run: &mut Running, height: i32) -> wl_surface::WlSurface {
+        use zwlr_layer_surface_v1::Anchor;
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = self.bind(4);
+        let qh = self.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "bar".into(),
+            &qh,
+            (),
+        );
+        layer.set_anchor(Anchor::Top | Anchor::Left | Anchor::Right);
+        layer.set_size(0, height.unsigned_abs());
+        layer.set_exclusive_zone(height);
+        assert!(self.answer(run, &surface), "the bar is configured");
+        let (serial, width, _) = self.client.layer_configure.expect("a configure");
+        layer.ack_configure(serial);
+        let width = i32::try_from(width).expect("a width");
+        let (buffer, _) = self.buffer(&shm, width, height, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        surface
     }
 
     /// Runs the compositor and the client in turn until `done` holds.
@@ -2345,6 +2437,42 @@ fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical> {
         .space
         .element_location(&window_of(run, id))
         .expect("a location")
+}
+
+/// A maximised window takes the area the bar's zone leaves at the commit that draws that size,
+/// is fitted again when the zone changes, and goes back where it was, at its size, when
+/// restored (OS12).
+#[test]
+fn a_window_is_maximised_and_restored() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let before = location_of(&run, &id);
+    let area = run.state.window_area().expect("an area");
+    let maximized = xdg_toplevel::State::Maximized as u32;
+
+    toplevel.set_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "the configure is maximised");
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+
+    let mut shell = Local::connect(&mut run, None);
+    let _bar = shell.bar(&mut run, 32);
+    let fitted = run.state.window_area().expect("an area");
+    assert_ne!(fitted, area, "the bar's zone changes the area");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "still maximised");
+    assert_eq!((width, height), (fitted.size.w, fitted.size.h));
+    assert_eq!(location_of(&run, &id), fitted.loc);
+
+    toplevel.unset_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(!states.contains(&maximized), "the configure is not maximised");
+    assert_eq!((width, height), (WIDTH, HEIGHT));
+    assert_eq!(location_of(&run, &id), before);
+    run.stop();
 }
 
 /// A client with its own window and the pointer over it: the serial of the pointer's enter.
