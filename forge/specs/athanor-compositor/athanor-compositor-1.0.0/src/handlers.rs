@@ -489,6 +489,7 @@ impl XdgShellHandler for State {
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.end_window_grab(&window);
             self.maximise(&window);
         }
     }

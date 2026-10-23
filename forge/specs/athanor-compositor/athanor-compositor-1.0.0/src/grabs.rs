@@ -3,6 +3,7 @@
 //! that resize it from the edge it names, within the sizes it accepts.
 
 use crate::state::{answered, State};
+use smithay::backend::input::InputTime;
 use smithay::desktop::Window;
 use smithay::input::pointer::{
     AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
@@ -12,7 +13,7 @@ use smithay::input::pointer::{
 };
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Serial, Size};
+use smithay::utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 use std::cell::Cell;
@@ -277,6 +278,25 @@ struct Resize {
 }
 
 impl State {
+    /// Ends a move or resize of `window`, whose size and place maximising takes over: the
+    /// grab, and the anchoring of a resize that ended without its last configure answered.
+    pub fn end_window_grab(&mut self, window: &Window) {
+        if let Some(pointer) = self.seat.get_pointer() {
+            let grabbed = pointer.with_grab(|_, grab| {
+                grab.downcast_ref::<MoveGrab>()
+                    .map(|grab| &grab.window)
+                    .or_else(|| grab.downcast_ref::<ResizeGrab>().map(|grab| &grab.window))
+                    == Some(window)
+            });
+            if grabbed == Some(true) {
+                pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
+            }
+        }
+        if let Some(resizing) = window.user_data().get::<Resizing>() {
+            resizing.0.set(None);
+        }
+    }
+
     /// Keeps the edges opposite a resize's where they were, at each commit while the resize
     /// lasts and at the commit that answers its last configure, whatever size the client drew.
     pub fn anchor_resized(&mut self, window: &Window) {

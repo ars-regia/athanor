@@ -3,7 +3,7 @@
 //! window from a wl_shm buffer and waits for its frame callback; the compositor's frames are then
 //! read back and their pixels compared.
 
-use crate::grabs::MoveGrab;
+use crate::grabs::{MoveGrab, ResizeGrab};
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
 use crate::identity::{AllowList, FileId, Process};
@@ -2634,6 +2634,50 @@ fn a_resize_sends_resizing_configures() {
         (before.loc.x + before.size.w, before.loc.y + before.size.h),
         "the bottom-right corner stays"
     );
+    release(&mut run);
+    run.stop();
+}
+
+/// A window maximised while it is resized ends the resize and takes the area, and the pointer
+/// no longer moves it (OS12).
+#[test]
+fn maximising_ends_a_resize() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let area = run.state.window_area().expect("an area");
+    let resizing = |run: &Running| {
+        run.state
+            .seat
+            .get_pointer()
+            .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<ResizeGrab>()))
+            .unwrap_or(false)
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    assert!(resizing(&run), "the client's own press grants the resize");
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    local.redraw(&mut run);
+
+    toplevel.set_maximized();
+    local.roundtrip(&mut run);
+    assert!(!resizing(&run), "maximising ends the resize");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&(xdg_toplevel::State::Maximized as u32)));
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+    run.state
+        .pointer_to(at + Point::from((90.0, 60.0)), InputTime::now());
+    local.redraw(&mut run);
+    assert_eq!(location_of(&run, &id), area.loc, "the window stays");
     release(&mut run);
     run.stop();
 }
