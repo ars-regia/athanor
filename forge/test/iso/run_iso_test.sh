@@ -134,6 +134,11 @@ cleanup() {
 }
 trap cleanup EXIT
 if [[ -n ${UPDATE_TO:-} ]]; then
+    # What the stages of an earlier run in this OUTPUT_DIR left: a stale `ready` would start
+    # them on the installer, a stale status would judge them, the phases are appended to, and
+    # acceptance-state holds the last guest's host key and seeds.
+    rm -f "${output}/ready" "${output}/upgrade-status" "${output}/upgrade-phases.txt"
+    rm -rf "${output}/acceptance-state"
     keydir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/var/tmp}}/collaudo-ssh.XXXXXX")
     ssh-keygen -q -t ed25519 -N '' -C '' -f "${keydir}/id"
     pubkey=$(cut -d' ' -f1,2 "${keydir}/id.pub")

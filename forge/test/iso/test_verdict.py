@@ -1032,6 +1032,32 @@ def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
     assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
 
 
+def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
+    """A second upgrade case in the same OUTPUT_DIR starts from none of the files the stages
+    leave: a stale `ready` would start the stages on the installer, a stale status would judge
+    them, the phases are appended to, and a known_hosts names the last guest's host key. They
+    are gone before the VM starts; here ssh-keygen fails, the step after them."""
+    out = tmp / "rerun"
+    stale = ["ready", "upgrade-status", "upgrade-phases.txt", "acceptance-state/known_hosts"]
+    for name in stale + ["kept.png"]:
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / name).write_text("last run\n")
+    stubs = tmp / "stubs"
+    stubs.mkdir(exist_ok=True)
+    (stubs / "ssh-keygen").write_text("#!/bin/sh\nexit 1\n")
+    (stubs / "ssh-keygen").chmod(0o755)
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    env = dict(os.environ, SECURE_BOOT="1", UPDATE_TO="sha256:" + "a" * 64,
+               UPDATE_REPOSITORY="ghcr.io/owner/athanor-system", PATH=f"{stubs}:{os.environ['PATH']}")
+    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(out)],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode != 0, proc
+    left = [name for name in stale if (out / name).exists()]
+    assert not left and not (out / "acceptance-state").exists(), (left, proc.stderr)
+    assert (out / "kept.png").exists(), "run_iso_test.sh removed a file it does not own"
+
+
 def test_plain_case_unchanged(tmp: pathlib.Path) -> None:
     """Without `upgrade` nothing of the upgrade is read, even if its files are there."""
     code, _ = verdict(tmp, COMPLETE + [("secureboot-enabled", 381)], 0, "secure-boot",
@@ -1208,6 +1234,7 @@ def main() -> int:
             test_upgrade_rollback_session_dead_fails,
             test_upgrade_shim_refusal_fails,
             test_upgrade_requires_secure_boot,
+            test_upgrade_clears_the_last_runs_files,
             test_plain_case_unchanged,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
