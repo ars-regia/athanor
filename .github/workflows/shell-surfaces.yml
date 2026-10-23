@@ -82,7 +82,7 @@ jobs:
 
   layout:
     name: Layout library and chooser; layout cases on the bar and the dock; chooser cases; end-to-end press
-    needs: lint
+    needs: [lint, build-bar]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -91,8 +91,12 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the layout crates
         run: bash forge/test/shell/rig.sh build-layout
-      - name: Build and test the bar and check the DT_NEEDED order
-        run: bash forge/test/shell/rig.sh build-bar
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: shell-rig-bin
+          path: .scratch/shell-rig/bin
+      - name: Verify the binaries of the build job
+        run: bash forge/test/shell/rig.sh verify-bin athanor-bar
       - name: Build and test the dock and check the DT_NEEDED order
         run: bash forge/test/shell/rig.sh build-dock
       - name: Layout cases (21) against the goldens
@@ -168,15 +172,19 @@ jobs:
 
   bar:
     name: Bar, build and end to end
-    needs: lint
+    needs: [lint, build-bar]
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
-      - name: Build and test the bar and check the DT_NEEDED order
-        run: bash forge/test/shell/rig.sh build-bar
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: shell-rig-bin
+          path: .scratch/shell-rig/bin
+      - name: Verify the binaries of the build job
+        run: bash forge/test/shell/rig.sh verify-bin athanor-bar athanor-shelld
       - name: Layer-surface guard
         run: bash forge/test/shell/rig.sh layer-guard bar
       - name: Accessibility tree of the bar
@@ -189,8 +197,6 @@ jobs:
         run: bash forge/test/shell/rig.sh bar-e2e
       - name: The network, Bluetooth, audio and battery modules against their fixtures
         run: bash forge/test/shell/rig.sh bar-modules-e2e
-      - name: athanor-shelld, the tray watcher of the tray scene
-        run: bash forge/test/shell/rig.sh build-shelld
       - name: Notification popups and list against a fake daemon
         run: bash forge/test/shell/rig.sh notifications-e2e
       - name: Shield end to end
@@ -209,9 +215,33 @@ jobs:
             .scratch/shell-rig/shield-e2e.png
             .scratch/shell-rig/tray-e2e.png
 
+  build-bar:
+    name: Build and test the bar and athanor-shelld once for the scene jobs
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the bar and check the DT_NEEDED order
+        run: bash forge/test/shell/rig.sh build-bar
+      - name: Build and test the daemon
+        run: bash forge/test/shell/rig.sh build-shelld
+      - name: Seal the binaries
+        run: bash forge/test/shell/rig.sh seal-bin athanor-bar athanor-shelld
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shell-rig-bin
+          path: |
+            .scratch/shell-rig/bin/athanor-bar
+            .scratch/shell-rig/bin/athanor-shelld
+            .scratch/shell-rig/bin/SEALED
+          if-no-files-found: error
+
   bar-scenes:
     name: Bar scene ${{ matrix.scene }} (12 cases) against the goldens
-    needs: lint
+    needs: build-bar
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -236,13 +266,12 @@ jobs:
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Rig image
-        run: bash forge/test/shell/rig.sh build-image
-      - name: Build the bar
-        run: bash forge/test/shell/rig.sh build-bar
-      - name: athanor-shelld, the tray watcher of the tray scene
-        if: matrix.scene == 'bar-tray'
-        run: bash forge/test/shell/rig.sh build-shelld
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        with:
+          name: shell-rig-bin
+          path: .scratch/shell-rig/bin
+      - name: Verify the binaries of the build job
+        run: bash forge/test/shell/rig.sh verify-bin athanor-bar athanor-shelld
       - name: Cases against the goldens
         run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
