@@ -48,7 +48,7 @@
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca)
+#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-compositor)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
@@ -1120,12 +1120,23 @@ orca)
     # athanor-toolkit's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
     # of the Containerfile's rig stage.
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
+    # The reference is always the cosmic-comp transcript: under RIG_COMPOSITOR=athanor the same
+    # command runs the walk under athanor-compositor, the clients with a grant as their units
+    # and orca_walk.py's wtype as rig-wtype.service, and orca_compare.py names each poorer line.
     case "${2:-}" in
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
     gallery) component= ;;
-    *) echo "rig.sh orca: the surface is 'chooser', 'dock' or 'gallery', not '${2:-}'" >&2; exit 2 ;;
+    bar) component=athanor-bar ;;
+    launcher) component=athanor-launcher ;;
+    greeter) component=athanor-greeter-ui ;;
+    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'launcher' or 'greeter', not '${2:-}'" >&2; exit 2 ;;
     esac
+    unit=
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+        unit=--unit
+    fi
     lang=(RIG_LOCALE=en_US.UTF-8)
     case "${3:-}" in
     '') ;;
@@ -1146,6 +1157,9 @@ orca)
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     transcript=orca-$2${3:+-$3}.txt
+    # Placeholder: how many results "cc window" lists in the launcher is read from no code (the
+    # providers and the headers decide it); the controller sets it from the recording.
+    launcher_steps=1
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1182,7 +1196,42 @@ orca)
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
             RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable --respawn"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
+        ;;
+    bar)
+        # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
+        # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
+        # the bar lacks Input source and Tiling, C1). The ninth Tab comes back round to the first.
+        stage_greeter_icons
+        seed_bar "$out/seed-orca-bar" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
+            RIG_DATA_OVERLAY="$bar_overlay" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*9" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+        ;;
+    launcher)
+        # One control, the entry (the rows are not focusable and Tab opens the result menu, so
+        # the walk is the arrows): Down goes down the results of "cc window", Up back to the first.
+        seed_bar "$out/seed-orca-launcher" float top visible light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
+            ATHANOR_LAUNCHER_SHOW="cc window" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Down*$launcher_steps Up*$launcher_steps" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-launcher -- \
+            bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
+                     && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-launcher"
+        ;;
+    greeter)
+        # The card of the rig's one account opens with the password focused. Seven controls:
+        # Back to the list, the password, Sign in, High contrast, Suspend, Restart, Shut down;
+        # seven Tabs go round them (the seal and the layout chip take no focus) and end on the
+        # password.
+        stage_greeter_icons
+        in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+            RIG_DATA_OVERLAY=/out/greeter-icons \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-greeter -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-greeter-ui"
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
