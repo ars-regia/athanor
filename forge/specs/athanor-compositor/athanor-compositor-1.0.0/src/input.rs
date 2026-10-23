@@ -13,7 +13,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb,
+    FilterResult, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
@@ -56,7 +56,8 @@ impl State {
         source: KeyboardSource,
     ) {
         // A dropped press never reaches the seat: it changes neither the keys held nor the
-        // modifiers a hardware key is read with.
+        // modifiers a hardware key is read with. A release is never dropped: a key held when the
+        // session locked is let go, or a window would see it held after unlock.
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
@@ -90,8 +91,6 @@ impl State {
                         state.kept_keys.swap_remove(at);
                         FilterResult::Intercept(None)
                     }
-                    // A virtual key held when the session locked is let go, unseen.
-                    None if state.drops_key(source) => FilterResult::Intercept(None),
                     None => FilterResult::Forward,
                 },
             },
@@ -261,7 +260,15 @@ impl State {
         input(self);
         if own.is_some() {
             if let Err(error) = keyboard.set_keymap_from_string(self, seat_keymap) {
-                tracing::error!(?error, "the seat's keymap did not load again");
+                // The seat's configuration, as `State::new` gives it, so that the seat never
+                // stays on a client's keymap.
+                tracing::error!(
+                    ?error,
+                    "the seat's keymap did not load again: back to the default"
+                );
+                if let Err(error) = keyboard.set_xkb_config(self, XkbConfig::default()) {
+                    tracing::error!(?error, "the default keymap did not load");
+                }
             }
         }
         // A new keymap starts with no modifier locked: the seat's Caps Lock and layout return.
@@ -289,11 +296,20 @@ impl VirtualKeyboardHandler for State {
     fn process_virtual_keyboard_event(&mut self, event: InputEvent<VirtualKeyboardBackend>) {
         match event {
             InputEvent::Keyboard { event } => {
-                self.activity();
-                self.request_redraw();
                 let device = event.device();
                 let (code, key_state, time) =
                     (event.key_code(), event.state(), Event::time(&event));
+                // While locked a press is dropped before anything, and a release lets go of a
+                // key the seat holds under the seat's keymap: no client is sent this client's
+                // keymap, and the idle timers keep running.
+                if self.drops_virtual_input() {
+                    if key_state == KeyState::Released {
+                        self.key_input(code, key_state, time, device.source());
+                    }
+                    return;
+                }
+                self.activity();
+                self.request_redraw();
                 self.with_keymap_of(&device, |state| {
                     state.key_input(code, key_state, time, device.source())
                 });
@@ -321,7 +337,20 @@ impl VirtualPointerHandler for State {
     /// session is locked (`drops_virtual_input`); its absolute motion spans the output it names,
     /// or all of them, and stays on the outputs.
     fn process_virtual_pointer_event(&mut self, event: InputEvent<VirtualPointerBackend>) {
-        if self.drops_virtual_input() {
+        // While locked only the release of a button a virtual pointer holds goes on, or a click
+        // on the lock surface would keep its grab after unlock. Smithay keeps the seat's held
+        // buttons to its grabs, so the compositor counts the virtual ones itself.
+        let locked = self.drops_virtual_input();
+        if let InputEvent::PointerButton { event } = &event {
+            let button = event.button_code();
+            let held = self.virtual_buttons.contains(&button);
+            match event.state() {
+                ButtonState::Pressed if !locked && !held => self.virtual_buttons.push(button),
+                ButtonState::Released if held => self.virtual_buttons.retain(|b| *b != button),
+                _ if locked => return,
+                _ => {}
+            }
+        } else if locked {
             return;
         }
         let InputEvent::PointerMotionAbsolute { event } = event else {

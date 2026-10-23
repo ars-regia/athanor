@@ -111,15 +111,16 @@ impl SessionLockHandler for State {
 }
 
 impl State {
-    /// Whether a virtual keyboard's keys and a virtual pointer's motion, buttons and scrolling
-    /// reach no client: while the session is locked (open question 12 of the OS9 plan, and the
-    /// maintainer's decision of 2026-10-23 for the pointer), so that no script types into the
-    /// lock surface, probes its password or clicks on it. The hardware's input is unaffected.
+    /// Whether a virtual keyboard's key presses and a virtual pointer's motion, button presses
+    /// and scrolling reach no client: while the session is locked (open question 12 of the OS9
+    /// plan, and the maintainer's decision of 2026-10-23 for the pointer), so that no script
+    /// types into the lock surface, probes its password or clicks on it. A release of what the
+    /// seat holds still goes on, and the hardware's input is unaffected.
     pub fn drops_virtual_input(&self) -> bool {
         self.lock.is_some()
     }
 
-    /// Whether a key from `source` reaches no client: a virtual keyboard's while
+    /// Whether a key pressed on `source` reaches no client: a virtual keyboard's while
     /// `drops_virtual_input`.
     pub fn drops_key(&self, source: KeyboardSource) -> bool {
         source != KeyboardSource::Physical && self.drops_virtual_input()

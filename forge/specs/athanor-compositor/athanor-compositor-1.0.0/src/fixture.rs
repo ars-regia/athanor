@@ -154,6 +154,10 @@ struct Client {
     workspaces_done: bool,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
+    /// The evdev codes of the keys held, as the last `enter` told them.
+    entered_keys: Vec<u32>,
+    /// The keymaps the client was sent.
+    keymaps: usize,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -326,13 +330,18 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_keyboard::Event::Key {
-            key,
-            state: WEnum::Value(wl_keyboard::KeyState::Pressed),
-            ..
-        } = event
-        {
-            client.keys.push(key);
+        match event {
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Pressed),
+                ..
+            } => client.keys.push(key),
+            wl_keyboard::Event::Enter { keys, .. } => {
+                let (keys, _) = keys.as_chunks::<4>();
+                client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
+            }
+            wl_keyboard::Event::Keymap { .. } => client.keymaps += 1,
+            _ => {}
         }
     }
 }
@@ -3283,6 +3292,20 @@ impl VirtualKeyboard {
         local.roundtrip(run);
     }
 
+    /// Presses or releases the key of evdev code `code`.
+    fn key(&self, local: &mut Local, run: &mut Running, code: u32, pressed: bool) {
+        let state = u32::from(pressed);
+        self.send(
+            1,
+            [
+                Argument::Uint(0),
+                Argument::Uint(code),
+                Argument::Uint(state),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
     fn send<const N: usize>(&self, opcode: u16, args: [Argument<ObjectId, i32>; N]) {
         let message = Message {
             sender_id: self.id.clone(),
@@ -3674,6 +3697,126 @@ fn os9_a_virtual_pointer_is_dropped_while_locked() {
             .map(|(_, client)| client),
         Some(&window_client),
         "after unlock the virtual click reaches the window"
+    );
+    run.stop();
+}
+
+/// The keys a surface that takes the keyboard is told are held: those of a new lock surface's
+/// `enter`, the session locked and unlocked again around it.
+fn held_at_the_next_enter(run: &mut Running) -> Vec<u32> {
+    let (mut locker, lock) = lock_session(run);
+    locker.roundtrip(run);
+    let held = locker.client.entered_keys.clone();
+    lock.unlock_and_destroy();
+    locker.roundtrip(run);
+    held
+}
+
+/// Waits for the window to have the keyboard, and returns a granted client's virtual keyboard
+/// holding A down in it.
+fn holding_a(run: &mut Running) -> (Local, VirtualKeyboard) {
+    let (window, _) = window_under_pointer(run);
+    run.until("the window has the keyboard", |state| {
+        state.seat.get_keyboard().and_then(|k| k.current_focus()) == Some(window.clone())
+    });
+    let mut typist = Local::connect(run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, run, None);
+    keyboard.key(&mut typist, run, 30, true);
+    (typist, keyboard)
+}
+
+/// A virtual key held when the session locks and released while it is locked is let go (the
+/// OS9 task 6 audit): the lock surface is told it is held, and the next surface to take the
+/// keyboard after unlock is told of no key held.
+#[test]
+fn os9_a_virtual_key_held_across_the_lock_is_let_go() {
+    let mut run = Running::start(None);
+    let (mut typist, keyboard) = holding_a(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    locker.roundtrip(&mut run);
+    assert_eq!(
+        locker.client.entered_keys,
+        [30],
+        "the lock surface sees A held"
+    );
+    keyboard.key(&mut typist, &mut run, 30, false);
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    assert_eq!(held_at_the_next_enter(&mut run), [0; 0], "A is let go");
+    run.stop();
+}
+
+/// A virtual keyboard whose client disconnects while the session is locked, with a key held
+/// from before the lock, leaves no key held after unlock (the OS9 task 6 audit).
+#[test]
+fn os9_a_virtual_keyboard_gone_while_locked_leaves_nothing_held() {
+    let mut run = Running::start(None);
+    let (typist, keyboard) = holding_a(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    drop(keyboard);
+    drop(typist);
+    run.until("the gone keyboard's key is let go", |state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.pressed_keys().is_empty())
+    });
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    assert_eq!(held_at_the_next_enter(&mut run), [0; 0], "A is let go");
+    run.stop();
+}
+
+/// A virtual keyboard with a keymap of its own typing while the session is locked sends its
+/// keymap to no client (the OS9 task 6 audit): the lock surface's client is sent no keymap and
+/// no key.
+#[test]
+fn os9_a_virtual_keymap_is_not_sent_while_locked() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(SWAPPED_KEYMAP));
+    locker.roundtrip(&mut run);
+    let keymaps = locker.client.keymaps;
+    keyboard.chord(&mut typist, &mut run, &[30, 31]);
+    locker.roundtrip(&mut run);
+    assert_eq!(locker.client.keymaps, keymaps, "no keymap was sent");
+    assert!(locker.client.keys.is_empty(), "no key was sent");
+    run.stop();
+}
+
+/// A virtual button pressed before the session locks and released while it is locked is let go
+/// (the OS9 task 6 audit): a later hardware click on the lock surface ends its grab.
+#[test]
+fn os9_a_virtual_button_released_while_locked_lets_a_click_end() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    use wayland_client::protocol::wl_pointer;
+    let mut run = Running::start(None);
+    let _ = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &clicker.queue.handle(), ());
+    // BTN_LEFT, over the window.
+    pointer.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+    pointer.frame();
+    clicker.roundtrip(&mut run);
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(seat_pointer.is_grabbed(), "the press grabs the pointer");
+
+    let (_locker, _lock) = lock_session(&mut run);
+    pointer.button(0, 0x110, wl_pointer::ButtonState::Released);
+    pointer.frame();
+    clicker.roundtrip(&mut run);
+    // BTN_RIGHT, on the hardware.
+    run.state
+        .button_input(0x111, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(0x111, ButtonState::Released, InputTime::now());
+    assert!(!seat_pointer.is_grabbed(), "the click's grab ended");
+    assert!(
+        run.state.virtual_buttons.is_empty(),
+        "no virtual button is held"
     );
     run.stop();
 }
