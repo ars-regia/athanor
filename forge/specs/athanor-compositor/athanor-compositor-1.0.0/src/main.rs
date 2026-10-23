@@ -139,7 +139,11 @@ fn run() -> Result<(), Error> {
 }
 
 fn main() -> ExitCode {
-    if let Err(error) = tracing_subscriber::fmt().try_init() {
+    // RUST_LOG narrows or widens the log, as `smithay::backend::drm::compositor=trace` for
+    // where each element of a frame goes; without it, the log is at info.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    if let Err(error) = tracing_subscriber::fmt().with_env_filter(filter).try_init() {
         eprintln!("athanor-compositor: no log: {error}");
     }
     match run() {
