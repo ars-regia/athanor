@@ -7,6 +7,7 @@ tested here: the guest itself needs QEMU, Secure Boot firmware and a candidate i
 systemctl, gh, ssh and df are stubs on PATH; HOME is a temporary directory.
 """
 
+import json
 import os
 import pathlib
 import subprocess
@@ -15,6 +16,25 @@ import unittest
 
 RUN = pathlib.Path(__file__).resolve().parents[1] / "devvm" / "acceptance" / "run.sh"
 DIGEST = "sha256:" + "a" * 64
+FROM = "sha256:" + "b" * 64
+# What athanor-update's check logs (forge/specs/athanor-update/.../src/check.rs).
+FEATURE_LINE = "the release attestation does not verify as the security class; the candidate is of the feature class"
+SECURITY_LINE = "security update unlocked for the next shutdown"
+# A guest that answers from files: the client's state, the check's journal, the boot and its
+# digest. A reboot boots the staged digest under a new boot id.
+GUEST = """g=@GUEST@
+case "$*" in
+  *state.json*) cat "$g/state.json" ;;
+  *journalctl*) cat "$g/journal" ;;
+  *"bootc status"*) printf '{"status":{"booted":{"image":{"imageDigest":"%s"}}}}' "$(cat "$g/booted")" ;;
+  *boot_id*) cat "$g/boot" ;;
+  *"date +%s"*) date +%s ;;
+  *ActiveState*) echo inactive ;;
+  *loginctl*) cat "$g/sessions" ;;
+  *"systemctl reboot"*) echo 2 > "$g/boot"; cp "$g/staged" "$g/booted" ;;
+  *tee*) cat > /dev/null ;;
+esac
+"""
 
 
 class CiMode(unittest.TestCase):
@@ -49,6 +69,7 @@ class CiMode(unittest.TestCase):
             "ACC_CI_OUT": str(self.dir / "out"),
             "SSH_PORT": "2222",
             "ACC_SSH_KEY": str(self.dir / "id"),
+            "ATHANOR_UPDATE_CLASS": "feature",
         }
 
     def tearDown(self):
@@ -104,6 +125,57 @@ class CiMode(unittest.TestCase):
         )
         self.assertIn("== seed", result.stdout, result.stderr)
         self.assertNotEqual(result.returncode, 0)
+
+    def guest(self, update, journal, serial_session=True):
+        """A guest whose check settled on UPDATE with the candidate downloaded and logged
+        JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply()."""
+        g = self.dir / "guest"
+        g.mkdir()
+        state = {
+            "update": update,
+            "downloaded": {"digest": DIGEST},
+            "last_error": "none",
+        }
+        (g / "state.json").write_text(json.dumps(state))
+        (g / "journal").write_text(journal + "\n")
+        (g / "booted").write_text(FROM)
+        (g / "staged").write_text(DIGEST)
+        (g / "boot").write_text("1")
+        sessions = [{"session": "3", "tty": "ttyS0"}] if serial_session else []
+        (g / "sessions").write_text(json.dumps(sessions))
+        self.stub("ssh", GUEST.replace("@GUEST@", str(g)))
+
+    def test_upgrade_reads_the_class_the_runner_verified(self):
+        self.guest("downloaded", FEATURE_LINE)
+        result = self.run_sh("--ci", "upgrade", env=self.ci)
+        self.assertIn(
+            "PASS  UD18 3: the guest reads the candidate as the feature class",
+            result.stdout,
+            result.stderr,
+        )
+        self.assertIn("ttyS0", result.stderr)
+
+    def test_upgrade_refuses_a_class_other_than_the_verified_one(self):
+        self.guest("downloaded", FEATURE_LINE)
+        result = self.run_sh(
+            "--ci", "upgrade", env={**self.ci, "ATHANOR_UPDATE_CLASS": "security"}
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "the guest settled the candidate as the feature class", result.stderr
+        )
+        self.assertNotIn("PASS  UD18 4", result.stdout)
+
+    def test_upgrade_refuses_a_journal_with_no_class(self):
+        self.guest("downloaded", "nothing about the class")
+        result = self.run_sh("--ci", "upgrade", env=self.ci)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("names no class", result.stderr)
+
+    def test_ci_mode_rejects_an_unknown_class(self):
+        result = self.run_sh("--ci", env={**self.ci, "ATHANOR_UPDATE_CLASS": "urgent"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ATHANOR_UPDATE_CLASS", result.stderr)
 
     def test_dev_mode_refuses_beside_a_busy_runner(self):
         result = self.run_sh()

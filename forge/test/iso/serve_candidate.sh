@@ -4,7 +4,10 @@
 # on the runner's 127.0.0.1:5000, which the guest reaches through QEMU's gateway as
 # 10.0.2.2:5000. The candidate's signature (sha256-<hex>.sig) and attestation
 # (sha256-<hex>.att) are served beside it, and the run fails without either: the client
-# reads both, and without the attestation it would only warn.
+# reads both, and without the attestation it would only warn. The attestation is verified
+# first with the public keys of the checkout (scripts/ci/release_attestation.py class, as
+# system/verify-images.sh verifies it; VERIFY_KEYS_DIR, default system/keys), and the class it
+# names lands in WORKDIR/class: the class the guest must settle on.
 #
 # The registry is left running in the background: WORKDIR/registry.pid names it, for the
 # caller to stop, and WORKDIR/mirror holds the location the guest's registries.conf mirror
@@ -30,6 +33,8 @@ retry=${here}/../../scripts/retry.sh
 local_repository=127.0.0.1:5000/${path}
 
 mkdir -p "${work}/store"
+"$retry" python3 -B "${here}/../../../scripts/ci/release_attestation.py" class \
+    --keys-dir "${VERIFY_KEYS_DIR:-${here}/../../../system/keys}" "${repository}@${digest}" < /dev/null > "${work}/class"
 cat > "${work}/registry.yml" << EOF
 version: 0.1
 log:
@@ -83,4 +88,4 @@ served=sha256:$(skopeo inspect --raw --tls-verify=false "docker://${local_reposi
     exit 1
 }
 echo "10.0.2.2:5000/${path}" > "${work}/mirror"
-echo "=== candidate ${digest} served as 10.0.2.2:5000/${path}:stable, with its .sig and .att"
+echo "=== candidate ${digest} served as 10.0.2.2:5000/${path}:stable, with its .sig and its .att of the $(< "${work}/class") class"

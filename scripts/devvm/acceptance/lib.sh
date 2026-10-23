@@ -10,11 +10,13 @@ if [[ ${ACC_CI:-} == 1 ]]; then
     echo "$*" >&2
     exit 1
   }
-  for var in ATHANOR_UPDATE_TO ATHANOR_UPDATE_REPOSITORY ATHANOR_UPDATE_MIRROR ACC_CI_OUT SSH_PORT ACC_SSH_KEY; do
+  for var in ATHANOR_UPDATE_TO ATHANOR_UPDATE_CLASS ATHANOR_UPDATE_REPOSITORY ATHANOR_UPDATE_MIRROR ACC_CI_OUT SSH_PORT ACC_SSH_KEY; do
     [[ -n ${!var:-} ]] || die "run.sh --ci needs $var (forge/test/iso/run_iso_test.sh sets it)"
   done
   [[ $ATHANOR_UPDATE_TO =~ ^sha256:[0-9a-f]{64}$ ]] || die "ATHANOR_UPDATE_TO is not a digest: '$ATHANOR_UPDATE_TO'"
   [[ $SSH_PORT =~ ^[0-9]+$ ]] || die "SSH_PORT is not a port: '$SSH_PORT'"
+  [[ $ATHANOR_UPDATE_CLASS == feature || $ATHANOR_UPDATE_CLASS == security ]] ||
+    die "ATHANOR_UPDATE_CLASS is not feature or security: '$ATHANOR_UPDATE_CLASS'"
   STATE=$ACC_CI_OUT/acceptance-state
   GUEST_USER=collaudo
   SYSTEM_IMAGE=$ATHANOR_UPDATE_REPOSITORY

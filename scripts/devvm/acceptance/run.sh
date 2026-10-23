@@ -571,7 +571,7 @@ ci_stage_seed() { # UD18 2
 }
 
 ci_stage_upgrade() { # UD18 3 and 4
-  local since journal ttys
+  local since journal class ttys
   disk_floor
   printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
     "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
@@ -579,15 +579,27 @@ ci_stage_upgrade() { # UD18 3 and 4
   quiet_checks "UD18 4"
   since=$(now_guest)
   check_now
+  # Required since ADR-0130: without the attestation the client only warns and goes on.
+  journal=$(journal_since "$since" athanor-update-check.service)
+  [[ $journal != *"release attestation could not be fetched"* ]] || die "FAIL  UD18 3: the candidate's attestation was not read"
+  guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
+    die "FAIL  UD18 3: the candidate's attestation was not stored"
+  # A stored attestation is not a verified one: the client reads an attestation no key of its
+  # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
+  # verified on the runner, read from the lines of check.rs, as the state does not keep it.
+  if [[ $journal == *"the candidate is of the feature class"* ]]; then
+    class=feature
+  elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
+    class=security
+  else
+    die "FAIL  UD18 3: the check's journal names no class for the candidate"
+  fi
+  [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
+    die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
+  pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
   [[ $(state .update) == downloaded && $(state .downloaded.digest) == "$ATHANOR_UPDATE_TO" ]] ||
     die "FAIL  UD18 4: the check did not download the candidate: update '$(state .update)', digest '$(state .downloaded.digest)', last_error '$(state .last_error)' from '$(state .last_error_host)'"
   pass "UD18 4: the client's own check downloads the candidate from the mirror"
-  # Required since ADR-0130: without the attestation the client only warns and goes on.
-  guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
-    die "FAIL  UD18 3: the candidate's attestation was not read"
-  journal=$(journal_since "$since" athanor-update-check.service)
-  [[ $journal != *"release attestation could not be fetched"* ]] || die "FAIL  UD18 3: the candidate's attestation was not read"
-  pass "UD18 3: the candidate's attestation was fetched and stored"
   # A login on the serial console is a second session of the user: Apply() would ask.
   ttys=$(guest_ssh loginctl list-sessions --json=short | jq -r '[.[].tty // empty] | join(" ")')
   [[ " $ttys " != *" ttyS0 "* ]] || die "FAIL  UD18 4: a session on ttyS0 is open, and Apply() would ask for an administrator"

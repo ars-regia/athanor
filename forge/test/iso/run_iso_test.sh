@@ -256,7 +256,7 @@ if [[ -n ${UPDATE_TO:-} ]]; then
     while kill -0 "$console_pid" 2> /dev/null && [[ ! -e ${output}/ready ]]; do sleep 5; done
     if [[ -e ${output}/ready ]]; then
         stages_status=0
-        ATHANOR_UPDATE_TO=$UPDATE_TO ATHANOR_UPDATE_REPOSITORY=$UPDATE_REPOSITORY \
+        ATHANOR_UPDATE_TO=$UPDATE_TO ATHANOR_UPDATE_CLASS=$(< "${serve}/class") ATHANOR_UPDATE_REPOSITORY=$UPDATE_REPOSITORY \
             ATHANOR_UPDATE_MIRROR=$(< "${serve}/mirror") ACC_CI_OUT=$output SSH_PORT=$SSH_PORT ACC_SSH_KEY=${keydir}/id \
             timeout "$STAGES_TIMEOUT" bash "${here}/../../../scripts/devvm/acceptance/run.sh" --ci > "${output}/upgrade.log" 2>&1 ||
             stages_status=$?
