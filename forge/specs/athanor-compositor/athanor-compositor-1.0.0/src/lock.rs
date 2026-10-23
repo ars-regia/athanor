@@ -4,6 +4,7 @@
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
+use smithay::input::keyboard::KeyboardSource;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
@@ -110,6 +111,13 @@ impl SessionLockHandler for State {
 }
 
 impl State {
+    /// Whether a key from `source` reaches no client: a virtual keyboard's while the session is
+    /// locked (open question 12 of the OS9 plan), so that no script types into the lock surface
+    /// or probes its password. The hardware keyboard's keys are unaffected.
+    pub fn drops_key(&self, source: KeyboardSource) -> bool {
+        self.lock.is_some() && source != KeyboardSource::Physical
+    }
+
     /// Gives the keyboard to `surface`; while the session is locked, to the first lock surface
     /// whatever `surface` is. Every change of the keyboard focus but a popup grab's goes
     /// through here, and `grab` refuses grabs while locked.

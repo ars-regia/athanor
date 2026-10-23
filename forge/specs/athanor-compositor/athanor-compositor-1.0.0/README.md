@@ -94,7 +94,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1` | every client outside a security context |
@@ -103,6 +103,12 @@ security context's listener is granted nothing, whatever its identity.
 on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
 plan): the bar's line carries the workspaces, and the output manager is the control center's.
+The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
+takes the hardware's path, so the compositor's keys and the layer focus apply to it: a virtual
+keyboard's keymap applies to its own keys only, the seat's returning after each; its modifiers
+apply to its own keys as well; a virtual pointer stays on the outputs, its absolute motion
+spanning the output it names or all of them. While the session is locked a virtual key reaches
+no client (open question 12), and a hardware key still reaches the lock surface.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,

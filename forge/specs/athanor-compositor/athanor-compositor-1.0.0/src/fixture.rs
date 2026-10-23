@@ -11,7 +11,11 @@ use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::desktop::layer_map_for_output;
+use smithay::input::keyboard::KeyboardSource;
 use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server::__interfaces::{
+    ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE, ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE,
+};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
@@ -26,7 +30,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use wayland_client::backend::{ObjectId, WaylandError};
+use wayland_client::backend::protocol::{Argument, Message};
+use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
@@ -66,6 +71,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 use wayland_protocols_wlr::output_management::v1::client::{
     zwlr_output_configuration_head_v1, zwlr_output_configuration_v1, zwlr_output_head_v1,
     zwlr_output_manager_v1, zwlr_output_mode_v1,
+};
+use wayland_protocols_wlr::virtual_pointer::v1::client::{
+    zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
@@ -306,6 +314,8 @@ delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
 delegate_noop!(Client: ignore zwlr_output_mode_v1::ZwlrOutputModeV1);
 delegate_noop!(Client: zwlr_output_configuration_head_v1::ZwlrOutputConfigurationHeadV1);
 delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
+delegate_noop!(Client: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
+delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
     fn event(
@@ -779,7 +789,8 @@ const CONTROL_CENTER: (&str, &str) = (
 /// layers and the output manager.
 const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 \
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
-    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1 ext_workspace_manager_v1\n\
+    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1 ext_workspace_manager_v1 \
+    zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -1547,10 +1558,20 @@ fn chord(state: &mut State, codes: &[u32]) {
     use smithay::backend::input::{InputTime, KeyState};
     // An xkb keycode is the evdev code plus 8.
     for code in codes {
-        state.key_input((code + 8).into(), KeyState::Pressed, InputTime::now());
+        state.key_input(
+            (code + 8).into(),
+            KeyState::Pressed,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
     }
     for code in codes.iter().rev() {
-        state.key_input((code + 8).into(), KeyState::Released, InputTime::now());
+        state.key_input(
+            (code + 8).into(),
+            KeyState::Released,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
     }
 }
 
@@ -1717,12 +1738,16 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
     let now = InputTime::now;
     let requests = run.state.lock_requests;
-    run.state.key_input(logo, KeyState::Pressed, now());
+    run.state
+        .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
     let logo_sent = run.state.grab_serials.key_press.clone();
-    run.state.key_input(escape, KeyState::Pressed, now());
+    run.state
+        .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
-    run.state.key_input(escape, KeyState::Released, now());
-    run.state.key_input(logo, KeyState::Released, now());
+    run.state
+        .key_input(escape, KeyState::Released, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(logo, KeyState::Released, now(), KeyboardSource::Physical);
     assert_eq!(escape_sent, logo_sent, "the Escape is not sent on");
     assert_eq!(
         run.state.lock_requests,
@@ -1730,12 +1755,16 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         "it asks for the lock"
     );
     let shift = Keycode::from(42u32 + 8);
-    run.state.key_input(logo, KeyState::Pressed, now());
-    run.state.key_input(shift, KeyState::Pressed, now());
-    run.state.key_input(escape, KeyState::Pressed, now());
+    run.state
+        .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(shift, KeyState::Pressed, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
     for key in [escape, shift, logo] {
-        run.state.key_input(key, KeyState::Released, now());
+        run.state
+            .key_input(key, KeyState::Released, now(), KeyboardSource::Physical);
     }
     assert_eq!(
         escape_sent.map(|(_, to)| to),
@@ -1851,13 +1880,15 @@ fn task8_a_pause_forgets_the_keys_the_compositor_kept() {
     let [ctrl, alt, f1] = [29u32, 56, 59].map(|code| Keycode::from(code + 8));
     let now = InputTime::now;
     for key in [ctrl, alt, f1] {
-        run.state.key_input(key, KeyState::Pressed, now());
+        run.state
+            .key_input(key, KeyState::Pressed, now(), KeyboardSource::Physical);
     }
     assert_eq!(run.state.kept_keys, [f1], "Ctrl+Alt+F1 is kept");
     run.state.pause();
     assert!(run.state.kept_keys.is_empty(), "the pause forgets it");
     run.state.grab_serials.key_release = None;
-    run.state.key_input(f1, KeyState::Released, now());
+    run.state
+        .key_input(f1, KeyState::Released, now(), KeyboardSource::Physical);
     assert!(
         run.state.grab_serials.key_release.is_some(),
         "a later release of F1 reaches the client"
@@ -3144,5 +3175,406 @@ fn os9_a_mode_finished_in_a_race_fails_the_configuration() {
         head.set_scale(1.5)
     });
     assert_eq!(scaled, "succeeded", "the client is still connected");
+    run.stop();
+}
+
+/// A virtual keyboard of zwp-virtual-keyboard-v1, whose client side no crate of the workspace
+/// generates: its requests are sent raw, on the interfaces Smithay's server side describes.
+struct VirtualKeyboard {
+    backend: Backend,
+    id: ObjectId,
+    /// The file of its keymap, open while the compositor may read it.
+    _keymap: std::fs::File,
+}
+
+/// The object data of the raw objects: zwp-virtual-keyboard-v1 has no events.
+struct Silent;
+
+impl ObjectData for Silent {
+    fn event(
+        self: Arc<Self>,
+        _: &Backend,
+        _: Message<ObjectId, OwnedFd>,
+    ) -> Option<Arc<dyn ObjectData>> {
+        None
+    }
+    fn destroyed(&self, _: ObjectId) {}
+}
+
+impl VirtualKeyboard {
+    /// Binds the manager and creates a keyboard on the seat, with `keymap`, an xkb keymap, or
+    /// the seat's own keymap when none.
+    fn new(local: &mut Local, run: &mut Running, keymap: Option<&str>) -> Self {
+        let seat: wl_seat::WlSeat = local.bind(1);
+        let manager = &ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE;
+        let (name, _, _) = local
+            .client
+            .globals
+            .iter()
+            .find(|(_, interface, _)| interface == manager.name)
+            .expect("the virtual keyboard manager");
+        let bind = wl_registry::Request::Bind {
+            name: *name,
+            id: (manager, 1),
+        };
+        let manager = local
+            .connection
+            .send_request(&local.registry, bind, Some(Arc::new(Silent)))
+            .expect("bind");
+        let backend = local.connection.backend();
+        let create = Message {
+            sender_id: manager,
+            opcode: 0,
+            args: [
+                Argument::Object(seat.id()),
+                Argument::NewId(ObjectId::null()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let id = backend
+            .send_request(
+                create,
+                Some(Arc::new(Silent)),
+                Some((&ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE, 1)),
+            )
+            .expect("a virtual keyboard");
+        let mut file = unlinked().expect("keymap file");
+        // `wl_keyboard.keymap_format`: no_keymap, or xkb_v1 in a NUL-terminated string.
+        let (format, size) = match keymap {
+            Some(text) => {
+                file.write_all(text.as_bytes()).expect("keymap");
+                file.write_all(&[0]).expect("keymap");
+                (1, text.len() + 1)
+            }
+            None => (0, 0),
+        };
+        let keyboard = Self {
+            backend,
+            id,
+            _keymap: file,
+        };
+        keyboard.send(
+            0,
+            [
+                Argument::Uint(format),
+                Argument::Fd(std::os::fd::AsRawFd::as_raw_fd(&keyboard._keymap)),
+                Argument::Uint(u32::try_from(size).expect("keymap size")),
+            ],
+        );
+        local.roundtrip(run);
+        keyboard
+    }
+
+    /// Presses the keys of evdev codes `codes` in order and releases them in reverse, as
+    /// `chord` does on the hardware path.
+    fn chord(&self, local: &mut Local, run: &mut Running, codes: &[u32]) {
+        let presses = codes.iter().map(|code| (*code, 1));
+        for (code, state) in presses.chain(codes.iter().rev().map(|code| (*code, 0))) {
+            self.send(
+                1,
+                [
+                    Argument::Uint(0),
+                    Argument::Uint(code),
+                    Argument::Uint(state),
+                ],
+            );
+        }
+        local.roundtrip(run);
+    }
+
+    fn send<const N: usize>(&self, opcode: u16, args: [Argument<ObjectId, i32>; N]) {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode,
+            args: args.into_iter().collect(),
+        };
+        self.backend
+            .send_request(message, None, None)
+            .expect("a virtual keyboard request");
+    }
+}
+
+/// A keymap of two keys whose evdev codes are other keys in the seat's: Escape at the code of
+/// A (30), and Super at the code of S (31).
+const SWAPPED_KEYMAP: &str = r#"xkb_keymap {
+    xkb_keycodes "swapped" { minimum = 8; maximum = 255; <ESCA> = 38; <SUPR> = 39; };
+    xkb_types "swapped" { include "complete" };
+    xkb_compatibility "swapped" { include "complete" };
+    xkb_symbols "swapped" {
+        key <ESCA> { [ Escape ] };
+        key <SUPR> { symbols[Group1] = [ Super_L ], actions[Group1] = [ SetMods(modifiers=Mod4) ] };
+        modifier_map Mod4 { <SUPR> };
+    };
+};"#;
+
+/// The seat's keymap, as the compositor sends it to its clients.
+fn seat_keymap(state: &mut State) -> String {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.with_xkb_state(state, |context| {
+        context
+            .xkb()
+            .lock()
+            .expect("the seat's keymap")
+            .keymap_as_string()
+    })
+}
+
+/// A virtual key takes the hardware path (OS9 task 6): a granted client's virtual Super+Escape,
+/// typed with a keymap of its own, takes the keyboard back from an exclusive top surface and asks
+/// for the lock, as `task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock` does with a
+/// hardware key; the surface sees Super go down, never the Escape. The keymap applies to its own
+/// keys only: the seat's is the same afterwards, and the same codes on the hardware keyboard, A
+/// and S, ask for nothing.
+#[test]
+fn os9_a_virtual_key_takes_the_hardware_path() {
+    let mut run = Running::start(None);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).is_some()
+    });
+    let window = focus(&run.state);
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(shell_id.clone())
+    });
+    let keymap = seat_keymap(&mut run.state);
+
+    let mut local = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    keyboard.chord(&mut local, &mut run, &[31, 30]);
+    assert_eq!(run.state.lock_requests, 1, "Super+Escape asks for the lock");
+    assert_eq!(
+        focus(&run.state),
+        window,
+        "the press takes the keyboard back"
+    );
+    assert_eq!(
+        run.state.escaped.len(),
+        1,
+        "the shell's identity is escaped"
+    );
+    assert!(
+        run.state.kept_keys.is_empty(),
+        "the release is kept as well"
+    );
+    assert_eq!(
+        shell_keys(&mut run, &steps),
+        [31],
+        "the surface saw Super go down, never the Escape"
+    );
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat's keymap is the seat's again"
+    );
+    chord(&mut run.state, &[31, 30]);
+    assert_eq!(
+        run.state.lock_requests, 1,
+        "S and A on the hardware keyboard are S and A"
+    );
+
+    drop(steps);
+    shell
+        .join()
+        .expect("the shell's thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// The window under the pointer and the id of its client.
+fn window_under_pointer(run: &Running) -> (WlSurface, ClientId) {
+    let (window, id) = fixture_window(run);
+    let surface = window.toplevel().expect("a toplevel").wl_surface().clone();
+    (surface, id)
+}
+
+/// Motion and a button from a granted client's virtual pointer reach the window under the
+/// pointer (OS9 task 6): the window has the pointer, and the button's serial was sent to its
+/// client.
+#[test]
+fn os9_a_virtual_pointer_moves_and_clicks() {
+    let mut run = Running::start(None);
+    let (surface, window_client) = window_under_pointer(&run);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    // The red half of the window, centred on the first output.
+    let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
+    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    pointer.motion(0, target.x - at.x, target.y - at.y);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert_eq!(
+        seat_pointer.current_location(),
+        target,
+        "moved by its delta"
+    );
+    assert_eq!(
+        seat_pointer.current_focus().as_ref(),
+        Some(&surface),
+        "the window has the pointer"
+    );
+
+    run.state.grab_serials.button = None;
+    // BTN_LEFT.
+    pointer.button(
+        0,
+        0x110,
+        wayland_client::protocol::wl_pointer::ButtonState::Pressed,
+    );
+    pointer.button(
+        0,
+        0x110,
+        wayland_client::protocol::wl_pointer::ButtonState::Released,
+    );
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "the press went to the window's client"
+    );
+    run.stop();
+}
+
+/// Absolute and relative motion of a virtual pointer past the edge of the fixture's two outputs
+/// leaves the pointer on an output (OS9 task 6), as
+/// `task8_an_output_that_shrinks_strands_no_window_and_no_pointer` requires of the hardware one.
+#[test]
+fn os9_a_virtual_pointer_stays_inside_the_outputs() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    let on_an_output = |state: &State| {
+        let at = state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .current_location();
+        state
+            .space
+            .outputs()
+            .filter_map(|output| state.space.output_geometry(output))
+            .any(|output| output.to_f64().contains(at))
+    };
+    // The far corner of the outputs' bounding box, below the smaller second output.
+    pointer.motion_absolute(0, 100, 100, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(on_an_output(&run.state), "absolute, at the far corner");
+    for (dx, dy, what) in [
+        (10_000.0, 10_000.0, "right and down"),
+        (-10_000.0, 10_000.0, "left and down"),
+        (-10_000.0, -10_000.0, "left and up"),
+        (10_000.0, -10_000.0, "right and up"),
+    ] {
+        pointer.motion(0, dx, dy);
+        pointer.frame();
+        local.roundtrip(&mut run);
+        assert!(on_an_output(&run.state), "relative, {what}");
+    }
+    run.stop();
+}
+
+/// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
+/// lock surface focused, a granted client's virtual key reaches neither the lock surface nor any
+/// other client; a hardware key reaches it; after unlock the same virtual key reaches the window
+/// again.
+#[test]
+fn os9_a_virtual_key_is_dropped_while_locked() {
+    let mut run = Running::start(None);
+    let (window, window_client) = window_under_pointer(&run);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+
+    let mut locker = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let lock = locks.lock(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(&mut run, "the lock surface is configured", |client, _| {
+        client.locked && client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = locker.id.clone().expect("a client the fixture inserted");
+    locker.pump(&mut run, "the lock surface has the keyboard", |_, state| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.grab_serials.key_press = None;
+    keyboard.chord(&mut typist, &mut run, &[30]);
+    locker.roundtrip(&mut run);
+    assert!(locker.client.keys.is_empty(), "the lock surface saw no key");
+    assert_eq!(
+        run.state.grab_serials.key_press, None,
+        "no client was sent a key"
+    );
+
+    chord(&mut run.state, &[30]);
+    locker.pump(
+        &mut run,
+        "a hardware key reaches the lock surface",
+        |client, _| client.keys == [30],
+    );
+
+    lock.unlock_and_destroy();
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| focus(state).as_ref() == Some(&window),
+    );
+    run.state.grab_serials.key_press = None;
+    keyboard.chord(&mut typist, &mut run, &[30]);
+    assert_eq!(
+        run.state
+            .grab_serials
+            .key_press
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "after unlock the virtual key reaches the window"
+    );
+    assert_eq!(locker.client.keys, [30], "and not the locker");
     run.stop();
 }

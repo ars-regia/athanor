@@ -26,10 +26,14 @@ pub enum Privilege {
     Workspaces,
     /// `zwlr_output_manager_v1`: the outputs' configuration, the control center's.
     OutputManagement,
+    /// `zwp_virtual_keyboard_manager_v1`: keys typed as if on the hardware keyboard.
+    VirtualKeyboard,
+    /// `zwlr_virtual_pointer_manager_v1`: a pointer moved and clicked as if by the hardware one.
+    VirtualPointer,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 7] = [
+    const ALL: [(Self, &'static str); 9] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -40,6 +44,8 @@ impl Privilege {
         (Self::SessionLock, "ext_session_lock_manager_v1"),
         (Self::Workspaces, "ext_workspace_manager_v1"),
         (Self::OutputManagement, "zwlr_output_manager_v1"),
+        (Self::VirtualKeyboard, "zwp_virtual_keyboard_manager_v1"),
+        (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {

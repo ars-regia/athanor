@@ -68,7 +68,10 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
+use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
 use smithay::wayland::xdg_activation::XdgActivationState;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -107,6 +110,9 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
+    /// The modifiers each virtual keyboard last set, applied to its own keys only
+    /// (`with_keymap_of`).
+    pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
     /// on any connection, hold it again only after a click on one of their surfaces
@@ -232,6 +238,11 @@ impl State {
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
         crate::workspace::global(&dh);
         crate::output_management::global(&dh);
+        // Synthetic input, which takes the hardware's path (`input.rs`).
+        VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
+            granted(c, Privilege::VirtualKeyboard)
+        });
+        VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -255,6 +266,7 @@ impl State {
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
+            virtual_modifiers: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,
             fatal: None,
