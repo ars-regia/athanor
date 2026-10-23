@@ -531,7 +531,7 @@ class Publish(GithubRelease):
         self.assertEqual(r.returncode, 0, r.stderr)
         body = self.fx["releases"]["promoted-412"]["body"]
         self.assertEqual(body, self.promotion_notes("promoted-412", bundle))
-        self.assertIn(f"gh release download promoted-412 -R {REPO} -p {ASSET}", body)
+        self.assertIn(f"gh release download promoted-412 -R {REPO} -p 'evidence-412-*.tar'", body)
         self.assertNotIn("v0.9.0", body)
         self.assertNotIn(NOTES, body)
 
@@ -628,29 +628,24 @@ class Publish(GithubRelease):
         self.nothing_published()
         self.assertEqual(self.fx["releases"], {})
 
-    def test_a_forged_release_with_an_asset_not_named_as_evidence_is_refused(self):
+    def test_a_forged_body_beside_a_valid_looking_earlier_asset_is_refused(self):
         bundle = self.planned()
-        for name in ("evidence-412-oops.tar", "evidence-412-8999.tar.gz", "notes.txt"):
-            with self.subTest(name=name):
-                self.release("promoted-412", title="Forged title", body="forged notes", assets={name: self.blob(b"x")})
-                self.refused(self.publish(bundle), "promoted-412", name, f"gh release delete promoted-412 -R {REPO}")
-                self.nothing_published()
-
-    def test_a_forged_release_with_an_evidence_bundle_that_does_not_verify_is_refused(self):
-        bundle = self.planned()
-        forged = self.bundle("forged")
-        (forged / "release.json").write_text(json.dumps({"tag": "promoted-412", "title": "Forged title", "latest": False,
-                                                          "notes_sha256": sha256(b"forged notes\n")}))
-        name = "evidence-412-8999.tar"
-        self.release("promoted-412", title="Forged title", body="forged notes", assets={name: self.blob(self.tar_of(forged))})
-        self.refused(self.publish(bundle), "promoted-412", name, "does not verify")
+        self.release("promoted-412", body="forged notes", assets={"evidence-412-8999.tar": self.blob(b"x")})
+        self.refused(self.publish(bundle), "promoted-412", "body", f"gh release delete promoted-412 -R {REPO}")
         self.nothing_published()
-
+    def test_only_a_strictly_named_asset_is_another_builds_evidence(self):
+        self.tag()
+        bundle = self.planned()
+        self.release("v0.9.0", title=TITLE, latest=True, assets={"evidence-411-x.tar": self.blob(b"x")})
+        r = self.publish(bundle)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("promoted-412", self.fx["releases"])
+        self.assertIn(ASSET, self.fx["releases"]["v0.9.0"]["assets"])
     def test_a_genuine_earlier_bundle_on_a_release_with_forged_notes_is_refused(self):
         self.first_promotion()
         bundle = self.planned()
         self.fx["releases"]["promoted-412"]["body"] = "forged notes"
-        self.refused(self.publish(bundle), "promoted-412", "evidence-412-8999.tar", "body")
+        self.refused(self.publish(bundle), "promoted-412", "body")
         self.nothing_published()
 
     def test_a_genuine_earlier_bundle_of_another_revision_is_refused(self):

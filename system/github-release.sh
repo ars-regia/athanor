@@ -83,8 +83,8 @@ tag_commit() { # tag_commit TAG -> the commit TAG names; nothing when the tag do
 }
 
 other_build() { # other_build RELEASE_JSON RUN -> the build run of an evidence asset that is not RUN's
-    jq -r --arg run "$2" '[.assets[].name | select(startswith("evidence-"))
-        | (capture("^evidence-(?<run>[0-9]+)-[0-9]+\\.tar$").run // .) | select(. != $run)] | first // empty' <<< "$1"
+    jq -r --arg run "$2" '[.assets[].name | capture("^evidence-(?<run>[0-9]+)-[0-9]+\\.tar$").run
+        | select(. != $run)] | first // empty' <<< "$1"
 }
 
 # check_version_tag WHAT TAG REVISION -> the subject of the tag's message. ADR-0131 decisions 3
@@ -216,10 +216,6 @@ body_sha() { # body_sha < TEXT -> the SHA-256 of TEXT without carriage returns a
     printf '%s\n' "$text" | sha256sum | cut -d' ' -f1
 }
 
-other_assets() { # other_assets RELEASE NAME -> the names of the Release's assets other than NAME, one a line
-    jq -r --arg name "$2" '.assets[].name | select(. != $name)' <<< "$1"
-}
-
 recovery() { # recovery TAG -> how the maintainer clears a Release at TAG that is not the approved one
     echo "gh release delete $1 -R $repo (without --cleanup-tag), then re-run the github-release job: gh run rerun $GITHUB_RUN_ID --job <job id> -R $repo"
 }
@@ -244,45 +240,10 @@ differs() {
     echo "$fields"
 }
 
-# check_earlier TAG RELEASE NAMES LATEST REVISION: a published Release that already holds assets
-# besides this promotion's is an earlier promotion's only if every such asset is an evidence bundle
-# the promotion workflow signed (verify-dir, the identity and issuer pins of evidence-bundle.sh)
-# for this tag and REVISION, and the Release is as one of them approved it. An asset name alone
-# proves nothing: anyone with contents: write can upload one.
-check_earlier() {
-    local tag=$1 release=$2 names=$3 latest=$4 revision=$5 asset into tree types key at title want fields matched=''
-    local fix
-    fix=$(recovery "$tag")
-    while read -r asset; do
-        [[ $asset =~ ^evidence-[0-9]+-[0-9]+\.tar$ ]] ||
-            die "the published Release at $tag holds $asset, which is not the evidence bundle of a promotion. Recovery, by the maintainer only: $fix"
-        into=$(mktemp -d -p "$work")
-        tree=$(mktemp -d -p "$work")
-        gh_must release download "$tag" -R "$repo" -p "$asset" -D "$into" > /dev/null
-        # Regular files and directories only: a link in an untrusted tar could write outside it.
-        types=$(tar -tvf "$into/$asset" | cut -c1 | sort -u | tr -d '\n')
-        [[ $types =~ ^[-d]+$ ]] || die "$asset on the Release at $tag holds links or special files. Recovery, by the maintainer only: $fix"
-        tar -xf "$into/$asset" -C "$tree" --no-same-owner --no-same-permissions
-        # Without the job token, as the step that verifies this promotion's own bundle.
-        env -u GH_TOKEN -u GITHUB_TOKEN bash "$root/system/evidence-bundle.sh" verify-dir "$tree" "$tree" >&2 ||
-            die "$asset on the Release at $tag does not verify as a signed evidence bundle of a promotion. Recovery, by the maintainer only: $fix"
-        key=$(jq -r --arg tag "$tag" 'if .tag == $tag then "" elif (.fallback.tag // "") == $tag then ".fallback" else "none" end' "$tree/release.json")
-        [[ $key != none ]] || die "$asset on the Release at $tag was approved for another tag. Recovery, by the maintainer only: $fix"
-        at=$(field .revision "$tree/promotion.json")
-        [[ $at == "$revision" ]] || die "$asset on the Release at $tag is the evidence of revision $at, not $revision. Recovery, by the maintainer only: $fix"
-        title=$(field "$key.title" "$tree/release.json")
-        want=$(field "$key.notes_sha256" "$tree/release.json")
-        fields=$(differs "$release" "$tag" "$title" "$latest" "$want" "$revision")
-        if [[ -z $fields ]]; then matched=$asset; fi
-    done <<< "$names"
-    [[ -n $matched ]] ||
-        die "the published Release at $tag is not as any promotion whose evidence it holds (${names//$'\n'/, }) approved it: $fields. Recovery, by the maintainer only: $fix"
-}
-
 # publish_state TAG TITLE LATEST NOTES ASSET SHA REVISION: the table of decision 7 of the plan.
 publish_state() {
     local tag=$1 title=$2 latest=$3 notes=$4 asset=$5 sha=$6 revision=$7 release name have='' draft kind fields
-    local flag=--latest=false recovery prior want
+    local flag=--latest=false recovery want
     name=${asset##*/}
     if [[ $latest == true ]]; then flag=--latest; fi
     recovery=$(recovery "$tag")
@@ -295,19 +256,15 @@ publish_state() {
     draft=$(jq -r '.isDraft' <<< "$release")
     kind=published
     if [[ $draft == true ]]; then kind=draft; fi
-    prior=$(other_assets "$release" "$name")
-    # A published Release with an earlier promotion's verified evidence gets this promotion's
-    # asset and nothing else (ADR-0131 decision 6). Any other Release at the tag is this job's
-    # from an interrupted run, or stray: anyone with contents: write can make one, so it must be
-    # the approved Release exactly before the signed asset goes on it.
-    if [[ $draft == false && -n $prior ]]; then
-        check_earlier "$tag" "$release" "$prior" "$latest" "$revision"
-    else
-        want=$(body_sha < "$notes")
-        fields=$(differs "$release" "$tag" "$title" "$latest" "$want" "$revision")
-        [[ -z $fields ]] ||
-            die "the $kind Release at $tag is not the approved one ('$title' on $revision): $fields. Recovery, by the maintainer only: $recovery"
-    fi
+    # Any Release at the tag, with or without earlier assets, must be this promotion's approved
+    # one exactly before the signed asset goes on it: anyone with contents: write can make one,
+    # and an earlier promotion's asset proves a planned promotion, not an approved one. The notes
+    # are a function of the build and the tag, so an earlier promotion of this build made the same
+    # Release, and this one adds its asset and nothing else (ADR-0131 decision 6).
+    want=$(body_sha < "$notes")
+    fields=$(differs "$release" "$tag" "$title" "$latest" "$want" "$revision")
+    [[ -z $fields ]] ||
+        die "the $kind Release at $tag is not the approved one ('$title' on $revision): $fields. Recovery, by the maintainer only: $recovery"
     if jq -e --arg name "$name" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null; then have=$(asset_sha "$tag" "$name"); fi
     if [[ -z $have ]]; then
         gh_must release upload "$tag" "$asset" -R "$repo"
@@ -322,18 +279,13 @@ publish_state() {
 # read_back TAG NAME SHA REVISION TITLE LATEST NOTES: the Release is published, is the approved
 # one, holds the asset and its tag names REVISION.
 read_back() {
-    local release at fields prior draft have url want
+    local release at fields draft have url want
     release=$(gh_must release view "$1" -R "$repo" --json "$RELEASE_FIELDS")
     draft=$(jq -r '.isDraft' <<< "$release")
     [[ $draft == false ]] || die "the Release at $1 is still a draft after it was published"
-    prior=$(other_assets "$release" "$2")
-    if [[ -n $prior ]]; then
-        check_earlier "$1" "$release" "$prior" "$6" "$4"
-    else
-        want=$(body_sha < "$7")
-        fields=$(differs "$release" "$1" "$5" "$6" "$want" "$4")
-        [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
-    fi
+    want=$(body_sha < "$7")
+    fields=$(differs "$release" "$1" "$5" "$6" "$want" "$4")
+    [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
     jq -e --arg name "$2" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null || die "the Release at $1 does not hold $2"
     have=$(asset_sha "$1" "$2")
     [[ $have == "$3" ]] || die "the Release at $1 holds $2 with SHA-256 $have, not this bundle's $3"

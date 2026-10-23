@@ -214,17 +214,26 @@ class EvidenceBundle(Tool):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("release.json", r.stderr)
 
-    def test_summary_promotion_mode_reads_no_release_json(self):
+    def test_summary_promotion_mode_is_a_function_of_the_build_and_the_tag(self):
         self.plan(trigger="https://github.com/ars-regia/athanor/actions/runs/9001")
         (self.artifacts / "release.json").unlink()
-        r = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        for text in ("build run 412", "Version: 43.20261024.5123", "| iso-acceptance | athanor-system | pass |",
-                     "gh release download promoted-412 -R ars-regia/athanor -p evidence-412-9001.tar",
+        first = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        for text in ("### Build run 412", "Version: 43.20261024.5123 (commit " + "f" * 40 + ")",
+                     "gh release download promoted-412 -R ars-regia/athanor -p 'evidence-412-*.tar'",
                      "--certificate-identity " + IDENTITY, "sha256sum --strict -c bundle.sha256"):
-            self.assertIn(text, r.stdout)
-        self.assertNotIn("GitHub Release", r.stdout)
-
+            self.assertIn(text, first.stdout)
+        for text in ("9001", "GitHub Release", "Previous stable", "Hardware override", "athanor-builder", "iso-acceptance"):
+            self.assertNotIn(text, first.stdout)
+        # Another promotion of the same build: its own run, previous stable, override, builder and evidence.
+        self.plan(trigger="https://github.com/ars-regia/athanor/actions/runs/9002", overrides=["athanor-system-nvidia"],
+                  images=[{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": "sha256:" + "e" * 64}],
+                  builder_content_hash="9" * 64)
+        (self.artifacts / "evidence" / "hardware.athanor-system.json").write_text(json.dumps({
+            "gate": "hardware", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-24T10:00:00Z"}))
+        second = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first.stdout, second.stdout)
     def test_the_summary_refuses_a_missing_field(self):
         # A plan without overrides would read "Hardware override: none" in the approval.
         plan = {"run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,

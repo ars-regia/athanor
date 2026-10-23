@@ -99,18 +99,27 @@ summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release ap
     if has("fallback") then "If that Release holds the evidence of another build: " + (.fallback | release), "" else empty end' "$1/release.json"
 }
 
-promotion_notes() { # promotion_notes ARTIFACTS_DIR TAG: the promotion, then how to verify its asset on the Release at TAG
-    promotion_summary "$1"
-    local asset
-    asset=$(jq -er '"evidence-\(.run_id)-\(.trigger | capture("/actions/runs/(?<id>[0-9]+)$").id).tar"' "$1/promotion.json") || {
-        echo "${0##*/}: $1/promotion.json names no build run_id or no promotion run trigger" >&2
+# promotion_notes ARTIFACTS_DIR TAG: the build, then how to verify each promotion's asset on the
+# Release at TAG. A function of the build and TAG only, never of the promotion run: every promotion
+# of a build computes the same notes, so a second one finds the Release exactly as it approved it
+# (ADR-0131 decision 6). What a promotion published is in its signed bundle.
+promotion_notes() {
+    local run
+    run=$(jq -er '.run_id' "$1/promotion.json") || {
+        echo "${0##*/}: $1/promotion.json names no build run_id" >&2
         exit 1
     }
-    printf '%s\n' "" "Verify the evidence bundle of this promotion against its keyless signature:" "" '```sh' \
-        "gh release download $2 -R ${GITHUB_REPOSITORY:-ars-regia/athanor} -p $asset" \
-        "mkdir ${asset%.tar} && tar -xf $asset -C ${asset%.tar} && cd ${asset%.tar}" \
-        "cosign verify-blob --bundle bundle.sha256.sigstore.json --certificate-identity $identity --certificate-oidc-issuer $issuer bundle.sha256" \
-        "sha256sum --strict -c bundle.sha256" '```'
+    jq -r 'def must(k): .[k] // error("promotion.json has no \(k)");
+    "### Build run \(must("run_id"))", "",
+    "Version: \(must("version")) (commit \(must("revision")))", "",
+    "Each promotion of this build attaches its signed evidence bundle, `evidence-\(must("run_id"))-<promotion run>.tar`; its `promotion.json` names the images, digests and evidence that promotion published.", ""' "$1/promotion.json"
+    printf '%s\n' "Verify each evidence bundle against its keyless signature:" "" '```sh' \
+        "gh release download $2 -R ${GITHUB_REPOSITORY:-ars-regia/athanor} -p 'evidence-$run-*.tar'" \
+        "for asset in evidence-$run-*.tar; do" \
+        "  mkdir \"\${asset%.tar}\" && tar -xf \"\$asset\" -C \"\${asset%.tar}\" && (cd \"\${asset%.tar}\" &&" \
+        "    cosign verify-blob --bundle bundle.sha256.sigstore.json --certificate-identity $identity --certificate-oidc-issuer $issuer bundle.sha256 &&" \
+        "    sha256sum --strict -c bundle.sha256)" \
+        "done" '```'
 }
 
 case ${1:-} in

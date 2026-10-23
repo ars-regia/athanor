@@ -228,10 +228,6 @@ jobs:
           path: approved
       - name: 🔎 Verify the approved bundle against its signature
         run: nix shell --inputs-from . nixpkgs#cosign -c bash system/evidence-bundle.sh verify-dir approved approved
-      - name: 🔑 Put the same cosign on PATH for the publish step
-        # github-release.sh verifies an earlier promotion's bundle on the Release with verify-dir;
-        # the nix fetch runs here, without the job token, and the publish step runs no nix.
-        run: nix build --inputs-from . nixpkgs#cosign --no-link --print-out-paths | sed 's|$|/bin|' >> "${GITHUB_PATH}"
       - name: 🚀 Publish the Release (system/github-release.sh)
         # The job token only where gh runs, with no nix in the step.
         env:
