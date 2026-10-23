@@ -565,6 +565,18 @@ impl State {
         }
     }
 
+    /// Moves `window`'s geometry to `to`: now, or, while the window waits for a configure that
+    /// changes its size, at the commit that answers it.
+    pub fn move_window(&mut self, window: &Window, to: Point<i32, Logical>) {
+        let serial = window
+            .user_data()
+            .get::<Relocate>()
+            .and_then(|relocate| relocate.0.get())
+            .and_then(|destination| destination.serial);
+        relocate(window, to, serial);
+        self.relocated(window);
+    }
+
     /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
     /// waits for, so that the window moves with its new size, not before.
     pub fn relocated(&mut self, window: &Window) {

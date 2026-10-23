@@ -1,6 +1,7 @@
 //! Smithay's handler traits: what the compositor does when a client commits, maps a window,
 //! opens a popup, imports a dmabuf or asks for activation.
 
+use crate::grabs::{kept_reachable, MoveGrab};
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
@@ -8,7 +9,7 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
-use smithay::input::pointer::{CursorImageStatus, Focus};
+use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
@@ -281,6 +282,29 @@ impl State {
         }
     }
 
+    /// The pointer, the start of its grab and the window, when the client of `surface` may
+    /// start a window grab with `serial`: the session is not locked, and `serial` is the last
+    /// button press, sent to that client and still held. A client cannot take the pointer when
+    /// it likes, as the popup grab checks.
+    fn window_grab(
+        &self,
+        surface: &ToplevelSurface,
+        seat: &wl_seat::WlSeat,
+        serial: Serial,
+    ) -> Option<(PointerHandle<Self>, GrabStartData<Self>, Window)> {
+        if self.lock.is_some() {
+            return None;
+        }
+        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        let client = surface.wl_surface().client()?.id();
+        if !self.grab_serials.clicked(serial, &client) || !pointer.has_grab(serial) {
+            return None;
+        }
+        let start = pointer.grab_start_data()?;
+        let window = self.window_for(surface.wl_surface())?;
+        Some((pointer, start, window))
+    }
+
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
     /// the keyboard exclusively; the others are deactivated.
     pub fn focus(&mut self, window: &Window) {
@@ -408,6 +432,29 @@ impl XdgShellHandler for State {
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
+    }
+
+    /// The window follows the pointer until every button is up. A maximised window is
+    /// restored first, its top edge where it was and its centre under the pointer.
+    fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(mut from) = self.space.element_geometry(&window).map(|g| g.loc) else {
+            return;
+        };
+        if let Some(kept) = self.restore(&window) {
+            from.x = start.location.to_i32_round::<i32>().x - kept.size.w / 2;
+            if let Some(area) = self.window_area() {
+                self.move_window(&window, kept_reachable(area, from, kept.size));
+            }
+        }
+        let grab = MoveGrab {
+            start,
+            window,
+            from,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {

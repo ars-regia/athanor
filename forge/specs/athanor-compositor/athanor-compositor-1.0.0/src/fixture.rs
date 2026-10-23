@@ -3,6 +3,7 @@
 //! window from a wl_shm buffer and waits for its frame callback; the compositor's frames are then
 //! read back and their pixels compared.
 
+use crate::grabs::MoveGrab;
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
 use crate::identity::{AllowList, FileId, Process};
@@ -26,7 +27,7 @@ use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server:
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::backend::input::InputTime;
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
@@ -87,6 +88,8 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
+/// The left button's evdev code.
+const BTN_LEFT: u32 = 0x110;
 const WIDTH: i32 = 200;
 const HEIGHT: i32 = 100;
 
@@ -2437,6 +2440,145 @@ fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical> {
         .space
         .element_location(&window_of(run, id))
         .expect("a location")
+}
+
+/// Whether a `MoveGrab` holds the pointer: any press installs Smithay's click grab, so
+/// `is_grabbed` cannot tell a move from a click.
+fn moving(run: &Running) -> bool {
+    run.state
+        .seat
+        .get_pointer()
+        .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<MoveGrab>()))
+        .unwrap_or(false)
+}
+
+/// Moves the pointer to `at` and presses the left button.
+fn press(run: &mut Running, at: Point<f64, Logical>) {
+    run.state.pointer_to(at, InputTime::now());
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+}
+
+/// Releases the left button.
+fn release(run: &mut Running) {
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+}
+
+/// A client's window, moved on the press it was sent: the client's id and where the press was.
+fn moved(run: &mut Running, local: &mut Local) -> (ClientId, Point<f64, Logical>) {
+    let toplevel = local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(run, at);
+    local.pump(run, "the press", |client, _| client.button.is_some());
+    toplevel._move(&seat, local.client.button.expect("a press"));
+    local.roundtrip(run);
+    assert!(moving(run), "the client's own press grants the move");
+    (id, at)
+}
+
+/// A move is granted only for the last press, sent to the client that asks, while it is held
+/// (OS12).
+#[test]
+fn a_move_needs_the_clients_own_button_press() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+
+    // A serial no press sent the client.
+    toplevel._move(&seat, SERIAL_COUNTER.next_serial().into());
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a serial no press sent is refused");
+
+    // An older press's serial.
+    press(&mut run, at);
+    release(&mut run);
+    local.pump(&mut run, "the first press", |client, _| client.button.is_some());
+    let older = local.client.button.take().expect("a press");
+    press(&mut run, at);
+    local.pump(&mut run, "the second press", |client, _| client.button.is_some());
+    toplevel._move(&seat, older);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "an older press's serial is refused");
+
+    // The current press's serial, recorded as sent to another client.
+    let current = local.client.button.expect("a press");
+    let (_, other) = fixture_window(&run);
+    assert_ne!(other, id, "the fixture's window belongs to another client");
+    run.state.grab_serials.button = Some((current.into(), other));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a press sent to another client is refused");
+
+    // The current press, sent to this client: granted.
+    run.state.grab_serials.button = Some((current.into(), id));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(moving(&run), "the client's own press grants the move");
+    run.stop();
+}
+
+/// The window follows the pointer until the button is up, and stays (OS12).
+#[test]
+fn a_window_follows_the_pointer_while_moved() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before + Point::from((100, 50)));
+    release(&mut run);
+    assert!(!moving(&run), "the release ends the move");
+    run.state.pointer_to(at, InputTime::now());
+    assert_eq!(
+        location_of(&run, &id),
+        before + Point::from((100, 50)),
+        "the window stays"
+    );
+    run.stop();
+}
+
+/// A window dragged off the area keeps its top edge, and 32 pixels across, inside it (OS12).
+#[test]
+fn a_moved_window_keeps_its_top_edge_reachable() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .pointer_to(at - Point::from((10_000.0, 10_000.0)), InputTime::now());
+    let location = location_of(&run, &id);
+    assert_eq!(location.y, area.loc.y, "the top edge stays in the area");
+    let width = window_of(&run, &id).geometry().size.w;
+    assert!(
+        location.x + width >= area.loc.x + 32,
+        "32 pixels stay in the area"
+    );
+    run.stop();
+}
+
+/// The lock ends a move: the pointer goes to the lock, and the window stays (OS12).
+#[test]
+fn the_lock_ends_a_move() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    let mut locker = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let _lock = locks.lock(&locker.queue.handle(), ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    assert!(!moving(&run), "the lock ends the move");
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before, "the window stays");
+    run.stop();
 }
 
 /// A maximised window takes the area the bar's zone leaves at the commit that draws that size,
