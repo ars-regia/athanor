@@ -2079,6 +2079,238 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7a. allow-list — a shell client that needs a privileged global has its line
+# --------------------------------------------------------------------------- #
+
+# The compositor's allow-list (doc_own_stack.md OS4) and the class of every global it offers.
+ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
+GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
+LAYER_SHELL = "zwlr_layer_shell_v1"
+# A surface on the top or overlay layer, which the compositor refuses without a grant.
+TOP_LAYER = re.compile(r"(?:set_layer\(|layer:\s*)(?:\w+::)*Layer::(?:Top|Overlay)\b")
+BIN_INSTALL = re.compile(r"\binstall\b[^\n]*?\btarget/release/(\S+)\s+%\{buildroot\}(?:/usr/bin|%\{_bindir\})/(\S+)")
+ANY_INSTALL = re.compile(r"%\{buildroot\}(?:/usr/bin|%\{_bindir\})/([\w.+-]+)")
+# A file of a path dependency that one public call alone enters counts for a target only when
+# the target's code makes that call: athanor-compositor-client binds the capture globals at the
+# first `Client::capture`, and capture.rs holds every name of them in the crate.
+ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs": re.compile(r"\.capture\(")}
+
+
+def without_comments(txt):
+    """`txt` with each comment blanked, newlines kept; strings stay, a global can be bound
+    by its name."""
+    out, at, i = [], 0, 0
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j == i:
+            i += 1
+            continue
+        if txt.startswith(("//", "/*"), i):
+            out.append(txt[at:i])
+            out.append(re.sub(r"[^\n]", " ", txt[i:j]))
+            at = j
+        i = j
+    out.append(txt[at:])
+    return "".join(out)
+
+
+def crate_sources(crate, start):
+    """The production files of the target whose entry point's directory is `start`: minus
+    the directories of the crate's other bin targets inside it, tests, and the modules and
+    items under `#[cfg(test)]`. Each as (path, text without test items and comments)."""
+    manifest = tomllib.loads(read(crate / "Cargo.toml"))
+    others = [(crate / b.get("path", "src/main.rs")).parent for b in manifest.get("bin", [])]
+    others = [d for d in others if d != start and d.is_relative_to(start)]
+    files = [p for p in walk(start, ".rs") if not any(p.is_relative_to(d) for d in others)]
+    test_modules = test_module_files(files)
+    return [(p, without_comments(without_test_items(read(p))))
+            for p in files if not is_test_file(p) and p not in test_modules]
+
+
+def enabled_dependencies(manifest, features, defaults):
+    """The optional dependencies `features` turn on (and `default` with `defaults`), and the
+    features each enables on a dependency, as Cargo reads `[features]`."""
+    table = manifest.get("features", {})
+    todo = list(features) + (["default"] if defaults else [])
+    seen, on, sub, weak = set(), set(), collections.defaultdict(set), []
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        if f not in table:
+            on.add(f)  # the implicit feature of an optional dependency
+        for v in table.get(f, []):
+            if v.startswith("dep:"):
+                on.add(v[4:])
+            elif "/" in v:
+                dep, feature = v.split("/", 1)
+                if dep.endswith("?"):
+                    weak.append((dep[:-1], feature))
+                else:
+                    on.add(dep)
+                    sub[dep].add(feature)
+            else:
+                todo.append(v)
+    for dep, feature in weak:
+        if dep in on:
+            sub[dep].add(feature)
+    return on, sub
+
+
+def path_dependencies(crate, manifest, root):
+    """(name in code, crate directory, entry) of each path dependency of `[dependencies]` and
+    of `[target.*.dependencies]`, through `workspace = true` too."""
+    workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {}) \
+        if (root / "Cargo.toml").is_file() else {}
+    tables = [manifest.get("dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in manifest.get("target", {}).values()]
+    for table in tables:
+        for name, entry in table.items():
+            if not isinstance(entry, dict):
+                continue
+            base, path = crate, entry.get("path")
+            if entry.get("workspace") and isinstance(workspace.get(name), dict):
+                base, path = root, workspace[name].get("path")
+            if path:
+                yield name, entry, (base / path).resolve()
+
+
+def target_files(crate, start, features, defaults, root):
+    """The production files a binary target is built from: its own, and those of the path
+    dependencies its code names, followed transitively with the features the build enables
+    (an optional dependency counts only when they turn it on)."""
+    files, done, todo = {}, {}, [(crate.resolve(), start.resolve(), set(features), defaults)]
+    while todo:
+        crate, start, features, defaults = todo.pop()
+        before = done.get(crate)
+        if before and features <= before[0] and (before[1] or not defaults):
+            continue
+        features = features | (before[0] if before else set())
+        defaults = defaults or bool(before and before[1])
+        done[crate] = (features, defaults)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        sources = crate_sources(crate, start)
+        files.update(sources)
+        code = "\n".join(text for _, text in sources)
+        on, sub = enabled_dependencies(manifest, features, defaults)
+        for name, entry, dep in path_dependencies(crate, manifest, root):
+            if entry.get("optional") and name not in on:
+                continue
+            ident = name if "package" in entry else \
+                tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("name", name)
+            # A dependency the code never names adds nothing that runs.
+            if not re.search(rf"\b{ident.replace('-', '_')}\b", code):
+                continue
+            lib = tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("path", "src/lib.rs")
+            wanted = set(entry.get("features", [])) | sub[name]
+            todo.append((dep, (dep / lib).parent, wanted, entry.get("default-features", True)))
+    return files
+
+
+def build_flags(spec, package):
+    """(features, defaults, all features) of the spec's `cargo build` of `package`."""
+    for line in spec.splitlines():
+        words = line.split()
+        if words[:2] != ["cargo", "build"]:
+            continue
+        named = [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-p"]
+        if named and package not in named:
+            continue
+        features = set()
+        for i, w in enumerate(words):
+            if w in ("--features", "-F") and i + 1 < len(words):
+                features.update(re.split(r"[ ,]+", words[i + 1].strip("\"'")))
+            elif w.startswith("--features="):
+                features.update(re.split(r"[ ,]+", w.split("=", 1)[1].strip("\"'")))
+        return features, "--no-default-features" not in words, "--all-features" in words
+    return set(), True, False
+
+
+def allow_list_problems(root=None):
+    """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
+    a crate of the tree, that asks for the top or overlay layer or names a privileged global
+    of data/globals has a line in data/privileged-clients, with zwlr_layer_shell_v1 when it
+    asks for those layers; each line names an executable a spec installs. A line's other
+    interfaces are the maintainer's grants, never derived here."""
+    root = Path(root or ROOT)
+    problems = []
+    privileged = set()
+    for line in read(root / GLOBALS_FILE).splitlines():
+        words = line.split()
+        if len(words) == 2 and words[1] == "privileged":
+            privileged.add(words[0])
+    lines = {}
+    for line in read(root / ALLOW_LIST).splitlines():
+        words = line.split()
+        if words and not words[0].startswith("#"):
+            lines[words[0]] = words[2:]
+
+    bins = {}
+    for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
+        manifest = tomllib.loads(read(manifest_path))
+        name = manifest.get("package", {}).get("name")
+        declared = manifest.get("bin", [])
+        if not declared and name and (manifest_path.parent / "src/main.rs").is_file():
+            declared = [{"name": name}]
+        for b in declared:
+            bins[b["name"]] = (manifest_path.parent, name, manifest_path.parent / b.get("path", "src/main.rs"))
+
+    installed, targets = set(), []
+    for spec_path in sorted((root / "forge/specs").glob("*/*.spec")):
+        spec = read(spec_path)
+        name = re.search(r"^Name:\s*(\S+)", spec, re.M)
+        if name:
+            spec = spec.replace("%{name}", name.group(1))
+        installed.update(f"/usr/bin/{b}" for b in ANY_INSTALL.findall(spec))
+        targets += [(built, f"/usr/bin/{dest}", spec) for built, dest in BIN_INSTALL.findall(spec)]
+
+    for built, executable, spec in targets:
+        if built not in bins:
+            continue  # built from a source outside the tree (cosmic-comp, matugen)
+        crate, package, entry = bins[built]
+        features, defaults, every = build_flags(spec, package)
+        if every:
+            features = set(tomllib.loads(read(crate / "Cargo.toml")).get("features", {}))
+        layer, names = None, {}
+        files = {path.relative_to(root.resolve()): text for path, text in
+                 target_files(crate, entry.parent, features, defaults, root).items()}
+        for where in [w for w in files if w.as_posix() in ON_DEMAND]:
+            call = ON_DEMAND[where.as_posix()]
+            if not any(call.search(text) for other, text in files.items() if other != where):
+                del files[where]
+        for where, text in sorted(files.items()):
+            for i, line in enumerate(text.split("\n"), 1):
+                if layer is None and TOP_LAYER.search(line):
+                    layer = f"{where}:{i}"
+                for interface in privileged:
+                    if interface not in names and re.search(rf"\b{interface}\b", line):
+                        names[interface] = f"{where}:{i}"
+        if layer is None and not names:
+            continue
+        asks = ([f"the top or overlay layer ({layer})"] if layer else []) + \
+            [f"{n} ({at})" for n, at in sorted(names.items())]
+        if executable not in lines:
+            problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
+        elif layer and LAYER_SHELL not in lines[executable]:
+            problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
+                            f"does not name {LAYER_SHELL}: the surface is closed (#683)")
+
+    for executable in lines:
+        if executable not in installed:
+            problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    return problems
+
+
+@check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
+def check_allow_list():
+    r = Result()
+    for problem in allow_list_problems():
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7b. riga di comando del kernel — le decisioni di doc_kernel_profile.md
 # --------------------------------------------------------------------------- #
 
