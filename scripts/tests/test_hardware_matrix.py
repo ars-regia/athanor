@@ -1,5 +1,6 @@
 """Unit tests of the hardware matrix (python3 -B -m unittest discover -s scripts/tests -v)."""
 
+import contextlib
 import importlib.util
 import pathlib
 import unittest
@@ -148,7 +149,11 @@ class Checks(unittest.TestCase):
         written = []
         with (
             mock.patch.object(matrix, "read_record", return_value=old),
-            mock.patch.object(matrix, "write_record", side_effect=lambda r, m, rec: written.append(dict(rec["rows"]))),
+            mock.patch.object(
+                matrix,
+                "write_record",
+                side_effect=lambda r, m, rec: written.append(dict(rec["rows"])),
+            ),
             mock.patch.object(matrix, "host", return_value={}),
             mock.patch.object(matrix, "attempt", return_value=("pass", "seen")),
         ):
@@ -181,6 +186,36 @@ class Checks(unittest.TestCase):
         out = "ethernet:connected (externally)\nwifi:disconnected\n"
         with mock.patch.object(matrix, "run", return_value=(0, out, "")):
             self.assertEqual(matrix.network()[0], "pass")
+
+    SESSION = {"XDG_RUNTIME_DIR": "/run/user/1000", "WAYLAND_DISPLAY": "wayland-0"}
+
+    def compositor(self, session, peer=None, exe=None):
+        patches = [mock.patch.dict(matrix.os.environ, session, clear=True)]
+        if peer is not None:
+            patches.append(mock.patch.object(matrix, "peer_pid", side_effect=peer))
+        if exe is not None:
+            patches.append(mock.patch.object(matrix.os, "readlink", side_effect=exe))
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            return matrix.attempt("compositor")
+
+    def test_compositor_passes_only_for_the_own_compositor(self):
+        for path, result in (
+            ("/usr/bin/athanor-compositor", "pass"),
+            ("/usr/bin/cosmic-comp", "fail"),
+        ):
+            got = self.compositor(self.SESSION, lambda s: 42, lambda p: path)
+            self.assertEqual(got[0], result)
+            self.assertIn(path, got[1])
+
+    def test_compositor_without_a_wayland_socket_is_a_failure(self):
+        self.assertEqual(self.compositor({})[0], "fail")
+
+    def test_compositor_with_a_dead_peer_is_a_failure(self):
+        gone = mock.Mock(side_effect=FileNotFoundError("/proc/42/exe"))
+        got = self.compositor(self.SESSION, lambda s: 42, gone)
+        self.assertEqual(got[0], "fail")
 
     def test_an_exception_is_recorded_as_a_failure(self):
         gone = mock.Mock(side_effect=FileNotFoundError("gone"))

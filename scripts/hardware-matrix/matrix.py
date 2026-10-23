@@ -22,6 +22,7 @@ import os
 import pathlib
 import re
 import socket
+import struct
 import subprocess
 import sys
 
@@ -237,6 +238,24 @@ def shell_units():
     return ("pass" if states == ["active"] * len(units) else "fail"), evidence
 
 
+def peer_pid(path):
+    """The pid of the process listening on the Unix socket `path`, from SO_PEERCRED."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(TIMEOUT)
+        s.connect(path)
+        creds = s.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+        )
+    return struct.unpack("3i", creds)[0]
+
+
+def compositor():
+    """Which compositor serves the session: the executable behind the Wayland socket."""
+    display = pathlib.Path(os.environ["XDG_RUNTIME_DIR"]) / os.environ["WAYLAND_DISPLAY"]
+    exe = os.readlink(f"/proc/{peer_pid(str(display))}/exe")
+    return ("pass" if exe == "/usr/bin/athanor-compositor" else "fail"), exe
+
+
 CHECKS = {
     f.__name__: f
     for f in (
@@ -252,6 +271,7 @@ CHECKS = {
         battery,
         failed_units,
         shell_units,
+        compositor,
     )
 }
 
