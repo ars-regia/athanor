@@ -140,6 +140,23 @@ class GithubRelease(Tool):
             "assets": assets or {},
         }
 
+    def first_promotion(self, run="8999"):
+        """A genuine earlier promotion of build run 412, by promotion run RUN, published at promoted-412."""
+        promotion = self.artifacts / "promotion.json"
+        record = json.loads(promotion.read_text())
+        trigger = record["trigger"]
+        record["trigger"] = f"https://github.com/{REPO}/actions/runs/{run}"
+        promotion.write_text(json.dumps(record, sort_keys=True, indent=2))
+        r = self.plan()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.publish(self.bundle(f"promotion-{run}"), GITHUB_RUN_ID=run)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        record["trigger"] = trigger
+        promotion.write_text(json.dumps(record, sort_keys=True, indent=2))
+
+    def tar_of(self, directory):
+        return subprocess.run(["tar", "-cf", "-", "-C", str(directory), "."], capture_output=True, check=True).stdout
+
     def approved_notes(self, tag):
         notes = self.promotion_notes(tag)
         return NOTES + "\n" + notes if tag.startswith("v") else notes
@@ -331,6 +348,11 @@ class Plan(GithubRelease):
         self.tag()
         (self.notes_dir / "0.9.0.md").unlink()
         self.refused(self.plan(), "v0.9.0", "0.9.0.md")
+
+    def test_plan_refuses_notes_with_carriage_returns(self):
+        self.tag()
+        (self.notes_dir / "0.9.0.md").write_text(NOTES.replace("\n", "\r\n"))
+        self.refused(self.plan(), "0.9.0.md", "carriage return")
 
     def test_plan_refuses_notes_whose_first_heading_names_another_version(self):
         self.tag()
@@ -597,6 +619,38 @@ class Publish(GithubRelease):
         self.nothing_published()
         self.assertEqual(self.fx["releases"], {})
 
+    def test_a_forged_release_with_an_asset_not_named_as_evidence_is_refused(self):
+        bundle = self.planned()
+        for name in ("evidence-412-oops.tar", "evidence-412-8999.tar.gz", "notes.txt"):
+            with self.subTest(name=name):
+                self.release("promoted-412", title="Forged title", body="forged notes", assets={name: self.blob(b"x")})
+                self.refused(self.publish(bundle), "promoted-412", name, f"gh release delete promoted-412 -R {REPO}")
+                self.nothing_published()
+
+    def test_a_forged_release_with_an_evidence_bundle_that_does_not_verify_is_refused(self):
+        bundle = self.planned()
+        forged = self.bundle("forged")
+        (forged / "release.json").write_text(json.dumps({"tag": "promoted-412", "title": "Forged title", "latest": False,
+                                                          "notes_sha256": sha256(b"forged notes\n")}))
+        name = "evidence-412-8999.tar"
+        self.release("promoted-412", title="Forged title", body="forged notes", assets={name: self.blob(self.tar_of(forged))})
+        self.refused(self.publish(bundle), "promoted-412", name, "does not verify")
+        self.nothing_published()
+
+    def test_a_genuine_earlier_bundle_on_a_release_with_forged_notes_is_refused(self):
+        self.first_promotion()
+        bundle = self.planned()
+        self.fx["releases"]["promoted-412"]["body"] = "forged notes"
+        self.refused(self.publish(bundle), "promoted-412", "evidence-412-8999.tar", "body")
+        self.nothing_published()
+
+    def test_a_genuine_earlier_bundle_of_another_revision_is_refused(self):
+        self.first_promotion()
+        bundle = self.planned()
+        self.fx["releases"]["promoted-412"]["target"] = OTHER
+        self.refused(self.publish(bundle), "promoted-412", "target")
+        self.nothing_published()
+
     def test_a_draft_without_the_asset_is_completed(self):
         bundle = self.planned()
         self.release("promoted-412", draft=True)
@@ -640,10 +694,9 @@ class Publish(GithubRelease):
                 )
 
     def test_a_second_promotion_of_the_same_build_adds_its_own_asset(self):
-        bundle = self.planned()
+        self.first_promotion()
         first = "evidence-412-8999.tar"
-        self.release("promoted-412", assets={first: self.blob(b"the first promotion")})
-        self.tag("promoted-412", annotated=False)
+        bundle = self.planned()
         r = self.publish(bundle)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([c[2] for c in self.writes()], ["upload"])
@@ -698,11 +751,8 @@ class Publish(GithubRelease):
         self.refused(self.publish(bundle), "promoted-412", "draft")
 
     def test_no_call_uses_clobber(self):
+        self.first_promotion()
         bundle = self.planned()
-        self.assertEqual(self.publish(bundle).returncode, 0)
-        self.fx["releases"]["promoted-412"]["assets"] = {
-            "evidence-412-8999.tar": self.blob(b"first")
-        }
         self.assertEqual(self.publish(bundle).returncode, 0)
         calls = self.calls()
         self.assertTrue(
