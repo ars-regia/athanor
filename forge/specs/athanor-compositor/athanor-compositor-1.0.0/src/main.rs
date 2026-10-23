@@ -139,12 +139,20 @@ fn run() -> Result<(), Error> {
 }
 
 fn main() -> ExitCode {
-    // RUST_LOG narrows or widens the log, as `smithay::backend::drm::compositor=trace` for
-    // where each element of a frame goes; without it, the log is at info.
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    // RUST_LOG adds to the log, as `smithay::backend::drm::compositor=trace` for where each
+    // element of a frame goes; what it does not name stays at info.
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+        .from_env();
+    let (filter, malformed) = match filter {
+        Ok(filter) => (filter, None),
+        Err(error) => (tracing_subscriber::EnvFilter::new("info"), Some(error)),
+    };
     if let Err(error) = tracing_subscriber::fmt().with_env_filter(filter).try_init() {
         eprintln!("athanor-compositor: no log: {error}");
+    }
+    if let Some(error) = malformed {
+        tracing::warn!(%error, "RUST_LOG is malformed: the log is at info");
     }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
