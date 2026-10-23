@@ -5089,3 +5089,50 @@ fn os9_a_key_the_input_method_forwards_reaches_the_window() {
     });
     run.stop();
 }
+
+/// Modifiers a virtual keyboard sets with no key after them reach the input method's grab, as
+/// they reach the focused window: Shift let go is let go for the input method too.
+#[test]
+fn os9_a_virtual_modifier_change_reaches_the_input_method_grab() {
+    const SHIFT: u32 = 1;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let mut local = Local::connect(&mut run, None);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
+    let grab = &method.grabs[0];
+    for (depressed, change) in [(SHIFT, "Shift held"), (0, "Shift let go")] {
+        let before = grab.events().len();
+        typist.modifiers(&mut local, &mut run, depressed);
+        ime.roundtrip(&mut run);
+        let sent: Vec<_> = grab.events().into_iter().skip(before).collect();
+        assert!(
+            matches!(&sent[..], [("modifiers", args)] if args[1] == depressed.to_string()),
+            "{change}: {sent:?}"
+        );
+    }
+
+    // Left Shift forwarded by the input method itself goes past its grab, which is sent the
+    // modifiers it changed and not the key. A first key gives the seat its keymap back.
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.chord(&mut ime, &mut run, &[31]);
+    window.pump(&mut run, "the window takes S", |client, _| {
+        client.keys.ends_with(&[31])
+    });
+    ime.roundtrip(&mut run);
+    let before = grab.events().len();
+    forwarder.key(&mut ime, &mut run, 42, true);
+    window.pump(&mut run, "the window takes Shift", |client, _| {
+        client.keys.ends_with(&[42])
+    });
+    let sent = grab.names_after(before);
+    assert!(sent.contains(&"modifiers") && !sent.contains(&"key"), "{sent:?}");
+    run.stop();
+}

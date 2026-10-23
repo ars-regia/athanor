@@ -154,6 +154,22 @@ impl State {
         }
     }
 
+    /// Sends the seat's modifiers to the input method's grab, if one is installed: none is
+    /// while the session is locked.
+    pub fn input_method_modifiers(&self) {
+        let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.as_ref()) else {
+            return;
+        };
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        send_modifiers(
+            grab,
+            SERIAL_COUNTER.next_serial(),
+            keyboard.modifier_state().serialized,
+        );
+    }
+
     /// The keymap and the modifiers, to the installed grab.
     fn send_keyboard_to_grab(&mut self) {
         let Some(keyboard) = self.seat.get_keyboard() else {

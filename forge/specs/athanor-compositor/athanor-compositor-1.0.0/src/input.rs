@@ -122,6 +122,10 @@ impl State {
                         time,
                         mods_changed,
                     );
+                    // The grab was not sent the key: it is sent what the key changed.
+                    if mods_changed {
+                        self.input_method_modifiers();
+                    }
                 } else {
                     keyboard.input_forward(self, code, key_state, serial, time, mods_changed);
                 }
@@ -281,21 +285,32 @@ impl State {
         let modifiers = self.virtual_modifiers.get(device).copied();
         let seat_modifiers = (self.virtual_keymap.is_none() && modifiers.is_some())
             .then(|| keyboard.modifier_state().serialized);
-        if let Some([depressed, latched, locked, group]) = modifiers {
-            keyboard.with_xkb_state(self, |mut context| {
-                context.set_modifier_mask(depressed, latched, locked, group)
-            });
+        if let Some(modifiers) = modifiers {
+            self.set_modifiers(&keyboard, modifiers);
         }
         input(self);
         if let Some(saved) = seat_modifiers {
-            keyboard.with_xkb_state(self, |mut context| {
-                context.set_modifier_mask(
-                    saved.depressed,
-                    saved.latched,
-                    saved.locked,
-                    saved.layout_effective,
-                )
-            });
+            let mask = [
+                saved.depressed,
+                saved.latched,
+                saved.locked,
+                saved.layout_effective,
+            ];
+            self.set_modifiers(&keyboard, mask);
+        }
+    }
+
+    /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
+    /// with no key: the focused surface is sent them when they change, and so is the input
+    /// method's grab, which a key would otherwise have carried them to.
+    fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
+        let [depressed, latched, locked, group] = mask;
+        let before = keyboard.modifier_state().serialized;
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group)
+        });
+        if keyboard.modifier_state().serialized != before {
+            self.input_method_modifiers();
         }
     }
 
@@ -438,14 +453,8 @@ impl VirtualKeyboardHandler for State {
                     .is_some_and(|current| current.device == device);
                 if current && !self.drops_virtual_input() {
                     if let Some(keyboard) = self.seat.get_keyboard() {
-                        keyboard.with_xkb_state(self, |mut context| {
-                            context.set_modifier_mask(
-                                mods_depressed,
-                                mods_latched,
-                                mods_locked,
-                                group,
-                            )
-                        });
+                        let mask = [mods_depressed, mods_latched, mods_locked, group];
+                        self.set_modifiers(&keyboard, mask);
                     }
                 }
                 self.virtual_modifiers
