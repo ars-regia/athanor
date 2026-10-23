@@ -2,12 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Maintainer review before any code.** This plan adds a job with `contents: write` to
-> `promote-stable.yml`, which runs the `release` environment, and changes the promotion
-> record that `system/promote.sh` compares against the signed plan. AGENTS.md lists
-> `system/promote.sh` under "Stop and ask before editing". No task starts before the
-> maintainer has approved the plan and answered the open questions. Every step that touches
-> signing, an environment, a permission or the trust chain is marked **[TRUST]**.
+> **Requires ADR-0131.** The maintainer's decisions of 2026-10-24 on this plan's open
+> questions are recorded in ADR-0131 (a separate pull request); no task starts before it is
+> merged. This plan adds a job with `contents: write` to `promote-stable.yml`, whose jobs
+> `promote` and `iso` run in the `release` environment, and changes the promotion record that
+> `system/promote.sh` compares against the signed plan. AGENTS.md lists `system/promote.sh`
+> under "Stop and ask before editing", so Tasks 1 and 3 still show their diff before the push.
+> Every step that touches signing, an environment, a permission or the trust chain is marked
+> **[TRUST]**.
 
 **Goal:** Each promotion to `:stable` publishes a GitHub Release named after the UT9 version of
 the promoted build. The Release carries the signed evidence bundle and the keyless signature of
@@ -48,6 +50,7 @@ script.
   - PL54, which limits runs to the `iso-v0` ref.
 - ADR-0106 items 4 and 7.
 - ADR-0115 item 2 and its consequences, which say to read "0.9" wherever these texts say "0.5".
+- ADR-0131, the maintainer's decisions on this plan (section "Decisions (ADR-0131)" below); it amends ADR-0115 item 2 for the VSA.
 - ADR-0129 item 3.
 - ADR-0104 item 3 and ADR-0105 item 2. A 0.x release is a signed tag plus a `:stable` promotion.
 - `docs/architecture/doc_update_trust.md` UT9. The version label is `<base major>.<UTC build date>.<serial>` and is never used to order releases.
@@ -56,8 +59,8 @@ script.
 
 ## Decisions this plan takes
 
-Each decision below follows from an approved text. The open questions at the end list the
-decisions that remain the maintainer's.
+Each decision below follows from an approved text or from ADR-0131, whose items are listed
+at the end.
 
 1. **The job.** A new job, `github-release`, in `promote-stable.yml` (`promote.yml` after PB5's
    rename) with `needs: [iso]`. It publishes a Release only for a promotion whose system images
@@ -69,17 +72,16 @@ decisions that remain the maintainer's.
    workflow identity `…/promote-stable.yml@refs/heads/iso-v0`. A second signature, made after
    the approval, would sign the same `bundle.sha256` again and would give a job that holds
    `contents: write` an OIDC token as well. It gets no `packages` permission and no registry
-   login: it reads only the signed artifact. It gets no environment under open question 1, which
-   recommends that.
+   login: it reads only the signed artifact. It runs in no environment (ADR-0131 item 1).
 3. **The version** (UT9) comes from the `org.opencontainers.image.version` label of the
    `athanor-system` digest in the run's `image-digests.txt`. That digest is always listed. The
    label is recorded in `promotion.json` as `version`, with `revision`, the
    `org.opencontainers.image.revision` commit. Both are read by digest, so the plan and the apply
    compute the same record, the job summary the approval covers shows them, and the bundle
-   signature binds them. The Release title is the version. The tag is decided by open
-   question 2.
+   signature binds them. The Release title is the version. The tag is `promoted-<build run id>`,
+   created on `revision`, unless decision 4 applies (ADR-0131 item 2).
 4. **0.x releases.** If exactly one tag matching `v<major>.<minor>.<patch>` points at
-   `revision`, and it is an annotated tag that is signed under open question 3, the promotion is
+   `revision`, and it is an annotated tag whose `verification.verified` is true (ADR-0131 item 3), the promotion is
    that 0.x release. In that case:
    - the Release uses that tag, so the API creates no tag;
    - the title is the tag's subject followed by the version, for example
@@ -142,12 +144,12 @@ decisions that remain the maintainer's.
 
 ## Review Focus
 
-- **[TRUST]** Task 3: the job's `permissions:` block (`contents: write` only), its lack of an environment (open question 1), and that no step of it has `id-token` or a registry login.
+- **[TRUST]** Task 3: the job's `permissions:` block (`contents: write` only), its lack of an environment (ADR-0131 item 1), and that no step of it has `id-token` or a registry login.
 - **[TRUST]** Task 1: `version` and `revision` added to `promotion.json`. The apply compares the recomputed record with the signed plan, so a plan made before the merge and applied after it fails with "plan again". That is fail-closed, and acceptable once.
 - **[TRUST]** Task 2: the bundle is verified before anything is published, and the identity is the one in `evidence-bundle.sh` (`promote-stable.yml@refs/heads/${RELEASE_BRANCH:-iso-v0}`), unchanged.
-- **[TRUST]** Task 2: the 0.x tag check (open question 3). A lightweight or unverified `v*` tag at the commit stops the job; it is never treated as "no tag".
+- **[TRUST]** Task 2: the 0.x tag check (ADR-0131 item 3). A lightweight or unverified `v*` tag at the commit stops the job; it is never treated as "no tag".
 - Every place where `gh` can fail must stop the script. "Not found" is the only state read as absence.
-- With a `contents: write` token, the Releases API creates the tag of a promotion Release on `revision` (open question 2). Check that nothing in the repository treats tags as trusted refs. `KERNEL_TRUSTED_REFS` lists branches (BRN6), and `promoted-*` cannot shadow `iso-v0` (PL55).
+- With a `contents: write` token, the Releases API creates the tag of a promotion Release on `revision` (ADR-0131 item 2). Check that nothing in the repository treats tags as trusted refs. `KERNEL_TRUSTED_REFS` lists branches (BRN6), and `promoted-*` cannot shadow `iso-v0` (PL55).
 
 ## Tasks
 
@@ -189,7 +191,7 @@ decisions that remain the maintainer's.
   - Output: on standard output, the Markdown line with the Release URL, for `$GITHUB_STEP_SUMMARY`. Exit status: 0 published or already published, 1 refused, 2 usage.
 - Internal functions, one job each:
   - `bundle_check` runs `evidence-bundle.sh verify-dir BUNDLE BUNDLE`;
-  - `release_of` returns `tag title notes_file`, from the record and the tags at `revision` (decision 4, open questions 2 and 3);
+  - `release_of` returns `tag title notes_file`, from the record and the tags at `revision` (decision 4, ADR-0131 items 2 and 3);
   - `pack` writes the deterministic tar of decision 6;
   - `publish` holds the state machine of decision 7;
   - `read_back` performs the check of decision 8.
@@ -234,7 +236,7 @@ decisions that remain the maintainer's.
 - The job:
   - `github-release: needs: [iso]`, `runs-on: ubuntu-24.04`, `timeout-minutes: 15`;
   - `permissions: { contents: write }` **[TRUST]**;
-  - no `environment` (open question 1) **[TRUST]**.
+  - no `environment` (ADR-0131 item 1) **[TRUST]**.
 - Its steps:
   - the existing ref check step, copied verbatim (PL54, PL60);
   - `actions/checkout` pinned at the same SHA, `persist-credentials: false`;
@@ -254,7 +256,7 @@ decisions that remain the maintainer's.
 - Create: `docs/releases/0.9.0.md`. It must name:
   - screenshot and screen share as absent (ADR-0129 item 3);
   - the known limits #600 and #604 (the 0.9 row of `release-1.0.md` section 4.1);
-  - the items of PL42 the bundle does not carry yet (open question 4);
+  - the items of PL42 the bundle does not carry yet: provenance (PL19 to PL21), SBOM (PL24), scan report (PL25), VEX (PL26) and the VSA (PL29) (ADR-0131 item 4);
   - Fedora 43 as the base (ADR-0115 item 3).
 
   The rest of the text is the maintainer's.
@@ -270,24 +272,14 @@ Not code. The maintainer runs these after the next promotion. Each is given as a
 - [ ] `gh release list -R ars-regia/athanor --limit 3` shows a Release whose title is the promoted version.
 - [ ] `gh release download <tag> -R ars-regia/athanor -p 'evidence-*.tar' -D /var/tmp/pl42-check`, then `tar -xf` into an empty directory, then `cosign verify-blob --bundle bundle.sha256.sigstore.json --certificate-identity https://github.com/ars-regia/athanor/.github/workflows/promote-stable.yml@refs/heads/iso-v0 --certificate-oidc-issuer https://token.actions.githubusercontent.com bundle.sha256` and `sha256sum --strict -c bundle.sha256` in that directory. Both pass (the PB9 acceptance).
 - [ ] Re-run the `github-release` job (`gh run rerun <promotion run> --job <job id> -R ars-regia/athanor`). It ends green, and `gh release view <tag> --json assets` lists the same asset with the same size.
-- [ ] For 0.9: the maintainer's signed `v0.9.0` is on the promoted commit before the promotion is dispatched (open question 5), and the Release shows the notes of Task 4.
+- [ ] For 0.9: the maintainer's signed `v0.9.0` is on the promoted commit before the promotion is dispatched (ADR-0131 item 5), and the Release shows the notes of Task 4.
 
-## Open questions for the maintainer
+## Decisions (ADR-0131)
 
-1. **The environment of `github-release`.**
-   - Recommended: **none**, with `contents: write` only. PL60 and PL56 require `release` only for a job that runs `system/promote.sh` or writes `:stable`. The job runs only after `promote` and `iso`, which were approved in the same run. A re-run needs no new approval.
-   - Alternative: `release`, which adds an approval click to every promotion.
-2. **The tag of a promotion with no 0.x tag.**
-   - Recommended: **`promoted-<build run id>`**, a lightweight tag that the Releases API creates on `revision`. It mirrors the immutable registry tag of PL35. The title stays the UT9 version, as PL42's "named after the version" requires.
-   - Alternative: the tag `<UT9 version>`. Two builds of one commit on one UTC day carry the same version, because UT9's serial is the commit count, so the second Release would collide. UT9 also says the version string never orders releases.
-   - A third alternative, no Release for such promotions, contradicts PL42's "each promotion publishes".
-3. **How the 0.x tag's signature is checked.**
-   - Recommended: **GitHub's verification of the tag object** (`verification.verified` from `git/tags/<sha>`), recorded in the job summary. It checks against the signing keys registered on the maintainer's account.
-   - Alternative: an allowed-signers file in the repository read by `git verify-tag`. That is key material, so it is stop-and-ask.
-   - BRN4 and ADR-0105 item 2 require a signed tag but do not say how CI checks one.
-4. **The PL42 contents not in today's bundle.** PL42 lists SBOMs, provenance, the VSA, the scan report and VEX. Today's bundle holds `promotion.json`, `image-digests.txt`, the acceptance and signature evidence, and the package sets. The SBOM exists only as an attestation on each image.
-   - Recommended: **the 0.9 Release carries the bundle as it is**, and its notes list the missing items. Each item joins the bundle, and so the Release, with the block that produces it (PL24 to PL26, PL29).
-   - ADR-0115's consequences also move the VSA (PL29) into 0.9 by ADR-0106 item 7, which this plan does not build. The maintainer decides whether 0.9 waits for it.
-5. **The order of the signed tag and the promotion.**
-   - Recommended: **the maintainer pushes `v0.9.0` before dispatching the promotion of that build.** If the tag comes later, re-running `github-release` creates the `v0.9.0` Release beside the `promoted-<run>` one, and nothing is lost.
-   - ADR-0105 item 2 defines a release as the pair but not the order of its two parts.
+Decided by the maintainer on 2026-10-24, each as this plan recommended; ADR-0131 records them and amends ADR-0115 item 2 for the VSA.
+
+1. The `github-release` job runs in no environment and holds `contents: write` only.
+2. A promotion without a 0.x tag gets the tag `promoted-<build run id>` on the build's commit, and the UT9 version as its title.
+3. CI checks the signed 0.x tag through GitHub's `verification.verified` of the tag object; there is no allowed-signers file.
+4. The Release ships today's bundle; the 0.9 notes name the PL42 items it lacks (provenance PL19 to PL21, SBOM PL24, scan PL25, VEX PL26, VSA PL29); 0.9 does not wait for the VSA.
+5. The maintainer pushes the signed `v0.x.y` tag before dispatching the promotion of that build.
