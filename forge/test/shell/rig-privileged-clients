@@ -4,3 +4,5 @@
 #   <executable under /usr> <systemd unit> <interface>...
 # grim captures each output through the compositor, run by in-unit.sh as rig-grim.service.
 /usr/bin/grim rig-grim.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
+# The test input method of `rig.sh input-method`, run by in-unit.sh as rig-input-method.service.
+/usr/bin/athanor-toolkit-input-method rig-input-method.service zwp_input_method_manager_v2
