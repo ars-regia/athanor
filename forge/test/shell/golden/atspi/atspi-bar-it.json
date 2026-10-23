@@ -1,0 +1,232 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "athanor-bar",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Spazi di lavoro",
+  "states": [
+   "focusable",
+   "focused",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Applicazioni",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "venerdì 18 settembre 2026, 10:00",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "label",
+  "name": "ven 18 set 10:00",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Sorgente di input: English (US)",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Accessibilità",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Affiancamento",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Alimentazione",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Immagine di sistema verificata",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]

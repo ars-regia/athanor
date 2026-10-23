@@ -1179,9 +1179,6 @@ orca)
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     transcript=orca-$2${3:+-$3}.txt
-    # Set from the recording: how many results "cc window" lists in the launcher is read from no
-    # code (the providers and the headers decide it), so this is a provisional value.
-    launcher_steps=1
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1223,35 +1220,40 @@ orca)
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Input source and Tiling, C1). The ninth Tab comes back round to the first.
+        # the bar lacks Input source and Tiling, C1). Tab skips Input source (#751), so the
+        # seventh Tab comes back round to the first; the eighth once Tab reaches it.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
             RIG_DATA_OVERLAY="$bar_overlay" \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*9" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         ;;
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
-        # the walk is the arrows): Down goes down the results of "cc window", Up back to the first.
+        # the walk is the arrows): "cc window" lists two results under a header, CC Window and
+        # the web search; Down goes down them, Up back to the first. Orca presents no result yet,
+        # and cosmic-comp in the rig never activates the launcher, so its reference is
+        # athanor-compositor's transcript (#751).
         seed_bar "$out/seed-orca-launcher" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Down*$launcher_steps Up*$launcher_steps" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Down*2 Up*2" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
                      && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-launcher"
         ;;
     greeter)
-        # The card of the rig's one account opens with the password focused. Seven controls:
-        # Back to the list, the password, Sign in, High contrast, Suspend, Restart, Shut down;
-        # seven Tabs go round them (the seal and the layout chip take no focus) and end on the
-        # password.
+        # The card of the rig's one account opens with the password focused. Seven controls are
+        # focusable: Back to the list, the password, Sign in, High contrast, Suspend, Restart,
+        # Shut down (the seal and the layout chip take no focus). Tab goes round the first three
+        # only, the password, Sign in and Back to the list (#751), so three Tabs end on the
+        # password; seven once Tab reaches them all.
         stage_greeter_icons
         in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             RIG_DATA_OVERLAY=/out/greeter-icons \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*3" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-greeter-ui"
         ;;
