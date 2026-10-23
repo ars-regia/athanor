@@ -5136,3 +5136,29 @@ fn os9_a_virtual_modifier_change_reaches_the_input_method_grab() {
     assert!(sent.contains(&"modifiers") && !sent.contains(&"key"), "{sent:?}");
     run.stop();
 }
+
+/// A key the input method forwards past its grab is read with the seat's modifiers: a hardware
+/// Shift held, which only the grab was sent, reaches the window with the key.
+#[test]
+fn os9_a_forwarded_key_carries_the_modifiers_the_grab_saw() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    key(&mut run.state, SHIFT, true);
+    ime.pump(&mut run, "the grab takes Shift", |_, _| {
+        method.keys() == [SHIFT]
+    });
+    forwarder.key(&mut ime, &mut run, 30, true);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    assert_eq!(
+        window.client.modifiers.last(),
+        Some(&1),
+        "the key is read with Shift"
+    );
+    run.stop();
+}

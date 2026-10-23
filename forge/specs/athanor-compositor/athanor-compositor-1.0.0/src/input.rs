@@ -114,13 +114,10 @@ impl State {
             Some((FilterResult::Intercept(kept), _)) => Some(kept),
             Some((FilterResult::Forward, mods_changed)) => {
                 if past_grab {
+                    // The focus is sent no modifiers while a grab holds the keyboard: they are
+                    // sent with the key, whether it changed them or not.
                     keyboard.input_forward_bypassing_grab(
-                        self,
-                        code,
-                        key_state,
-                        serial,
-                        time,
-                        mods_changed,
+                        self, code, key_state, serial, time, true,
                     );
                     // The grab was not sent the key: it is sent what the key changed.
                     if mods_changed {
