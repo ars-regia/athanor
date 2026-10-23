@@ -18,7 +18,7 @@ REPO=$ACC_REGISTRY/athanor-system
 UPDATE1=(os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1)
 mkdir -p "$ACC_STATE"
 
-# The 31 GB host cannot hold the 16 GB runner guest and this 8 GB VM together. Only a job on
+# The 31 GB host does not run the 12 GB runner guest and this 8 GB VM together. Only a job on
 # a self-hosted runner, the guest on this host, counts: jobs on GitHub's hosted runners use
 # none of its memory (maintainer, 2026-10-15). This checks the start only: a job that starts
 # later can still bring the host under memory pressure. A host without the runner unit, such
