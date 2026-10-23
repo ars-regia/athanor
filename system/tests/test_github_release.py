@@ -349,6 +349,15 @@ class Plan(GithubRelease):
         (self.notes_dir / "0.9.0.md").unlink()
         self.refused(self.plan(), "v0.9.0", "0.9.0.md")
 
+    def test_plan_refuses_notes_still_to_be_completed(self):
+        (self.notes_dir / "0.9.0.md").write_text(NOTES + "\nTO BE COMPLETED BEFORE THE v0.9.0 TAG.\n")
+        # A promoted-* Release takes its notes from the summary alone: the file never reaches it.
+        r = self.plan()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("TO BE COMPLETED", self.promotion_notes("promoted-412"))
+        self.tag()
+        self.refused(self.plan(), "v0.9.0", "0.9.0.md", "TO BE COMPLETED BEFORE THE v0.9.0 TAG.")
+
     def test_plan_refuses_notes_with_carriage_returns(self):
         self.tag()
         (self.notes_dir / "0.9.0.md").write_text(NOTES.replace("\n", "\r\n"))

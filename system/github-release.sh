@@ -128,6 +128,10 @@ notes() { # notes DIR TAG OUT: the notes of the Release at TAG, from the promoti
         [[ $first =~ $heading ]] || die "the first line of $file, for $tag, is not a level-1 heading naming $version: '$first'"
         # GitHub may store a body without them: the notes must hash the same before and after.
         if grep -q $'\r' "$file"; then die "$file, for $tag, holds a carriage return: the notes take Unix line ends"; fi
+        # docs/releases/<version>.md is drafted with this line until the maintainer's text is in.
+        if grep -Fqx "TO BE COMPLETED BEFORE THE $tag TAG." "$file"; then
+            die "$file, for $tag, still says TO BE COMPLETED BEFORE THE $tag TAG.: the maintainer's text is missing"
+        fi
         cat "$file" > "$out"
         echo >> "$out"
     fi
