@@ -483,12 +483,20 @@ publish-build-image)
     # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
     # digest, and with it the pixels of the goldens, stay where they are.
     mkdir -p "$out"
+    # Provenance from the GitHub environment, else from the checkout. `created` is the commit's
+    # time, not the build's, so a rebuild of the same commit carries the same label.
+    revision=${GITHUB_SHA:-$(git -C "$root" rev-parse HEAD)}
+    source_url=${GITHUB_SERVER_URL:+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY}
+    source_url=${source_url:-$(git -C "$root" remote get-url origin)}
     podman build "${rig_base[@]}" --target build --label "$build_label=$(bash "$rig/build-inputs.sh")" \
+        --label "org.opencontainers.image.revision=$revision" --label "org.opencontainers.image.source=$source_url" \
+        --label "org.opencontainers.image.created=$(git -C "$root" show -s --format=%cI "$revision")" \
         -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
     echo "$registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")" > "$out/build-image.ref"
     echo "published $(cat "$out/build-image.ref")"
     echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
+    echo "the pin trusts this run: the digest is unsigned, and rig.sh checks only the inputs label against the checkout"
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
