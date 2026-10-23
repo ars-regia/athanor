@@ -94,6 +94,13 @@ title = "The bar, the dock and athanor-shelld are active"
 check = "shell_units"
 machines = ["desktop", "laptop"]
 
+[[row]]
+id = "compositor"
+area = "shell"
+title = "The session runs on the own compositor (athanor-compositor)"
+check = "compositor"
+machines = ["desktop", "laptop"]
+
 # --- by hand ---------------------------------------------------------------------------------
 
 [[row]]
@@ -101,7 +108,7 @@ id = "outputs-hotplug"
 area = "graphics"
 title = "An output unplugged and plugged back"
 steps = "Unplug an external output and plug it back: the bar and the dock return to it in place within five seconds."
-machines = ["desktop", "laptop"]
+machines = ["laptop"]
 
 [[row]]
 id = "output-scale"
@@ -122,7 +129,21 @@ id = "suspend-resume"
 area = "power"
 title = "Suspend and resume"
 steps = "Run `systemctl suspend` and wake the machine with the keyboard: the session, every output and the GPU come back, and `matrix.py run` afterwards finds no failed unit."
+machines = ["laptop"]
+
+[[row]]
+id = "frame-times"
+area = "graphics"
+title = "Frame times after one hour on the own compositor"
+steps = "After one hour of ordinary use, read the compositor's frame summary lines in its log and record the mean and the maximum frame time."
 machines = ["desktop", "laptop"]
+
+[[row]]
+id = "explicit-sync"
+area = "graphics"
+title = "Explicit sync on the NVIDIA desktop"
+steps = "Read the compositor's log: record its `explicit sync:` line."
+machines = ["desktop"]
 
 [[row]]
 id = "audio"
@@ -250,3 +271,28 @@ reason = "no such controller"
 id = "nvidia-pascal"
 title = "The laptop's GeForce MX150 (Pascal)"
 reason = "Pascal needs the -nvidia-legacy image, whose evidence moved to 1.1 (release-1.0.md section 4.3)"
+
+[[untested]]
+id = "suspend-resume-desktop"
+title = "Suspend and resume on the NVIDIA desktop"
+reason = "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)"
+
+[[untested]]
+id = "outputs-hotplug-desktop"
+title = "An output unplugged and plugged back on the NVIDIA desktop"
+reason = "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)"
+
+[[untested]]
+id = "vrr"
+title = "Variable refresh rate"
+reason = "no machine has a variable refresh rate output"
+
+[[untested]]
+id = "tablet"
+title = "A graphics tablet"
+reason = "no machine has a graphics tablet"
+
+[[untested]]
+id = "touch"
+title = "A touch screen"
+reason = "no machine has a touch screen"
