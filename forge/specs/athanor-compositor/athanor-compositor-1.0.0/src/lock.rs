@@ -114,10 +114,12 @@ impl State {
     /// Whether a virtual keyboard's key presses and a virtual pointer's motion, button presses
     /// and scrolling reach no client: while the session is locked (open question 12 of the OS9
     /// plan, and the maintainer's decision of 2026-10-23 for the pointer), so that no script
-    /// types into the lock surface, probes its password or clicks on it. A release of what the
-    /// seat holds still goes on, and the hardware's input is unaffected.
+    /// types into the lock surface, probes its password or clicks on it; and while the session
+    /// is paused on another virtual terminal, where the user cannot see what it would do, nor a
+    /// virtual Ctrl+Alt+F`n` switch the terminal (OS9 task 6 audit). A release of what the seat
+    /// holds still goes on, and the hardware's input is unaffected.
     pub fn drops_virtual_input(&self) -> bool {
-        self.lock.is_some()
+        self.lock.is_some() || self.session_paused()
     }
 
     /// Whether a key pressed on `source` reaches no client: a virtual keyboard's while

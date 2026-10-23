@@ -20,7 +20,9 @@ use smithay::backend::drm::{
     DrmNode, NodeType,
 };
 use smithay::backend::input::InputEvent;
-use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis};
+use smithay::backend::libinput::{
+    LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis,
+};
 use smithay::backend::renderer::damage::Error as DamageError;
 use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::element::surface::{
@@ -293,13 +295,23 @@ impl Drm {
 
 impl State {
     /// Ctrl+Alt+F`vt`: to that virtual terminal, which pauses the session. Nested or headless,
-    /// there is none.
+    /// there is none; while the session is paused, another terminal has the seat, and nothing
+    /// here switches it.
     pub fn switch_vt(&mut self, vt: i32) {
         if let Backend::Drm(drm) = &mut self.backend {
+            if !drm.session.is_active() {
+                return;
+            }
             if let Err(error) = drm.session.change_vt(vt) {
                 tracing::warn!(%error, vt, "the virtual terminal could not be switched");
             }
         }
+    }
+
+    /// Whether the session is paused, another virtual terminal having the seat. Nested or
+    /// headless, never.
+    pub fn session_paused(&self) -> bool {
+        matches!(&self.backend, Backend::Drm(drm) if !drm.session.is_active())
     }
 
     /// Something on screen may have changed: each output draws, at once or a refresh after its
