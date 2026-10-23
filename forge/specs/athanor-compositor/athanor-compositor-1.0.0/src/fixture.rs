@@ -11,7 +11,11 @@ use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::desktop::layer_map_for_output;
+use smithay::input::keyboard::KeyboardSource;
 use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server::__interfaces::{
+    ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE, ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE,
+};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
@@ -26,7 +30,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use wayland_client::backend::{ObjectId, WaylandError};
+use wayland_client::backend::protocol::{Argument, Message};
+use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
     wl_shm_pool, wl_surface,
@@ -67,6 +72,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 use wayland_protocols_wlr::output_management::v1::client::{
     zwlr_output_configuration_head_v1, zwlr_output_configuration_v1, zwlr_output_head_v1,
     zwlr_output_manager_v1, zwlr_output_mode_v1,
+};
+use wayland_protocols_wlr::virtual_pointer::v1::client::{
+    zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
@@ -147,6 +155,16 @@ struct Client {
     workspaces_done: bool,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
+    /// The evdev codes of the keys held, as the last `enter` told them.
+    entered_keys: Vec<u32>,
+    /// The keymaps the client was sent.
+    keymaps: usize,
+    /// The size of the last keymap the client was sent, which tells two keymaps apart.
+    keymap_size: u32,
+    /// The size of the keymap each key of `keys` was read under.
+    keys_under: Vec<u32>,
+    /// The depressed modifiers of each `wl_keyboard.modifiers` the client was sent.
+    modifiers: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -308,6 +326,8 @@ delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
 delegate_noop!(Client: ignore zwlr_output_mode_v1::ZwlrOutputModeV1);
 delegate_noop!(Client: zwlr_output_configuration_head_v1::ZwlrOutputConfigurationHeadV1);
 delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
+delegate_noop!(Client: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
+delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
     fn event(
@@ -318,13 +338,27 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let wl_keyboard::Event::Key {
-            key,
-            state: WEnum::Value(wl_keyboard::KeyState::Pressed),
-            ..
-        } = event
-        {
-            client.keys.push(key);
+        match event {
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Pressed),
+                ..
+            } => {
+                client.keys.push(key);
+                client.keys_under.push(client.keymap_size);
+            }
+            wl_keyboard::Event::Enter { keys, .. } => {
+                let (keys, _) = keys.as_chunks::<4>();
+                client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
+            }
+            wl_keyboard::Event::Keymap { size, .. } => {
+                client.keymaps += 1;
+                client.keymap_size = size;
+            }
+            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                client.modifiers.push(mods_depressed);
+            }
+            _ => {}
         }
     }
 }
@@ -781,7 +815,9 @@ const CONTROL_CENTER: (&str, &str) = (
 /// layers and the output manager.
 const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 \
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
-    ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1 ext_workspace_manager_v1\n\
+    ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
+    ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
+    zwlr_virtual_pointer_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -1549,10 +1585,20 @@ fn chord(state: &mut State, codes: &[u32]) {
     use smithay::backend::input::{InputTime, KeyState};
     // An xkb keycode is the evdev code plus 8.
     for code in codes {
-        state.key_input((code + 8).into(), KeyState::Pressed, InputTime::now());
+        state.key_input(
+            (code + 8).into(),
+            KeyState::Pressed,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
     }
     for code in codes.iter().rev() {
-        state.key_input((code + 8).into(), KeyState::Released, InputTime::now());
+        state.key_input(
+            (code + 8).into(),
+            KeyState::Released,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
     }
 }
 
@@ -1719,12 +1765,16 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
     let now = InputTime::now;
     let requests = run.state.lock_requests;
-    run.state.key_input(logo, KeyState::Pressed, now());
+    run.state
+        .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
     let logo_sent = run.state.grab_serials.key_press.clone();
-    run.state.key_input(escape, KeyState::Pressed, now());
+    run.state
+        .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
-    run.state.key_input(escape, KeyState::Released, now());
-    run.state.key_input(logo, KeyState::Released, now());
+    run.state
+        .key_input(escape, KeyState::Released, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(logo, KeyState::Released, now(), KeyboardSource::Physical);
     assert_eq!(escape_sent, logo_sent, "the Escape is not sent on");
     assert_eq!(
         run.state.lock_requests,
@@ -1732,12 +1782,16 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         "it asks for the lock"
     );
     let shift = Keycode::from(42u32 + 8);
-    run.state.key_input(logo, KeyState::Pressed, now());
-    run.state.key_input(shift, KeyState::Pressed, now());
-    run.state.key_input(escape, KeyState::Pressed, now());
+    run.state
+        .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(shift, KeyState::Pressed, now(), KeyboardSource::Physical);
+    run.state
+        .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
     for key in [escape, shift, logo] {
-        run.state.key_input(key, KeyState::Released, now());
+        run.state
+            .key_input(key, KeyState::Released, now(), KeyboardSource::Physical);
     }
     assert_eq!(
         escape_sent.map(|(_, to)| to),
@@ -1853,13 +1907,15 @@ fn task8_a_pause_forgets_the_keys_the_compositor_kept() {
     let [ctrl, alt, f1] = [29u32, 56, 59].map(|code| Keycode::from(code + 8));
     let now = InputTime::now;
     for key in [ctrl, alt, f1] {
-        run.state.key_input(key, KeyState::Pressed, now());
+        run.state
+            .key_input(key, KeyState::Pressed, now(), KeyboardSource::Physical);
     }
     assert_eq!(run.state.kept_keys, [f1], "Ctrl+Alt+F1 is kept");
     run.state.pause();
     assert!(run.state.kept_keys.is_empty(), "the pause forgets it");
     run.state.grab_serials.key_release = None;
-    run.state.key_input(f1, KeyState::Released, now());
+    run.state
+        .key_input(f1, KeyState::Released, now(), KeyboardSource::Physical);
     assert!(
         run.state.grab_serials.key_release.is_some(),
         "a later release of F1 reaches the client"
@@ -3147,6 +3203,1007 @@ fn os9_a_mode_finished_in_a_race_fails_the_configuration() {
     });
     assert_eq!(scaled, "succeeded", "the client is still connected");
     run.stop();
+}
+
+/// A virtual keyboard of zwp-virtual-keyboard-v1, whose client side no crate of the workspace
+/// generates: its requests are sent raw, on the interfaces Smithay's server side describes.
+struct VirtualKeyboard {
+    backend: Backend,
+    id: ObjectId,
+    /// The file of its keymap, open while the compositor may read it.
+    _keymap: std::fs::File,
+}
+
+/// The object data of the raw objects: zwp-virtual-keyboard-v1 has no events.
+struct Silent;
+
+impl ObjectData for Silent {
+    fn event(
+        self: Arc<Self>,
+        _: &Backend,
+        _: Message<ObjectId, OwnedFd>,
+    ) -> Option<Arc<dyn ObjectData>> {
+        None
+    }
+    fn destroyed(&self, _: ObjectId) {}
+}
+
+impl VirtualKeyboard {
+    /// Binds the manager and creates a keyboard on the seat, with `keymap`, an xkb keymap, or
+    /// the seat's own keymap when none.
+    fn new(local: &mut Local, run: &mut Running, keymap: Option<&str>) -> Self {
+        let seat: wl_seat::WlSeat = local.bind(1);
+        let manager = &ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE;
+        let (name, _, _) = local
+            .client
+            .globals
+            .iter()
+            .find(|(_, interface, _)| interface == manager.name)
+            .expect("the virtual keyboard manager");
+        let bind = wl_registry::Request::Bind {
+            name: *name,
+            id: (manager, 1),
+        };
+        let manager = local
+            .connection
+            .send_request(&local.registry, bind, Some(Arc::new(Silent)))
+            .expect("bind");
+        let backend = local.connection.backend();
+        let create = Message {
+            sender_id: manager,
+            opcode: 0,
+            args: [
+                Argument::Object(seat.id()),
+                Argument::NewId(ObjectId::null()),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let id = backend
+            .send_request(
+                create,
+                Some(Arc::new(Silent)),
+                Some((&ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE, 1)),
+            )
+            .expect("a virtual keyboard");
+        let mut file = unlinked().expect("keymap file");
+        // `wl_keyboard.keymap_format`: no_keymap, or xkb_v1 in a NUL-terminated string.
+        let (format, size) = match keymap {
+            Some(text) => {
+                file.write_all(text.as_bytes()).expect("keymap");
+                file.write_all(&[0]).expect("keymap");
+                (1, text.len() + 1)
+            }
+            None => (0, 0),
+        };
+        let keyboard = Self {
+            backend,
+            id,
+            _keymap: file,
+        };
+        keyboard.send(
+            0,
+            [
+                Argument::Uint(format),
+                Argument::Fd(std::os::fd::AsRawFd::as_raw_fd(&keyboard._keymap)),
+                Argument::Uint(u32::try_from(size).expect("keymap size")),
+            ],
+        );
+        local.roundtrip(run);
+        keyboard
+    }
+
+    /// Presses the keys of evdev codes `codes` in order and releases them in reverse, as
+    /// `chord` does on the hardware path.
+    fn chord(&self, local: &mut Local, run: &mut Running, codes: &[u32]) {
+        let presses = codes.iter().map(|code| (*code, 1));
+        for (code, state) in presses.chain(codes.iter().rev().map(|code| (*code, 0))) {
+            self.send(
+                1,
+                [
+                    Argument::Uint(0),
+                    Argument::Uint(code),
+                    Argument::Uint(state),
+                ],
+            );
+        }
+        local.roundtrip(run);
+    }
+
+    /// Presses or releases the key of evdev code `code`.
+    fn key(&self, local: &mut Local, run: &mut Running, code: u32, pressed: bool) {
+        let state = u32::from(pressed);
+        self.send(
+            1,
+            [
+                Argument::Uint(0),
+                Argument::Uint(code),
+                Argument::Uint(state),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
+    /// Sets the depressed modifiers `depressed`, none latched or locked, in the first group.
+    fn modifiers(&self, local: &mut Local, run: &mut Running, depressed: u32) {
+        self.send(
+            2,
+            [
+                Argument::Uint(depressed),
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(0),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
+    fn send<const N: usize>(&self, opcode: u16, args: [Argument<ObjectId, i32>; N]) {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode,
+            args: args.into_iter().collect(),
+        };
+        self.backend
+            .send_request(message, None, None)
+            .expect("a virtual keyboard request");
+    }
+}
+
+/// A keymap of two keys whose evdev codes are other keys in the seat's: Escape at the code of
+/// A (30), and Super at the code of S (31).
+const SWAPPED_KEYMAP: &str = r#"xkb_keymap {
+    xkb_keycodes "swapped" { minimum = 8; maximum = 255; <ESCA> = 38; <SUPR> = 39; };
+    xkb_types "swapped" { include "complete" };
+    xkb_compatibility "swapped" { include "complete" };
+    xkb_symbols "swapped" {
+        key <ESCA> { [ Escape ] };
+        key <SUPR> { symbols[Group1] = [ Super_L ], actions[Group1] = [ SetMods(modifiers=Mod4) ] };
+        modifier_map Mod4 { <SUPR> };
+    };
+};"#;
+
+/// The seat's keymap, as the compositor sends it to its clients.
+fn seat_keymap(state: &mut State) -> String {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.with_xkb_state(state, |context| {
+        context
+            .xkb()
+            .lock()
+            .expect("the seat's keymap")
+            .keymap_as_string()
+    })
+}
+
+/// A virtual key takes the hardware path (OS9 task 6): a granted client's virtual Super+Escape,
+/// typed with a keymap of its own, takes the keyboard back from an exclusive top surface and asks
+/// for the lock, as `task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock` does with a
+/// hardware key; the surface sees Super go down, never the Escape. The keymap applies to its own
+/// keys only: the same codes on the hardware keyboard, A and S, ask for nothing, and the seat's
+/// keymap is its own again.
+#[test]
+fn os9_a_virtual_key_takes_the_hardware_path() {
+    let mut run = Running::start(None);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).is_some()
+    });
+    let window = focus(&run.state);
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(shell_id.clone())
+    });
+    let keymap = seat_keymap(&mut run.state);
+
+    let mut local = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    keyboard.chord(&mut local, &mut run, &[31, 30]);
+    assert_eq!(run.state.lock_requests, 1, "Super+Escape asks for the lock");
+    assert_eq!(
+        focus(&run.state),
+        window,
+        "the press takes the keyboard back"
+    );
+    assert_eq!(
+        run.state.escaped.len(),
+        1,
+        "the shell's identity is escaped"
+    );
+    assert!(
+        run.state.kept_keys.is_empty(),
+        "the release is kept as well"
+    );
+    assert_eq!(
+        shell_keys(&mut run, &steps),
+        [31],
+        "the surface saw Super go down, never the Escape"
+    );
+    chord(&mut run.state, &[31, 30]);
+    assert_eq!(
+        run.state.lock_requests, 1,
+        "S and A on the hardware keyboard are S and A"
+    );
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "a hardware key gives the seat its keymap back"
+    );
+
+    drop(steps);
+    shell
+        .join()
+        .expect("the shell's thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// The keymap follows the keyboard that sent the last key, as wlroots has it (OS9 task 6 audit):
+/// from a virtual key's press to its release the focused client has the virtual keyboard's
+/// keymap, so that its own key repeat reads the held key under it; a second virtual key sends no
+/// keymap again; a hardware key after them is sent the seat's keymap first.
+#[test]
+fn os9_the_keymap_follows_the_last_keyboard() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let seat_size = local.client.keymap_size;
+    let keymap = seat_keymap(&mut run.state);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    let keymaps = local.client.keymaps;
+
+    // Escape, in the virtual keyboard's keymap, held.
+    typist.key(&mut local, &mut run, 30, true);
+    let own_size = local.client.keymap_size;
+    assert_ne!(own_size, seat_size, "the client has the virtual keymap");
+    assert_eq!(
+        local.client.keys_under,
+        [own_size],
+        "the press is read under it"
+    );
+    assert_ne!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat keeps it while the key is held"
+    );
+    typist.key(&mut local, &mut run, 30, false);
+    typist.key(&mut local, &mut run, 31, true);
+    typist.key(&mut local, &mut run, 31, false);
+    assert_eq!(
+        local.client.keymaps,
+        keymaps + 1,
+        "two virtual keys in a row send the keymap once"
+    );
+
+    // A, on the hardware keyboard.
+    chord(&mut run.state, &[30]);
+    local.roundtrip(&mut run);
+    assert_eq!(
+        local.client.keys_under,
+        [own_size, own_size, seat_size],
+        "a hardware key is read under the seat's keymap, sent before it"
+    );
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat has its keymap back"
+    );
+
+    // A virtual keyboard that goes while the seat has its keymap gives the seat its own back.
+    let mut leaving = Local::connect(&mut run, None);
+    let gone = VirtualKeyboard::new(&mut leaving, &mut run, Some(SWAPPED_KEYMAP));
+    gone.chord(&mut leaving, &mut run, &[30]);
+    assert!(
+        run.state.virtual_keymap.is_some(),
+        "the seat has the leaving keyboard's keymap"
+    );
+    drop(gone);
+    drop(leaving);
+    run.until("the gone keyboard's keymap goes with it", |state| {
+        state.virtual_keymap.is_none()
+    });
+    assert_eq!(
+        seat_keymap(&mut run.state),
+        keymap,
+        "the seat has its keymap back once more"
+    );
+    run.stop();
+}
+
+/// A client with a mapped toplevel and a `wl_keyboard`, given the keyboard, and its window.
+fn focused_window(run: &mut Running) -> (Local, smithay::desktop::Window) {
+    let mut local = Local::connect(run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    local.pump(run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = local.id.clone().expect("a client the fixture inserted");
+    let ours = |state: &State| {
+        state
+            .space
+            .elements()
+            .find(|w| {
+                w.toplevel()
+                    .and_then(|t| t.wl_surface().client())
+                    .map(|c| c.id())
+                    == Some(id.clone())
+            })
+            .cloned()
+    };
+    local.pump(run, "the window is mapped", |_, state| {
+        ours(state).is_some()
+    });
+    let window = ours(&run.state).expect("the window");
+    run.state.focus(&window);
+    local.pump(run, "the window has the keyboard", |client, state| {
+        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
+        client.keymaps > 0 && focus.and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+    (local, window)
+}
+
+/// A virtual keyboard's modifiers reach the seat at once while its keymap is current (OS9 task 6
+/// audit): a Shift it lets go of with no key after it is let go for the focused client, and a
+/// client focused afterwards is not entered with Shift.
+#[test]
+fn os9_a_virtual_modifier_change_reaches_the_seat_at_once() {
+    const SHIFT: u32 = 1;
+    let mut run = Running::start(None);
+    let (mut other, other_window) = focused_window(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.modifiers(&mut local, &mut run, SHIFT);
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(
+        local.client.modifiers.last(),
+        Some(&SHIFT),
+        "the key is read with Shift"
+    );
+    typist.modifiers(&mut local, &mut run, 0);
+    assert_eq!(
+        local.client.modifiers.last(),
+        Some(&0),
+        "Shift is let go with no key after it"
+    );
+    let sent = other.client.modifiers.len();
+    run.state.focus(&other_window);
+    other.pump(&mut run, "the other window has the keyboard", |client, _| {
+        client.modifiers.len() > sent
+    });
+    assert_eq!(
+        other.client.modifiers.last(),
+        Some(&0),
+        "a client focused afterwards is not entered with Shift"
+    );
+    let shift = run
+        .state
+        .seat
+        .get_keyboard()
+        .expect("a keyboard")
+        .modifier_state()
+        .shift;
+    assert!(!shift, "the seat holds no Shift");
+    run.stop();
+}
+
+/// The window under the pointer and the id of its client.
+fn window_under_pointer(run: &Running) -> (WlSurface, ClientId) {
+    let (window, id) = fixture_window(run);
+    let surface = window.toplevel().expect("a toplevel").wl_surface().clone();
+    (surface, id)
+}
+
+/// Motion and a button from a granted client's virtual pointer reach the window under the
+/// pointer (OS9 task 6): the window has the pointer, and the button's serial was sent to its
+/// client.
+#[test]
+fn os9_a_virtual_pointer_moves_and_clicks() {
+    let mut run = Running::start(None);
+    let (surface, window_client) = window_under_pointer(&run);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    // The red half of the window, centred on the first output.
+    let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
+    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    pointer.motion(0, target.x - at.x, target.y - at.y);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert_eq!(
+        seat_pointer.current_location(),
+        target,
+        "moved by its delta"
+    );
+    assert_eq!(
+        seat_pointer.current_focus().as_ref(),
+        Some(&surface),
+        "the window has the pointer"
+    );
+
+    run.state.grab_serials.button = None;
+    // BTN_LEFT.
+    pointer.button(
+        0,
+        0x110,
+        wayland_client::protocol::wl_pointer::ButtonState::Pressed,
+    );
+    pointer.button(
+        0,
+        0x110,
+        wayland_client::protocol::wl_pointer::ButtonState::Released,
+    );
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "the press went to the window's client"
+    );
+    run.stop();
+}
+
+/// A virtual pointer's code outside evdev's buttons (BTN_MISC to KEY_MAX) is no button (OS9 task
+/// 6 audit): it reaches no client and is not counted as held, so a pointer cannot grow its held
+/// set without bound; a button code goes on.
+#[test]
+fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
+    use wayland_client::protocol::wl_pointer::ButtonState;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    run.state.last_input_serial = None;
+    for code in [0, 0xff, 0x300, u32::MAX] {
+        pointer.button(0, code, ButtonState::Pressed);
+    }
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.last_input_serial.is_none(),
+        "no press reached the seat"
+    );
+    assert!(
+        run.state.virtual_buttons.values().all(Vec::is_empty),
+        "no code is held"
+    );
+    // BTN_LEFT and KEY_MAX, the range's last code.
+    for code in [0x110, 0x2ff] {
+        pointer.button(0, code, ButtonState::Pressed);
+    }
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.last_input_serial.is_some(),
+        "a button reached the seat"
+    );
+    assert_eq!(
+        run.state
+            .virtual_buttons
+            .values()
+            .flatten()
+            .collect::<Vec<_>>(),
+        [&0x110, &0x2ff],
+        "both buttons are held"
+    );
+    run.stop();
+}
+
+/// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
+/// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
+/// beside it, which `confine` alone accepts. The height is one both outputs have.
+#[test]
+fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer_with_output(
+        Some(&seat),
+        Some(&output),
+        &local.queue.handle(),
+        (),
+    );
+    pointer.motion_absolute(0, 100, 10, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .and_then(|output| run.state.space.output_geometry(output))
+        .expect("the first output");
+    let y = first.loc.y + first.size.h / 10;
+    let beside = Point::from((first.loc.x + first.size.w, y));
+    assert!(
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|area| area.contains(beside)),
+        "the unclamped point is on the other output"
+    );
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    assert_eq!(
+        at,
+        Point::from((f64::from(first.loc.x + first.size.w - 1), f64::from(y))),
+        "on the first output's last column"
+    );
+    run.stop();
+}
+
+/// Absolute and relative motion of a virtual pointer past the edge of the fixture's two outputs
+/// leaves the pointer on an output (OS9 task 6), as
+/// `task8_an_output_that_shrinks_strands_no_window_and_no_pointer` requires of the hardware one.
+#[test]
+fn os9_a_virtual_pointer_stays_inside_the_outputs() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &local.queue.handle(), ());
+    let on_an_output = |state: &State| {
+        let at = state
+            .seat
+            .get_pointer()
+            .expect("a pointer")
+            .current_location();
+        state
+            .space
+            .outputs()
+            .filter_map(|output| state.space.output_geometry(output))
+            .any(|output| output.to_f64().contains(at))
+    };
+    // The far corner of the outputs' bounding box, below the smaller second output.
+    pointer.motion_absolute(0, 100, 100, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    assert!(on_an_output(&run.state), "absolute, at the far corner");
+    for (dx, dy, what) in [
+        (10_000.0, 10_000.0, "right and down"),
+        (-10_000.0, 10_000.0, "left and down"),
+        (-10_000.0, -10_000.0, "left and up"),
+        (10_000.0, -10_000.0, "right and up"),
+    ] {
+        pointer.motion(0, dx, dy);
+        pointer.frame();
+        local.roundtrip(&mut run);
+        assert!(on_an_output(&run.state), "relative, {what}");
+    }
+    run.stop();
+}
+
+/// Locks the session for a new client, with a lock surface on the first output that has the
+/// keyboard, and returns the client, which records its keys, and its lock.
+fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLockV1) {
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let mut locker = Local::connect(run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let lock = locks.lock(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(run, "the lock surface is configured", |client, _| {
+        client.locked && client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = locker.id.clone().expect("a client the fixture inserted");
+    locker.pump(run, "the lock surface has the keyboard", |_, state| {
+        focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+    (locker, lock)
+}
+
+/// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
+/// lock surface focused, a granted client's virtual key reaches neither the lock surface nor any
+/// other client; a hardware key reaches it; after unlock the same virtual key reaches the window
+/// again.
+#[test]
+fn os9_a_virtual_key_is_dropped_while_locked() {
+    let mut run = Running::start(None);
+    let (window, window_client) = window_under_pointer(&run);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+
+    let (mut locker, lock) = lock_session(&mut run);
+
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.grab_serials.key_press = None;
+    keyboard.chord(&mut typist, &mut run, &[30]);
+    locker.roundtrip(&mut run);
+    assert!(locker.client.keys.is_empty(), "the lock surface saw no key");
+    assert_eq!(
+        run.state.grab_serials.key_press, None,
+        "no client was sent a key"
+    );
+
+    chord(&mut run.state, &[30]);
+    locker.pump(
+        &mut run,
+        "a hardware key reaches the lock surface",
+        |client, _| client.keys == [30],
+    );
+
+    lock.unlock_and_destroy();
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| focus(state).as_ref() == Some(&window),
+    );
+    run.state.grab_serials.key_press = None;
+    keyboard.chord(&mut typist, &mut run, &[30]);
+    assert_eq!(
+        run.state
+            .grab_serials
+            .key_press
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "after unlock the virtual key reaches the window"
+    );
+    assert_eq!(locker.client.keys, [30], "and not the locker");
+    run.stop();
+}
+
+/// Moves `pointer` by `(dx, dy)` and clicks its left button.
+fn virtual_click(
+    pointer: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
+    local: &mut Local,
+    run: &mut Running,
+    (dx, dy): (f64, f64),
+) {
+    use wayland_client::protocol::wl_pointer::ButtonState;
+    pointer.motion(0, dx, dy);
+    pointer.frame();
+    // BTN_LEFT.
+    pointer.button(0, 0x110, ButtonState::Pressed);
+    pointer.button(0, 0x110, ButtonState::Released);
+    pointer.frame();
+    local.roundtrip(run);
+}
+
+/// A virtual pointer while the session is locked (the maintainer's decision of 2026-10-23): a
+/// granted client's virtual motion and click over the lock surface reach nothing; a hardware
+/// click reaches the lock surface; after unlock the same virtual click reaches the window.
+#[test]
+fn os9_a_virtual_pointer_is_dropped_while_locked() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    let mut run = Running::start(None);
+    let (window, window_client) = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &clicker.queue.handle(), ());
+    let (mut locker, lock) = lock_session(&mut run);
+    let locker_id = locker.id.clone().expect("a client the fixture inserted");
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    // The red half of the window, centred on the first output.
+    let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
+    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    let to_target = |at: Point<f64, smithay::utils::Logical>| (target.x - at.x, target.y - at.y);
+
+    let at = seat_pointer.current_location();
+    run.state.grab_serials.button = None;
+    virtual_click(&pointer, &mut clicker, &mut run, to_target(at));
+    assert_eq!(
+        seat_pointer.current_location(),
+        at,
+        "the pointer did not move"
+    );
+    assert_eq!(
+        run.state.grab_serials.button, None,
+        "no client was sent a button"
+    );
+
+    run.state
+        .button_input(0x110, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(0x110, ButtonState::Released, InputTime::now());
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&locker_id),
+        "a hardware click reaches the lock surface"
+    );
+
+    lock.unlock_and_destroy();
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| focus(state).as_ref() == Some(&window),
+    );
+    run.state.grab_serials.button = None;
+    let at = seat_pointer.current_location();
+    virtual_click(&pointer, &mut clicker, &mut run, to_target(at));
+    assert_eq!(
+        seat_pointer.current_location(),
+        target,
+        "moved by its delta"
+    );
+    assert_eq!(
+        run.state
+            .grab_serials
+            .button
+            .as_ref()
+            .map(|(_, client)| client),
+        Some(&window_client),
+        "after unlock the virtual click reaches the window"
+    );
+    run.stop();
+}
+
+/// The keys a surface that takes the keyboard is told are held: those of a new lock surface's
+/// `enter`, the session locked and unlocked again around it.
+fn held_at_the_next_enter(run: &mut Running) -> Vec<u32> {
+    let (mut locker, lock) = lock_session(run);
+    locker.roundtrip(run);
+    let held = locker.client.entered_keys.clone();
+    lock.unlock_and_destroy();
+    locker.roundtrip(run);
+    held
+}
+
+/// Waits for the window to have the keyboard, and returns a granted client's virtual keyboard
+/// holding A down in it.
+fn holding_a(run: &mut Running) -> (Local, VirtualKeyboard) {
+    let (window, _) = window_under_pointer(run);
+    run.until("the window has the keyboard", |state| {
+        state.seat.get_keyboard().and_then(|k| k.current_focus()) == Some(window.clone())
+    });
+    let mut typist = Local::connect(run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, run, None);
+    keyboard.key(&mut typist, run, 30, true);
+    (typist, keyboard)
+}
+
+/// A virtual key held when the session locks and released while it is locked is let go (the
+/// OS9 task 6 audit): the lock surface is told it is held, and the next surface to take the
+/// keyboard after unlock is told of no key held.
+#[test]
+fn os9_a_virtual_key_held_across_the_lock_is_let_go() {
+    let mut run = Running::start(None);
+    let (mut typist, keyboard) = holding_a(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    locker.roundtrip(&mut run);
+    assert_eq!(
+        locker.client.entered_keys,
+        [30],
+        "the lock surface sees A held"
+    );
+    keyboard.key(&mut typist, &mut run, 30, false);
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    assert_eq!(held_at_the_next_enter(&mut run), [0; 0], "A is let go");
+    run.stop();
+}
+
+/// A virtual keyboard whose client disconnects while the session is locked, with a key held
+/// from before the lock, leaves no key held after unlock (the OS9 task 6 audit).
+#[test]
+fn os9_a_virtual_keyboard_gone_while_locked_leaves_nothing_held() {
+    let mut run = Running::start(None);
+    let (typist, keyboard) = holding_a(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    drop(keyboard);
+    drop(typist);
+    run.until("the gone keyboard's key is let go", |state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.pressed_keys().is_empty())
+    });
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    assert_eq!(held_at_the_next_enter(&mut run), [0; 0], "A is let go");
+    run.stop();
+}
+
+/// A virtual keyboard with a keymap of its own typing while the session is locked sends its
+/// keymap to no client (the OS9 task 6 audit): the lock surface's client is sent no keymap and
+/// no key.
+#[test]
+fn os9_a_virtual_keymap_is_not_sent_while_locked() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(SWAPPED_KEYMAP));
+    locker.roundtrip(&mut run);
+    let keymaps = locker.client.keymaps;
+    keyboard.chord(&mut typist, &mut run, &[30, 31]);
+    locker.roundtrip(&mut run);
+    assert_eq!(locker.client.keymaps, keymaps, "no keymap was sent");
+    assert!(locker.client.keys.is_empty(), "no key was sent");
+    run.stop();
+}
+
+/// A virtual button pressed before the session locks and released while it is locked is let go
+/// (the OS9 task 6 audit): a later hardware click on the lock surface ends its grab.
+#[test]
+fn os9_a_virtual_button_released_while_locked_lets_a_click_end() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    use wayland_client::protocol::wl_pointer;
+    let mut run = Running::start(None);
+    let _ = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let pointer = manager.create_virtual_pointer(Some(&seat), &clicker.queue.handle(), ());
+    // BTN_LEFT, over the window.
+    pointer.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+    pointer.frame();
+    clicker.roundtrip(&mut run);
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(seat_pointer.is_grabbed(), "the press grabs the pointer");
+
+    let (_locker, _lock) = lock_session(&mut run);
+    pointer.button(0, 0x110, wl_pointer::ButtonState::Released);
+    pointer.frame();
+    clicker.roundtrip(&mut run);
+    // BTN_RIGHT, on the hardware.
+    run.state
+        .button_input(0x111, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(0x111, ButtonState::Released, InputTime::now());
+    assert!(!seat_pointer.is_grabbed(), "the click's grab ended");
+    assert!(
+        run.state.virtual_buttons.values().all(Vec::is_empty),
+        "no virtual button is held"
+    );
+    run.stop();
+}
+
+/// A virtual pointer's release while the session is locked goes on only for a button that same
+/// pointer holds, and is no activity (the second OS9 task 6 audit): A holds the left button from
+/// before the lock; on the lock surface the user presses it on the hardware; B's release of it
+/// reaches no client and leaves the user's click held; A's release lets go, and the locked
+/// session stays idle.
+#[test]
+fn os9_a_virtual_release_while_locked_is_the_same_pointers() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    use wayland_client::protocol::wl_pointer;
+    let mut run = Running::start(None);
+    let _ = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let qh = clicker.queue.handle();
+    let a = manager.create_virtual_pointer(Some(&seat), &qh, ());
+    let b = manager.create_virtual_pointer(Some(&seat), &qh, ());
+    // BTN_LEFT, over the window.
+    a.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+    a.frame();
+    clicker.roundtrip(&mut run);
+
+    let (_locker, _lock) = lock_session(&mut run);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = clicker.bind(1);
+    let _notification = notifier.get_idle_notification(100, &seat, &qh, ());
+    clicker.pump(&mut run, "the locked session is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    run.state
+        .button_input(0x110, ButtonState::Pressed, InputTime::now());
+    assert!(
+        seat_pointer.is_grabbed(),
+        "the user's click on the lock surface"
+    );
+
+    b.button(0, 0x110, wl_pointer::ButtonState::Released);
+    b.frame();
+    clicker.roundtrip(&mut run);
+    assert!(
+        seat_pointer.is_grabbed(),
+        "B's release leaves the user's click held"
+    );
+
+    a.button(0, 0x110, wl_pointer::ButtonState::Released);
+    a.frame();
+    clicker.roundtrip(&mut run);
+    assert!(!seat_pointer.is_grabbed(), "A's release lets go");
+    assert!(
+        run.state.virtual_buttons.values().all(Vec::is_empty),
+        "no virtual button is held"
+    );
+    assert_eq!(clicker.client.idle, ["idled"], "the session stays idle");
+    run.stop();
+}
+
+/// A virtual pointer made and dropped is no input: the idle session stays idle, locked or not.
+/// A press dropped while locked leaves no entry behind.
+#[test]
+fn os9_a_virtual_pointer_coming_and_going_is_no_activity() {
+    use wayland_client::protocol::wl_pointer;
+    for locked in [true, false] {
+        let mut run = Running::start(None);
+        let _lock = locked.then(|| lock_session(&mut run));
+        let mut clicker = Local::connect(&mut run, None);
+        let seat: wl_seat::WlSeat = clicker.bind(1);
+        let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+        let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = clicker.bind(1);
+        let qh = clicker.queue.handle();
+        let _notification = notifier.get_idle_notification(100, &seat, &qh, ());
+        clicker.pump(&mut run, "the session is idle", |client, _| {
+            client.idle == ["idled"]
+        });
+        let pointer = manager.create_virtual_pointer(Some(&seat), &qh, ());
+        if locked {
+            // BTN_LEFT, dropped while locked.
+            pointer.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+            pointer.frame();
+        }
+        clicker.roundtrip(&mut run);
+        assert!(
+            run.state.virtual_buttons.is_empty(),
+            "no entry for a pointer that holds nothing (locked: {locked})"
+        );
+        pointer.destroy();
+        clicker.roundtrip(&mut run);
+        assert_eq!(
+            clicker.client.idle,
+            ["idled"],
+            "the session stays idle (locked: {locked})"
+        );
+        run.stop();
+    }
 }
 
 /// A capture source of output `index`, named by `local`'s own `wl_output` of it, and a session
