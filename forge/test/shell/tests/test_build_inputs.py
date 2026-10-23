@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 import tempfile
@@ -38,10 +39,17 @@ class BuildInputs(unittest.TestCase):
         (self.dir / "rig-image.digest").write_text("sha256:" + "0" * 64 + "\n")
         self.assertNotEqual(before, digest(self.dir))
 
-    def test_the_repository_is_hashed_by_default(self):
-        self.assertEqual(digest(SHELL), subprocess.run(
-            ["bash", str(SHELL / "build-inputs.sh")], check=True, capture_output=True, text=True,
-        ).stdout.strip())
+    def test_a_missing_containerfile_fails(self):
+        (self.dir / "Containerfile").unlink()
+        with self.assertRaises(subprocess.CalledProcessError):
+            digest(self.dir)
+
+    def test_the_containerfile_takes_nothing_from_the_context(self):
+        # build-inputs.sh hashes only the Containerfile and rig-image.digest: a file copied or
+        # mounted into the build would change the stage without changing the hash.
+        text = (SHELL / "Containerfile").read_text(encoding="utf-8")
+        found = re.findall(r"(?im)^\s*(?:COPY|ADD)\b.*$|--mount\b.*$", text)
+        self.assertEqual(found, [], "add these inputs to build-inputs.sh, then update this test")
 
 
 if __name__ == "__main__":

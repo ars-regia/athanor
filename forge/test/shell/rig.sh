@@ -456,6 +456,8 @@ build-image)
     fi
     if [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    elif [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ] && podman image exists "$build_ref"; then
+        : # an explicit image already here, perhaps one that exists only locally: nothing to pull
     else
         podman pull "$build_ref"
         if [ -z "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
