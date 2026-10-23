@@ -46,7 +46,7 @@ Decisions this plan takes, each to be named in the pull request:
 
 **Files:**
 - Create: `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml`; `src/toplevel_state.rs`
-- Modify: `system/athanor-compositor-client/protocols/README.md` (section "Athanor's own descriptions": this file, its licence, not in `SHA256SUMS`, changes only with a new interface version); `src/main.rs` (`mod toplevel_state;`); `src/state.rs` (global next to `crate::workspace::global(&dh)`, field `toplevel_states`); `src/identity.rs` (`Privilege::ToplevelState`); `data/globals`; `data/privileged-clients`; `C/Cargo.toml` (`bitflags = { workspace = true }`, `wayland-scanner = { workspace = true }` in `[dependencies]`, used by the fixture too; no dev-dependency entry); `Cargo.lock`; `C/README.md` (the privileged table's first row gains `athanor_toplevel_manager_v1`); `forge/test/shell/rig.sh` (`compositor-globals`: the interface joins the refusal list, "none of the 9 privileged ones" becomes 10); the RPM spec per D4
+- Modify: `system/athanor-compositor-client/protocols/README.md` (section "Athanor's own descriptions": this file, its licence, not in `SHA256SUMS`, changes only with a new interface version); `src/main.rs` (`mod toplevel_state;`); `src/state.rs` (global next to `crate::workspace::global(&dh)`, field `toplevel_states`); `src/identity.rs` (`Privilege::ToplevelState`; `Privilege::ALL` goes from `[_; 11]` to `[_; 12]`, which the compiler flags); `data/globals`; `data/privileged-clients`; `C/Cargo.toml` (`bitflags = { workspace = true }`, `wayland-scanner = { workspace = true }` in `[dependencies]`, used by the fixture too; no dev-dependency entry); `Cargo.lock`; `C/README.md` (the privileged table's first row gains `athanor_toplevel_manager_v1`); `forge/test/shell/rig.sh` (`compositor-globals`: the interface joins the refusal list, "none of the 9 privileged ones" becomes 10); the RPM spec per D4
 - Test: `src/fixture.rs` (the bar's line of `FIXTURE_ALLOW_LIST` gains the interface; client bindings `mod athanor_toplevel`, laid out as the client crate's `generated!` with `wayland_protocols::ext::foreign_toplevel_list::v1` as dependency)
 
 **Interfaces:**
@@ -75,14 +75,14 @@ git commit -m "feat(compositor): describe and offer the private toplevel manager
 ### Task 2: Minimising a window, and the state the shell reads
 
 **Files:**
-- Modify: `src/state.rs`; `src/handlers.rs` (`commit`, `XdgShellHandler::minimize_request`, `toplevel_destroyed`, `request_activation`, `rename`, `OutputHandler::output_bound`, `focus_top`); `src/capture.rs` (`captured`); `src/toplevel_state.rs` (`get_toplevel_state`, `send_toplevel_states`); `src/headless.rs`, `src/udev.rs`, `src/winit.rs` (`send_toplevel_states` right after each frame's `self.space.refresh()`)
+- Modify: `src/state.rs`; `src/handlers.rs` (`commit`, `XdgShellHandler::minimize_request`, `toplevel_destroyed`, `request_activation`, `rename`, `OutputHandler::output_bound`, `focus_top`); `src/lock.rs` (`refresh_pointer` becomes `pub(crate)`); `src/capture.rs` (`captured`); `src/toplevel_state.rs` (`get_toplevel_state`, `send_toplevel_states`); `src/headless.rs`, `src/udev.rs`, `src/winit.rs` (`send_toplevel_states` right after each frame's `self.space.refresh()`)
 - Test: `src/fixture.rs` (helper `Running::activation_token(&mut self, client: &mut Local, serial: u32) -> String` through `xdg_activation_v1`)
 
 **Interfaces:**
 - `pub(crate) fn shown(window: &Window) -> bool` in `handlers.rs`: `Placed` and a geometry of positive size, the test `focus_top` already makes inline, which now calls it. `Placed` stays private.
 - `State::minimised: Vec<(Window, Point<i32, Logical>)>`. `State::window_or_minimised(&self, surface: &WlSurface) -> Option<Window>`: the space, then `minimised`. `State::window_by_handle(&self, handle: &ForeignToplevelHandle) -> Option<Window>`, over both.
-- `State::minimise(&mut self, window: &Window) -> bool`: refuses (false) a window not `shown`, so a window that has not drawn is never minimised; otherwise `end_window_grab`, `set_activated(false)` and `send_pending_configure`, unmaps it keeping its location, `refocus(its surface)`, `request_redraw`, true.
-- `State::unminimise(&mut self, window: &Window) -> bool`: false when not minimised; maps it at its kept location, or centred in `window_area()` when that no longer overlaps an output; then `relocated(window)` (a `Relocate` answered while minimised applies now) and `fit_maximised()` (a maximised window takes the area of now); `focus`; `request_redraw`; true.
+- `State::minimise(&mut self, window: &Window) -> bool`: refuses (false) a window not `shown`, so a window that has not drawn is never minimised; otherwise `end_window_grab`, `set_activated(false)` and `send_pending_configure`, unmaps it keeping its location, `refocus(its surface)`, `refresh_pointer` (a button goes to the pointer's focus, so a click without a motion must not reach the hidden window), `request_redraw`, true.
+- `State::unminimise(&mut self, window: &Window) -> bool`: false when not minimised, or when the kept window is not `shown` (it committed a null buffer while minimised, as an app hiding into the tray does): it stays minimised; maps it at its kept location, or centred in `window_area()` when that no longer overlaps an output; then `relocated(window)` (a `Relocate` answered while minimised applies now) and `fit_maximised()` (a maximised window takes the area of now); `focus`; `refresh_pointer`; `request_redraw`; true.
 - `commit` looks the root up with `window_or_minimised`; for a minimised window it runs `on_commit` only: no `place`, `relocated` or `anchor_resized` (the grab ended at minimise, so no resize anchors it; `Relocate` is kept for `unminimise`). The initial-configure lookup uses `window_or_minimised` too. `rename` and `toplevel_destroyed` use it; `toplevel_destroyed` also removes the window from `minimised`.
 - `minimize_request` calls `minimise`. `request_activation` calls `unminimise` first only when `self.lock.is_none()`, then `focus` as today when the window is mapped.
 - `captured` resolves a window through the space and `minimised`: a minimised window keeps its thumbnail, drawn from its last buffer.
@@ -97,6 +97,7 @@ git commit -m "feat(compositor): describe and offer the private toplevel manager
   - `a_token_restores_nothing_while_locked`: a minimised window, the session locked (`lock_session`); token activation leaves it in `minimised` and the keyboard on the lock surface.
   - `the_state_follows_focus_and_minimise`: a state object gets `state(activated)`, `output_enter`, `done` at once; another window focused: `state(0)`, `done`; minimised: `state(minimized)`, `output_leave`, `done`, and its client's last configure no longer holds `activated`.
   - `outputs_follow_the_window`: two outputs; `State::move_window` from the first to the second gives `output_leave(first)`, `output_enter(second)`, `done`, and nothing on the next frame; a second client that makes its state object before binding `wl_output` gets `output_enter` and `done` once it binds.
+  - `a_click_after_minimise_misses_the_hidden_window`: the pointer over a window above another; the window is minimised; a press and release at the same spot, with no motion, reach the window below (or nothing), never the minimised one; restored, a click there reaches it again.
   - `a_minimised_window_keeps_its_thumbnail`: a toplevel capture session of a window that is then minimised still gets a frame of the window's size.
 - [ ] **Step 2: Run them to see them fail**
 
@@ -108,7 +109,7 @@ Expected: compile error, no field `minimised` on `State` (the tests read it).
 
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
-git add "$C/src/state.rs" "$C/src/handlers.rs" "$C/src/capture.rs" "$C/src/toplevel_state.rs" "$C/src/headless.rs" "$C/src/udev.rs" "$C/src/winit.rs" "$C/src/fixture.rs"
+git add "$C/src/state.rs" "$C/src/handlers.rs" "$C/src/lock.rs" "$C/src/capture.rs" "$C/src/toplevel_state.rs" "$C/src/headless.rs" "$C/src/udev.rs" "$C/src/winit.rs" "$C/src/fixture.rs"
 git commit -m "feat(compositor): minimise a window and send its state and outputs to the shell"
 ```
 
@@ -120,15 +121,16 @@ git commit -m "feat(compositor): minimise a window and send its state and output
 
 **Interfaces:**
 - Consumes: `State::window_by_handle`, `minimise`, `unminimise`, `focus`, `handlers::shown` (Task 2); `ForeignToplevelHandle::from_resource`.
-- Produces: each request a no-op while `state.lock.is_some()`, on a handle that resolves to no window, or on a mapped window that is not `shown`. `activate` also requires `Seat::from_resource(&seat) == Some(state.seat)`, restores a minimised window, then `focus`; `set_minimized` calls `minimise`; `unset_minimized` calls `unminimise`; `close` calls `ToplevelSurface::send_close`.
+- Produces: each request a no-op while `state.lock.is_some()`, on a handle that resolves to no window, or on a mapped window that is not `shown`. `activate` also requires `Seat::from_resource(&seat) == Some(state.seat)`, restores a minimised window and focuses it only when `unminimise` returns true, else `focus` a mapped one; `set_minimized` calls `minimise`; `unset_minimized` calls `unminimise`; `close` calls `ToplevelSurface::send_close`.
 
 - [ ] **Step 1: Write the failing tests** (they compile: Task 1 accepted the requests as no-ops)
   - `the_dock_raises_minimises_and_closes_a_window`: the bar-identity client with the manager and the list; two windows of another client; `activate(first)` raises it with the keyboard; `set_minimized(first)` hides it; `unset_minimized(first)` brings it back focused; `close(second)` sends `xdg_toplevel.close`.
   - `activation_respects_the_lock_and_an_exclusive_layer`: locked, `activate` and `set_minimized` change neither stack nor keyboard; with a layer surface holding the keyboard exclusively, `activate` raises the window and the keyboard stays with the layer.
   - `a_closed_or_undrawn_window_is_left_alone`: the four requests on a destroyed window's handle, and `activate` on a placed window that committed a null buffer, change neither stack nor keyboard; then `activate` on a live window raises it and gives it the keyboard (fails until this task).
+  - `a_hidden_minimised_window_stays_minimised`: a minimised window commits a null buffer; `activate` and `unset_minimized` on it leave it in `minimised`, out of the space, and the keyboard focus unchanged (guards Task 2's `unminimise`).
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `cargo test -p athanor-compositor -- the_dock_raises activation_respects closed_or_undrawn`
+Run: `cargo test -p athanor-compositor -- the_dock_raises activation_respects closed_or_undrawn hidden_minimised`
 Expected: FAIL at run time, `activate` has not raised the window.
 
 - [ ] **Step 3: Implement** the requests as the Interfaces block says.
