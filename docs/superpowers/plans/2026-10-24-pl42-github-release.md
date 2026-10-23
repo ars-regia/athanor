@@ -127,6 +127,12 @@ at the end.
    is the hash of those notes, not of the `v*` notes. No
    notes file is needed, so an hourly promotion (UD5) never waits for one. Its Release is marked
    `--latest=false`.
+
+   The notes are a function of the build and the tag only: the build run, version and commit,
+   and a command that verifies every `evidence-<run_id>-*.tar` asset at the tag. Nothing of the
+   promotion run (its id, asset name, previous stable digests, overrides, builder or evidence
+   times) is in them; what a promotion published is in its signed bundle. Every promotion of a
+   build therefore computes byte-identical notes. *(Amended after the second security review.)*
 6. **One asset per promotion run:** `evidence-<run_id>-<promotion run id>.tar`. Both ids come
    from the record: `.run_id`, and the last path segment of `.trigger`. The name follows the
    off-GitHub copy `athanor-evidence:<run_id>-<github.run_id>`. The tar holds the bundle
@@ -157,11 +163,10 @@ at the end.
    | State found | What `publish` does |
    | --- | --- |
    | No Release | Creates a draft with the asset, then publishes it with its `latest` flag |
-   | A draft, or a published Release holding no `evidence-*` asset of an earlier promotion, that is the approved Release exactly (below), without this asset | Uploads the asset, then publishes a draft |
+   | A draft or a published Release, with or without earlier promotions' assets, that is the approved Release exactly (below), without this asset | Uploads the asset, then publishes a draft; on a published Release (a second promotion of the same build) edits nothing |
    | The same, holding this asset with the same SHA-256 | Publishes a draft; for a published Release (a re-run) does nothing and succeeds |
-   | A `v*` Release, draft or published, holding an `evidence-*` asset of another build run | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
-   | Any other draft, or a published Release holding no `evidence-*` asset of an earlier promotion that is not the approved Release exactly (a stray Release: anyone with `contents: write` can make one) | Stops, naming the Release, the fields that differ and the recovery below |
-   | A published Release holding an `evidence-*` asset of an earlier promotion (a second promotion of the same build), without this asset, that passes the check of an earlier promotion (below) | Uploads the asset and edits nothing |
+   | A `v*` Release, draft or published, holding an asset named `evidence-<run>-<run>.tar` of another build run | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
+   | Any other Release, draft or published, with or without earlier assets, that is not the approved Release exactly (a stray Release: anyone with `contents: write` can make one) | Stops, naming the Release, the fields that differ and the recovery below |
    | This asset with a different SHA-256 | Stops, naming the recovery below; it never uses `--clobber` |
    | The tag already points at another commit | Stops |
 
@@ -169,19 +174,15 @@ at the end.
    returns removed and one final newline, equal to that of the approved notes; the approved
    revision as its target commit; not a prerelease; and, for a published `v*` Release, the
    `latest` flag as approved. The read-back after publishing checks the same, as well as the
-   asset; on a Release with an earlier promotion's evidence, whose notes name that promotion's
-   asset, it checks the title only. *(Amended after the audit of the implementation, which
-   published the signed asset on a pre-created Release with a forged title or notes.)*
+   asset. The release notes take no carriage return. *(Amended after the audit of the
+   implementation, which published the signed asset on a pre-created Release with a forged
+   title or notes.)*
 
-   The check of an earlier promotion: every asset of a published Release besides this
-   promotion's is named `evidence-<run>-<run>.tar`, holds regular files and directories only,
-   passes `evidence-bundle.sh verify-dir` (the identity and issuer pins, no token in its
-   environment), and its `release.json` names this tag (as `tag` or `fallback.tag`) and its
-   `promotion.json` this revision; the Release's title and body hash are those one of them
-   approved, its target is this revision, it is not a prerelease and, for a `v*` Release,
-   `latest` is as approved. The read-back applies the same check. The release notes take no
-   carriage return. An asset name alone proves nothing: anyone with `contents: write` can
-   upload one. *(Amended after the security review of the first amendment.)*
+   An earlier promotion's asset vouches for nothing: anyone with `contents: write` can upload
+   one, and even a bundle that verifies proves a planned promotion, not an approved one, since
+   the plan job signs it before the `release` approval. A second promotion of the same build
+   adds its asset because its own approved notes are the same bytes (decision 5), not because
+   an asset is there. *(Amended after the second security review.)*
 
    **Recovery from a stray Release** (destructive, the maintainer only; never for a draft that
    holds another run's `evidence-*` asset, which is a build's legitimate Release): `gh release delete <tag>
@@ -303,7 +304,7 @@ at the end.
 
 **Files:**
 - Create: `system/github-release.sh`
-- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it, and the fallback's when there is one. A new mode, `summary --promotion ARTIFACTS_DIR TAG`, prints only the promotion and evidence part, with verify commands naming `TAG`, and reads no `release.json` (decision 5). `github-release.sh` calls it for both the chosen and the fallback notes. The existing `create` tests of `test_evidence_bundle.py` gain a `release.json` in their fixtures.
+- Modify: `system/evidence-bundle.sh`. `create` copies `release.json` and fails without it. `summary` prints the Release's tag, title, `latest` flag and notes SHA-256 from it, and the fallback's when there is one. A new mode, `summary --promotion ARTIFACTS_DIR TAG`, prints the build run, version and commit, with a verify command naming `TAG` and every `evidence-<run_id>-*.tar`, nothing of the promotion run, and reads no `release.json` (decision 5). `github-release.sh` calls it for both the chosen and the fallback notes. The existing `create` tests of `test_evidence_bundle.py` gain a `release.json` in their fixtures.
 - Modify: `system/tests/fake_registry.py`. Add `gh release` and the `gh api` paths of decision 9, with the state kept in the fixture. Document two new fixture keys in its docstring:
   - `releases`: `{tag: {"draft": bool, "latest": bool, "target": sha, "title": str, "body": str, "assets": {name: sha256}}}`;
   - `git_tags`: `{name: {"sha": object sha, "type": "commit"|"tag", "commit": sha, "message": str, "tagger_email": str, "verified": bool}}`. The existing key `tags` already holds registry tags.
