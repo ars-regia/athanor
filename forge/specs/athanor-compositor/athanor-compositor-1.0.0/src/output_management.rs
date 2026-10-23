@@ -32,8 +32,12 @@ const VERSION: u32 = 4;
 /// The scales a configuration may set, as `--scale` takes them.
 const SCALES: std::ops::RangeInclusive<f64> = 1.0..=4.0;
 
-/// The user data of the global and of every object of the protocol.
+/// The user data of the global and of every object of the protocol but the modes.
 pub struct Heads;
+
+/// The user data of a mode: the head it was sent for, which tells a mode the compositor has
+/// finished since from one that never belonged to the head.
+pub struct ModeOf(ZwlrOutputHeadV1);
 
 /// What the clients of the protocol were sent, and their configurations in progress.
 #[derive(Default)]
@@ -100,6 +104,9 @@ struct Change {
     transform: Option<wl_output::Transform>,
     scale: Option<f64>,
     adaptive_sync: Option<AdaptiveSyncState>,
+    /// The mode set was one of the head's that the compositor finished before the request came,
+    /// a race with a hot-plug: the configuration fails.
+    mode_gone: bool,
 }
 
 /// Offers the global to the clients the allow-list grants it.
@@ -182,13 +189,16 @@ fn announce(
 }
 
 impl Head {
-    /// Sends the output's modes the client has not been sent, and finishes those it has lost.
-    fn send_modes(&mut self, dh: &DisplayHandle, client: &Client) -> Result<(), InvalidId> {
+    /// Sends the output's modes the client has not been sent, and finishes those it has lost;
+    /// whether any was sent or finished.
+    fn send_modes(&mut self, dh: &DisplayHandle, client: &Client) -> Result<bool, InvalidId> {
         let modes = self.output.modes();
+        let mut changed = false;
         self.modes.retain(|(mode, resource)| {
             let kept = modes.contains(mode);
             if !kept {
                 resource.finished();
+                changed = true;
             }
             kept
         });
@@ -198,16 +208,20 @@ impl Head {
             }
             // A child takes its parent's version, as wlroots sends it.
             let version = self.head.version();
-            let resource =
-                client.create_resource::<ZwlrOutputModeV1, _, State>(dh, version, Heads)?;
+            let resource = client.create_resource::<ZwlrOutputModeV1, _, State>(
+                dh,
+                version,
+                ModeOf(self.head.clone()),
+            )?;
             self.head.mode(&resource);
             resource.size(mode.size.w, mode.size.h);
             if mode.refresh > 0 {
                 resource.refresh(mode.refresh);
             }
             self.modes.push((mode, resource));
+            changed = true;
         }
-        Ok(())
+        Ok(changed)
     }
 
     /// Sends the current mode, if the output has one among those sent.
@@ -223,11 +237,11 @@ impl Head {
 
     /// Sends what changed since the head was last sent; whether anything did.
     fn update(&mut self, dh: &DisplayHandle, client: &Client, now: Sent) -> bool {
-        let before = (self.sent, self.modes.len());
-        if let Err(error) = self.send_modes(dh, client) {
+        // A mode finished and another sent leave as many: the modes are told apart by identity.
+        let modes_changed = self.send_modes(dh, client).unwrap_or_else(|error| {
             tracing::warn!(%error, "a mode could not be sent");
-        }
-        let modes_changed = self.modes.len() != before.1;
+            true
+        });
         let was = std::mem::replace(&mut self.sent, now);
         if now.mode != was.mode || modes_changed {
             self.send_current_mode();
@@ -241,7 +255,7 @@ impl Head {
         if now.scale != was.scale {
             self.head.scale(now.scale);
         }
-        now != before.0 || modes_changed
+        now != was || modes_changed
     }
 
     /// The output is gone: its modes and its head are finished.
@@ -381,7 +395,9 @@ impl Change {
                 mode.size == wanted.size && (wanted.refresh == 0 || mode.refresh == wanted.refresh)
             })
         });
-        mode && self.position.is_none_or(|at| at == now.position)
+        !self.mode_gone
+            && mode
+            && self.position.is_none_or(|at| at == now.position)
             && self.transform.is_none_or(|t| t == now.transform)
             && self.scale.is_none_or(|scale| SCALES.contains(&scale))
             && self
@@ -442,7 +458,7 @@ impl Dispatch2<ZwlrOutputHeadV1, State> for Heads {
     }
 }
 
-impl Dispatch2<ZwlrOutputModeV1, State> for Heads {
+impl Dispatch2<ZwlrOutputModeV1, State> for ModeOf {
     /// `release` only.
     fn request(
         &self,
@@ -503,6 +519,7 @@ impl Dispatch2<ZwlrOutputConfigurationV1, State> for Heads {
             transform: None,
             scale: None,
             adaptive_sync: None,
+            mode_gone: false,
         });
         pending.heads.push((head, change));
     }
@@ -555,28 +572,31 @@ impl Dispatch2<ZwlrOutputConfigurationHeadV1, State> for Heads {
                     .find(|head| head.head == named)
                     .and_then(|head| head.modes.iter().find(|(_, sent)| *sent == mode))
                     .map(|(mode, _)| *mode);
-                match (change.mode, own) {
-                    (Some(_), _) => refuse(Error::AlreadySet, "the mode is set already"),
-                    (None, None) => refuse(Error::InvalidMode, "the mode is not the head's"),
-                    (None, Some(own)) => change.mode = Some(own),
+                let sent_for_head = mode.data::<ModeOf>().is_some_and(|of| of.0 == named);
+                match (change.mode.is_some() || change.mode_gone, own) {
+                    (true, _) => refuse(Error::AlreadySet, "the mode is set already"),
+                    (false, Some(own)) => change.mode = Some(own),
+                    // Finished since: the client raced a hot-plug, which is no protocol error.
+                    (false, None) if sent_for_head => change.mode_gone = true,
+                    (false, None) => refuse(Error::InvalidMode, "the mode is not the head's"),
                 }
             }
             Request::SetCustomMode {
                 width,
                 height,
                 refresh,
-            } => match change.mode {
-                Some(_) => refuse(Error::AlreadySet, "the mode is set already"),
-                None if width <= 0 || height <= 0 || refresh < 0 => {
+            } => {
+                if change.mode.is_some() || change.mode_gone {
+                    refuse(Error::AlreadySet, "the mode is set already")
+                } else if width <= 0 || height <= 0 || refresh < 0 {
                     refuse(Error::InvalidCustomMode, "a custom mode needs a size")
-                }
-                None => {
+                } else {
                     change.mode = Some(Mode {
                         size: (width, height).into(),
                         refresh,
                     })
                 }
-            },
+            }
             Request::SetPosition { x, y } => match change.position {
                 Some(_) => refuse(Error::AlreadySet, "the position is set already"),
                 None => change.position = Some((x, y).into()),

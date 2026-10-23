@@ -54,6 +54,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1, ext_workspace_handle_v1, ext_workspace_manager_v1,
 };
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
+};
 use wayland_protocols::wp::security_context::v1::client::{
     wp_security_context_manager_v1, wp_security_context_v1,
 };
@@ -150,13 +153,18 @@ struct Client {
     output_serial: Option<u32>,
     /// The answer to the last output configuration: `succeeded`, `failed` or `cancelled`.
     configured: Option<&'static str>,
+    /// The last preferred scale of wp-fractional-scale, in 120ths.
+    fractional_scale: Option<u32>,
 }
 
-/// A head of wlr-output-management as the client has seen it: its name and its last scale.
+/// A head of wlr-output-management as the client has seen it: its name, its last scale and its
+/// modes.
 struct OutputHead {
     head: zwlr_output_head_v1::ZwlrOutputHeadV1,
     name: String,
     scale: f64,
+    /// Every mode sent for the head, the finished ones included.
+    modes: Vec<zwlr_output_mode_v1::ZwlrOutputModeV1>,
 }
 
 /// A window of the foreign toplevel list as the client has seen it.
@@ -299,6 +307,7 @@ delegate_noop!(Client: wp_security_context_manager_v1::WpSecurityContextManagerV
 delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
 delegate_noop!(Client: ignore zwlr_output_mode_v1::ZwlrOutputModeV1);
 delegate_noop!(Client: zwlr_output_configuration_head_v1::ZwlrOutputConfigurationHeadV1);
+delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
 
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
     fn event(
@@ -566,6 +575,7 @@ impl Dispatch<zwlr_output_manager_v1::ZwlrOutputManagerV1, ()> for Client {
                 head,
                 name: String::new(),
                 scale: 0.0,
+                modes: Vec::new(),
             }),
             zwlr_output_manager_v1::Event::Done { serial } => client.output_serial = Some(serial),
             _ => {}
@@ -592,6 +602,7 @@ impl Dispatch<zwlr_output_head_v1::ZwlrOutputHeadV1, ()> for Client {
         match event {
             zwlr_output_head_v1::Event::Name { name } => seen.name = name,
             zwlr_output_head_v1::Event::Scale { scale } => seen.scale = scale,
+            zwlr_output_head_v1::Event::Mode { mode } => seen.modes.push(mode),
             _ => {}
         }
     }
@@ -616,6 +627,21 @@ impl Dispatch<zwlr_output_configuration_v1::ZwlrOutputConfigurationV1, ()> for C
             zwlr_output_configuration_v1::Event::Cancelled => Some("cancelled"),
             _ => None,
         };
+    }
+}
+
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wp_fractional_scale_v1::WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            client.fractional_scale = Some(scale);
+        }
     }
 }
 
@@ -2156,9 +2182,10 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
     (window, id)
 }
 
-/// The globals the bar sees are offered once each, but `wl_output`, once per output; a client
-/// inside a security context sees only the standard and layer-gated ones (spike Q4: the
-/// privileged ones are refused to sandboxes).
+/// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and
+/// `zwlr_output_manager_v1`, which its line does not name, not at all; a client inside a
+/// security context sees only the standard and layer-gated ones (spike Q4: the privileged ones
+/// are refused to sandboxes).
 #[test]
 fn task4_standard_globals_are_offered() {
     let mut run = Running::start(None);
@@ -2948,8 +2975,9 @@ fn os9_the_workspace_list_is_privileged() {
 
 /// `zwlr_output_manager_v1` is the control center's only (open question 10 of the OS9 plan):
 /// the bar, whose line does not name it, does not see it. The control center sets the first
-/// output's scale through it, which the output keeps in the next frame; a configuration that
-/// asks for more than a scale fails, and one on a stale serial is cancelled.
+/// output's scale through it, which the output keeps in the next frame and a window already
+/// mapped there is told as its preferred scale; a configuration that asks for more than a scale
+/// fails, and one on a stale serial is cancelled.
 #[test]
 fn os9_the_output_manager_is_granted_to_the_control_center_only() {
     const MANAGER: &str = "zwlr_output_manager_v1";
@@ -2971,6 +2999,32 @@ fn os9_the_output_manager_is_granted_to_the_control_center_only() {
         .collect();
     assert_eq!(names, ["headless-0", "headless-1"], "one head per output");
     let serial = control_center.client.output_serial.expect("a serial");
+
+    // A window on the first output, mapped before the change, with its fractional scale. It is
+    // larger than the fixture's, centred at the same place, so that a frame shows part of it
+    // whichever is on top: only a surface shown on an output is sent that output's scale.
+    let compositor: wl_compositor::WlCompositor = control_center.bind(4);
+    let shm: wl_shm::WlShm = control_center.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = control_center.bind(1);
+    let fractional: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1 =
+        control_center.bind(1);
+    let qh = control_center.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let _scale = fractional.get_fractional_scale(&surface, &qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    control_center.pump(&mut run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(control_center.client.configure.expect("a configure"));
+    let (buffer, _) = control_center.buffer(&shm, 2 * WIDTH, 2 * HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    control_center.pump(&mut run, "the window is mapped at scale 1", |client, _| {
+        client.fractional_scale == Some(120)
+    });
+
     let first = run
         .state
         .space
@@ -3017,6 +3071,81 @@ fn os9_the_output_manager_is_granted_to_the_control_center_only() {
                 .iter()
                 .any(|head| head.name == "headless-0" && head.scale == 1.5)
     });
+    control_center.pump(&mut run, "the window is told the new scale", |client, _| {
+        client.fractional_scale == Some(180)
+    });
+    run.stop();
+}
+
+/// A mode the compositor finished between the client's last `done` and its configuration is a
+/// race with a hot-plug, not a protocol error: the configuration fails and the client stays
+/// connected. A mode list that loses one mode and gains another, as many as before, is still a
+/// change, sent with a new serial.
+#[test]
+fn os9_a_mode_finished_in_a_race_fails_the_configuration() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .expect("the first output")
+        .clone();
+    let sent = |client: &Client| {
+        client
+            .heads
+            .iter()
+            .find(|head| head.name == "headless-0")
+            .map_or(0, |head| head.modes.len())
+    };
+    let before = sent(&control_center.client);
+    let extra = |width: i32| smithay::output::Mode {
+        size: (width, OUTPUTS[0].height).into(),
+        refresh: 60_000,
+    };
+
+    first.add_mode(extra(OUTPUTS[0].width + 16));
+    run.state.output_heads_changed();
+    control_center.pump(&mut run, "the extra mode is sent", |client, _| {
+        sent(client) == before + 1
+    });
+    control_center.roundtrip(&mut run);
+    let serial = control_center.client.output_serial.expect("a serial");
+    let gone = control_center
+        .client
+        .heads
+        .iter()
+        .find(|head| head.name == "headless-0")
+        .and_then(|head| head.modes.last())
+        .cloned()
+        .expect("the extra mode");
+
+    first.delete_mode(extra(OUTPUTS[0].width + 16));
+    first.add_mode(extra(OUTPUTS[0].width + 32));
+    run.state.output_heads_changed();
+    control_center.pump(&mut run, "one mode for another is a change", |client, _| {
+        client.output_serial.is_some_and(|now| now != serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    assert_eq!(
+        sent(&control_center.client),
+        before + 2,
+        "the new mode is sent"
+    );
+
+    let raced = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_mode(&gone)
+    });
+    assert_eq!(raced, "failed", "a finished mode");
+    let scaled = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_scale(1.5)
+    });
+    assert_eq!(scaled, "succeeded", "the client is still connected");
     run.stop();
 }
 
