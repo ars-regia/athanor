@@ -157,16 +157,23 @@ at the end.
    | State found | What `publish` does |
    | --- | --- |
    | No Release | Creates a draft with the asset, then publishes it with its `latest` flag |
-   | A draft with the approved title and target, without this asset | Uploads the asset, then publishes |
-   | A draft with the approved title and target, holding this asset with the same SHA-256 | Publishes |
+   | A draft, or a published Release holding no `evidence-*` asset of an earlier promotion, that is the approved Release exactly (below), without this asset | Uploads the asset, then publishes a draft |
+   | The same, holding this asset with the same SHA-256 | Publishes a draft; for a published Release (a re-run) does nothing and succeeds |
    | A `v*` Release, draft or published, holding an `evidence-*` asset of another build run | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
-   | A draft that holds no `evidence-*` asset of another build run, with another title or target (a stray draft) | Stops and names the draft and the recovery below |
-   | A published Release without this asset (a second promotion of the same build) | Uploads the asset |
-   | A published Release with this asset, same SHA-256 (a re-run) | Does nothing and succeeds |
+   | Any other draft, or a published Release holding no `evidence-*` asset of an earlier promotion that is not the approved Release exactly (a stray Release: anyone with `contents: write` can make one) | Stops, naming the Release, the fields that differ and the recovery below |
+   | A published Release holding an `evidence-*` asset of an earlier promotion (a second promotion of the same build), without this asset | Uploads the asset and edits nothing |
    | This asset with a different SHA-256 | Stops, naming the recovery below; it never uses `--clobber` |
    | The tag already points at another commit | Stops |
 
-   **Recovery from a stray draft** (destructive, the maintainer only; never for a draft that
+   The approved Release exactly: the approved title; the SHA-256 of its body, with carriage
+   returns removed and one final newline, equal to that of the approved notes; the approved
+   revision as its target commit; not a prerelease; and, for a published `v*` Release, the
+   `latest` flag as approved. The read-back after publishing checks the same, as well as the
+   asset; on a Release with an earlier promotion's evidence, whose notes name that promotion's
+   asset, it checks the title only. *(Amended after the audit of the implementation, which
+   published the signed asset on a pre-created Release with a forged title or notes.)*
+
+   **Recovery from a stray Release** (destructive, the maintainer only; never for a draft that
    holds another run's `evidence-*` asset, which is a build's legitimate Release): `gh release delete <tag>
    -R ars-regia/athanor`, without `--cleanup-tag`, then re-run the `github-release` job with
    `gh run rerun <promotion run> --job <job id> -R ars-regia/athanor`. A new `plan` is not a
