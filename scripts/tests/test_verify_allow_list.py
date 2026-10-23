@@ -205,14 +205,28 @@ class AllowList(unittest.TestCase):
 
     def test_a_capture_global_counts_only_for_a_target_that_captures(self):
         # A client whose only privileged name is in capture.rs, entered by `Client::capture`.
-        self.write(f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n')
+        self.write(
+            f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
+        )
         self.write(f"{CLIENT}/src/lib.rs", "mod capture;\npub fn connect() {}\n")
-        self.write(f"{CLIENT}/src/capture.rs", 'fn capture() { Unavailable("ext_session_lock_manager_v1") }\n')
+        self.write(
+            f"{CLIENT}/src/capture.rs",
+            'fn capture() { Unavailable("ext_session_lock_manager_v1") }\n',
+        )
         dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
-        self.package("athanor-dock", dependency, {"src/main.rs": "use athanor_compositor_client::connect;\nfn main() {}\n"})
+        self.package(
+            "athanor-dock",
+            dependency,
+            {"src/main.rs": "use athanor_compositor_client::connect;\nfn main() {}\n"},
+        )
         self.assertEqual(self.problems(), [])
-        self.package("athanor-launcher", dependency,
-                     {"src/main.rs": "use athanor_compositor_client::connect;\nasync fn f() { client.capture(id).await; }\n"})
+        self.package(
+            "athanor-launcher",
+            dependency,
+            {
+                "src/main.rs": "use athanor_compositor_client::connect;\nasync fn f() { client.capture(id).await; }\n"
+            },
+        )
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("/usr/bin/athanor-launcher", out[0])
@@ -274,6 +288,175 @@ class AllowList(unittest.TestCase):
             "/usr/bin/athanor-lock athanor-lock.service ext_session_lock_manager_v1\n"
         )
         self.assertEqual(self.problems(), [])
+
+    def spec(self, name, install):
+        """The spec of package `name`, building it and installing with `install`."""
+        self.write(
+            f"forge/specs/{name}/{name}.spec",
+            f"Name: {name}\n%build\ncargo build --release --locked\n%install\n{install}\n",
+        )
+
+    def test_the_top_layer_counts_however_it_is_written(self):
+        written = {
+            "a variable": "fn f() { let l = Layer::Top; w.set_layer(l); }\n",
+            "an if-expression": "fn f() { w.set_layer(if full { Layer::Overlay } else { Layer::Bottom }); }\n",
+            "an alias": "use gtk4_layer_shell::Layer as L;\nfn f() { w.set_layer(L::Top); }\n",
+            "an alias in a group": "use gtk4_layer_shell::{Edge, Layer as Plane, LayerShell};\nfn f() { w.set_layer(Plane::Overlay); }\n",
+            "a type alias": "type Plane = gtk4_layer_shell::Layer;\nfn f() { w.set_layer(Plane::Top); }\n",
+            "a constant": "const LAYER: Layer = Layer::Overlay;\n",
+            "the protocol request": "fn f() { shell.get_layer_surface(&s, None, zwlr_layer_shell_v1::Layer::Top, ns, qh, ()); }\n",
+            "an imported variant": "use zwlr_layer_shell_v1::Layer::{Bottom, Overlay};\n",
+        }
+        for case, code in written.items():
+            with self.subTest(case):
+                self.package("athanor-dock", files={"src/main.rs": code})
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("top or overlay layer", out[0])
+        self.package(
+            "athanor-dock",
+            files={"src/main.rs": "fn f() { w.set_layer(Layer::Bottom); }\n"},
+        )
+        self.assertEqual(self.problems(), [])
+
+    def test_an_install_counts_however_it_is_written(self):
+        written = {
+            "into libexec": (
+                "install -D -m 0755 target/release/athanor-dock %{buildroot}%{_libexecdir}/athanor-dock",
+                "/usr/libexec/athanor-dock",
+            ),
+            "with a target directory": (
+                "install -Dm755 -t %{buildroot}%{_bindir} target/release/athanor-dock",
+                "/usr/bin/athanor-dock",
+            ),
+            "with cp into a directory": (
+                "cp -p target/release/athanor-dock %{buildroot}/usr/bin/",
+                "/usr/bin/athanor-dock",
+            ),
+            "over continued lines": (
+                "install -D -m 0755 \\\n    target/release/athanor-dock \\\n"
+                "    %{buildroot}%{_bindir}/athanor-dock",
+                "/usr/bin/athanor-dock",
+            ),
+        }
+        for case, (install, executable) in written.items():
+            with self.subTest(case):
+                self.package(
+                    "athanor-dock",
+                    files={"src/main.rs": "fn f() { w.set_layer(Layer::Top); }\n"},
+                )
+                self.spec("athanor-dock", install)
+                self.lines("")
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn(f"{executable}: asks for", out[0])
+                self.lines(f"{executable} athanor-dock.service zwlr_layer_shell_v1\n")
+                self.assertEqual(self.problems(), [])
+
+    def test_a_binary_of_src_bin_is_a_target(self):
+        self.package(
+            "athanor-dock",
+            files={
+                "src/main.rs": "fn main() {}\n",
+                "src/bin/athanor-dock-edge.rs": "fn main() { w.set_layer(Layer::Top); }\n",
+                "src/bin/athanor-dock-peek/main.rs": "mod peek;\nfn main() {}\n",
+                "src/bin/athanor-dock-peek/peek.rs": "fn f() { w.set_layer(Layer::Overlay); }\n",
+            },
+            installs=("athanor-dock", "athanor-dock-edge", "athanor-dock-peek"),
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 2, out)
+        self.assertIn("/usr/bin/athanor-dock-edge: asks for", out[0])
+        self.assertIn("/usr/bin/athanor-dock-peek: asks for", out[1])
+
+    def test_a_binary_no_crate_of_the_tree_builds_fails_when_the_spec_carries_a_crate(
+        self,
+    ):
+        self.package(
+            "athanor-dock",
+            files={"src/main.rs": "fn main() {}\n"},
+            installs=("athanor-dock", "athanor-dock-gone"),
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("athanor-dock-gone", out[0])
+
+    def test_every_line_of_an_executable_is_checked(self):
+        self.package(
+            "athanor-dock",
+            files={"src/main.rs": "fn f() { w.set_layer(Layer::Top); }\n"},
+        )
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1\n"
+            "/usr/bin/athanor-dock athanor-dock-peek.service ext_foreign_toplevel_list_v1\n"
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("athanor-dock-peek.service", out[0])
+
+    def test_a_capture_counts_however_it_is_called(self):
+        self.write(
+            f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
+        )
+        self.write(
+            f"{CLIENT}/src/lib.rs",
+            "mod capture;\nuse crate::capture;\npub fn connect() {}\n",
+        )
+        self.write(
+            f"{CLIENT}/src/capture.rs",
+            'fn capture() { Unavailable("ext_session_lock_manager_v1") }\n',
+        )
+        dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
+        self.package(
+            "athanor-dock",
+            dependency,
+            {"src/main.rs": "use athanor_compositor_client::connect;\nfn main() {}\n"},
+        )
+        self.assertEqual(self.problems(), [])
+        for call in (
+            "Client::capture(&client, id)",
+            "windows.map(Client::capture)",
+            "client.capture (id)",
+        ):
+            with self.subTest(call):
+                self.package(
+                    "athanor-launcher",
+                    dependency,
+                    {
+                        "src/main.rs": f"use athanor_compositor_client::Client;\nfn f() {{ {call}; }}\n"
+                    },
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-launcher", out[0])
+                self.assertIn("ext_session_lock_manager_v1", out[0])
+
+    def test_a_spec_feature_of_a_dependency_enables_it(self):
+        self.write(
+            "system/athanor-toolkit/Cargo.toml",
+            '[package]\nname = "athanor-toolkit"\n[features]\nedge = []\n',
+        )
+        self.write(
+            "system/athanor-toolkit/src/lib.rs",
+            "pub fn surface() { s.set_layer(Layer::Top); }\n",
+        )
+        self.package(
+            "athanor-dock",
+            '[dependencies]\nathanor-toolkit = { path = "../../../../system/athanor-toolkit", optional = true }\n',
+            {"src/main.rs": "use athanor_toolkit::surface;\nfn main() {}\n"},
+        )
+        self.assertEqual(self.problems(), [])
+        for flag in (
+            "--features athanor-toolkit/edge",
+            "--features dep:athanor-toolkit",
+        ):
+            with self.subTest(flag):
+                self.write(
+                    "forge/specs/athanor-dock/athanor-dock.spec",
+                    f"Name: athanor-dock\n%build\ncargo build --release --locked {flag}\n%install\n"
+                    "install -D -m 0755 target/release/athanor-dock %{buildroot}/usr/bin/athanor-dock\n",
+                )
+                self.assertEqual(len(self.problems()), 1)
 
 
 if __name__ == "__main__":

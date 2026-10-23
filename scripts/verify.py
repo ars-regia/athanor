@@ -2086,14 +2086,110 @@ def check_panics():
 ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
 GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
 LAYER_SHELL = "zwlr_layer_shell_v1"
-# A surface on the top or overlay layer, which the compositor refuses without a grant.
-TOP_LAYER = re.compile(r"(?:set_layer\(|layer:\s*)(?:\w+::)*Layer::(?:Top|Overlay)\b")
-BIN_INSTALL = re.compile(r"\binstall\b[^\n]*?\btarget/release/(\S+)\s+%\{buildroot\}(?:/usr/bin|%\{_bindir\})/(\S+)")
-ANY_INSTALL = re.compile(r"%\{buildroot\}(?:/usr/bin|%\{_bindir\})/([\w.+-]+)")
+# The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
+# surface on its top or overlay layer, however the variant is reached, is refused without a grant.
+LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
+# What a spec puts under these directories is an executable a line can name.
+EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_libexecdir}": "/usr/libexec", "%{_prefix}": "/usr"}
+INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
+COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
-# the target's code makes that call: athanor-compositor-client binds the capture globals at the
-# first `Client::capture`, and capture.rs holds every name of them in the crate.
-ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs": re.compile(r"\.capture\(")}
+# code outside that crate makes the call, written as a method or as a path: athanor-compositor-
+# client binds the capture globals at the first `Client::capture`, and capture.rs holds every
+# name of them in the crate.
+ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
+             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)"))}
+
+
+def top_layer(files):
+    """Where the first of `files` reaches the top or overlay variant of the layer enum, by its
+    name or an alias, a variant import or a glob import of it; None when none does."""
+    names = {"Layer"} | {a for text in files.values() for m in LAYER_ALIAS.finditer(text) for a in m.groups() if a}
+    variant = re.compile(rf"\b(?:{'|'.join(sorted(names))})\s*::\s*"
+                         r"(?:\*|\{[^}]*\b(?:Top|Overlay)\b|(?:Top|Overlay)\b)")
+    for where, text in sorted(files.items()):
+        found = variant.search(text)
+        if found:
+            return f"{where}:{text.count(chr(10), 0, found.start()) + 1}"
+    return None
+
+
+def spec_installs(spec):
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin or
+    /usr/libexec: continued lines joined, a target directory given by -t or as the last
+    argument, a destination directory given with or without its trailing slash."""
+    for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
+        words = command.split()
+        if not words or words[0] not in INSTALL | COPY:
+            continue
+        args, directory, i = [], None, 1
+        while i < len(words):
+            w = words[i]
+            if w in ("--target-directory", "--mode", "--owner", "--group", "--suffix"):
+                directory, i = (words[i + 1] if w == "--target-directory" and i + 1 < len(words) else directory), i + 1
+            elif w.startswith("--target-directory="):
+                directory = w.split("=", 1)[1]
+            elif w == "--directory" and words[0] in INSTALL:
+                break
+            elif w.startswith("-") and len(w) > 1 and not w.startswith("--"):
+                for k, c in enumerate(w[1:], 1):
+                    if c == "d" and words[0] in INSTALL:
+                        args = None
+                        break
+                    if c in "mogSt":
+                        value = w[k + 1:]
+                        if not value and i + 1 < len(words):
+                            i, value = i + 1, words[i + 1]
+                        directory = value if c == "t" else directory
+                        break
+                if args is None:
+                    break
+            elif not w.startswith("--"):
+                args.append(w)
+            i += 1
+        if not args:
+            continue  # install -d makes directories
+        if directory is None:
+            if len(args) < 2:
+                continue
+            *sources, directory = args
+            if len(sources) == 1 and not directory.endswith("/") and \
+                    executable_path(directory) not in EXEC_DIRS.values():
+                if executable_path(directory).startswith(("/usr/bin/", "/usr/libexec/")):
+                    yield sources[0], executable_path(directory)
+                continue
+        else:
+            sources = args
+        for source in sources:
+            executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
+            if executable.startswith(("/usr/bin/", "/usr/libexec/")):
+                yield source, executable
+
+
+def executable_path(destination):
+    """`destination` of a spec's %install as the path it has on the installed system."""
+    for root in ("%{buildroot}", "%buildroot", "${RPM_BUILD_ROOT}", "$RPM_BUILD_ROOT"):
+        destination = destination.replace(root, "")
+    for macro, value in EXEC_DIRS.items():
+        destination = destination.replace(macro, value)
+    return re.sub(r"/+", "/", destination.strip("\"'")).rstrip("/") or "/"
+
+
+def binaries(crate, manifest):
+    """{name: entry file} of each bin target of `crate`, Cargo's auto-discovered ones (src/main.rs,
+    src/bin/*.rs, src/bin/*/main.rs) and those of `[[bin]]`."""
+    package = manifest.get("package", {})
+    found = {}
+    if package.get("autobins", True):
+        if package.get("name") and (crate / "src/main.rs").is_file():
+            found[package["name"]] = crate / "src/main.rs"
+        found.update((p.stem, p) for p in sorted((crate / "src/bin").glob("*.rs")))
+        found.update((p.parent.name, p) for p in sorted((crate / "src/bin").glob("*/main.rs")))
+    for b in manifest.get("bin", []):
+        entry = crate / b["path"] if "path" in b else found.get(b["name"], crate / "src/main.rs")
+        found = {n: p for n, p in found.items() if p != entry}
+        found[b["name"]] = entry
+    return found
 
 
 def without_comments(txt):
@@ -2114,14 +2210,16 @@ def without_comments(txt):
     return "".join(out)
 
 
-def crate_sources(crate, start):
-    """The production files of the target whose entry point's directory is `start`: minus
-    the directories of the crate's other bin targets inside it, tests, and the modules and
-    items under `#[cfg(test)]`. Each as (path, text without test items and comments)."""
+def crate_sources(crate, start, entry=None):
+    """The production files of the target whose entry point, `entry` (the library when None),
+    lies in `start`: minus the crate's other bin targets inside it, each with its modules'
+    directory, tests, and the modules and items under `#[cfg(test)]`. Each as (path, text
+    without test items and comments)."""
     manifest = tomllib.loads(read(crate / "Cargo.toml"))
-    others = [(crate / b.get("path", "src/main.rs")).parent for b in manifest.get("bin", [])]
-    others = [d for d in others if d != start and d.is_relative_to(start)]
-    files = [p for p in walk(start, ".rs") if not any(p.is_relative_to(d) for d in others)]
+    others = [p for p in binaries(crate, manifest).values() if p != entry]
+    dirs = [p.parent if p.name == "main.rs" else p.with_suffix("") for p in others]
+    dirs = [d for d in dirs if d != start and d.is_relative_to(start)]
+    files = [p for p in walk(start, ".rs") if p not in others and not any(p.is_relative_to(d) for d in dirs)]
     test_modules = test_module_files(files)
     return [(p, without_comments(without_test_items(read(p))))
             for p in files if not is_test_file(p) and p not in test_modules]
@@ -2138,20 +2236,19 @@ def enabled_dependencies(manifest, features, defaults):
         if f in seen:
             continue
         seen.add(f)
-        if f not in table:
-            on.add(f)  # the implicit feature of an optional dependency
-        for v in table.get(f, []):
-            if v.startswith("dep:"):
-                on.add(v[4:])
-            elif "/" in v:
-                dep, feature = v.split("/", 1)
-                if dep.endswith("?"):
-                    weak.append((dep[:-1], feature))
-                else:
-                    on.add(dep)
-                    sub[dep].add(feature)
+        if f.startswith("dep:"):
+            on.add(f[4:])
+        elif "/" in f:
+            dep, feature = f.split("/", 1)
+            if dep.endswith("?"):
+                weak.append((dep[:-1], feature))
             else:
-                todo.append(v)
+                on.add(dep)
+                sub[dep].add(feature)
+        elif f not in table:
+            on.add(f)  # the implicit feature of an optional dependency
+        else:
+            todo.extend(table[f])
     for dep, feature in weak:
         if dep in on:
             sub[dep].add(feature)
@@ -2176,13 +2273,14 @@ def path_dependencies(crate, manifest, root):
                 yield name, entry, (base / path).resolve()
 
 
-def target_files(crate, start, features, defaults, root):
+def target_files(crate, entry, features, defaults, root):
     """The production files a binary target is built from: its own, and those of the path
     dependencies its code names, followed transitively with the features the build enables
     (an optional dependency counts only when they turn it on)."""
-    files, done, todo = {}, {}, [(crate.resolve(), start.resolve(), set(features), defaults)]
+    files, done = {}, {}
+    todo = [(crate.resolve(), entry.parent.resolve(), entry.resolve(), set(features), defaults)]
     while todo:
-        crate, start, features, defaults = todo.pop()
+        crate, start, entry, features, defaults = todo.pop()
         before = done.get(crate)
         if before and features <= before[0] and (before[1] or not defaults):
             continue
@@ -2190,7 +2288,7 @@ def target_files(crate, start, features, defaults, root):
         defaults = defaults or bool(before and before[1])
         done[crate] = (features, defaults)
         manifest = tomllib.loads(read(crate / "Cargo.toml"))
-        sources = crate_sources(crate, start)
+        sources = crate_sources(crate, start, entry)
         files.update(sources)
         code = "\n".join(text for _, text in sources)
         on, sub = enabled_dependencies(manifest, features, defaults)
@@ -2204,7 +2302,7 @@ def target_files(crate, start, features, defaults, root):
                 continue
             lib = tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("path", "src/lib.rs")
             wanted = set(entry.get("features", [])) | sub[name]
-            todo.append((dep, (dep / lib).parent, wanted, entry.get("default-features", True)))
+            todo.append((dep, (dep / lib).parent, None, wanted, entry.get("default-features", True)))
     return files
 
 
@@ -2240,21 +2338,18 @@ def allow_list_problems(root=None):
         words = line.split()
         if len(words) == 2 and words[1] == "privileged":
             privileged.add(words[0])
-    lines = {}
+    lines = collections.defaultdict(list)
     for line in read(root / ALLOW_LIST).splitlines():
         words = line.split()
         if words and not words[0].startswith("#"):
-            lines[words[0]] = words[2:]
+            lines[words[0]].append(words[1:])
 
     bins = {}
     for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
         manifest = tomllib.loads(read(manifest_path))
         name = manifest.get("package", {}).get("name")
-        declared = manifest.get("bin", [])
-        if not declared and name and (manifest_path.parent / "src/main.rs").is_file():
-            declared = [{"name": name}]
-        for b in declared:
-            bins[b["name"]] = (manifest_path.parent, name, manifest_path.parent / b.get("path", "src/main.rs"))
+        for b, entry in binaries(manifest_path.parent, manifest).items():
+            bins[b] = (manifest_path.parent, name, entry)
 
     installed, targets = set(), []
     for spec_path in sorted((root / "forge/specs").glob("*/*.spec")):
@@ -2262,27 +2357,35 @@ def allow_list_problems(root=None):
         name = re.search(r"^Name:\s*(\S+)", spec, re.M)
         if name:
             spec = spec.replace("%{name}", name.group(1))
-        installed.update(f"/usr/bin/{b}" for b in ANY_INSTALL.findall(spec))
-        targets += [(built, f"/usr/bin/{dest}", spec) for built, dest in BIN_INSTALL.findall(spec)]
+        in_tree = any(walk(spec_path.parent, "Cargo.toml"))
+        for source, executable in spec_installs(spec):
+            installed.add(executable)
+            built = re.search(r"(?:^|/)release/([\w.+-]+)$", source)
+            if built:
+                targets.append((built.group(1), executable, spec, spec_path, in_tree))
 
-    for built, executable, spec in targets:
+    for built, executable, spec, spec_path, in_tree in targets:
         if built not in bins:
-            continue  # built from a source outside the tree (cosmic-comp, matugen)
+            # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
+            # carries a crate: then no bin target of the tree has the name it installs.
+            if in_tree:
+                problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
+                                f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
+            continue
         crate, package, entry = bins[built]
         features, defaults, every = build_flags(spec, package)
         if every:
             features = set(tomllib.loads(read(crate / "Cargo.toml")).get("features", {}))
         layer, names = None, {}
         files = {path.relative_to(root.resolve()): text for path, text in
-                 target_files(crate, entry.parent, features, defaults, root).items()}
+                 target_files(crate, entry, features, defaults, root).items()}
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
-            call = ON_DEMAND[where.as_posix()]
-            if not any(call.search(text) for other, text in files.items() if other != where):
+            owner, call = ON_DEMAND[where.as_posix()]
+            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
                 del files[where]
+        layer = top_layer(files)
         for where, text in sorted(files.items()):
             for i, line in enumerate(text.split("\n"), 1):
-                if layer is None and TOP_LAYER.search(line):
-                    layer = f"{where}:{i}"
                 for interface in privileged:
                     if interface not in names and re.search(rf"\b{interface}\b", line):
                         names[interface] = f"{where}:{i}"
@@ -2292,9 +2395,10 @@ def allow_list_problems(root=None):
             [f"{n} ({at})" for n, at in sorted(names.items())]
         if executable not in lines:
             problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
-        elif layer and LAYER_SHELL not in lines[executable]:
-            problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
-                            f"does not name {LAYER_SHELL}: the surface is closed (#683)")
+        elif layer:
+            problems += [f"{executable}: asks for the top or overlay layer ({layer}) and its line for "
+                         f"{line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)"
+                         for line in lines[executable] if LAYER_SHELL not in line[1:]]
 
     for executable in lines:
         if executable not in installed:

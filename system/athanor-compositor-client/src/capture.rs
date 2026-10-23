@@ -377,8 +377,13 @@ mod tests {
         out
     }
 
-    /// A compositor speaking the wire protocol: it offers `OFFERED`, answers each sync, and
-    /// records the interface of every bind, until the client hangs up.
+    /// One fake compositor's client at a time: `Client::connect_wayland` acquires the default
+    /// main context, which a test on another thread may hold.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// A compositor speaking the wire protocol: it offers `OFFERED`, answers each sync, records
+    /// the interface of every bind, and announces one window on the toplevel list, until the
+    /// client hangs up.
     fn serve(mut stream: UnixStream, bound: &Mutex<Vec<String>>) {
         let word = |bytes: &[u8], at: usize| {
             u32::from_ne_bytes(bytes[at..at + 4].try_into().expect("word"))
@@ -411,6 +416,11 @@ mod tests {
                 (id, 0) if Some(id) == registry => {
                     let length = word(&body, 4) as usize;
                     let interface = String::from_utf8_lossy(&body[8..8 + length - 1]);
+                    if interface == TOPLEVEL_LIST {
+                        // ext_foreign_toplevel_list_v1.toplevel, a server-allocated handle.
+                        let list = word(&body, 8 + length.next_multiple_of(4) + 4);
+                        reply.extend(message(list, 0, &0xff00_0000u32.to_ne_bytes()));
+                    }
                     bound.lock().expect("lock").push(interface.into_owned());
                 }
                 _ => {}
@@ -423,6 +433,7 @@ mod tests {
     /// where the compositor offers them; only `Client::capture` binds them.
     #[test]
     fn connecting_binds_no_capture_global() {
+        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (ours, theirs) = UnixStream::pair().expect("socket pair");
         let bound = Arc::new(Mutex::new(Vec::new()));
         let record = bound.clone();
@@ -432,6 +443,33 @@ mod tests {
         let bound = bound.lock().expect("lock").clone();
         assert!(bound.iter().any(|i| i == TOPLEVEL_LIST), "{bound:?}");
         assert!(!OFFERED[1..].iter().any(|c| bound.iter().any(|i| i == c)), "{bound:?}");
+        drop(client);
+    }
+
+    /// A caller that captures binds both capture globals the compositor offers, once across
+    /// its captures. Without `wl_shm` each capture then stops before it asks for a frame.
+    #[test]
+    fn capturing_binds_each_capture_global_once() {
+        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (ours, theirs) = UnixStream::pair().expect("socket pair");
+        let bound = Arc::new(Mutex::new(Vec::new()));
+        let record = bound.clone();
+        std::thread::spawn(move || serve(theirs, &record));
+        let connection = Connection::from_socket(ours).expect("connection");
+        let client = Client::connect_wayland(&connection).expect("client");
+        let window = *client.inner.state.borrow().toplevels.keys().next().expect("a window");
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..2 {
+            let mut capture = std::pin::pin!(client.capture(window));
+            let answer = std::future::Future::poll(capture.as_mut(), &mut context);
+            assert!(matches!(answer, Poll::Ready(Err(Error::Unavailable("wl_shm")))), "{answer:?}");
+        }
+        client.flush().expect("flush");
+        connection.roundtrip().expect("roundtrip");
+        let bound = bound.lock().expect("lock").clone();
+        for capture in &OFFERED[1..] {
+            assert_eq!(bound.iter().filter(|i| i == capture).count(), 1, "{bound:?}");
+        }
         drop(client);
     }
 
