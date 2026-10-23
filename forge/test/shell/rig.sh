@@ -487,17 +487,17 @@ capture_surface() { # capture_surface <surface>: every case of it, its tags appe
 # GTK keeps exporting the tree of a surface the compositor closed, so an atspi walk alone passes
 # a client that is not on screen; the compositor's log says when it closed a surface (src/layer.rs).
 # A missing or empty log fails too: grep would find nothing in it.
-atspi_not_closed() { # atspi_not_closed <surface> <scene tag>: only under athanor-compositor
-    local log="$out/$2-compositor.log"
+surface_not_closed() { # surface_not_closed <recipe> <surface> <scene tag>: only under athanor-compositor
+    local log="$out/$3-compositor.log"
     if [ "${RIG_COMPOSITOR:-}" != athanor ]; then
         return 0
     fi
     if [ ! -s "$log" ]; then
-        echo "atspi $1: no compositor log at $log" >&2
+        echo "$1 $2: no compositor log at $log" >&2
         exit 1
     fi
     if grep -q "not granted them was closed" "$log"; then
-        echo "atspi $1: athanor-compositor closed the surface of $1; see $log" >&2
+        echo "$1 $2: athanor-compositor closed the surface of $2; see $log" >&2
         exit 1
     fi
 }
@@ -1066,7 +1066,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui ${session_unit[*]}"
-        atspi_not_closed greeter atspi-greeter
+        surface_not_closed atspi greeter atspi-greeter
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/atspi-greeter${3:+-$3}.json" "/out/atspi-greeter${3:+-$3}.json"
         ;;
@@ -1084,7 +1084,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-chooser -- \
             bash -c "$enable && exec $(printf '%q ' "${UNIT_CMD[@]}")"
-        atspi_not_closed chooser atspi-chooser
+        surface_not_closed atspi chooser atspi-chooser
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1135,7 +1135,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
-        atspi_not_closed bar atspi-bar
+        surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
         # athanor-compositor it names each line the bar lacks (Input source and Tiling, C1).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
@@ -1154,7 +1154,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures ${session_unit[*]}"
-        atspi_not_closed bar-modules atspi-bar-modules
+        surface_not_closed atspi bar-modules atspi-bar-modules
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
@@ -1168,7 +1168,7 @@ atspi)
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
-        atspi_not_closed dock atspi-dock
+        surface_not_closed atspi dock atspi-dock
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
@@ -1184,7 +1184,7 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
                      && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher ${session_unit[*]}"
-        atspi_not_closed launcher atspi-launcher
+        surface_not_closed atspi launcher atspi-launcher
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/atspi-launcher${3:+-$3}.json" "/out/atspi-launcher${3:+-$3}.json"
         ;;
@@ -1283,6 +1283,7 @@ orca)
             RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
+        surface_not_closed orca dock orca-dock
         ;;
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
@@ -1298,17 +1299,7 @@ orca)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
         # the walk alone would read a bar that is not on screen.
-        if [ -n "$unit" ]; then
-            log="$out/orca-bar-compositor.log"
-            if [ ! -s "$log" ]; then
-                echo "orca bar: no compositor log at $log" >&2
-                exit 1
-            fi
-            if grep -q "not granted them was closed" "$log"; then
-                echo "orca bar: athanor-compositor closed the bar's surface; see $log" >&2
-                exit 1
-            fi
-        fi
+        surface_not_closed orca bar orca-bar
         ;;
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
@@ -1323,6 +1314,7 @@ orca)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
                      && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-launcher"
+        surface_not_closed orca launcher orca-launcher
         ;;
     greeter)
         # The card of the rig's one account opens with the password focused. Seven controls are
