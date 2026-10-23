@@ -17,6 +17,7 @@ wl_compositor standard
 zwlr_layer_shell_v1 layer-gated
 ext_foreign_toplevel_list_v1 privileged
 ext_session_lock_manager_v1 privileged
+ext_image_copy_capture_manager_v1 privileged
 """
 
 SPEC = """\
@@ -40,6 +41,11 @@ class AllowList(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def fresh(self):
+        """An empty fixture tree in place of the current one."""
+        self.tearDown()
+        self.setUp()
+
     def write(self, path, text):
         p = self.root / path
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -62,14 +68,23 @@ class AllowList(unittest.TestCase):
         self.write(f"forge/specs/{name}/{name}.spec", text)
 
     def client(self):
-        """A path dependency that binds the toplevel list, as athanor-compositor-client does."""
+        """A path dependency that binds the toplevel list at connect and the image copy
+        capture at the first `capture`, as athanor-compositor-client does."""
         self.write(
             f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
         )
         self.write(
             f"{CLIENT}/src/lib.rs",
+            "mod capture;\nmod connection;\npub fn connect() {}\n",
+        )
+        self.write(
+            f"{CLIENT}/src/connection.rs",
             "use wayland_protocols::ext::foreign_toplevel_list::v1::client::"
-            "ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;\npub fn connect() {}\n",
+            "ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1;\n",
+        )
+        self.write(
+            f"{CLIENT}/src/capture.rs",
+            'fn capture() { Unavailable("ext_image_copy_capture_manager_v1") }\n',
         )
 
     def problems(self):
@@ -151,6 +166,7 @@ class AllowList(unittest.TestCase):
         )
 
     def test_a_line_for_an_executable_nothing_installs_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
         self.lines("/usr/bin/grim grim.service zwlr_layer_shell_v1\n")
         out = self.problems()
         self.assertEqual(len(out), 1)
@@ -212,21 +228,15 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(self.problems()), 1)
 
     def test_a_capture_global_counts_only_for_a_target_that_captures(self):
-        # A client whose only privileged name is in capture.rs, entered by `Client::capture`.
-        self.write(
-            f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
-        )
-        self.write(f"{CLIENT}/src/lib.rs", "mod capture;\npub fn connect() {}\n")
-        self.write(
-            f"{CLIENT}/src/capture.rs",
-            'fn capture() { Unavailable("ext_session_lock_manager_v1") }\n',
-        )
+        # The client binds the image copy capture at the first `Client::capture` only.
+        self.client()
         dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
         self.package(
             "athanor-dock",
             dependency,
             {"src/main.rs": "use athanor_compositor_client::connect;\nfn main() {}\n"},
         )
+        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
         self.assertEqual(self.problems(), [])
         self.package(
             "athanor-launcher",
@@ -238,7 +248,7 @@ class AllowList(unittest.TestCase):
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("/usr/bin/athanor-launcher", out[0])
-        self.assertIn("ext_session_lock_manager_v1", out[0])
+        self.assertIn("ext_image_copy_capture_manager_v1", out[0])
 
     def test_a_top_layer_target_whose_line_omits_layer_shell_fails(self):
         self.package(
@@ -252,20 +262,100 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("zwlr_layer_shell_v1", out[0])
 
-    def test_a_target_with_a_line_passes_whatever_its_other_interfaces(self):
+    def test_a_line_grants_every_privileged_global_the_target_binds(self):
         self.client()
-        self.package(
-            "athanor-dock",
-            '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n',
-            {
-                "src/main.rs": "use athanor_compositor_client::connect;\nfn f() { w.set_layer(Layer::Top); }\n"
-            },
-        )
-        # The line lacks the toplevel list the client binds: the check never derives a grant.
+        dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
+        dock = "use athanor_compositor_client::connect;\nfn f() { w.set_layer(Layer::Top); }\n"
+        launcher = "use athanor_compositor_client::Client;\nfn f() { client.capture(id); }\n"
+        cases = {
+            # What the client binds at connect, missing from the line.
+            "a missing connect name": (
+                "athanor-dock", dock,
+                "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1\n",
+                "ext_foreign_toplevel_list_v1",
+            ),
+            # What the client binds at the first capture, missing from a capturing target's line.
+            "a missing capture grant": (
+                "athanor-launcher", launcher,
+                "/usr/bin/athanor-launcher athanor-launcher.service ext_foreign_toplevel_list_v1\n",
+                "ext_image_copy_capture_manager_v1",
+            ),
+            # A name that is no privileged or layer-gated row, as a new version of a global.
+            "an unknown name": (
+                "athanor-dock", dock,
+                "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
+                "ext_foreign_toplevel_list_v1 ext_workspace_manager_v2\n",
+                "ext_workspace_manager_v2",
+            ),
+            "a trailing comment": (
+                "athanor-dock", dock,
+                "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
+                "ext_foreign_toplevel_list_v1 #dock\n",
+                "names #dock",
+            ),
+            "a line with no interface": (
+                "athanor-dock", dock,
+                "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
+                "ext_foreign_toplevel_list_v1\n/usr/bin/athanor-dock athanor-dock.service\n",
+                "grant nothing at all",
+            ),
+            "a standard global": (
+                "athanor-dock", dock,
+                "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
+                "ext_foreign_toplevel_list_v1 wl_compositor\n",
+                "wl_compositor",
+            ),
+        }
+        for case, (name, main, line, missing) in cases.items():
+            with self.subTest(case):
+                self.fresh()
+                self.client()
+                self.package(name, dependency, {"src/main.rs": main})
+                self.lines(line)
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn(missing, out[0])
+        # A grant beyond what the target binds is the maintainer's: it passes.
+        self.fresh()
+        self.client()
+        self.package("athanor-dock", dependency, {"src/main.rs": dock})
+        self.package("athanor-launcher", dependency, {"src/main.rs": launcher})
         self.lines(
-            "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_session_lock_manager_v1\n"
+            "/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 "
+            "ext_foreign_toplevel_list_v1 ext_session_lock_manager_v1\n"
+            "/usr/bin/athanor-launcher athanor-launcher.service ext_foreign_toplevel_list_v1 "
+            "ext_image_copy_capture_manager_v1\n"
         )
         self.assertEqual(self.problems(), [])
+
+    def test_the_check_never_passes_on_nothing(self):
+        self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
+        self.assertEqual(self.problems(), [])
+        cases = {
+            "no privileged row": (verify.GLOBALS_FILE, "zwlr_layer_shell_v1 layer-gated\n", "no privileged row"),
+            "a row with a trailing comment": (
+                verify.GLOBALS_FILE, GLOBALS + "zwlr_output_manager_v1 privileged # the control center\n",
+                "zwlr_output_manager_v1 privileged # the control center",
+            ),
+            "a row of no class": (verify.GLOBALS_FILE, GLOBALS + "wl_shm everyone\n", "wl_shm everyone"),
+            "a client whose connect names no privileged global": (
+                f"{CLIENT}/src/connection.rs", "pub fn connect() {}\n", "binds at connect",
+            ),
+            "a client whose capture moved": (
+                f"{CLIENT}/src/capture.rs", "\n", "binds at the first capture",
+            ),
+            "no target": ("forge/specs/athanor-dock/athanor-dock.spec", "Name: athanor-dock\n", "no target"),
+        }
+        for case, (path, text, problem) in cases.items():
+            with self.subTest(case):
+                self.fresh()
+                if path.startswith(CLIENT):
+                    self.client()
+                self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
+                self.write(path, text)
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn(problem, out[0])
 
     def test_the_greeter_overlay_target_needs_its_line(self):
         self.package(
@@ -309,6 +399,7 @@ class AllowList(unittest.TestCase):
         self.assertIn("OUTSIDE_THE_LIST", out[0])
 
     def test_an_exemption_no_spec_installs_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
         out, notes = self.exempt()
         self.assertEqual(len(out), 1, out)
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
@@ -458,6 +549,7 @@ class AllowList(unittest.TestCase):
             "a glob": "install -D -m 0755 -t %{buildroot}%{_bindir} target/release/*",
             "an unknown macro": "install -D -m 0755 target/release/%{binary} %{buildroot}%{_bindir}/athanor-dock",
         }
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
         for case, install in written.items():
             with self.subTest(case):
                 self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
@@ -481,24 +573,19 @@ class AllowList(unittest.TestCase):
         self.assertIn("athanor-dock-peek.service", out[0])
 
     def test_a_capture_counts_however_it_is_called(self):
-        self.write(
-            f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
-        )
-        self.write(
-            f"{CLIENT}/src/lib.rs",
-            "mod capture;\nuse crate::capture;\npub fn connect() {}\n",
-        )
-        self.write(
-            f"{CLIENT}/src/capture.rs",
-            'fn capture() { Unavailable("ext_session_lock_manager_v1") }\n',
-        )
+        self.client()
         dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
         self.package(
             "athanor-dock",
             dependency,
             {"src/main.rs": "use athanor_compositor_client::connect;\nfn main() {}\n"},
         )
+        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
         self.assertEqual(self.problems(), [])
+        self.lines(
+            "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+            "/usr/bin/athanor-launcher athanor-launcher.service ext_foreign_toplevel_list_v1\n"
+        )
         for call in (
             "Client::capture(&client, id)",
             "windows.map(Client::capture)",
@@ -515,7 +602,7 @@ class AllowList(unittest.TestCase):
                 out = self.problems()
                 self.assertEqual(len(out), 1, out)
                 self.assertIn("/usr/bin/athanor-launcher", out[0])
-                self.assertIn("ext_session_lock_manager_v1", out[0])
+                self.assertIn("ext_image_copy_capture_manager_v1", out[0])
 
     def test_a_spec_feature_of_a_dependency_enables_it(self):
         self.write(

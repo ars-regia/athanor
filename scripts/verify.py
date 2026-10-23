@@ -2105,6 +2105,13 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # name of them in the crate.
 ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
              ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)"))}
+CLIENT_CRATE = "system/athanor-compositor-client"
+# Where athanor-compositor-client names the privileged globals it binds at connect and at the
+# first capture. Each names at least one, or the check no longer sees what the client binds.
+CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
+                "system/athanor-compositor-client/src/capture.rs": "at the first capture"}
+# The classes of data/globals, as the compositor's fixture reads them (`classified`).
+CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 
 
 def top_layer(files):
@@ -2343,24 +2350,48 @@ def build_flags(spec, package):
 def allow_list_problems(root=None, notes=None, outside=None):
     """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
     a crate of the tree, that asks for the top or overlay layer or names a privileged global
-    of data/globals has a line in data/privileged-clients, with zwlr_layer_shell_v1 when it
-    asks for those layers; each line names an executable a spec installs. A line's other
-    interfaces are the maintainer's grants, never derived here. An executable of
-    `outside` (OUTSIDE_THE_LIST by default) is appended to `notes` in place of its problem."""
+    of data/globals has a line in data/privileged-clients, and each of its lines grants
+    zwlr_layer_shell_v1 when it asks for those layers and every privileged global its code
+    names; each line names an executable a spec installs, and only interfaces of the
+    privileged and layer-gated rows. A grant beyond those is the maintainer's, never
+    derived here. An executable of `outside` (OUTSIDE_THE_LIST by default) is appended to
+    `notes` in place of its problem."""
     root = Path(root or ROOT)
     notes = [] if notes is None else notes
     outside = OUTSIDE_THE_LIST if outside is None else outside
     problems = []
-    privileged = set()
-    for line in read(root / GLOBALS_FILE).splitlines():
+    classes = {}
+    for number, line in enumerate(read(root / GLOBALS_FILE).splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
         words = line.split()
-        if len(words) == 2 and words[1] == "privileged":
-            privileged.add(words[0])
+        if len(words) != 2 or words[1] not in CLASSES:
+            problems.append(f"{GLOBALS_FILE}:{number}: not `<interface> <class>` with a class of "
+                            f"{', '.join(CLASSES)}, which the compositor's fixture refuses: {line}")
+            continue
+        classes[words[0]] = words[1]
+    privileged = {i for i, c in classes.items() if c == "privileged"}
+    grantable = {i for i, c in classes.items() if c in ("privileged", "layer-gated")}
+    if not privileged:
+        problems.append(f"{GLOBALS_FILE} has no privileged row: no client would need a line")
+    if (root / CLIENT_CRATE / "Cargo.toml").is_file():
+        for where, when in CLIENT_BINDS.items():
+            text = without_comments(without_test_items(read(root / where))) if (root / where).is_file() else ""
+            if not any(re.search(rf"\b{i}\b", text) for i in privileged):
+                problems.append(f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
+                                f"longer sees what athanor-compositor-client binds {when}")
     lines = collections.defaultdict(list)
     for line in read(root / ALLOW_LIST).splitlines():
         words = line.split()
-        if words and not words[0].startswith("#"):
+        if len(words) in (1, 2) and not words[0].startswith("#"):
+            problems.append(f"{ALLOW_LIST}: not `<executable> <unit> <interface>...`, which makes the "
+                            f"compositor grant nothing at all: {line.strip()}")
+        elif words and not words[0].startswith("#"):
             lines[words[0]].append(words[1:])
+            problems += [f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
+                         f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
+                         for name in words[2:] if name not in grantable]
 
     bins = {}
     for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
@@ -2382,6 +2413,7 @@ def allow_list_problems(root=None, notes=None, outside=None):
             if built:
                 targets.append((built.group(1), executable, spec, spec_path, in_tree))
 
+    checked = 0
     for built, executable, spec, spec_path, in_tree in targets:
         if built not in bins:
             # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
@@ -2395,6 +2427,7 @@ def allow_list_problems(root=None, notes=None, outside=None):
                 problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
                                 f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
             continue
+        checked += 1
         crate, package, entry = bins[built]
         features, defaults, every = build_flags(spec, package)
         if every:
@@ -2421,11 +2454,17 @@ def allow_list_problems(root=None, notes=None, outside=None):
                          "(doc_session.md SN12)")
         elif executable not in lines:
             problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
-        elif layer:
-            problems += [f"{executable}: asks for the top or overlay layer ({layer}) and its line for "
-                         f"{line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)"
-                         for line in lines[executable] if LAYER_SHELL not in line[1:]]
+        else:
+            for line in lines[executable]:
+                if layer and LAYER_SHELL not in line[1:]:
+                    problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
+                                    f"for {line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)")
+                problems += [f"{executable}: binds {n} ({at}) and its line for {line[0]} does not grant it"
+                             for n, at in sorted(names.items()) if n not in line[1:]]
 
+    if not checked:
+        problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
+                        "builds: the check found no target")
     for executable in lines:
         if executable not in installed:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
