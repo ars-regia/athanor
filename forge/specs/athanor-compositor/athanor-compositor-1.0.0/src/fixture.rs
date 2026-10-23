@@ -3876,3 +3876,42 @@ fn os9_a_virtual_release_while_locked_is_the_same_pointers() {
     assert_eq!(clicker.client.idle, ["idled"], "the session stays idle");
     run.stop();
 }
+
+/// A virtual pointer made and dropped is no input: the idle session stays idle, locked or not.
+/// A press dropped while locked leaves no entry behind.
+#[test]
+fn os9_a_virtual_pointer_coming_and_going_is_no_activity() {
+    use wayland_client::protocol::wl_pointer;
+    for locked in [true, false] {
+        let mut run = Running::start(None);
+        let _lock = locked.then(|| lock_session(&mut run));
+        let mut clicker = Local::connect(&mut run, None);
+        let seat: wl_seat::WlSeat = clicker.bind(1);
+        let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+        let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = clicker.bind(1);
+        let qh = clicker.queue.handle();
+        let _notification = notifier.get_idle_notification(100, &seat, &qh, ());
+        clicker.pump(&mut run, "the session is idle", |client, _| {
+            client.idle == ["idled"]
+        });
+        let pointer = manager.create_virtual_pointer(Some(&seat), &qh, ());
+        if locked {
+            // BTN_LEFT, dropped while locked.
+            pointer.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+            pointer.frame();
+        }
+        clicker.roundtrip(&mut run);
+        assert!(
+            run.state.virtual_buttons.is_empty(),
+            "no entry for a pointer that holds nothing (locked: {locked})"
+        );
+        pointer.destroy();
+        clicker.roundtrip(&mut run);
+        assert_eq!(
+            clicker.client.idle,
+            ["idled"],
+            "the session stays idle (locked: {locked})"
+        );
+        run.stop();
+    }
+}

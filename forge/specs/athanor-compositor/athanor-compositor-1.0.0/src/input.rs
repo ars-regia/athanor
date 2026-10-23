@@ -342,30 +342,49 @@ impl VirtualPointerHandler for State {
         // held buttons to its grabs, so the compositor counts each virtual pointer's itself.
         let locked = self.drops_virtual_input();
         match &event {
+            // A pointer coming or going is no input: no activity, so a client that makes and
+            // drops pointers in a loop does not keep the session awake.
+            InputEvent::DeviceAdded { .. } => return,
             InputEvent::DeviceRemoved { device } => {
                 self.virtual_buttons.remove(device);
+                return;
             }
             InputEvent::PointerButton { event } => {
                 let (device, button) = (event.device(), event.button_code());
-                let held = self.virtual_buttons.entry(device).or_default();
-                let holds = held.contains(&button);
+                let holds = self
+                    .virtual_buttons
+                    .get(&device)
+                    .is_some_and(|held| held.contains(&button));
                 match event.state() {
                     ButtonState::Pressed if locked => return,
-                    ButtonState::Pressed if !holds => held.push(button),
+                    ButtonState::Pressed => {
+                        if !holds {
+                            self.virtual_buttons.entry(device).or_default().push(button);
+                        }
+                    }
                     ButtonState::Released if holds => {
-                        held.retain(|b| *b != button);
+                        if let Some(held) = self.virtual_buttons.get_mut(&device) {
+                            held.retain(|b| *b != button);
+                        }
                         // Not through `process_input_event`: letting go is no activity, and the
                         // locked session keeps going idle.
                         if locked {
                             return self.button_input(button, ButtonState::Released, event.time());
                         }
                     }
-                    _ if locked => return,
-                    _ => {}
+                    ButtonState::Released if locked => return,
+                    ButtonState::Released => {}
                 }
             }
-            _ if locked => return,
-            _ => {}
+            InputEvent::PointerMotion { .. }
+            | InputEvent::PointerMotionAbsolute { .. }
+            | InputEvent::PointerAxis { .. } => {
+                if locked {
+                    return;
+                }
+            }
+            // Smithay's virtual pointer sends nothing else; anything it may add is no input here.
+            _ => return,
         }
         let InputEvent::PointerMotionAbsolute { event } = event else {
             return self.process_input_event(event);
