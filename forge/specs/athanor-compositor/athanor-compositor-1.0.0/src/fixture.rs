@@ -5065,3 +5065,27 @@ fn os9_a_stale_input_method_commit_reaches_no_field() {
     assert_eq!(other_field.names_after(other_before), ["done"]);
     run.stop();
 }
+
+/// A key the input method forwards through its own virtual keyboard while it holds the
+/// keyboard goes to the focused window, not back to its grab.
+#[test]
+fn os9_a_key_the_input_method_forwards_reaches_the_window() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [] as [u32; 0], "the grab saw no key");
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the grab takes a hardware key", |_, _| {
+        method.keys() == [31]
+    });
+    run.stop();
+}

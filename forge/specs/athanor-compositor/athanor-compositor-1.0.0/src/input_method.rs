@@ -175,6 +175,14 @@ impl State {
         );
     }
 
+    /// Whether `client` holds the keyboard's grab, the input method's: a key it types through
+    /// its own virtual keyboard is one it forwards, for the focused surface, not for itself.
+    pub fn holds_keyboard_grab(&self, client: Option<Client>) -> bool {
+        let grab = self.composing.method.as_ref().and_then(|m| m.grab.as_ref());
+        let owner = grab.and_then(|grab| grab.client()).map(|owner| owner.id());
+        owner.is_some() && owner == client.map(|client| client.id())
+    }
+
     /// Installs `grab`, the input method's, unless the session is locked: then it stays a dead
     /// object, sent nothing, now and after unlock.
     fn grab_keyboard(&mut self, grab: ZwpInputMethodKeyboardGrabV2) {

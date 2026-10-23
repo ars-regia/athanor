@@ -55,6 +55,19 @@ impl State {
         time: InputTime,
         source: KeyboardSource,
     ) {
+        self.typed(code, key_state, time, source, false);
+    }
+
+    /// As `key_input`, and a key `past_grab` goes to the focused surface past the keyboard's
+    /// grab: the input method's, which forwards it through its own virtual keyboard.
+    fn typed(
+        &mut self,
+        code: Keycode,
+        key_state: KeyState,
+        time: InputTime,
+        source: KeyboardSource,
+        past_grab: bool,
+    ) {
         // A dropped press never reaches the seat: it changes neither the keys held nor the
         // modifiers a hardware key is read with. A release is never dropped: a key held when the
         // session locked is let go, or a window would see it held after unlock.
@@ -72,13 +85,11 @@ impl State {
         let to = keyboard
             .current_focus()
             .and_then(|surface| surface.client());
-        let filtered = keyboard.input_from_source(
+        let filtered = keyboard.input_intercept(
             source,
             self,
             code,
             key_state,
-            serial,
-            time,
             |state, modifiers, handle| match key_state {
                 KeyState::Pressed => {
                     match kept(modifiers, handle.modified_sym(), state.lock.is_some()) {
@@ -99,6 +110,26 @@ impl State {
                 },
             },
         );
+        let filtered = match filtered {
+            Some((FilterResult::Intercept(kept), _)) => Some(kept),
+            Some((FilterResult::Forward, mods_changed)) => {
+                if past_grab {
+                    keyboard.input_forward_bypassing_grab(
+                        self,
+                        code,
+                        key_state,
+                        serial,
+                        time,
+                        mods_changed,
+                    );
+                } else {
+                    keyboard.input_forward(self, code, key_state, serial, time, mods_changed);
+                }
+                None
+            }
+            // A key another source holds already: there is nothing to send.
+            None => None,
+        };
         match filtered {
             // Sent to the client: a popup's grab may name its serial.
             None => {
@@ -386,8 +417,9 @@ impl VirtualKeyboardHandler for State {
                 }
                 self.activity();
                 self.request_redraw();
+                let past_grab = self.holds_keyboard_grab(device.client());
                 self.with_keymap_of(&device, |state| {
-                    state.key_input(code, key_state, time, device.source())
+                    state.typed(code, key_state, time, device.source(), past_grab)
                 });
             }
             InputEvent::Special(VirtualKeyboardSpecialEvent::Modifiers {
