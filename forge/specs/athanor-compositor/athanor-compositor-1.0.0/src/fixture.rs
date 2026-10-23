@@ -47,6 +47,7 @@ use wayland_protocols::ext::idle_notify::v1::client::{
 };
 use wayland_protocols::ext::image_capture_source::v1::client::{
     ext_foreign_toplevel_image_capture_source_manager_v1, ext_image_capture_source_v1,
+    ext_output_image_capture_source_manager_v1,
 };
 use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_frame_v1, ext_image_copy_capture_manager_v1,
@@ -313,6 +314,7 @@ delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_output::WlOutput);
 delegate_noop!(Client: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1);
+delegate_noop!(Client: ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1);
 delegate_noop!(Client: ext_image_capture_source_v1::ExtImageCaptureSourceV1);
 delegate_noop!(Client: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1);
 delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
@@ -808,8 +810,9 @@ const CONTROL_CENTER: (&str, &str) = (
 /// layers and the output manager.
 const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 \
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
-    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1 ext_workspace_manager_v1 \
-    zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1\n\
+    ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
+    ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
+    zwlr_virtual_pointer_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -4131,4 +4134,157 @@ fn os9_a_virtual_pointer_coming_and_going_is_no_activity() {
         );
         run.stop();
     }
+}
+
+/// A capture source of output `index`, named by `local`'s own `wl_output` of it, and a session
+/// of it that has its constraints.
+fn output_session(
+    local: &mut Local,
+    run: &mut Running,
+    copy: &ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+    index: usize,
+) -> (
+    ext_image_capture_source_v1::ExtImageCaptureSourceV1,
+    ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+) {
+    let sources: ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1 =
+        local.bind(1);
+    let qh = local.queue.handle();
+    let (name, version) = local
+        .client
+        .globals
+        .iter()
+        .filter(|(_, interface, _)| interface == "wl_output")
+        .nth(index)
+        .map(|(name, _, version)| (*name, *version))
+        .expect("the output's global");
+    let output: wl_output::WlOutput = local.registry.bind(name, version.min(4), &qh, ());
+    let source = sources.create_source(&output, &qh, ());
+    let session = copy.create_session(
+        &source,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+        &qh,
+        (),
+    );
+    local.pump(run, "the session has its constraints", |client, _| {
+        client.capture_size.is_some()
+    });
+    (source, session)
+}
+
+/// The whole of `file`, `len` bytes from its start.
+fn contents(file: &std::fs::File, len: usize) -> Vec<u8> {
+    let mut bytes = vec![0; len];
+    file.read_exact_at(&mut bytes, 0).expect("the buffer");
+    bytes
+}
+
+/// A client granted `ext_output_image_capture_source_manager_v1`, the bar, captures the
+/// fixture's second output by its `wl_output` (OS4, register row 10). The window is moved onto
+/// that output, and the buffer then holds, byte for byte, the pixels the fixture reads back from
+/// it, in the client's B, G, R, A: the window's red among them, so a buffer left as it was fails.
+#[test]
+fn os9_an_output_is_captured_by_a_granted_client() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = run.state.space.outputs().nth(1).expect("output 1").clone();
+    let area = run.state.space.output_geometry(&second).expect("mapped");
+    run.state
+        .space
+        .map_element(window, area.loc + Point::from((40, 40)), false);
+
+    let mut bar = Local::connect(&mut run, None);
+    let shm: wl_shm::WlShm = bar.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
+    let (_source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
+    assert_eq!(
+        bar.client.capture_size,
+        Some((w as u32, h as u32)),
+        "the output's size in pixels"
+    );
+
+    let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
+    let frame = session.create_frame(&bar.queue.handle(), ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, w, h);
+    frame.capture();
+    bar.pump(&mut run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(bar.client.captured, Some(Ok(())), "the frame is ready");
+
+    let expected: Vec<u8> = run
+        .state
+        .capture(1)
+        .expect("frame of output 1")
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|&[r, g, b, a]| [b, g, r, a])
+        .collect();
+    let captured = contents(&file, expected.len());
+    assert!(
+        captured == expected,
+        "the buffer is output 1 as the fixture reads it back"
+    );
+    assert!(
+        captured.as_chunks::<4>().0.contains(&[0, 0, 255, 255]),
+        "the window's red is in it"
+    );
+    run.stop();
+}
+
+/// While the session is locked no output is captured (OS4, register row 10). A frame asked for
+/// in the same flush as the lock fails, its session is stopped, and the buffer keeps its own
+/// bytes; a new session of the output is refused.
+#[test]
+fn os9_output_capture_is_refused_while_locked() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let shm: wl_shm::WlShm = bar.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = bar.bind(1);
+    let (source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
+    let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
+
+    let qh = bar.queue.handle();
+    let frame = session.create_frame(&qh, ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, w, h);
+    frame.capture();
+    // The compositor reads both requests before it draws the next frame.
+    let _lock = locks.lock(&qh, ());
+    let stopped = session.id();
+    bar.pump(
+        &mut run,
+        "the frame fails and the session stops",
+        |client, _| client.captured.is_some() && client.stopped.contains(&stopped),
+    );
+    assert!(
+        matches!(bar.client.captured, Some(Err(_))),
+        "the frame fails: {:?}",
+        bar.client.captured
+    );
+    let len = usize::try_from(w * h * 4).expect("size");
+    assert!(
+        contents(&file, len).iter().all(|&byte| byte == 0x55),
+        "no pixel of the output reaches the buffer"
+    );
+
+    let refused = copy
+        .create_session(
+            &source,
+            ext_image_copy_capture_manager_v1::Options::empty(),
+            &qh,
+            (),
+        )
+        .id();
+    bar.pump(
+        &mut run,
+        "a session is refused while locked",
+        |client, _| client.stopped.contains(&refused),
+    );
+    run.stop();
 }

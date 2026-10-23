@@ -62,7 +62,7 @@ Since task 5 the top and overlay layers are a privileged client's.
 
 Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
 windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
-through the toplevel capture source, into a client's `wl_shm` buffer (`src/capture.rs`).
+through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
@@ -94,7 +94,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1` | every client outside a security context |
@@ -118,6 +118,11 @@ pointer still reach the lock surface.
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
 position, transform or adaptive sync fails.
+`ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
+and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
+client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
+binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
+client.
 
 The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
 the bar what the plan names, and the fixture grants its clients every privileged global but the
