@@ -44,7 +44,7 @@
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
-#   rig.sh atspi <greeter|chooser|bar|dock> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <greeter|chooser|bar|dock|launcher> it   the same in Italian, with the shipped catalog
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
@@ -957,6 +957,12 @@ EOF
     echo "look at $out/bar-preview-*.png"
     ;;
 atspi)
+    # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
+    # its reference is recorded under cosmic-comp only.
+    if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        echo "rig.sh atspi: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        exit 2
+    fi
     # A screen reader announces itself by setting IsEnabled; GTK exports its tree then.
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     # In Italian as well as English (doc_shell.md, section 7 item 3 and section 8 item 6): the
@@ -974,7 +980,7 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
-            [dock]="athanor-dock Applicazioni")
+            [dock]="athanor-dock Applicazioni" [launcher]="athanor-launcher Cerca")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$2]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
@@ -987,10 +993,12 @@ atspi)
         # chips; and the seal, which names the badge a verified state backs (doc_shell.md,
         # section 7, item 3).
         in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="${required:-System image verified}" \
+            ATSPI_REQUIRED_NAME="${required:-System image verified}" ATSPI_TRANSCRIPT="/out/atspi-greeter${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-greeter-ui 7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui"
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-greeter${3:+-$3}.json" "/out/atspi-greeter${3:+-$3}.json"
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
@@ -1051,6 +1059,7 @@ atspi)
         seed_bar "$out/seed-atspi-bar" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
+            ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
@@ -1068,6 +1077,10 @@ atspi)
                 exit 1
             fi
         fi
+        # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
+        # athanor-compositor it names each line the bar lacks (Input source and Tiling, C1).
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
@@ -1099,13 +1112,16 @@ atspi)
         # 1 interactive widget by atspi_check.py's list of roles: the entry, named "Search".
         # The list ("Results") and its rows are not in that list, and a header row has no
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
+        # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
-            ATHANOR_LAUNCHER_SHOW="cc window" \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
+            ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
             bash -c "$enable && python3 /repo/forge/test/shell/launcher_fixtures.py \
                      && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher"
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-launcher${3:+-$3}.json" "/out/atspi-launcher${3:+-$3}.json"
         ;;
     *)
         echo "rig.sh atspi: unknown surface '${2:-}'" >&2
@@ -1114,6 +1130,12 @@ atspi)
     esac
     ;;
 orca)
+    # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
+    # its reference is recorded under cosmic-comp only.
+    if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        echo "rig.sh orca: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        exit 2
+    fi
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
     # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
@@ -1157,8 +1179,8 @@ orca)
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
     transcript=orca-$2${3:+-$3}.txt
-    # Placeholder: how many results "cc window" lists in the launcher is read from no code (the
-    # providers and the headers decide it); the controller sets it from the recording.
+    # Set from the recording: how many results "cc window" lists in the launcher is read from no
+    # code (the providers and the headers decide it), so this is a provisional value.
     launcher_steps=1
     case "$2" in
     chooser)
