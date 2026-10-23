@@ -91,7 +91,7 @@ push_probe() {
     done
 }
 
-probe() { guest_ssh "sudo python3 $PROBE_DIR/greeter_probe.py $(printf '%q ' "$@")"; }
+probe() { guest_ssh "sudo python3 -B $PROBE_DIR/greeter_probe.py $(printf '%q ' "$@")"; }
 
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$HERE/keyboard_type.py"; }
 
