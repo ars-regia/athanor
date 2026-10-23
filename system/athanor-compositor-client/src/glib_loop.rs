@@ -331,9 +331,12 @@ mod tests {
     }
 
     /// One test: GLib's default context has one owner at a time, and the tests of a binary
-    /// run on threads of their own.
+    /// run on threads of their own, so it holds `MAIN_CONTEXT` as the clients' tests do.
     #[test]
     fn glib_runs_its_sources_inside_calloop() {
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut event_loop: EventLoop<'static, ()> = EventLoop::try_new().expect("event loop");
         event_loop
             .handle()
