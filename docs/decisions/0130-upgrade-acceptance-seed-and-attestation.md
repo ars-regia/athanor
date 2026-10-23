@@ -24,23 +24,21 @@ disagree:
 - Step 3 serves the candidate's `sha256-<hex>.sig` attachment. The client also reads the
   candidate's attestation attachment (`.att`, `check.rs`), and treats a failed fetch as a
   warning: served without it, the upgrade would never be tested with the attestation.
-- UD21 sets `timeout-minutes: 60` from an estimate that leaves out the second reboot of the
-  rollback and the serial console's first boot, which the job keeps.
+- UD21 sets `timeout-minutes: 60`. The bounds of the planned job add up to about 70 minutes:
+  the install's existing 25-minute bound, 35 minutes for the upgrade, the rollback and their
+  checks, and about 10 minutes of setup, ISO fetch and evidence.
 
 ## Decision
 
 1. **Step 2 seeds `/etc/security/pwquality.conf.d/50-athanor.conf`.** The image writes it with
    fixed content (`system/Containerfile`), and it is the file an administrator edits to change
-   the password rules. The seed appends a comment, so the rule itself is unchanged, and the job
-   fails with a named message if the candidate ships a different copy of the file than the
-   "from" image, since the three-way merge would then test something else.
+   the password rules.
    - Option A, chosen: **a file the image already ships.** The merge is tested the same way,
      and nothing is added to the product image for a test.
    - Option B: **ship `/etc/athanor-upgrade-probe.conf`.** Rejected: a test-only file in the
      product image, and a job that cannot pass before a build carrying it is promoted.
 2. **Step 3 serves the `.att` attachment beside `.sig`, and the job requires it.** The job
-   fails when the candidate has no attestation, or when the guest did not store it after the
-   check.
+   fails when the candidate has no attestation.
    - Option A, chosen: **served and required.**
    - Option B: **`.sig` only, as written.** Rejected: the client would fall back with a warning,
      and the attestation path would go untested.
@@ -51,5 +49,5 @@ disagree:
 
 - Amended: `doc_update_delivery.md` UD18 steps 2 and 3, and UD21's timeout. Its status line
   names this record; the text of revision 3 keeps its words.
-- The plan `docs/superpowers/plans/2026-10-23-iso-secure-boot-update-to-stable.md` implements
-  UD18 and UD19 with these amendments.
+- The plan of the `upgrade-acceptance` job (#764) implements UD18 and UD19 with these
+  amendments.
