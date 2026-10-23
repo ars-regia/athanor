@@ -7,6 +7,11 @@
 # keyboard grab, and the click on the shield that would give it one needs a pointer QEMU's
 # monitor cannot move under egl-headless. The state stage checks that the unit trusts the state
 # root's os.athanor.Update1 answers with, and that the update service exits idle after the call.
+# The security stage (UT13, BR6 items 6 and 7) opens the sheet on three fixtures made from the
+# verified one: a security digest waiting for the next shutdown, which must offer "Postpone"
+# beside "Restart to update"; the same postponed, which must carry the expiry and no button; and
+# an opted-out machine, which must carry the persistent warning. It does not press the switch:
+# the switch is no push button for shield_probe.py, so the warning it opens is not driven here.
 # The stale stage moves the guest's clock 15 days past the last successful check, with no
 # check since, and the shield must read "Not verified yet" (SH12, 14 days); the clock goes
 # back to the host's, and NTP as it was, before the stage ends or in the cleanup.
@@ -38,7 +43,7 @@ UPDATE_POLICY=$ROOT/forge/specs/athanor-update/SOURCES/usr/share/dbus-1/system.d
 IDLE_EXIT_SECONDS=90 # the service's 60 s idle limit, polled every 5 s, plus margin
 DATA=$ROOT/forge/specs/athanor-bar/athanor-bar-1.0.0/data
 SHOTS=$ROOT/.scratch/shield-acceptance
-STAGES=(deploy sheet state actions stale cleanup)
+STAGES=(deploy sheet state actions security stale cleanup)
 STALE_SECONDS=$((15 * 86400))
 CLOCK_MOVED=0
 GUEST_NTP=
@@ -116,6 +121,23 @@ write_state() { # write_state NAME
         fail "installing the $1 state at /run/athanor-update/state.json"
 }
 
+# The verified fixture through a jq filter ($now is the guest's time), installed as the system
+# publishes it, with the units that would rewrite it masked.
+SHEET_NOW=
+write_variant() { # write_variant FILTER
+    local tmp
+    guest_ssh "sudo systemctl mask --runtime --now ${UPDATE_UNITS[*]}" > /dev/null ||
+        fail "masking ${UPDATE_UNITS[*]}"
+    SHEET_NOW=$(guest_ssh date +%s) || fail "reading the guest's clock"
+    tmp=$(mktemp)
+    python3 -B "$ROOT/forge/test/shell/trust_state.py" verified --now "$SHEET_NOW" --out "$tmp" ||
+        fail "trust_state.py verified"
+    jq -c --argjson now "$SHEET_NOW" "$1" "$tmp" |
+        guest_ssh "sudo tee /run/athanor-update/state.json > /dev/null && sudo chmod 0644 /run/athanor-update/state.json" ||
+        fail "installing the variant at /run/athanor-update/state.json"
+    rm -f "$tmp"
+}
+
 stage_deploy() {
     [[ -x $BIN/athanor-bar ]] || fail "no $BIN/athanor-bar: run forge/test/shell/rig.sh build-bar"
     [[ -x $UPDATE_BIN ]] ||
@@ -189,6 +211,40 @@ stage_actions() {
     probe showing "$RESTART" || fail "the sheet does not offer '$RESTART' on a state with a downloaded update"
     probe showing "$GO_BACK" || fail "the sheet does not offer '$GO_BACK' beside '$RESTART'"
     "$HERE/screenshot.sh" "$SHOTS/actions-downloaded.png" > /dev/null
+}
+
+# UT13 in the real session. The postponed sentence names the expiry, first_notice_at plus seven days,
+# as "28 October, 14:30" in the session's language (assumed English here).
+# shellcheck disable=SC2016 # a jq filter
+SECURITY_WAITING='.update = "will-apply-at-next-shutdown"
+  | .downloaded = (.booted | .digest = "sha256:" + ([range(64) | "2"] | add))
+  | .postpone = {anchor: null, first_notice_at: ($now - 3600), boots_remaining: 7, postponed: false}'
+OPT_OUT_WARNING="Automatic security updates are off: security fixes wait until someone installs them."
+stage_security() {
+    local when
+    write_variant "$SECURITY_WAITING"
+    fresh_start
+    open_sheet "security digest waiting"
+    probe showing "Postpone" || fail "the sheet does not offer Postpone for an unpostponed security digest"
+    probe showing "$RESTART" || fail "the sheet does not offer '$RESTART' beside Postpone"
+    probe showing "Automatic security updates" || fail "the sheet shows no switch for automatic security updates"
+    probe hidden "$OPT_OUT_WARNING" || fail "the sheet carries the opt-out warning with the opt-out off"
+    "$HERE/screenshot.sh" "$SHOTS/security-waiting.png" > /dev/null
+    write_variant "$SECURITY_WAITING | .update = \"downloaded\" | .postpone.postponed = true"
+    fresh_start
+    open_sheet "postponed"
+    when=$(guest_ssh "LC_ALL=en_US.UTF-8 date -d @$((SHEET_NOW - 3600 + 604800)) +'%-d %B, %H:%M'") || fail "formatting the expiry"
+    probe showing "The security update is postponed, at most until $when; then it installs at the next shutdown or restart." ||
+        fail "the sheet does not carry the postponed sentence with the expiry '$when'"
+    probe hidden "Postpone" || fail "the sheet offers Postpone for a postponed lineage"
+    "$HERE/screenshot.sh" "$SHOTS/security-postponed.png" > /dev/null
+    write_variant "$SECURITY_WAITING | .update = \"downloaded\" | .postpone = null | .automatic_security_updates = false"
+    fresh_start
+    open_sheet "opted out"
+    probe showing "$OPT_OUT_WARNING" || fail "the sheet carries no persistent warning with the opt-out on"
+    probe showing "$RESTART" || fail "the sheet does not offer '$RESTART' for a downloaded security digest with the opt-out on"
+    probe hidden "Postpone" || fail "the sheet offers Postpone with the opt-out on"
+    "$HERE/screenshot.sh" "$SHOTS/security-opted-out.png" > /dev/null
 }
 
 # SH12 in the real session: with no successful check for more than 14 days the shield turns
