@@ -9,6 +9,12 @@
 # RIG_COMPOSITOR: callers use this script only under RIG_COMPOSITOR=athanor.
 set -euo pipefail
 
+# It writes /usr/bin and the cgroup tree: only inside the rig's container, never on a host.
+if [ ! -e /run/.containerenv ]; then
+    echo "in-unit.sh: /run/.containerenv is missing; this runs only inside the rig's podman container" >&2
+    exit 1
+fi
+
 unit=${1:?usage: in-unit.sh <unit> <binary> [args...]}
 binary=${2:?usage: in-unit.sh <unit> <binary> [args...]}
 shift 2
