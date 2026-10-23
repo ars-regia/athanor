@@ -410,6 +410,7 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `SETTINGS_APP_CLIENT_ID` | variable, no default | repository | CI29 |
 | `EVIDENCE_REGISTRY`, `EVIDENCE_REGISTRY_USER` | variable, no default: unset, promotion fails closed (ADR-0106 item 4) | repository, set by the maintainer on 2026-10-11 | CI11 |
 | `EVIDENCE_REGISTRY_TOKEN` | secret (push credential of `EVIDENCE_REGISTRY`) | repository, set by the maintainer on 2026-10-11; repository-wide because the `plan` job, which has no environment, publishes the bundle | CI11 |
+| `MAINTAINER_TAG_EMAIL` | variable, no default: unset, the promotion of a commit carrying a `v*` tag fails closed (ADR-0131 decision 3) | repository, set by the maintainer | CI11 |
 
 Environments (`gh api repos/ars-regia/athanor/environments`):
 
