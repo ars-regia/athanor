@@ -1,7 +1,7 @@
 //! Smithay's handler traits: what the compositor does when a client commits, maps a window,
 //! opens a popup, imports a dmabuf or asks for activation.
 
-use crate::grabs::{kept_reachable, MoveGrab};
+use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
@@ -14,6 +14,7 @@ use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{
@@ -113,6 +114,7 @@ impl CompositorHandler for State {
                 window.on_commit();
                 self.place(&window);
                 self.relocated(&window);
+                self.anchor_resized(&window);
             }
         }
         self.layer_commit(surface);
@@ -454,6 +456,30 @@ impl XdgShellHandler for State {
             window,
             from,
         };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    /// The window's `edges` follow the pointer until every button is up. A maximised window
+    /// keeps its size.
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let maximised = surface
+            .with_pending_state(|state| state.states.contains(xdg_toplevel::State::Maximized));
+        if edges == xdg_toplevel::ResizeEdge::None || maximised {
+            return;
+        }
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(from) = self.space.element_geometry(&window) else {
+            return;
+        };
+        let grab = ResizeGrab::new(start, window, edges, from);
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 

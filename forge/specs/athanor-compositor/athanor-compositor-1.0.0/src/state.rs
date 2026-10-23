@@ -69,7 +69,7 @@ use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
-use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::viewporter::ViewporterState;
@@ -587,10 +587,7 @@ impl State {
             return;
         };
         if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
-            let acked = toplevel.with_cached_state(|state| {
-                state.last_acked.as_ref().map(|configure| configure.serial)
-            });
-            if acked.is_none_or(|acked| acked < serial) {
+            if !answered(toplevel, serial) {
                 return;
             }
         }
@@ -689,7 +686,10 @@ impl State {
         }
         // ponytail: no presentation feedback for the input method's popups, which ask for none
         // yet; take theirs in `presentation_feedback` when one does.
-        for surface in locked.iter().chain(popups.iter().map(|(surface, _)| surface)) {
+        for surface in locked
+            .iter()
+            .chain(popups.iter().map(|(surface, _)| surface))
+        {
             send_frames_surface_tree(
                 surface,
                 output,
@@ -1057,6 +1057,13 @@ pub struct Relocate(Cell<Option<Destination>>);
 struct Destination {
     to: Point<i32, Logical>,
     serial: Option<Serial>,
+}
+
+/// Whether the state `toplevel` committed answers the configure of `serial`, or a later one.
+pub fn answered(toplevel: &ToplevelSurface, serial: Serial) -> bool {
+    toplevel
+        .with_cached_state(|state| state.last_acked.as_ref().map(|configure| configure.serial))
+        .is_some_and(|acked| acked >= serial)
 }
 
 /// Asks for `window` to move its geometry to `to` at the commit that answers `serial`.

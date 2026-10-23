@@ -11,8 +11,10 @@ use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::KeyboardSource;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
     ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE, ZWP_TEXT_INPUT_V3_INTERFACE,
@@ -27,8 +29,6 @@ use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server:
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::backend::input::{ButtonState, InputTime};
-use smithay::input::pointer::CursorImageStatus;
 use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
 use std::collections::BTreeSet;
@@ -2498,10 +2498,14 @@ fn a_move_needs_the_clients_own_button_press() {
     // An older press's serial.
     press(&mut run, at);
     release(&mut run);
-    local.pump(&mut run, "the first press", |client, _| client.button.is_some());
+    local.pump(&mut run, "the first press", |client, _| {
+        client.button.is_some()
+    });
     let older = local.client.button.take().expect("a press");
     press(&mut run, at);
-    local.pump(&mut run, "the second press", |client, _| client.button.is_some());
+    local.pump(&mut run, "the second press", |client, _| {
+        client.button.is_some()
+    });
     toplevel._move(&seat, older);
     local.roundtrip(&mut run);
     assert!(!moving(&run), "an older press's serial is refused");
@@ -2581,6 +2585,59 @@ fn the_lock_ends_a_move() {
     run.stop();
 }
 
+/// A resize sends configures with the `resizing` state and the size the pointer asks for, and
+/// one without it at the release; from the top-left corner the bottom-right one stays (OS12).
+#[test]
+fn a_resize_sends_resizing_configures() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let resizing = xdg_toplevel::State::Resizing as u32;
+    let geometry = |run: &Running| {
+        run.state
+            .space
+            .element_geometry(&window_of(run, &id))
+            .expect("mapped")
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&resizing), "the configure is resizing");
+    assert_eq!((width, height), (WIDTH + 50, HEIGHT + 20));
+    release(&mut run);
+    let (_, _, states) = local.redraw(&mut run);
+    assert!(!states.contains(&resizing), "the release ends the resize");
+
+    let before = geometry(&run);
+    let at = before.loc.to_f64() + Point::from((5.0, 5.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::TopLeft);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at - Point::from((30.0, 40.0)), InputTime::now());
+    let (width, height, _) = local.redraw(&mut run);
+    assert_eq!((width, height), (before.size.w + 30, before.size.h + 40));
+    let after = geometry(&run);
+    assert_eq!(
+        (after.loc.x + after.size.w, after.loc.y + after.size.h),
+        (before.loc.x + before.size.w, before.loc.y + before.size.h),
+        "the bottom-right corner stays"
+    );
+    release(&mut run);
+    run.stop();
+}
+
 /// A maximised window takes the area the bar's zone leaves at the commit that draws that size,
 /// is fitted again when the zone changes, and goes back where it was, at its size, when
 /// restored (OS12).
@@ -2611,7 +2668,10 @@ fn a_window_is_maximised_and_restored() {
 
     toplevel.unset_maximized();
     let (width, height, states) = local.redraw(&mut run);
-    assert!(!states.contains(&maximized), "the configure is not maximised");
+    assert!(
+        !states.contains(&maximized),
+        "the configure is not maximised"
+    );
     assert_eq!((width, height), (WIDTH, HEIGHT));
     assert_eq!(location_of(&run, &id), before);
     run.stop();
@@ -2652,7 +2712,11 @@ fn another_clients_cursor_is_not_shown() {
         .space
         .map_element(window_of(&run, &id), area.loc, true);
     let (other, _) = fixture_window(&run);
-    let over = run.state.space.element_location(&other).expect("a location");
+    let over = run
+        .state
+        .space
+        .element_location(&other)
+        .expect("a location");
     run.state
         .pointer_to(over.to_f64() + Point::from((20.0, 10.0)), InputTime::now());
     // Smithay resets the cursor when the focus changes: the client's is put back, as if it had
