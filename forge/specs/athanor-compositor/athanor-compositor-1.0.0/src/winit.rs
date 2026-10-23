@@ -95,10 +95,11 @@ impl State {
         let frame_period = Duration::from_secs_f64(1_000.0 / f64::from(REFRESH));
         let frame_target = self.clock.now() + frame_period;
         let output = nested.output.clone();
+        let popups = self.composing.popups_on(&self.space, &output);
         let age = nested.backend.buffer_age().unwrap_or(0);
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
-                let view = View::of(&self.space, self.lock.as_ref(), &output);
+                let view = View::of(&self.space, self.lock.as_ref(), &popups, &output);
                 let started = Instant::now();
                 let drawn = draw_view(
                     renderer,

@@ -55,6 +55,19 @@ impl State {
         time: InputTime,
         source: KeyboardSource,
     ) {
+        self.typed(code, key_state, time, source, false);
+    }
+
+    /// As `key_input`, and a key `past_grab` goes to the focused surface past the keyboard's
+    /// grab: the input method's, which forwards it through its own virtual keyboard.
+    fn typed(
+        &mut self,
+        code: Keycode,
+        key_state: KeyState,
+        time: InputTime,
+        source: KeyboardSource,
+        past_grab: bool,
+    ) {
         // A dropped press never reaches the seat: it changes neither the keys held nor the
         // modifiers a hardware key is read with. A release is never dropped: a key held when the
         // session locked is let go, or a window would see it held after unlock.
@@ -72,13 +85,11 @@ impl State {
         let to = keyboard
             .current_focus()
             .and_then(|surface| surface.client());
-        let filtered = keyboard.input_from_source(
+        let filtered = keyboard.input_intercept(
             source,
             self,
             code,
             key_state,
-            serial,
-            time,
             |state, modifiers, handle| match key_state {
                 KeyState::Pressed => {
                     match kept(modifiers, handle.modified_sym(), state.lock.is_some()) {
@@ -99,6 +110,27 @@ impl State {
                 },
             },
         );
+        let filtered = match filtered {
+            Some((FilterResult::Intercept(kept), _)) => Some(kept),
+            Some((FilterResult::Forward, mods_changed)) => {
+                if past_grab {
+                    // The focus is sent no modifiers while a grab holds the keyboard: they are
+                    // sent with the key, whether it changed them or not.
+                    keyboard.input_forward_bypassing_grab(
+                        self, code, key_state, serial, time, true,
+                    );
+                    // The grab was not sent the key: it is sent what the key changed.
+                    if mods_changed {
+                        self.input_method_modifiers();
+                    }
+                } else {
+                    keyboard.input_forward(self, code, key_state, serial, time, mods_changed);
+                }
+                None
+            }
+            // A key another source holds already: there is nothing to send.
+            None => None,
+        };
         match filtered {
             // Sent to the client: a popup's grab may name its serial.
             None => {
@@ -250,21 +282,32 @@ impl State {
         let modifiers = self.virtual_modifiers.get(device).copied();
         let seat_modifiers = (self.virtual_keymap.is_none() && modifiers.is_some())
             .then(|| keyboard.modifier_state().serialized);
-        if let Some([depressed, latched, locked, group]) = modifiers {
-            keyboard.with_xkb_state(self, |mut context| {
-                context.set_modifier_mask(depressed, latched, locked, group)
-            });
+        if let Some(modifiers) = modifiers {
+            self.set_modifiers(&keyboard, modifiers);
         }
         input(self);
         if let Some(saved) = seat_modifiers {
-            keyboard.with_xkb_state(self, |mut context| {
-                context.set_modifier_mask(
-                    saved.depressed,
-                    saved.latched,
-                    saved.locked,
-                    saved.layout_effective,
-                )
-            });
+            let mask = [
+                saved.depressed,
+                saved.latched,
+                saved.locked,
+                saved.layout_effective,
+            ];
+            self.set_modifiers(&keyboard, mask);
+        }
+    }
+
+    /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
+    /// with no key: the focused surface is sent them when they change, and so is the input
+    /// method's grab, which a key would otherwise have carried them to.
+    fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
+        let [depressed, latched, locked, group] = mask;
+        let before = keyboard.modifier_state().serialized;
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group)
+        });
+        if keyboard.modifier_state().serialized != before {
+            self.input_method_modifiers();
         }
     }
 
@@ -316,6 +359,7 @@ impl State {
             seat_keymap,
             seat_modifiers,
         });
+        self.input_method_keymap_changed();
         true
     }
 
@@ -344,6 +388,7 @@ impl State {
         keyboard.with_xkb_state(self, |mut context| {
             context.set_modifier_mask(depressed, latched, locked, layout)
         });
+        self.input_method_keymap_changed();
     }
 }
 
@@ -358,7 +403,7 @@ pub struct VirtualKeymap {
 }
 
 /// The keymap of `xkb`, as the clients are sent it.
-fn keymap_text(xkb: &Mutex<Xkb>) -> String {
+pub(crate) fn keymap_text(xkb: &Mutex<Xkb>) -> String {
     xkb.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .keymap_as_string()
@@ -373,6 +418,14 @@ impl VirtualKeyboardHandler for State {
                 let device = event.device();
                 let (code, key_state, time) =
                     (event.key_code(), event.state(), Event::time(&event));
+                // The release of a key forwarded past the input method's grab goes past it too,
+                // to the surface that saw the press, even once the grab or its client is gone:
+                // smithay lets go of a gone keyboard's keys when its client may be gone too.
+                let forwarded = key_state == KeyState::Released
+                    && self
+                        .past_grab_keys
+                        .get_mut(&device)
+                        .is_some_and(|held| held.remove(&code));
                 // While locked a press is dropped before anything, and a release lets go of a
                 // key the seat holds under the keymap the seat has: no client is sent this
                 // client's keymap, and the idle timers keep running.
@@ -384,9 +437,14 @@ impl VirtualKeyboardHandler for State {
                 }
                 self.activity();
                 self.request_redraw();
+                let past_grab = forwarded || self.holds_keyboard_grab(device.client());
                 self.with_keymap_of(&device, |state| {
-                    state.key_input(code, key_state, time, device.source())
+                    state.typed(code, key_state, time, device.source(), past_grab)
                 });
+                // A code outside evdev's keys is not kept: its release takes the grab's way.
+                if past_grab && key_state == KeyState::Pressed && KEYS.contains(&code.raw()) {
+                    self.past_grab_keys.entry(device).or_default().insert(code);
+                }
             }
             InputEvent::Special(VirtualKeyboardSpecialEvent::Modifiers {
                 device,
@@ -404,14 +462,8 @@ impl VirtualKeyboardHandler for State {
                     .is_some_and(|current| current.device == device);
                 if current && !self.drops_virtual_input() {
                     if let Some(keyboard) = self.seat.get_keyboard() {
-                        keyboard.with_xkb_state(self, |mut context| {
-                            context.set_modifier_mask(
-                                mods_depressed,
-                                mods_latched,
-                                mods_locked,
-                                group,
-                            )
-                        });
+                        let mask = [mods_depressed, mods_latched, mods_locked, group];
+                        self.set_modifiers(&keyboard, mask);
                     }
                 }
                 self.virtual_modifiers
@@ -419,6 +471,7 @@ impl VirtualKeyboardHandler for State {
             }
             InputEvent::DeviceRemoved { device } => {
                 self.virtual_modifiers.remove(&device);
+                self.past_grab_keys.remove(&device);
                 if self
                     .virtual_keymap
                     .as_ref()
@@ -518,6 +571,9 @@ impl VirtualPointerHandler for State {
 
 /// The evdev codes of buttons, BTN_MISC to KEY_MAX.
 const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
+
+/// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
+const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
 
 /// A key the compositor keeps for itself.
 #[derive(Clone, Copy, Debug, PartialEq)]

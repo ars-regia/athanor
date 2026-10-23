@@ -261,7 +261,8 @@ where
             // ponytail: never the pointer, whatever the session's `paint_cursors`; draw it when
             // a client asks for it (the portal, task 7).
             let mut tracker = OutputDamageTracker::from_output(output);
-            let view = View::Space(space);
+            // ponytail: without the input method's popups; pass them in when a capture needs them.
+            let view = View::Space(space, &[]);
             let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker)
                 .map_err(|error| format!("{error:?}"))?;
             result.sync.wait()?;

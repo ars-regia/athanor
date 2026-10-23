@@ -170,6 +170,10 @@ check-unit shard:
 check-rust:
     #!/usr/bin/env bash
     set -euo pipefail
+    # fuzz/ is outside the workspace and no other job reads its lockfile: scripts/ci/fuzz-container.sh
+    # runs this same command, so a drifted fuzz/Cargo.lock stops the weekly fuzz job unless it fails here,
+    # first, before the rig build.
+    cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null
     bash forge/test/shell/rig.sh build-image
     # The calculator's test runs the real qalc of the rig and may not skip here.
     export ATHANOR_REQUIRE_QALC=1

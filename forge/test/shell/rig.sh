@@ -54,6 +54,7 @@
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
+#                           RIG_COMPOSITOR=athanor runs it under athanor-compositor, the input method as its rig unit (run build-compositor first)
 #   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-toolkit's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
@@ -1276,10 +1277,15 @@ measure-chooser)
     ;;
 input-method)
     # doc_own_stack.md, T1 task 6 (OS9 item 3): the test input method pre-edits and commits into
-    # athanor-toolkit's text field under cosmic-comp, which offers zwp_input_method_v2 to the
-    # scene's clients because none is behind a security context.
+    # athanor-toolkit's text field. cosmic-comp offers zwp_input_method_v2 to the scene's clients
+    # because none is behind a security context; under RIG_COMPOSITOR=athanor the input method
+    # runs as rig-input-method.service, which rig-privileged-clients grants the protocol
+    # (input_method_check.py).
     require athanor-toolkit-field build-toolkit
     require athanor-toolkit-input-method build-toolkit
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+    fi
     in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=4 \
         RIG_HOLD="python3 /repo/forge/test/shell/input_method_check.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 input-method -- \
