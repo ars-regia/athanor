@@ -1,0 +1,9 @@
+# Each case of `rig.sh golden-report` whose capture under athanor-compositor differs from
+# cosmic-comp's golden by more than compare.py's tolerance. One entry per case: the cause (one
+# of the eight of docs/spikes/c1-own-compositor.md, or a newer one) and the issue that tracks
+# it. The report fails on a difference without an entry and on an entry without a difference.
+#
+#   [[difference]]
+#   case = "bar-light-1.0-en"
+#   cause = "..."
+#   issue = 0
