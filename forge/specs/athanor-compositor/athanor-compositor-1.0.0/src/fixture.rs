@@ -4505,7 +4505,10 @@ fn text_input(local: &mut Local, run: &mut Running) -> Raw {
     let manager = Raw::bind(local, &ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE);
     let text_input = manager.create(
         "get_text_input",
-        vec![Argument::NewId(ObjectId::null()), Argument::Object(seat.id())],
+        vec![
+            Argument::NewId(ObjectId::null()),
+            Argument::Object(seat.id()),
+        ],
         &ZWP_TEXT_INPUT_V3_INTERFACE,
     );
     local.roundtrip(run);
@@ -4539,7 +4542,10 @@ impl SimulatedInputMethod {
         let manager = Raw::bind(local, &ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE);
         let method = manager.create(
             "get_input_method",
-            vec![Argument::Object(seat.id()), Argument::NewId(ObjectId::null())],
+            vec![
+                Argument::Object(seat.id()),
+                Argument::NewId(ObjectId::null()),
+            ],
             &ZWP_INPUT_METHOD_V2_INTERFACE,
         );
         local.roundtrip(run);
@@ -4551,7 +4557,12 @@ impl SimulatedInputMethod {
 
     /// Commits the pending state, with the serial the protocol asks: the `done` events received.
     fn commit(&self, local: &mut Local, run: &mut Running) {
-        let done = self.method.names_after(0).iter().filter(|name| **name == "done").count();
+        let done = self
+            .method
+            .names_after(0)
+            .iter()
+            .filter(|name| **name == "done")
+            .count();
         let serial = u32::try_from(done).expect("serial");
         self.method.send("commit", vec![Argument::Uint(serial)]);
         local.roundtrip(run);
@@ -4583,11 +4594,14 @@ impl SimulatedInputMethod {
 
     /// The evdev codes of the keys pressed on its grabs.
     fn keys(&self) -> Vec<u32> {
-        self.grabs.iter().flat_map(Raw::events).filter_map(|(name, args)| match (name, &args[..]) {
-            ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
-            _ => None,
-        })
-        .collect()
+        self.grabs
+            .iter()
+            .flat_map(Raw::events)
+            .filter_map(|(name, args)| match (name, &args[..]) {
+                ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -4615,7 +4629,12 @@ fn os9_a_committed_string_reaches_the_focused_text_input() {
     method.preedit(&mut ime, &mut run, "e");
     method.commit_string(&mut ime, &mut run, "è");
     window.pump(&mut run, "the text input is done twice", |_, _| {
-        field.names_after(before).iter().filter(|name| **name == "done").count() == 2
+        field
+            .names_after(before)
+            .iter()
+            .filter(|name| **name == "done")
+            .count()
+            == 2
     });
     let received: Vec<(&str, Vec<String>)> = field.events().into_iter().skip(before).collect();
     let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
@@ -4638,7 +4657,9 @@ fn os9_the_input_method_grab_is_dropped_while_locked() {
     let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
     method.grab_keyboard(&mut ime, &mut run);
     chord(&mut run.state, &[30]);
-    ime.pump(&mut run, "the grab takes the key", |_, _| method.keys() == [30]);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
     window.roundtrip(&mut run);
     assert!(window.client.keys.is_empty(), "the window saw no key");
 
@@ -4652,23 +4673,33 @@ fn os9_the_input_method_grab_is_dropped_while_locked() {
     // A grab asked for while locked does not hold either.
     method.grab_keyboard(&mut ime, &mut run);
     chord(&mut run.state, &[32]);
-    locker.pump(&mut run, "the lock surface takes the next key", |client, _| {
-        client.keys == [31, 32]
-    });
+    locker.pump(
+        &mut run,
+        "the lock surface takes the next key",
+        |client, _| client.keys == [31, 32],
+    );
     ime.roundtrip(&mut run);
-    assert_eq!(method.keys(), [30], "the input method saw no key typed on the lock");
+    assert_eq!(
+        method.keys(),
+        [30],
+        "the input method saw no key typed on the lock"
+    );
 
     lock.unlock_and_destroy();
     let id = window.id.clone().expect("a client the fixture inserted");
-    locker.pump(&mut run, "unlocking gives the window the keyboard", |_, state| {
-        state
-            .seat
-            .get_keyboard()
-            .and_then(|k| k.current_focus())
-            .and_then(|s| s.client())
-            .map(|c| c.id())
-            == Some(id.clone())
-    });
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| {
+            state
+                .seat
+                .get_keyboard()
+                .and_then(|k| k.current_focus())
+                .and_then(|s| s.client())
+                .map(|c| c.id())
+                == Some(id.clone())
+        },
+    );
     assert!(!grabbed(&run.state), "unlocking restores no grab");
     chord(&mut run.state, &[33]);
     window.pump(&mut run, "the window takes the key", |client, _| {
@@ -4744,5 +4775,159 @@ fn os9_a_sandboxed_client_has_no_text_input() {
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
     let other = Local::connect(&mut run, None);
     assert!(other.sees(manager), "a client with no line");
+    run.stop();
+}
+
+/// Presses the key of evdev code `code`, or releases it, as the backend hands it to the seat.
+fn key(state: &mut State, code: u32, pressed: bool) {
+    use smithay::backend::input::{InputTime, KeyState};
+    let key_state = if pressed {
+        KeyState::Pressed
+    } else {
+        KeyState::Released
+    };
+    state.key_input(
+        (code + 8).into(),
+        key_state,
+        InputTime::now(),
+        KeyboardSource::Physical,
+    );
+}
+
+/// Left Shift, as evdev numbers it.
+const SHIFT: u32 = 42;
+
+/// A keyboard grab asked for while locked is sent nothing, not even the keymap, the repeat
+/// rate or the modifiers held on the lock: a modifier pressed while the password is typed
+/// stays unknown to the input method, when pressed and when released.
+#[test]
+fn os9_a_grab_taken_while_locked_is_sent_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let (mut locker, _lock) = lock_session(&mut run);
+    key(&mut run.state, SHIFT, true);
+    method.grab_keyboard(&mut ime, &mut run);
+    locker.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "with Shift held on the lock");
+    key(&mut run.state, SHIFT, false);
+    chord(&mut run.state, &[30]);
+    locker.pump(&mut run, "the lock surface takes the keys", |client, _| {
+        client.keys == [SHIFT, 30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "after Shift is released");
+    run.stop();
+}
+
+/// After unlock a grab taken while locked stays inert, and the input method takes the keyboard
+/// with a new grab, which is sent the keymap, the repeat rate and the modifiers, then the keys.
+#[test]
+fn os9_a_grab_taken_while_locked_stays_inert_after_unlock() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "unlocking ends the lock", |_, state| {
+        state.lock.is_none()
+    });
+    chord(&mut run.state, &[30]);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "the grab taken while locked");
+
+    method.grab_keyboard(&mut ime, &mut run);
+    let names = |raw: &Raw| raw.names_after(0);
+    assert_eq!(
+        names(&method.grabs[1]),
+        ["repeat_info", "keymap", "modifiers"]
+    );
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the new grab takes the key", |_, _| {
+        method.keys() == [31]
+    });
+    assert_eq!(method.grabs[0].events(), [], "the old grab still");
+    run.stop();
+}
+
+/// An input method releasing its keyboard grab ends that grab only: a popup's grab that
+/// replaced it goes on.
+#[test]
+fn os9_an_input_method_releasing_its_grab_leaves_a_popup_grab() {
+    let mut run = Running::start(None);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let grabbed = |state: &State| state.seat.get_keyboard().is_some_and(|k| k.is_grabbed());
+    assert!(grabbed(&run.state), "the input method holds the keyboard");
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    let exclusive = focus(&run.state).expect("the exclusive surface");
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, shell_id.clone()));
+    steps
+        .send(Step::Popup(serial.into()))
+        .expect("the shell's client");
+    run.until("the popup's grab takes the keyboard", |state| {
+        focus(state).is_some_and(|surface| {
+            surface != exclusive && state.popups.find_popup(&surface).is_some()
+        })
+    });
+    let popup = focus(&run.state);
+
+    method.grabs[0].send("release", vec![]);
+    ime.roundtrip(&mut run);
+    assert!(grabbed(&run.state), "the popup's grab goes on");
+    assert_eq!(focus(&run.state), popup, "the popup keeps the keyboard");
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// One input method per seat: a second is told it is unavailable, as the only event it gets,
+/// and the first goes on serving the focused text input.
+#[test]
+fn os9_a_second_input_method_is_unavailable() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let mut other = Local::connect(&mut run, None);
+    let second = SimulatedInputMethod::new(&mut other, &mut run);
+    assert_eq!(second.method.names_after(0), ["unavailable"]);
+    let before = field.events().len();
+    method.commit_string(&mut ime, &mut run, "è");
+    window.pump(&mut run, "the text input is done", |_, _| {
+        field.names_after(before).contains(&"done")
+    });
+    assert_eq!(field.names_after(before), ["commit_string", "done"]);
     run.stop();
 }

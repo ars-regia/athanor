@@ -116,11 +116,16 @@ the lock still goes on, so that nothing stays held after unlock. The hardware ke
 pointer still reach the lock surface.
 The input method of OS9 item 3 is granted to no shipped client; the rig grants its test input
 method (`forge/test/shell/rig-privileged-clients`). Text input is offered outside a security
-context only (open question 13). While the session is locked no keyboard grab holds: locking
-ends the input method's, a grab it takes while locked ends at the next key, and unlocking ends
-any grab rather than restoring it, so the keys typed on the lock reach the lock surface only.
-The lock surface has no text input either: the input method is not activated for it nor told
-its text, and what it commits reaches no client.
+context only (open question 13). The compositor serves both protocols itself
+(`src/input_method.rs`), one input method per seat; a second is told `unavailable`. Locking
+ends the input method's keyboard grab. A grab it asks for while locked is never installed and
+is sent nothing, neither the keymap, the repeat rate nor the modifiers held on the lock, and it
+stays so after unlock: only a grab asked for while unlocked is sent the keymap, the repeat rate
+and the current modifiers, then the keys. While locked the text inputs follow no surface, so
+the input method is neither activated for the lock surface nor told its text, and what it
+commits or pre-edits reaches no client. Releasing its grab ends that grab only, never one that
+replaced it; an exclusive layer surface taking the keyboard ends any grab, the input method's
+included.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,

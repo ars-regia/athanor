@@ -68,12 +68,6 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        // While locked no grab holds the keyboard: the lock ended the one it found, and one an
-        // input method takes while locked, which Smithay sets at its request, ends here, before
-        // it can read a key typed on the lock.
-        if self.lock.is_some() && keyboard.is_grabbed() {
-            keyboard.unset_grab(self);
-        }
         let serial = SERIAL_COUNTER.next_serial();
         let to = keyboard
             .current_focus()
@@ -322,6 +316,7 @@ impl State {
             seat_keymap,
             seat_modifiers,
         });
+        self.input_method_keymap_changed();
         true
     }
 
@@ -350,6 +345,7 @@ impl State {
         keyboard.with_xkb_state(self, |mut context| {
             context.set_modifier_mask(depressed, latched, locked, layout)
         });
+        self.input_method_keymap_changed();
     }
 }
 
@@ -364,7 +360,7 @@ pub struct VirtualKeymap {
 }
 
 /// The keymap of `xkb`, as the clients are sent it.
-fn keymap_text(xkb: &Mutex<Xkb>) -> String {
+pub(crate) fn keymap_text(xkb: &Mutex<Xkb>) -> String {
     xkb.lock()
         .unwrap_or_else(PoisonError::into_inner)
         .keymap_as_string()

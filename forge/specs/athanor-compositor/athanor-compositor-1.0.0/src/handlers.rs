@@ -1,7 +1,7 @@
 //! Smithay's handler traits: what the compositor does when a client commits, maps a window,
 //! opens a popup, imports a dmabuf or asks for activation.
 
-use crate::state::{unconfined, ClientState, State};
+use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
@@ -18,8 +18,7 @@ use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
-use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
-use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
+use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{Logical, Point, Rectangle, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
@@ -33,9 +32,6 @@ use smithay::wayland::drm_syncobj::{DrmSyncobjCachedState, DrmSyncobjHandler, Dr
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
-use smithay::wayland::input_method::{
-    InputMethodHandler, InputMethodSeat, PopupSurface as InputMethodPopup,
-};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::security_context::{
@@ -50,8 +46,6 @@ use smithay::wayland::shell::xdg::{
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
-use smithay::wayland::text_input::{TextInputActivation, TextInputSeat};
-use smithay::wayland::{GlobalData, GlobalDispatch2};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
@@ -528,19 +522,12 @@ impl SeatHandler for State {
     /// Smithay checks no focus on `wl_data_offer.receive` and keeps the offer's object data to
     /// itself, so the compositor cannot withdraw it.
     ///
-    /// While the session is locked the text input follows the keyboard nowhere: Smithay has just
-    /// entered the lock surface's text inputs, and they leave again, so that the input method is
-    /// neither activated for the lock nor told its text, and what it commits reaches no client.
+    /// The text inputs follow the keyboard too, except while the session is locked
+    /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| surface.client());
         set_data_device_focus(&self.display_handle, seat, client);
-        if self.lock.is_some() {
-            let text_input = seat.text_input();
-            if seat.input_method().has_instance() || text_input.compositor_input_method() {
-                text_input.leave();
-            }
-            text_input.set_focus(None);
-        }
+        self.text_input_focus(focused.cloned());
     }
 }
 
@@ -728,63 +715,6 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
         .filter(|last| last.is_no_older_than(&enter))
         .unwrap_or(enter);
     serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
-}
-
-/// The user data of the text input global, offered to every client outside a security context
-/// (open question 13 of the OS9 plan): Smithay's `TextInputManagerState` offers it to all.
-pub struct TextInputs;
-
-impl GlobalDispatch2<ZwpTextInputManagerV3, State> for TextInputs {
-    fn bind(
-        &self,
-        _: &mut State,
-        _: &DisplayHandle,
-        _: &Client,
-        resource: New<ZwpTextInputManagerV3>,
-        data_init: &mut DataInit<'_, State>,
-    ) {
-        // Smithay serves the manager's requests on `GlobalData`.
-        data_init.init(resource, GlobalData);
-    }
-
-    fn can_view(&self, client: &Client) -> bool {
-        unconfined(client)
-    }
-}
-
-impl TextInputActivation for State {}
-
-/// The input method's popup, its candidate list, is shown beside the text input it serves, as
-/// an xdg popup of that surface is.
-impl InputMethodHandler for State {
-    fn new_popup(&mut self, surface: InputMethodPopup) {
-        if let Err(error) = self.popups.track_popup(PopupKind::from(surface)) {
-            tracing::warn!(%error, "an input method popup could not be tracked");
-        }
-    }
-
-    fn dismiss_popup(&mut self, surface: InputMethodPopup) {
-        let Some(parent) = surface.get_parent().map(|parent| parent.surface.clone()) else {
-            return;
-        };
-        if let Err(error) =
-            smithay::desktop::PopupManager::dismiss_popup(&parent, &PopupKind::from(surface))
-        {
-            tracing::warn!(%error, "an input method popup could not be dismissed");
-        }
-    }
-
-    fn popup_repositioned(&mut self, _: InputMethodPopup) {}
-
-    /// The geometry of the window whose surface is `parent`; a surface of no window, a layer
-    /// surface's, places the popup from the origin.
-    fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, Logical> {
-        self.space
-            .elements()
-            .find(|window| window.toplevel().is_some_and(|t| t.wl_surface() == parent))
-            .map(Window::geometry)
-            .unwrap_or_default()
-    }
 }
 
 smithay::delegate_dispatch2!(State);

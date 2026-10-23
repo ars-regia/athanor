@@ -4,6 +4,7 @@
 use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
+use crate::input_method::PlacedPopup;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
 use crate::udev::Drm;
@@ -39,7 +40,6 @@ use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
-use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -61,7 +61,6 @@ use smithay::wayland::image_capture_source::{
     OutputCaptureSourceState, ToplevelCaptureSourceState,
 };
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
-use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
 use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
@@ -90,6 +89,11 @@ use std::time::Duration;
 pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
 
 pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
+
+/// The keyboard's repeat: the delay before a held key repeats, in milliseconds, and the
+/// repeats per second.
+pub const REPEAT_DELAY: i32 = 200;
+pub const REPEAT_RATE: i32 = 25;
 
 /// What draws the outputs.
 pub enum Backend {
@@ -120,6 +124,8 @@ pub struct State {
     /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
     /// none while the seat has its own (`with_keymap_of`).
     pub virtual_keymap: Option<crate::input::VirtualKeymap>,
+    /// The text inputs and the input method (`input_method.rs`).
+    pub composing: crate::input_method::Composing,
     /// The buttons each virtual pointer holds, whose release goes on while the session is
     /// locked; a pointer's entry goes with it. Only evdev's button codes are counted, so an entry
     /// holds at most 512.
@@ -259,15 +265,14 @@ impl State {
         });
         VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
         // Composed text (OS9 item 3): the input method by grant, text input outside a sandbox.
-        InputMethodManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::InputMethod));
-        dh.create_global::<Self, ZwpTextInputManagerV3, _>(1, crate::handlers::TextInputs);
+        crate::input_method::globals(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
-        seat.add_keyboard(Default::default(), 200, 25)?;
+        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)?;
         seat.add_pointer();
 
         dispatch_clients(event_loop, display)?;
@@ -286,6 +291,7 @@ impl State {
             kept_keys: Vec::new(),
             virtual_modifiers: HashMap::new(),
             virtual_keymap: None,
+            composing: Default::default(),
             virtual_buttons: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,
@@ -539,6 +545,10 @@ impl State {
         if let Some(surface) = &locked {
             with_surfaces_surface_tree(surface, scanout);
         }
+        let popups = self.composing.popups_on(&self.space, output);
+        for (surface, _) in &popups {
+            with_surfaces_surface_tree(surface, scanout);
+        }
         if damaged {
             self.presentation_feedback(output, states).presented(
                 frame_target,
@@ -564,7 +574,9 @@ impl State {
                 surface_primary_scanout_output,
             );
         }
-        if let Some(surface) = &locked {
+        // ponytail: no presentation feedback for the input method's popups, which ask for none
+        // yet; take theirs in `presentation_feedback` when one does.
+        for surface in locked.iter().chain(popups.iter().map(|(surface, _)| surface)) {
             send_frames_surface_tree(
                 surface,
                 output,
@@ -660,18 +672,23 @@ impl State {
     }
 }
 
-/// What an output shows: the space, or while the session is locked only the lock surface the
-/// locker gave it, if any, on the background.
+/// What an output shows: the space with the input method's popups on top, or while the session
+/// is locked only the lock surface the locker gave it, if any, on the background.
 pub enum View<'a> {
-    Space(&'a Space<Window>),
+    Space(&'a Space<Window>, &'a [PlacedPopup]),
     Locked(Option<&'a WlSurface>),
 }
 
 impl<'a> View<'a> {
-    pub fn of(space: &'a Space<Window>, lock: Option<&'a Lock>, output: &Output) -> Self {
+    pub fn of(
+        space: &'a Space<Window>,
+        lock: Option<&'a Lock>,
+        popups: &'a [PlacedPopup],
+        output: &Output,
+    ) -> Self {
         match lock {
             Some(lock) => View::Locked(lock.surface_on(output)),
-            None => View::Space(space),
+            None => View::Space(space, popups),
         }
     }
 }
@@ -690,17 +707,33 @@ where
     R::TextureId: Clone + Texture + 'static,
 {
     match view {
-        View::Space(space) => render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
-            output,
-            renderer,
-            framebuffer,
-            1.0,
-            age,
-            [space],
-            &[],
-            damage_tracker,
-            BACKGROUND,
-        ),
+        View::Space(space, popups) => {
+            let scale = output.current_scale().fractional_scale();
+            let popups: Vec<WaylandSurfaceRenderElement<R>> = popups
+                .iter()
+                .flat_map(|(surface, at)| {
+                    render_elements_from_surface_tree(
+                        renderer,
+                        surface,
+                        at.to_physical_precise_round(scale),
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                })
+                .collect();
+            render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
+                output,
+                renderer,
+                framebuffer,
+                1.0,
+                age,
+                [space],
+                &popups,
+                damage_tracker,
+                BACKGROUND,
+            )
+        }
         View::Locked(surface) => {
             let scale = output.current_scale().fractional_scale();
             let elements: Vec<WaylandSurfaceRenderElement<R>> = surface
