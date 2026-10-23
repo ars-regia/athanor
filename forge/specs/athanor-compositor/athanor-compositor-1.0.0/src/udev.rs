@@ -104,6 +104,16 @@ pub struct Drm {
     pointer: SolidColorBuffer,
 }
 
+/// What a scheduled draw of an output is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wake {
+    /// A draw that is due.
+    Draw,
+    /// The frame callbacks of a surface shown on no output, at `FRAME_THROTTLE`: a request to
+    /// draw does not wait for it.
+    Throttle,
+}
+
 /// A monitor: the output and what draws it.
 struct Head {
     output: Output,
@@ -112,8 +122,8 @@ struct Head {
     queued: bool,
     /// Whether its frames showed the lock.
     lock: LockFrames,
-    /// The next draw, when one is scheduled.
-    timer: Option<RegistrationToken>,
+    /// The next draw, when one is scheduled, and what it is for.
+    timer: Option<(RegistrationToken, Wake)>,
     /// Whether its draws keep failing, so that the log says so once (`FailureLog`).
     failing: FailureLog,
     /// Something may have changed since the last draw (`request_redraw`).
@@ -717,7 +727,7 @@ impl State {
         let Some(head) = drm.outputs.remove(&crtc) else {
             return;
         };
-        if let Some(timer) = head.timer {
+        if let Some((timer, _)) = head.timer {
             self.loop_handle.remove(timer);
         }
         let output = head.output.clone();
@@ -745,13 +755,18 @@ impl State {
 
     /// Draws the output of `crtc` after `delay`, in place of a draw scheduled before.
     fn schedule(&mut self, crtc: crtc::Handle, delay: Duration) {
+        self.wake(crtc, delay, Wake::Draw);
+    }
+
+    /// Schedules the next draw of `crtc` after `delay`, in place of the one scheduled.
+    fn wake(&mut self, crtc: crtc::Handle, delay: Duration, wake: Wake) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
-        if let Some(timer) = head.timer.take() {
+        if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
         let timer = Timer::from_duration(delay);
@@ -764,7 +779,7 @@ impl State {
             state.draw(crtc);
             TimeoutAction::Drop
         }) {
-            Ok(timer) => head.timer = Some(timer),
+            Ok(timer) => head.timer = Some((timer, wake)),
             Err(error) => {
                 tracing::warn!(error = %error.error, "the next frame could not be scheduled")
             }
@@ -823,9 +838,14 @@ impl State {
         }
         head.not_before = Some(Instant::now() + period.mul_f64(0.6));
         let next = next_draw(head, Instant::now());
+        let idle = next.is_none() && head.timer.is_none();
         self.confirm_lock();
         if let Some(delay) = next {
             self.schedule(crtc, delay);
+        } else if idle && self.frame_callbacks_waiting() {
+            // Only a draw sends a frame callback, and a request may have taken the throttle's
+            // place: with no draw to follow, a surface still waiting is drawn for at the throttle.
+            self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
         }
         // `locked` and the presentation feedback are sent here, and nothing else flushes an idle
         // seat.
@@ -949,7 +969,7 @@ impl State {
             if redraw {
                 self.schedule(crtc, period);
             } else if waiting {
-                self.schedule(crtc, FRAME_THROTTLE);
+                self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
             }
         }
         self.serve_captures();
@@ -1082,19 +1102,28 @@ fn lock_shown<'a>(heads: impl IntoIterator<Item = &'a LockFrames>) -> bool {
 
 /// The delay of the next draw of `head`, when it must be scheduled at `now`: when something
 /// may have changed and neither a queued frame (whose VBlank draws the next) nor a scheduled
-/// draw will draw it.
+/// draw will draw it. A wake-up at the throttle does not count: it would hold the request back
+/// for up to a second.
 fn next_draw(head: &Head, now: Instant) -> Option<Duration> {
     pacing(
         head.wanted,
-        head.queued || head.timer.is_some(),
+        head.queued,
+        head.timer.map(|(_, wake)| wake),
         head.not_before,
         now,
     )
 }
 
-/// `next_draw`, of what it reads of the head: `wanted`, a frame queued or a draw scheduled
-/// (`busy`), and the earliest next draw.
-fn pacing(wanted: bool, busy: bool, not_before: Option<Instant>, now: Instant) -> Option<Duration> {
+/// `next_draw`, of what it reads of the head: `wanted`, a frame queued, what the scheduled
+/// draw is for, and the earliest next draw.
+fn pacing(
+    wanted: bool,
+    queued: bool,
+    scheduled: Option<Wake>,
+    not_before: Option<Instant>,
+    now: Instant,
+) -> Option<Duration> {
+    let busy = queued || scheduled == Some(Wake::Draw);
     (wanted && !busy).then(|| {
         not_before.map_or(Duration::ZERO, |not_before| {
             not_before.saturating_duration_since(now)
@@ -1204,31 +1233,46 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 
 #[cfg(test)]
 mod tests {
-    use super::{lock_shown, pacing, FailureLog, LockFrames};
+    use super::{lock_shown, pacing, FailureLog, LockFrames, Wake};
     use std::time::{Duration, Instant};
 
     #[test]
     fn an_output_draws_only_when_asked_and_at_most_once_a_refresh() {
         let now = Instant::now();
         let period = Duration::from_millis(16);
-        assert_eq!(pacing(false, false, None, now), None, "idle: no draw");
+        assert_eq!(pacing(false, false, None, None, now), None, "idle: no draw");
         assert_eq!(
-            pacing(true, false, None, now),
+            pacing(true, false, None, None, now),
             Some(Duration::ZERO),
             "asked: at once"
         );
         assert_eq!(
-            pacing(true, true, None, now),
+            pacing(true, true, None, None, now),
             None,
-            "a queued frame or a scheduled draw draws it"
+            "a queued frame draws it"
         );
         assert_eq!(
-            pacing(true, false, Some(now + period), now),
+            pacing(true, false, Some(Wake::Draw), None, now),
+            None,
+            "a scheduled draw draws it"
+        );
+        assert_eq!(
+            pacing(true, false, Some(Wake::Throttle), None, now),
+            Some(Duration::ZERO),
+            "a wake-up at the throttle does not hold a request back"
+        );
+        assert_eq!(
+            pacing(false, false, Some(Wake::Throttle), None, now),
+            None,
+            "nor draws unasked"
+        );
+        assert_eq!(
+            pacing(true, false, None, Some(now + period), now),
             Some(period),
             "not before a refresh after the last draw"
         );
         assert_eq!(
-            pacing(true, false, Some(now), now + period),
+            pacing(true, false, None, Some(now), now + period),
             Some(Duration::ZERO),
             "at once when that refresh is over"
         );
