@@ -1058,6 +1058,22 @@ def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
     assert (out / "kept.png").exists(), "run_iso_test.sh removed a file it does not own"
 
 
+def test_upgrade_deadline_ends_inside_the_job(tmp: pathlib.Path) -> None:
+    """run_iso_test.sh's own deadline for the upgrade case (TIMEOUT, from the script's start)
+    ends inside the job's timeout-minutes, with room for the setup before the script and the
+    report after it: GitHub cancelling the job would leave no verdict at all. The room is an
+    estimate: about 10 minutes of setup and ISO fetch (the install job's comment), 5 of report
+    and uploads, and 5 of margin."""
+    job = (HERE.parents[2] / ".github/workflows/accept.yml").read_text().split("\n  upgrade-acceptance:\n", 1)[1]
+    minutes = int(re.search(r"^    timeout-minutes: (\d+)$", job, re.M).group(1))
+    step = re.search(r'^          TIMEOUT: "(\d+)"$', job, re.M)
+    script = (HERE / "run_iso_test.sh").read_text()
+    default = int(re.search(r"^if \[\[ -n \$\{UPDATE_TO:-\} \]\]; then timeout_default=(\d+); fi$", script, re.M).group(1))
+    deadline = int(step.group(1)) if step else default
+    assert deadline + (10 + 5 + 5) * 60 <= minutes * 60, (deadline, minutes)
+    assert default <= deadline, "run_iso_test.sh's own default outlives the job"
+
+
 def test_plain_case_unchanged(tmp: pathlib.Path) -> None:
     """Without `upgrade` nothing of the upgrade is read, even if its files are there."""
     code, _ = verdict(tmp, COMPLETE + [("secureboot-enabled", 381)], 0, "secure-boot",
@@ -1235,6 +1251,7 @@ def main() -> int:
             test_upgrade_shim_refusal_fails,
             test_upgrade_requires_secure_boot,
             test_upgrade_clears_the_last_runs_files,
+            test_upgrade_deadline_ends_inside_the_job,
             test_plain_case_unchanged,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,

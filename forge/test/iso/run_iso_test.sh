@@ -46,10 +46,13 @@ DISK_GIB=${DISK_GIB:-30}
 # Measured on a KVM runner, the install itself takes about eight minutes and the whole
 # job under twelve, so twenty-five is room to spare rather than a budget to spend. Raise
 # it for a host without KVM, where everything is emulated and hours are normal.
-# The upgrade case adds the candidate's download, two reboots each way and the checks of
-# both boots: STAGES_TIMEOUT bounds those stages, and the outer bound grows to match.
+# The upgrade case adds the candidate's copy to the runner's registry, its download, two
+# reboots each way and the checks of both boots. TIMEOUT counts from this script's start, so
+# the copy is inside it, and it ends inside the job's timeout-minutes (accept.yml): a job that
+# GitHub cancels leaves no verdict. STAGES_TIMEOUT caps the stages, which also end a minute
+# before TIMEOUT, so a run out of time reads as the stages timing out.
 timeout_default=1500
-if [[ -n ${UPDATE_TO:-} ]]; then timeout_default=3600; fi
+if [[ -n ${UPDATE_TO:-} ]]; then timeout_default=3000; fi
 TIMEOUT=${TIMEOUT:-$timeout_default}
 STAGES_TIMEOUT=${STAGES_TIMEOUT:-2100}
 # Reported next to the time the first boot actually took, so a run that is getting slower
@@ -228,10 +231,12 @@ shots_pid=$!
 # and it is the one usbguard blocks when the image ships no policy for it. With QEMU's
 # default PS/2 keyboard the first install on real hardware reached a greeter nobody could
 # type into while this test stayed green.
+vm_timeout=$((TIMEOUT - SECONDS))
+((vm_timeout > 0)) || { echo "the TIMEOUT of ${TIMEOUT}s was spent before the VM started" >&2; exit 1; }
 set +e
 # The serial socket waits for the console (wait=on): GRUB draws its menu once, and a console
 # that connects after it would never type the boot commands.
-timeout "$TIMEOUT" qemu-system-x86_64 \
+timeout "$vm_timeout" qemu-system-x86_64 \
     -machine "$machine" "${secure_boot[@]}" -accel "$accel" -cpu max -smp "${VCPUS:-4}" -m "${MEMORY_MIB:-6144}" \
     -device qemu-xhci -device usb-kbd \
     -drive "if=pflash,format=raw,readonly=on,file=${ovmf_code}" \
@@ -260,10 +265,13 @@ qemu_pid=$!
 if [[ -n ${UPDATE_TO:-} ]]; then
     while kill -0 "$console_pid" 2> /dev/null && [[ ! -e ${output}/ready ]]; do sleep 5; done
     if [[ -e ${output}/ready ]]; then
+        stages_timeout=$((TIMEOUT - SECONDS - 60))
+        ((stages_timeout < STAGES_TIMEOUT)) || stages_timeout=$STAGES_TIMEOUT
+        ((stages_timeout > 0)) || stages_timeout=1
         stages_status=0
         ATHANOR_UPDATE_TO=$UPDATE_TO ATHANOR_UPDATE_CLASS=$(< "${serve}/class") ATHANOR_UPDATE_REPOSITORY=$UPDATE_REPOSITORY \
             ATHANOR_UPDATE_MIRROR=$(< "${serve}/mirror") ACC_CI_OUT=$output SSH_PORT=$SSH_PORT ACC_SSH_KEY=${keydir}/id \
-            timeout "$STAGES_TIMEOUT" bash "${here}/../../../scripts/devvm/acceptance/run.sh" --ci > "${output}/upgrade.log" 2>&1 ||
+            timeout "$stages_timeout" bash "${here}/../../../scripts/devvm/acceptance/run.sh" --ci > "${output}/upgrade.log" 2>&1 ||
             stages_status=$?
         echo "$stages_status" > "${output}/upgrade-status"
         echo "=== upgrade stages exited ${stages_status} (upgrade.log)"

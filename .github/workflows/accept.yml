@@ -165,7 +165,9 @@ jobs:
   upgrade-acceptance:
     needs: [install]
     runs-on: ubuntu-24.04
-    # Setup and fetch ~10, install and first boot ~25, stages 35 (STAGES_TIMEOUT 2100 s).
+    # Estimates: setup and fetch ~10 (as in install), run_iso_test.sh at most 50 (TIMEOUT
+    # 3000 s from its start: the candidate's copy, the install and the stages), report and
+    # uploads ~5, ~5 spare: the script's own deadline ends first, so the verdict says timeout.
     timeout-minutes: 70
     permissions:
       contents: read
@@ -218,6 +220,7 @@ jobs:
       - name: ⬆️ Install :stable, upgrade to the candidate and roll back
         env:
           SECURE_BOOT: "1"
+          TIMEOUT: "3000"
           VCPUS: "4"
           MEMORY_MIB: "6144"
         run: >-
