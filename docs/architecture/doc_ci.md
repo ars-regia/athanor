@@ -192,10 +192,10 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI12 Acceptance
 
-- **File:** `accept.yml`. **Purpose:** installs the ISO of one build run in a KVM guest, reboots, logs in at the greeter and checks that a session starts, then does it again on OVMF with Secure Boot enforced, the Athanor certificate enrolled through MokManager, passing only when the installed system reports Secure Boot enabled; screenshots; writes the `iso-acceptance` evidence of UD4 for the run's `athanor-system` digest, a pass only when both cases pass.
-- **Triggers:** dispatch (`run_id`, the build run). **Output:** artifacts `evidence-<run_id>-iso-acceptance` and `acceptance-<run_id>-<acceptance run id>`.
+- **File:** `accept.yml`. **Purpose:** installs the ISO of one build run in a KVM guest, reboots, logs in at the greeter and checks that a session starts, then does it again on OVMF with Secure Boot enforced, the Athanor certificate enrolled through MokManager, passing only when the installed system reports Secure Boot enabled; screenshots; writes the `iso-acceptance` evidence of UD4 for the run's `athanor-system` digest, a pass only when both cases pass. A second job, `upgrade-acceptance` (UD18, ADR-0130), installs the ISO of `:stable` on Secure Boot firmware, upgrades it to the run's `athanor-system` digest served from a registry on the runner, rolls back with `GoBack()`, and writes the `upgrade-acceptance` evidence of UD4.
+- **Triggers:** dispatch (`run_id`, the build run). **Output:** artifacts `evidence-<run_id>-iso-acceptance`, `evidence-<run_id>-upgrade-acceptance`, `acceptance-<run_id>-<acceptance run id>` and `upgrade-acceptance-<run_id>-<acceptance run id>`.
 - **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted with KVM. **Concurrency:** `accept-<run_id>`, no cancel.
-- **Scripts:** `forge/test/iso/run_iso_test.sh`, `screenshots.py`, `forge/scripts/retry.sh`, `system/accept-target.sh`, `system/trusted-run.sh`, `scripts/ci/evidence.py`.
+- **Scripts:** `forge/test/iso/run_iso_test.sh`, `fetch_iso.sh`, `serve_candidate.sh`, `screenshots.py`, `scripts/devvm/acceptance/run.sh`, `scripts/ci/install-tools.sh`, `forge/scripts/retry.sh`, `system/accept-target.sh`, `system/trusted-run.sh`, `scripts/ci/evidence.py`.
 - **Health:** `gh run list --workflow accept.yml --branch iso-v0 --limit 5`.
 
 ### CI13 System Image Check

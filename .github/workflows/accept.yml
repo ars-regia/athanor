@@ -154,3 +154,114 @@ jobs:
           # upload should not be a second error on top of the real one.
           if-no-files-found: ignore
           retention-days: 30
+
+  # The upgrade acceptance of UD18 (doc_update_delivery.md, ADR-0130): the ISO of the current
+  # :stable installed on Secure Boot firmware, upgraded to this run's athanor-system digest by
+  # the guest's own units from a registry on the runner, then rolled back with GoBack(). The
+  # stages run over SSH (scripts/devvm/acceptance/run.sh --ci, UD19), and the verdict passes
+  # only when both boots keep the session and Secure Boot. After the ISO acceptance, never
+  # beside it: one VM at a time per job, and a candidate that does not install is not worth
+  # upgrading to.
+  upgrade-acceptance:
+    needs: [install]
+    runs-on: ubuntu-24.04
+    # Setup and fetch ~10, install and first boot ~25, stages 35 (STAGES_TIMEOUT 2100 s).
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    env:
+      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+      BUILD_RUN_ID: ${{ inputs.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: ./.github/actions/kvm
+
+      - name: 🧰 Install QEMU and the tools the run needs
+        run: |
+          set -euo pipefail
+          # Only Ubuntu's own index, as in the install job (run 34383930627).
+          bash forge/scripts/retry.sh sudo apt-get update \
+            -o Dir::Etc::SourceList=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::SourceParts=/nonexistent
+          sudo apt-get install --no-install-recommends -y \
+            qemu-system-x86 qemu-utils ovmf e2fsprogs
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        # The registry that serves the candidate to the guest (forge/test/iso/serve_candidate.sh).
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: 🔑 Log in to the registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
+
+      - name: 🎯 Resolve the run
+        run: bash system/accept-target.sh "${BUILD_RUN_ID}" target
+
+      - name: 💽 Fetch the ISO of :stable
+        # The tag is resolved once, so the ISO installed is the digest the summary names.
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://${REGISTRY}/athanor-iso:stable")
+          ref=${REGISTRY}/athanor-iso@${digest}
+          echo "Upgrade from \`${ref}\` to athanor-system@\`$(<target/default-digest)\`" >> "${GITHUB_STEP_SUMMARY}"
+          iso=$(bash forge/test/iso/fetch_iso.sh "$ref" iso)
+          echo "ISO_PATH=${iso}" >> "${GITHUB_ENV}"
+
+      - name: ⬆️ Install :stable, upgrade to the candidate and roll back
+        env:
+          SECURE_BOOT: "1"
+          VCPUS: "4"
+          MEMORY_MIB: "6144"
+        run: >-
+          UPDATE_TO="$(<target/default-digest)" UPDATE_REPOSITORY="${REGISTRY}/athanor-system"
+          bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test-upgrade
+
+      - name: 📋 Convert the screenshots and report
+        if: always()
+        run: bash forge/test/iso/report.sh iso-test-upgrade
+
+      - name: 💾 Disk use of the stages
+        if: always() && hashFiles('iso-test-upgrade/df.txt') != ''
+        run: |
+          set -euo pipefail
+          { echo '### Disk use before each stage'; echo '```'; cat iso-test-upgrade/df.txt; echo '```'; } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: 🧾 Write the upgrade-acceptance evidence (UD4)
+        if: always() && hashFiles('target/default-digest') != ''
+        run: >-
+          python3 -B scripts/ci/evidence.py write --gate upgrade-acceptance --image athanor-system
+          --digest "$(<target/default-digest)" --run-id "${BUILD_RUN_ID}" --verdict-json iso-test-upgrade/verdict.json
+          --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --out evidence
+
+      - name: 📎 Hand the evidence to the promotion
+        if: always() && hashFiles('evidence/*.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: evidence-${{ inputs.run_id }}-upgrade-acceptance
+          path: evidence/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: upgrade-acceptance-${{ inputs.run_id }}-${{ github.run_id }}
+          path: |
+            iso-test-upgrade/*.png
+            iso-test-upgrade/serial.log
+            iso-test-upgrade/phases.txt
+            iso-test-upgrade/upgrade-phases.txt
+            iso-test-upgrade/upgrade.log
+            iso-test-upgrade/upgrade-status
+            iso-test-upgrade/df.txt
+            iso-test-upgrade/verdict.md
+            iso-test-upgrade/memory.json
+          if-no-files-found: ignore
+          retention-days: 30
