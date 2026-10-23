@@ -62,7 +62,7 @@ Since task 5 the top and overlay layers are a privileged client's.
 
 Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
 windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
-through the toplevel capture source, into a client's `wl_shm` buffer (`src/capture.rs`).
+through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
@@ -108,7 +108,7 @@ heads with their modes, position, transform and scale, and a configuration succe
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
 position, transform or adaptive sync fails.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
-and `ext-image-copy-capture-v1` copies the output, drawn whole as it draws itself, into a
+and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
 binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
 client.

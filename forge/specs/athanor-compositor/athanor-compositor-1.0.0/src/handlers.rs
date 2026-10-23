@@ -611,7 +611,8 @@ impl DrmSyncobjHandler for State {
 
 impl FractionalScaleHandler for State {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        // ponytail: the first output's scale; per output once windows move between outputs.
+        // The first output's scale until a frame shows the surface: `frame_done` then sends the
+        // scale of the output it is shown on, and every later change of it.
         let scale = self
             .space
             .outputs()
