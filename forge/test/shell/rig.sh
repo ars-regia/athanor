@@ -20,6 +20,8 @@
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
 #   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
+#   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
+#   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
@@ -649,7 +651,7 @@ build-toolkit)
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1 and 2: what a client of athanor-compositor binds.
+    # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1, 2 and 6: what a client of athanor-compositor binds.
     # session.sh installs the shipped allow-list and the rig's lines, but wayland-info is listed
     # in neither and runs in no unit, so it is granted none of the privileged globals of task 5;
     # the fixture checks the grant. The compositor runs headless: linux-dmabuf is offered with a
@@ -682,14 +684,15 @@ compositor-globals)
     done
     for interface in ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1 \
         ext_foreign_toplevel_image_capture_source_manager_v1 ext_output_image_capture_source_manager_v1 \
-        ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1; do
+        ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
+        zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 7 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 9 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
@@ -708,6 +711,34 @@ cargo)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
+    ;;
+seal-bin)
+    shift
+    [ "$#" -gt 0 ] || { echo "rig.sh: seal-bin needs a binary name" >&2; exit 2; }
+    for f in "$@"; do require "$f" "the build recipe of $f"; done
+    {
+        echo "commit $(git -C "$root" rev-parse HEAD)"
+        (cd "$out/bin" && sha256sum -- "$@")
+    } > "$out/bin/SEALED"
+    ;;
+verify-bin)
+    shift
+    [ "$#" -gt 0 ] || { echo "rig.sh: verify-bin needs a binary name" >&2; exit 2; }
+    if [ ! -s "$out/bin/SEALED" ]; then
+        echo "rig.sh: $out/bin/SEALED is missing; download the artifact of the build job" >&2
+        exit 1
+    fi
+    sealed=$(head -n 1 "$out/bin/SEALED")
+    if [ "$sealed" != "commit $(git -C "$root" rev-parse HEAD)" ]; then
+        echo "rig.sh: the binaries were sealed at '$sealed', not at this commit" >&2
+        exit 1
+    fi
+    for f in "$@"; do
+        grep -q -- "  $f\$" "$out/bin/SEALED" || { echo "rig.sh: $f is not sealed" >&2; exit 1; }
+    done
+    # Artifacts drop the mode bits, so the check runs on the content and the mode is restored after.
+    (cd "$out/bin" && tail -n +2 SEALED | sha256sum --check --strict -)
+    for f in "$@"; do chmod 0755 "$out/bin/$f"; done
     ;;
 build-bar)
     mkdir -p "$out/bin" "$out/target"
