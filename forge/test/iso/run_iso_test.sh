@@ -95,17 +95,53 @@ qemu-img create -f raw "$disk" "${DISK_GIB}G" > /dev/null
 # device name because the installer sees the disks in whatever order the firmware hands
 # them over, and a name that depends on that order is a test that fails for the wrong
 # reason.
+# The kickstart the installer reads is a copy cut to the case. The upgrade case
+# (UPDATE_TO, doc_update_delivery.md UD19) is driven over SSH: its copy carries a public
+# key made for this run, whose private half stays outside OUTPUT_DIR so it is never
+# uploaded, and the guest's port 22 is forwarded to a free port of the host. Every other
+# case deletes the upgrade blocks, so the ISO acceptance keeps sshd disabled.
+ks="${output}/collaudo.ks"
+netdev=user,id=n0
+keydir=''
+# shellcheck disable=SC2329 # the EXIT trap calls it
+cleanup() {
+    if [[ -n $keydir ]]; then
+        rm -f "${keydir}/id" "${keydir}/id.pub"
+        rmdir "$keydir"
+    fi
+}
+trap cleanup EXIT
+if [[ -n ${UPDATE_TO:-} ]]; then
+    keydir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/var/tmp}}/collaudo-ssh.XXXXXX")
+    ssh-keygen -q -t ed25519 -N '' -C '' -f "${keydir}/id"
+    pubkey=$(cut -d' ' -f1,2 "${keydir}/id.pub")
+    [[ $pubkey =~ ^ssh-ed25519\ [A-Za-z0-9+/]+=*$ ]] || { echo "unexpected public key: ${pubkey}" >&2; exit 2; }
+    sed "s|@COLLAUDO_SSH_KEY@|${pubkey}|" "${here}/collaudo.ks" > "$ks"
+    if grep -q -e @COLLAUDO_SSH_KEY@ "$ks"; then
+        echo "the key was not substituted into ${ks}" >&2
+        exit 2
+    fi
+    SSH_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+    netdev+=",hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+else
+    sed '/# upgrade-acceptance begin/,/# upgrade-acceptance end/d' "${here}/collaudo.ks" > "$ks"
+    if grep -q -e @COLLAUDO_SSH_KEY@ -e upgrade-acceptance "$ks"; then
+        echo "the upgrade blocks were not removed from ${ks}" >&2
+        exit 2
+    fi
+fi
+
 truncate -s 8M "$ksimg"
 mkfs.ext4 -q -L ATHANORKS "$ksimg"
 mkdir -p "${output}/ksmnt"
 if command -v guestmount > /dev/null; then
     guestmount -a "$ksimg" -m /dev/sda --rw "${output}/ksmnt"
-    cp "${here}/collaudo.ks" "${output}/ksmnt/collaudo.ks"
+    cp "$ks" "${output}/ksmnt/collaudo.ks"
     guestunmount "${output}/ksmnt"
 else
     # debugfs writes into an unmounted ext4 without root and without a loop device, which
     # is what a hosted runner gives us.
-    debugfs -w -R "write ${here}/collaudo.ks collaudo.ks" "$ksimg" > /dev/null 2>&1
+    debugfs -w -R "write ${ks} collaudo.ks" "$ksimg" > /dev/null 2>&1
 fi
 rmdir "${output}/ksmnt"
 
@@ -170,7 +206,7 @@ timeout "$TIMEOUT" qemu-system-x86_64 \
     -drive "file=${ksimg},if=virtio,format=raw" \
     -drive "file=${iso},if=none,id=cd,media=cdrom,readonly=on" \
     -device virtio-scsi-pci -device scsi-cd,drive=cd,bootindex=1 \
-    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+    -netdev "$netdev" -device virtio-net-pci,netdev=n0 \
     -device virtio-vga \
     -display none -serial "unix:${serial},server=on,wait=on" \
     -monitor "unix:${monitor},server,nowait" &
