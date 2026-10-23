@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import struct
@@ -539,6 +540,45 @@ def play_the_monitor(server: socket.socket, received: list[bytes]) -> None:
         return  # the server socket was closed: the test is over
 
 
+def play_first_boot(server: socket.socket) -> socket.socket:
+    """Play the guest from GRUB to the settings question: the installer finishes, the
+    installed system offers its serial login, and each question gets its answer. Returns
+    the connection with the settings question typed and not yet answered."""
+    conn, _ = server.accept()
+    conn.settimeout(2)
+    conn.sendall(b"GRUB version 2.12\r\n")
+    time.sleep(14)  # it types the boot commands
+    conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
+    time.sleep(0.5)
+
+    # The installed system offers its serial login; the console logs in and asks the
+    # guest whether the greeter is up. Play the guest: wait for the question, answer.
+    conn.sendall(b"athanor login: ")
+    typed = typed_until(conn, b"PROFILE_%s", 20)
+    conn.sendall(b"PROFILE_OK\r\n")
+    if b"KARG_%s" not in typed:
+        typed += typed_until(conn, b"KARG_%s", 20)
+    conn.sendall(b"KARG_OK btrfs\r\n")
+    if b"ORIGIN_%s" not in typed:
+        typed += typed_until(conn, b"ORIGIN_%s", 20)
+    conn.sendall(b"ORIGIN_OK ghcr.io/acme/athanor-system:stable containerPolicy\r\n")
+    if b"GREETER_%s" not in typed:
+        typed_until(conn, b"GREETER_%s", 20)
+    conn.sendall(b"GREETER_ALIVE c5\r\n")
+
+    # It types the password on the keyboard, one key at a time, then asks whether
+    # the session came up.
+    typed_until(conn, b"SESSION_%s", 60)
+    conn.sendall(b"SESSION_ALIVE c7\r\n")
+
+    # It starts Settings inside that session and asks whether it stayed up. The rest of
+    # the question's line is read too, so whatever comes next is typed after it.
+    typed = typed_until(conn, b"SETTINGS_%s", 60)
+    if b"\n" not in typed.rpartition(b"SETTINGS_%s")[2]:
+        typed_until(conn, b"\n", 20)
+    return conn
+
+
 def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     """A steady greeter gets the password typed on the machine's keyboard, a steady
     session gets Settings started inside it, and Settings still running ends the run at
@@ -574,35 +614,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
     )
     try:
-        conn, _ = server.accept()
-        conn.settimeout(2)
-        conn.sendall(b"GRUB version 2.12\r\n")
-        time.sleep(14)  # it types the boot commands
-        conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
-        time.sleep(0.5)
-
-        # The installed system offers its serial login; the console logs in and asks the
-        # guest whether the greeter is up. Play the guest: wait for the question, answer.
-        conn.sendall(b"athanor login: ")
-        typed = typed_until(conn, b"PROFILE_%s", 20)
-        conn.sendall(b"PROFILE_OK\r\n")
-        if b"KARG_%s" not in typed:
-            typed += typed_until(conn, b"KARG_%s", 20)
-        conn.sendall(b"KARG_OK btrfs\r\n")
-        if b"ORIGIN_%s" not in typed:
-            typed += typed_until(conn, b"ORIGIN_%s", 20)
-        conn.sendall(b"ORIGIN_OK ghcr.io/acme/athanor-system:stable containerPolicy\r\n")
-        if b"GREETER_%s" not in typed:
-            typed_until(conn, b"GREETER_%s", 20)
-        conn.sendall(b"GREETER_ALIVE c5\r\n")
-
-        # It types the password on the keyboard, one key at a time, then asks whether
-        # the session came up.
-        typed_until(conn, b"SESSION_%s", 60)
-        conn.sendall(b"SESSION_ALIVE c7\r\n")
-
-        # It starts Settings inside that session and asks whether it stayed up.
-        typed_until(conn, b"SETTINGS_%s", 60)
+        conn = play_first_boot(server)
         started = time.time()
         conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
         proc.wait(timeout=40)
@@ -637,6 +649,99 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     ):
         assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
     assert "idle-timeout" not in phases, "it should not have waited out the idle window"
+
+
+def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
+    """In the upgrade case (ATHANOR_CONSOLE_HOLD=1) a steady Settings ends the serial
+    login, since a tty login is a session that makes Apply() ask for an administrator
+    (UT6), and `ready` is written only once the getty offers its login again. From then on
+    the console types nothing, keeps noting markers, a shim refusal included, and ends
+    when the socket closes."""
+    if not hasattr(socket, "AF_UNIX"):
+        print("  skip test_console_logs_out_then_holds: no unix sockets")
+        return
+
+    run = tmp / "hold"
+    shutil.rmtree(run, ignore_errors=True)
+    run.mkdir(parents=True)
+    sock = str(run / "serial.sock")
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(sock)
+    server.listen(1)
+    monitor = socket.socket(socket.AF_UNIX)
+    monitor.bind(str(run / "monitor.sock"))
+    monitor.listen(2)
+    threading.Thread(target=play_the_monitor, args=(monitor, []), daemon=True).start()
+    proc = subprocess.Popen(
+        [sys.executable, str(HERE / "console.py"), sock, str(run / "serial.log"),
+         str(run / "phases.txt"), str(run / "monitor.sock")],
+        stdout=subprocess.DEVNULL,
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_CONSOLE_HOLD": "1"},
+    )
+    try:
+        conn = play_first_boot(server)
+        conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
+        typed = typed_until(conn, b"exit", 20)
+        time.sleep(3)
+        assert not (run / "ready").exists(), "ready was written before the getty's login"
+        assert proc.poll() is None, "the console ended at Settings in the upgrade case"
+        conn.sendall(b"\r\nathanor login: ")
+        deadline = time.time() + 20
+        while not (run / "ready").exists() and time.time() < deadline:
+            time.sleep(0.1)
+        assert (run / "ready").exists(), "no ready after the getty's login"
+        # The reboots of the upgrade, seen on the serial line only: a shim that refuses the
+        # new kernel is a phase of its own.
+        conn.sendall(b"\x1b[0mbad shim signature\r\n")
+        time.sleep(3)
+        assert proc.poll() is None, "the console stopped holding"
+        conn.settimeout(0.5)
+        try:
+            typed += conn.recv(65536)
+        except socket.timeout:
+            pass
+        conn.close()
+        proc.wait(timeout=20)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        server.close()
+        monitor.close()
+
+    assert typed.split() == [b"exit"], f"typed after Settings answered: {typed!r}"
+    phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
+    for expected in ("settings-alive", "ready", "secure-boot-refused", "console-closed"):
+        assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
+    assert "idle-timeout" not in phases, sorted(phases)
+
+
+def test_classify_maps_probe_output(tmp: pathlib.Path) -> None:
+    """The answers of a probe run over SSH become phases through the console's own markers,
+    in the `name epoch` lines verdict.py reads, under the prefix of the boot they describe."""
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--classify", "upgraded-"],
+        input=b"GREETER_ALIVE 3\r\nSECUREBOOT_ENABLED\r\n", capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.decode().splitlines()
+    assert len(lines) == 2, lines
+    for line in lines:
+        assert re.fullmatch(r"upgraded-(greeter-alive|secureboot-enabled) \d+", line), lines
+
+
+def test_print_probe_is_the_typed_probe(tmp: pathlib.Path) -> None:
+    """The probe run over SSH is the one typed on the serial console, byte for byte."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "MOK"], capture_output=True
+    )
+    assert proc.returncode == 0 and proc.stdout == console.MOK_PROBE, proc
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "ORIGIN"], capture_output=True
+    )
+    assert proc.returncode == 2, "an unknown probe must be refused"
 
 
 def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
@@ -986,6 +1091,9 @@ def main() -> int:
             test_console_boots_our_kickstart,
             test_installed_systems_own_grub_is_not_a_loop,
             test_console_logs_in_opens_settings_and_stops,
+            test_console_logs_out_then_holds,
+            test_classify_maps_probe_output,
+            test_print_probe_is_the_typed_probe,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,

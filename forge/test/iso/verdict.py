@@ -86,7 +86,8 @@ ORIGIN_SIGNALS = ("origin-stable-signed",)
 # "reinstall-loop" is not a crash but it is a failure, and a distinctive one: the machine
 # booted the installer again instead of the system it had just written, so the run says
 # nothing about first boot no matter how long it is left going.
-FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
+# secure-boot-refused: shim refused a kernel or GRUB it was asked to load (console.py).
+FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop", "secure-boot-refused")
 # MOK_ENROLLED in console.py: the certificate is in MokList. MOK_NOT_APPLICABLE: firmware
 # without Secure Boot, not accepted in the Secure Boot case. MOK_MISSING and
 # MOK_CERT_ABSENT (an image without the certificate, which an ISO built from this tree
