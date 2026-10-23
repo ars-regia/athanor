@@ -4963,3 +4963,21 @@ fn os9_a_negative_cursor_rectangle_is_empty() {
     assert_eq!(popup.events(), [("text_input_rectangle", rectangle)]);
     run.stop();
 }
+
+/// An input method's popup whose `wl_surface` is destroyed is drawn no more, though the popup
+/// object lives on.
+#[test]
+fn os9_a_popup_of_a_destroyed_surface_is_not_drawn() {
+    let mut run = Running::start(None);
+    let (_window, _field, mut ime, method) = composing(&mut run);
+    let (surface, _popup) = method.popup(&mut ime, &mut run);
+    let drawn = |state: &State| {
+        let output = state.space.outputs().next().expect("an output");
+        state.composing.popups_on(&state.space, output).len()
+    };
+    assert_eq!(drawn(&run.state), 1, "the popup is drawn");
+    surface.destroy();
+    ime.roundtrip(&mut run);
+    assert_eq!(drawn(&run.state), 0, "its surface is gone");
+    run.stop();
+}

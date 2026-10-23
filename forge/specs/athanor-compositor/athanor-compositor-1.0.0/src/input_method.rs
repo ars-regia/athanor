@@ -200,7 +200,8 @@ impl State {
 
 impl Composing {
     /// The input method's popups shown on `output` of `space`, below the active text input's
-    /// cursor; none while the session is locked, when the text inputs follow nothing.
+    /// cursor; none while the session is locked, when the text inputs follow nothing, and none
+    /// whose surface its client destroyed.
     pub fn popups_on(&self, space: &Space<Window>, output: &Output) -> Vec<PlacedPopup> {
         let (Some(_), Some(focus)) = (&self.active, &self.focus) else {
             return Vec::new();
@@ -212,6 +213,7 @@ impl Composing {
         let at = origin + self.cursor.loc + Point::from((0, self.cursor.size.h)) - area.loc;
         self.popups
             .iter()
+            .filter(|(_, surface)| surface.is_alive())
             .map(|(_, surface)| (surface.clone(), at))
             .collect()
     }
