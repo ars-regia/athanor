@@ -3,7 +3,7 @@ id: ADR-0131
 title: "The GitHub Release of each promotion, and release 0.9 without the VSA"
 date: 2026-10-24
 status: accepted
-issues: []
+issues: [766]
 areas: [build, release, process, security]
 ---
 
@@ -51,7 +51,8 @@ yet. Planning it, and auditing the plan, found points that the approved text lea
      in the repository, under its own review.
 4. **The Release carries today's bundle, and release 0.9 does not wait for the VSA.** The 0.9
    release notes name each PL42 item the bundle does not carry yet; each joins the bundle with
-   the work that produces it. This record places the VSA in no release.
+   the work that produces it. This record places the VSA in no release; issue #766 tracks
+   choosing one.
    - Option A, chosen: **the bundle as it is, the gaps named.**
    - Option B: **0.9 waits for the VSA of PL29.** Rejected: it holds the release for work that
      has no plan yet.
