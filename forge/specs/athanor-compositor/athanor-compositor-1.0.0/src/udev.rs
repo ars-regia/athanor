@@ -838,9 +838,14 @@ impl State {
         }
         head.not_before = Some(Instant::now() + period.mul_f64(0.6));
         let next = next_draw(head, Instant::now());
+        let idle = next.is_none() && head.timer.is_none();
         self.confirm_lock();
         if let Some(delay) = next {
             self.schedule(crtc, delay);
+        } else if idle && self.frame_callbacks_waiting() {
+            // Only a draw sends a frame callback, and a request may have taken the throttle's
+            // place: with no draw to follow, a surface still waiting is drawn for at the throttle.
+            self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
         }
         // `locked` and the presentation feedback are sent here, and nothing else flushes an idle
         // seat.
