@@ -7,7 +7,7 @@
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
-image=${ATHANOR_RIG_BUILD_IMAGE:-localhost/athanor-shell-rig:build}
+image=$(bash "$root/forge/test/shell/rig.sh" build-image-ref)
 generated=$root/system/athanor-style/calmo/generated
 
 python3 -B "$root/system/athanor-style/calmo/generate.py" cosmic

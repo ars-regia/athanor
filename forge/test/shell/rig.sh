@@ -4,6 +4,7 @@
 #
 #   rig.sh build-image      build the rig and build stages locally, layered on the published rig;
 #                           with the build stage pinned (build-image.digest, a full reference), pull it instead
+#   rig.sh build-image-ref  print the reference of the build stage that rig.sh runs: the pinned one, an explicit one or the local build
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
@@ -104,7 +105,9 @@ rig_image() {
 build_image() {
     if [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
         echo "$ATHANOR_RIG_BUILD_IMAGE"
-    elif [ -s "$rig/build-image.digest" ]; then
+    elif [ -e "$rig/build-image.digest" ]; then
+        # An empty pin is a mistake, not a request for a local build.
+        [ -s "$rig/build-image.digest" ] || { echo "rig.sh: $rig/build-image.digest is empty" >&2; exit 2; }
         cat "$rig/build-image.digest" # the full reference that was pushed, see publish-build-image
     else
         echo "$local_image:build"
@@ -441,14 +444,18 @@ capture_launcher() {
 }
 
 case "${1:-}" in
+build-image-ref)
+    build_image
+    ;;
 build-image)
-    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$(build_image)" = "$local_image:build" ]; then
+    build_ref=$(build_image)
+    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     fi
-    if [ "$(build_image)" = "$local_image:build" ]; then
+    if [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     else
-        podman pull "$(build_image)"
+        podman pull "$build_ref"
     fi
     ;;
 publish-image)
