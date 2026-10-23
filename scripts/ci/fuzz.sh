@@ -44,7 +44,7 @@ if [ $((count * seconds + build * 60)) -gt $((budget * 60)) ]; then
 fi
 
 bash "$root/forge/test/shell/rig.sh" build-image
-image=${ATHANOR_RIG_BUILD_IMAGE:-localhost/athanor-shell-rig:build}
+image=$(bash "$root/forge/test/shell/rig.sh" build-image-ref)
 
 mkdir -p "$out"
 corpus_in=()

@@ -4,6 +4,8 @@
 #
 #   rig.sh build-image      build the rig and build stages locally, layered on the published rig;
 #                           with the build stage pinned (build-image.digest, a full reference), pull it instead
+#   rig.sh build-image-ref  print the reference of the build stage that rig.sh runs: the pinned one, an explicit one or the local build
+#   rig.sh build-inputs     print the hash of the build stage's inputs (build-inputs.sh), the label of the published stage
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
@@ -92,6 +94,7 @@ esac
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
+build_label=org.athanor.rig.build-inputs
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.
 rig_image() {
@@ -109,7 +112,9 @@ rig_image() {
 build_image() {
     if [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
         echo "$ATHANOR_RIG_BUILD_IMAGE"
-    elif [ -s "$rig/build-image.digest" ]; then
+    elif [ -e "$rig/build-image.digest" ]; then
+        # An empty pin is a mistake, not a request for a local build.
+        [ -s "$rig/build-image.digest" ] || { echo "rig.sh: $rig/build-image.digest is empty" >&2; exit 2; }
         cat "$rig/build-image.digest" # the full reference that was pushed, see publish-build-image
     else
         echo "$local_image:build"
@@ -510,15 +515,33 @@ require_for() { # require_for <surface>
 }
 
 case "${1:-}" in
+build-image-ref)
+    build_image
+    ;;
 build-image)
-    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$(build_image)" = "$local_image:build" ]; then
+    build_ref=$(build_image)
+    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     fi
-    if [ "$(build_image)" = "$local_image:build" ]; then
+    if [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    elif [ -n "${ATHANOR_RIG_BUILD_IMAGE:-}" ] && podman image exists "$build_ref"; then
+        : # an explicit image already here, perhaps one that exists only locally: nothing to pull
     else
-        podman pull "$(build_image)"
+        podman pull "$build_ref"
+        if [ -z "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
+            want=$(bash "$rig/build-inputs.sh")
+            have=$(podman image inspect --format '{{ index .Labels "'"$build_label"'" }}' "$build_ref")
+            if [ "$have" != "$want" ]; then
+                echo "rig.sh: the pinned build stage $build_ref is stale: its $build_label label is '${have:-absent}', the Containerfile and rig-image.digest hash to '$want'." >&2
+                echo "Run the workflow publish-rig-build-image.yml and merge the pin it opens." >&2
+                exit 1
+            fi
+        fi
     fi
+    ;;
+build-inputs)
+    bash "$rig/build-inputs.sh"
     ;;
 publish-image)
     mkdir -p "$out"
@@ -531,11 +554,20 @@ publish-build-image)
     # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
     # digest, and with it the pixels of the goldens, stay where they are.
     mkdir -p "$out"
-    podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    # Provenance from the GitHub environment, else from the checkout. `created` is the commit's
+    # time, not the build's, so a rebuild of the same commit carries the same label.
+    revision=${GITHUB_SHA:-$(git -C "$root" rev-parse HEAD)}
+    source_url=${GITHUB_SERVER_URL:+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY}
+    source_url=${source_url:-$(git -C "$root" remote get-url origin)}
+    podman build "${rig_base[@]}" --target build --label "$build_label=$(bash "$rig/build-inputs.sh")" \
+        --label "org.opencontainers.image.revision=$revision" --label "org.opencontainers.image.source=$source_url" \
+        --label "org.opencontainers.image.created=$(git -C "$root" show -s --format=%cI "$revision")" \
+        -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
     echo "$registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")" > "$out/build-image.ref"
     echo "published $(cat "$out/build-image.ref")"
     echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
+    echo "the pin trusts this run: the digest is unsigned, and rig.sh checks only the inputs label against the checkout"
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
