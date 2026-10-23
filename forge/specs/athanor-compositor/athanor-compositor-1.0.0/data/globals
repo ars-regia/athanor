@@ -1,0 +1,36 @@
+# Every global athanor-compositor can offer, and who receives it (doc_own_stack.md OS4, OS5).
+# One row per global, `<interface> <class>`; `#` starts a comment line. The classes:
+#   standard     offered to every client
+#   unconfined   offered to every client outside a security context
+#   layer-gated  offered to every client; its top and overlay layers are refused unless the
+#                allow-list grants them (`State::layer_commit`)
+#   privileged   offered only to the clients the allow-list grants it, never inside a security
+#                context
+# The privileged and layer-gated rows are the interfaces the allow-list may name
+# (data/privileged-clients). The fixture fails on an offered global without a row
+# (os9_every_global_is_classified).
+wl_compositor standard
+wl_subcompositor standard
+wl_shm standard
+wl_seat standard
+wl_output standard
+xdg_wm_base standard
+zxdg_output_manager_v1 standard
+wp_viewporter standard
+wp_fractional_scale_manager_v1 standard
+wp_presentation standard
+wp_cursor_shape_manager_v1 standard
+xdg_activation_v1 standard
+wl_data_device_manager standard
+ext_idle_notifier_v1 standard
+# On a render node only, and linux-drm-syncobj-v1 only on one that can wait on a syncobj.
+zwp_linux_dmabuf_v1 standard
+wp_linux_drm_syncobj_manager_v1 standard
+wp_security_context_manager_v1 unconfined
+zwlr_layer_shell_v1 layer-gated
+ext_foreign_toplevel_list_v1 privileged
+ext_foreign_toplevel_image_capture_source_manager_v1 privileged
+ext_image_copy_capture_manager_v1 privileged
+ext_session_lock_manager_v1 privileged
+ext_workspace_manager_v1 privileged
+zwlr_output_manager_v1 privileged

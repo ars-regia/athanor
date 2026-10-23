@@ -5,6 +5,7 @@ use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::lock::Lock;
+use crate::output_management::OutputManagement;
 use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
@@ -151,6 +152,8 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
+    /// The heads sent to the clients of wlr-output-management, and their configurations.
+    pub output_management: OutputManagement,
 
     /// Which client is granted which privileged global (OS4), read when the compositor starts.
     pub allow_list: AllowList,
@@ -227,8 +230,8 @@ impl State {
             });
         let lock_state =
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
-        // ext-workspace-v1 is not among OS4's privileged protocols: every unconfined client's.
         crate::workspace::global(&dh);
+        crate::output_management::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -279,6 +282,7 @@ impl State {
             lock: None,
             idle_notifier_state,
             workspace_groups: Vec::new(),
+            output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
         })
@@ -335,6 +339,7 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        self.output_heads_changed();
     }
 
     /// An output that goes: its layer surfaces are closed, and the windows no output left shows
@@ -380,6 +385,7 @@ impl State {
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
         }
+        self.output_heads_changed();
     }
 
     /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
@@ -816,8 +822,8 @@ pub fn granted(client: &Client, privilege: Privilege) -> bool {
         .is_some_and(|data| data.grants.contains(&privilege))
 }
 
-/// Whether `client` connected outside a security context: only such a client sees
-/// ext-workspace-v1 and the security context manager.
+/// Whether `client` connected outside a security context: only such a client sees the security
+/// context manager.
 pub fn unconfined(client: &Client) -> bool {
     client
         .get_data::<ClientState>()

@@ -94,14 +94,23 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
-| `ext_workspace_manager_v1`, `wp_security_context_manager_v1` | every client outside a security context |
+| `wp_security_context_manager_v1` | every client outside a security context |
+
+`data/globals` gives the class of every global the compositor can offer, and the fixture fails
+on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
+and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
+plan): the bar's line carries the workspaces, and the output manager is the control center's.
+`src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
+heads with their modes, position, transform and scale, and a configuration succeeds when it
+changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
+position, transform or adaptive sync fails.
 
 The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
-the bar what the plan names, and the fixture grants its clients every privileged global as the
-bar (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+the bar what the plan names, and the fixture grants its clients every privileged global but the
+output manager as the bar, and the output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
 can lock the session until one is added.
 
 What the check does not cover, for revision 2 of `doc_own_stack.md`:
@@ -118,9 +127,8 @@ What the check does not cover, for revision 2 of `doc_own_stack.md`:
   2 decides.
 - **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
-- **ext-workspace-v1 is not among OS4's privileged protocols**: every unconfined client may
-  switch workspaces. The bottom and background layers of `wlr-layer-shell` stay offered inside a
-  security context. Revision 2 decides both.
+- The bottom and background layers of `wlr-layer-shell` stay offered inside a security context.
+  Revision 2 decides.
 - Input-method, virtual keyboard and pointer, data control and the private interface are not
   offered yet; each joins the allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape

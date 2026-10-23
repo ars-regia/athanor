@@ -75,6 +75,7 @@ pub fn start(
                     nested.output.set_preferred(mode);
                     layer_map_for_output(&nested.output).arrange();
                 }
+                state.output_heads_changed();
             }
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => state.redraw(),
