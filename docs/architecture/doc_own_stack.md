@@ -1,20 +1,46 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 1, approved by the maintainer on 2026-10-17; amended on 2026-10-19
-(ADR-0126), the amendment approved by the maintainer on 2026-10-19 (#629).** It sets out the direction ADR-0121 records: a
-compositor of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in
-Rust. The code starts at once (ADR-0121 decision 1); revision 2 adds the measurements of the first
-two milestones of section 5 and the compositor's acceptance. The amendment adds OS10 and OS11, a
-toolkit developers outside Athanor can build on, with decisions 12 to 15. Section 7
-records the maintainer's decisions of 2026-10-17 and the one left open; decisions 10 and 11 were
-taken after the approval and are recorded in ADR-0122, decisions 12 to 15 on 2026-10-19 in
-ADR-0126. The milestones' plans are
-`docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
-`docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`.
+Status: **revision 2, draft for the maintainer's approval.** Revision 1 was approved by the
+maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
+maintainer on 2026-10-19 (#629). The document sets out the direction ADR-0121 records: a compositor
+of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
+started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
+outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
+two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
+compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
+2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12
+to 15 in ADR-0126, and decisions 16 to 26 in section 7. Text marked "(decision N)" is what the
+maintainer chose for decision N of section 7.
+
+The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
+`docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`. Their results are
+`docs/spikes/c1-own-compositor.md`, `docs/spikes/c1-protocols.md` and
+`docs/spikes/t1-own-toolkit.md`, cited below as the C1 results, the C1 protocols and the T1 results,
+by section. The open questions of `docs/superpowers/plans/2026-10-22-os9-harnesses.md`, answered by
+the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
+
+**Changes in revision 2:**
+
+- The status line, this list, and the date of the measurements below it.
+- Section 1.3: the Vello paragraph carries milestone T1's measurements.
+- OS4: the privileged protocols as the compositor classifies them; the identity's limits; the
+  trusted path in every window state, with the reveal key; the lock path; the keyboard monitor; the
+  capture of an output; rows 8 and 9 of the register.
+- OS5: the private protocols, and what their absence cost milestone C1.
+- OS6: the hardware matrix machine by machine.
+- OS7: the renderer, the group role and the title bar's strings. OS8: a role spoken differently.
+- New, for the compositor: OS12 window actions, OS13 key bindings, OS14 outputs, OS15 the pointer
+  and colour, OS16 capture, OS17 the class of every global, OS18 no restart, OS19 the acceptance.
+- New, for the toolkit: OS20 the first surface's acceptance.
+- Section 5: what milestones C1 and T1 measured.
+- Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
+- Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
+- Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each milestone reads them
-again before it relies on them.
+again before it relies on them. The measurements revision 2 adds were read on 2026-10-23 from the
+results the paragraph above names.
 
 ## 1. Context
 
@@ -84,8 +110,13 @@ again before it relies on them.
   selection and IME composition.
 - **Vello** now has three renderers: `vello_cpu`, the most mature; `vello_gpu`, rasterising through
   wgpu without compute shaders and meant to become the production GPU renderer; and the original
-  compute renderer, moved under `research/`. No published figure covers NVIDIA's driver, llvmpipe or
-  virgl: we measure them.
+  compute renderer, moved under `research/`. No published figure covered NVIDIA's driver, llvmpipe
+  or virgl, so milestone T1 measured the layout chooser (T1 results, task 7). Nested on the NVIDIA
+  desktop, `vello_cpu` drew its first frame in 22 ms and held 18.4 MiB of resident memory after a
+  minute, against 296 ms and 228.4 MiB for `vello_gpu` on Vulkan and 302 ms and 269.9 MiB for the
+  GTK chooser. In the rig on the reference laptop, on llvmpipe, the figures were 81 ms and 16.4 MiB,
+  against 199 ms and 131.0 MiB for `vello_gpu`, and 186 ms and 46.0 MiB for GTK. virgl was not
+  measured. Decision 16 follows from these figures.
 - **Windowing.** winit has no wlr-layer-shell (pull request #4044 open). The bar, dock and greeter
   are layer-shell clients, so the toolkit needs a driver of its own on smithay-client-toolkit, with
   `accesskit_unix` attached directly.
@@ -121,28 +152,61 @@ start a unit of any name with `systemd-run --user`, or add a drop-in to a unit, 
 is a barrier against it.
 
 - **Privileged protocols by identity.** wlr-layer-shell's top and overlay layers,
-  ext-foreign-toplevel-list, ext-image-copy-capture, input-method, virtual keyboard and pointer,
-  data control, ext-session-lock and the compositor's private interface are granted to a client
-  only when both the executable of its process, a file under `/usr` in the read-only image, and
-  the systemd unit it runs in match an allow-list under `/usr`. Both are read from the
-  connection's peer credentials and pidfd when it connects. A string the client supplies grants
-  nothing, which narrows the finding of spike P4 to unconfined code.
+  ext-foreign-toplevel-list, ext-image-copy-capture with its window and output sources,
+  input-method, virtual keyboard and pointer, data control, ext-session-lock, ext-workspace (OS9
+  plan, question 7), wlr-output-management, granted to the control center only (question 10), and
+  the compositor's private interface are granted to a client only when both the executable of its
+  process, a file under `/usr` in the read-only image, and the systemd unit it runs in match an
+  allow-list under `/usr`. Both are read from the connection's peer credentials and pidfd when it
+  connects. A string the client supplies grants nothing, which narrows the finding of spike P4 to
+  unconfined code. The bottom and background layers stay open to every client. Every shipped client
+  that draws on the top or overlay layer or binds a privileged interface has its line in the shipped
+  list, naming each interface it binds, and `verify.py allow-list` fails without it (#728; C1
+  results, section 10, item 1).
+- **The identity's limits** (C1 results, section 5). The identity is the one read at connect: a
+  client that `exec`s another program keeps it, and a process handed a connection acts with the
+  identity of the process that connected. For programs under `/usr` this is accepted, and no check
+  is repeated at each bind (decision 17). Reading the identity never waits on a
+  file system a client controls: the executable is checked with `statx` and `AT_STATX_DONT_SYNC`,
+  and a fixture test with a stalled FUSE server at an allow-listed path shows the compositor still
+  drawing (decision 18). A kernel that answers `SO_PEERPIDFD` with `ENOPROTOOPT`
+  grants nothing, and a test exercises that answer. A client still running an executable that an
+  update replaced is granted nothing on a new connection until it restarts; this is recorded, not
+  prevented.
 - **No privileged protocol through a security context.** A client that connects through
   `security-context-v1`, as every application launched through the shell does
   (`doc_session_daemons.md` SD8), receives the standard globals only, whatever its executable or
   unit.
-- **The trusted path** follows LP13 as ADR-0092 amended it: the compositor borders the floating
-  windows of clients that carry a security context, and the real prompt is told apart by the
-  absence of that border and by the reveal key. If a decoration around the agent stays, the agent
-  is identified by its executable under `/usr` and its unit, as LP13 says. Because the compositor
-  owns the stacking order, the full-screen and tiled imitations of the open gap L13 are in its
-  reach; how it closes them is specified with the trusted path, not here.
+- **The trusted path** follows LP13 as ADR-0092 amended it: the compositor borders the windows of
+  clients that carry a security context, and the real prompt is told apart by the absence of that
+  border and by the reveal key. If a decoration around the agent stays, the agent is identified by
+  its executable under `/usr` and its unit, as LP13 says. The border is drawn in every window state,
+  floating, tiled, maximised and full-screen, as the maintainer's decision D16 on the gap L13 asks
+  of the indicator (`doc_lock_and_prompts.md`, section 4), so L13 closes with the own compositor. On
+  a full-screen window the border is drawn inside the window's edge, over the client's content. The
+  reveal key is handled by the compositor and never delivered to a client: while it is held, every
+  window shows whether it carries the border and the name of its application as the security context
+  gives it, never the client's own title; it is bound to Super+Alt+T (decision 26).
+  The fixture tests a confined client's window bordered in each state and the agent's window,
+  outside a security context, without one (`doc_session.md` SN16, gap 2).
+- **The lock path.** `ext_session_lock_manager_v1` is granted only by the locker's line in the
+  allow-list, which lands with the change that installs the locker (`doc_session.md` SN16, gap 1;
+  OS9 plan, question 3). Until a locker holds it, Super+Escape takes the keyboard back and asks
+  logind to lock (C1 results, section 5, item 9). While the session is locked, an input method's
+  grab is dropped, a virtual keyboard's keys aimed at the lock surface are dropped (question 12),
+  and no capture is served.
 - **The keyboard monitor answers Orca** (AX4): it admits only a client whose cgroup is
-  `orca.service`'s, as AX4 says, and, added by the own compositor, whose executable is Orca's under
-  `/usr`, at every call; an integrity check, as AX4 says, not a barrier against unconfined code.
+  `orca.service`'s, at every call; an integrity check, as AX4 says, not a barrier against
+  unconfined code. It
+  is written in the compositor over zbus; milestone C1 estimated about 500 lines for the monitor,
+  the key filter and AX4's admission (C1 results, section 10, item 6). Whether the image's session
+  bus returns `ProcessFD` is AX4's open doubt 9, answered before the acceptance. Until the
+  monitor exists, Orca's own commands do not reach Orca under the own compositor (SN16, gap 3).
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
-  by identity as above.
+  by identity as above. An output is captured through `ext_output_image_capture_source_manager_v1`,
+  granted by an allow-list line of its own and refused while the session is locked (#725; C1
+  results, section 7.3, T9-1); OS16 says what the portal's screen cast needs.
 - **X11 applications are one client.** Every X11 application reaches the compositor through
   xwayland-satellite, as one Wayland client with the satellite's identity, and shares one X server
   with every other X11 application. The satellite connects through a security context in a unit
@@ -154,9 +218,10 @@ The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the req
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
 and row 4 (the reduced-motion switch, AX9) are behaviour the own compositor ships from its first
 version. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
-three-finger swipe) follows decision 4 of `doc_overview.md`. Rows 8 and 9 depend on spikes of
-cosmic-comp; the behaviour they protect (an input method's grab dropped while locked, the special
-layer namespace counted only on overlay or top) is a requirement tested in the fixture of OS6.
+three-finger swipe) follows decision 4 of `doc_overview.md`. Row 8's behaviour, an input method's
+grab dropped while locked, is a requirement tested in the fixture of OS6 (#750). Row 9, the special
+layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
+S3 says what behaviour the namespace needs (OS9 plan, question 8).
 
 **OS5. The shell does not change to move.** `athanor-compositor-client` keeps its interface; its
 inside is rewritten for the new compositor, as SH2 foresees. Before it replaces cosmic-comp, the
@@ -170,10 +235,21 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   `zcosmic_toplevel_manager_v1` (window state and actions, `doc_overview.md`),
   `zcosmic_workspace_manager_v2`, `zcosmic_keyboard_layout_manager_v1` (`doc_languages.md`) and
   `cosmic_a11y_manager_v1` (`doc_accessibility.md`): a standard protocol where one covers it,
-  otherwise a private Athanor protocol, documented here before it is written;
+  otherwise a private Athanor protocol, documented here before it is written. Without them the bar
+  shows 6 of its 8 interactive widgets, the input source and the tiling toggle missing (C1 results,
+  section 4), and the dock cannot raise a window (section 7.3, T9-5). The set (decision
+  19), from the C1 protocols, section 3: `ext_foreign_toplevel_list_v1` for the list of
+  windows, with a private `athanor_toplevel_state_v1` keyed by its handle for the state and the
+  outputs of a window and a manager interface for activate, minimise, unminimise and close;
+  `ext_workspace_manager_v1` for workspaces, with a private `athanor_workspace_tiling_v1` for the
+  tiling state; a private `athanor_keyboard_group_v1` for the keyboard group; and a private
+  `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
+  (OS4), and its description is in the repository, versioned, before its first client;
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
 - for cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings, which ADR-0103 D13 keeps in
   1.0, either the protocols each uses or its replacement by a component of Athanor's (ADR-0121).
+  Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
+  process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
 **OS6. Tested without a GPU, with several outputs.** The compositor has a headless backend and an
 in-process client and server fixture, as niri does, with virtual outputs of any number, size and
@@ -181,17 +257,127 @@ scale. The rig runs the shell's surfaces against it, which brings the two-output
 pull request instead of a scheduled job. Protocol conformance, input methods and the security
 model of OS4 are tested in that fixture. The hardware matrix (outputs plugged and unplugged,
 fractional scale, VRR, NVIDIA, suspend and resume, tablets and touch) is checked on the reference
-laptop, on the maintainer's NVIDIA desktop and in the development VM. NVIDIA's driver is tested
-without the maintainer from the first milestone: the fixture also runs headless on the desktop's
-NVIDIA render node, so that rendering, dmabuf and explicit sync are checked at every change, and
-the compositor runs nested in the session. The console sessions on KMS come last (ADR-0121
-decision 9).
+laptop, on the maintainer's NVIDIA desktop and in the development VM. Suspend and resume and an
+output unplugged run on the laptop only, because on the desktop they make the GPU fall off the bus
+(#604); VRR, tablets and touch are recorded untested until a machine with them arrives (OS9 plan,
+questions 4 and 5). NVIDIA's driver is tested without the maintainer from the first milestone: the
+fixture also runs headless on the desktop's NVIDIA render node, so that rendering, dmabuf and
+explicit sync are checked at every change, and the compositor runs nested in the session. The
+console sessions on KMS come last (ADR-0121 decision 9).
+
+**OS12. Window actions.** A window can be moved and resized with the pointer: `xdg_toplevel.move`
+and `.resize` start an interactive grab, so a press on a title bar the client draws moves its window
+(C1 results, section 7.3, T9-8). The compositor serves the maximise, minimise and full-screen
+requests of `xdg_toplevel`, and the actions the shell gives the user through the private manager of
+OS5: activate, minimise, unminimise and close. The model is the one OS2 keeps: floating windows, and
+per workspace the automatic tiling the bar's toggle turns on and off, as cosmic-comp tiles today
+(OS2: the bar's toggle is shipped behaviour, F-bar-34). How the own compositor's tiling lays out
+windows is written in the plan that implements it, against cosmic-comp's as the reference, and any
+departure from it is an entry in the register. Any other model enters through the register (CO2).
+
+**OS13. Key bindings.** The compositor binds by default the keys the approved documents name: Super
+for the launcher and Super+A for the application library (`doc_launcher.md` LA8); Super+C and
+Super+N (`doc_control_center.md` CC9) and Super+V (CC10); Super+W and Super+1 to Super+0
+(`doc_overview.md` OV1, OV13), with OV13's Super+Shift and the same keys to move the window,
+Super+Ctrl with the arrows or h, j, k, l to step, Super+Shift+Ctrl to carry the window, and its
+four-finger swipes; Super+Space for the input source (`doc_languages.md` LN9); Super+Escape
+(`doc_lock_and_prompts.md` section 1 and its acceptance, item 1) and Super+Alt+Escape (LP10);
+Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7), and the
+magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
+decision 26); the keys of `doc_osd.md` OD3; and the switch to a text console. The bindings a user
+assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
+as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
+`doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
+(`doc_session.md` SN16, gap 7).
+
+**OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
+own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
+For 1.0 (decision 20): fractional scale per output; damage tracked per output, so
+that an output redraws only what changed; on an output's removal, its layer surfaces closed and
+their clients told, and its windows moved to a remaining output; outputs of a second GPU recorded as
+a known limit, since no machine of the matrix connects one (C1 results, section 7: the desktop's RTX
+3060 and the laptop's MX150 drove nothing). Milestone C1 is single-scale, renders on the primary GPU
+and redraws every output whole (C1 results, section 10, item 9).
+
+**OS15. The pointer and colour.** The pointer is drawn from a buffer the compositor can read, a
+themed cursor or the client's cursor surface (`wl_pointer.set_cursor`, `wp_cursor_shape_v1`), so
+that it can take the cursor plane. Milestone C1's solid square could not, and on the NVIDIA desktop
+nobody saw a pointer in either run, although the second run's trace has the square composited where
+the mouse was (C1 results, section 7.3, T9-3). The acceptance's console runs record the pointer seen
+by someone at the console (OS19). At 1.0 outputs are driven in 8-bit formats; 10-bit formats, colour
+management and HDR come after 1.0 (decision 21).
+
+**OS16. Capture.** Windows and outputs are captured through `ext-image-copy-capture-v1`, by identity
+(OS4) and never while locked. Before the portal's screen cast (`doc_portal.md`) runs on the
+compositor, capture serves dmabuf buffers and reports damage, so that a stream copies only what
+changed; screenshots keep shared-memory buffers (decision 22). Milestone C1 has
+neither dmabuf capture nor damage (C1 results, section 10, item 11).
+
+**OS17. Every global has a class.** The compositor's `data/globals` gives each global it offers one
+class: standard, offered to every client; unconfined, offered only outside a security context;
+layer-gated, whose top and overlay layers the allow-list grants; or privileged (OS4). The fixture
+fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` is unconfined (OS9
+plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
+(questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
+written (decision 23): data control, privileged, as OS4 says; primary selection,
+idle inhibit, single-pixel buffer and server-side decoration, standard;
+`zwlr_output_power_manager_v1`, privileged, for `athanor-idle` (`doc_session_daemons.md` SD4).
+`ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
+per-client filter for it (C1 results, section 4).
+
+**OS18. The compositor is not restarted.** Its unit has no `Restart=`: Wayland clients do not
+survive their compositor, so its end ends the session and greetd shows the greeter (`doc_session.md`
+SN6, SN15). A console run checks in the compositor's log, at the start and after each resume, that
+libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
+
+**OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
+(section 6, step 4) when each of the following holds, recorded in the pull request that makes it the
+default session:
+
+1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
+   `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
+   toolkit's (those pass the gates of OS8 and OS9 in the gallery, OS10): the 243 of today's 18
+   surfaces and layouts, the greeter's 12 included, which the report leaves out while the greeter
+   runs on cosmic-comp in greetd's session (`doc_session.md` SN12; section 6, step 5), and the 24 of
+   the lock screen and the polkit agent once installed. Each difference has its cause and its issue
+   in `athanor-differences.toml`, and a second set of goldens is recorded only when cosmic-comp
+   leaves the image (OS9 plan, questions 1 and 2). The eight causes milestone C1 listed are tied to
+   cases there (C1 results, section 3).
+2. **OS4 and OS5 tested in the fixture of OS6:** each requirement of OS4, OS5 and OS12 to OS17 has a
+   fixture test, the identity's limits and the trusted path included, and the bar shows its 8
+   interactive widgets.
+3. **AX17's scenarios pass, and Orca's transcripts are no poorer than on cosmic-comp,** in the rig
+   and in the development VM, whose part needs `athanor-a11y`, the AX5 gate and the AX4 monitor (OS9
+   plan, question 9). The keyboard aids, the magnifier and the colour filters are in
+   (`doc_session.md` SN16, gap 4).
+4. **The hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included, as a recorded
+   run.** On the reference laptop and on the NVIDIA desktop, an hour of use on a text console, run
+   by someone at the console, with frame times in the form of the C1 results' section 6; the desktop
+   on its three outputs; on the laptop, one suspend and resume and one output unplugged and plugged
+   back, not on the desktop (#604). Each run records, with its logs: the devices listed at the start
+   (OS18), explicit sync negotiated, the pointer seen, the switch to a text console and back, and
+   Super+Escape with the bar, the dock and a terminal open (C1 results, section 10, items 13 and
+   14). The fixture runs headless on the desktop's NVIDIA render node with explicit sync and a
+   Vulkan client, which milestone C1 did not record (C1 results, section 8).
+5. **Frame times within their thresholds** on each console run, per output (decision
+   24, set from the desktop's console session and the laptop's unattended run, in place of the
+   attended laptop run the OS9 plan's question 6 named): a mean draw under 2 ms; a longest draw
+   under one refresh period of the output; and a client that animates on an otherwise idle output
+   committing at a median interval within 10 % of the refresh period. Milestone C1's console runs
+   met the first two, with longest draws of 4.20 ms on the laptop and 3.67 ms on the desktop, and
+   not the third on NVIDIA, where Firefox committed a frame every 23 to 81 ms on average (C1
+   results, sections 7.1 and 7.3, T9-4).
+
+This acceptance closes the gaps 2 to 5 and 7 of `doc_session.md` SN16: the trusted path and Orca's
+keyboard monitor (OS4), the aids, the magnifier and the filters (item 3), the identity's limits
+(OS4) and the key bindings (OS13).
 
 ## 4. The toolkit
 
 **OS7. A widget layer of our own, on Parley and AccessKit** (ADR-0121). A library crate under
 `system/`, `MIT OR Apache-2.0`. Parley lays out and edits text, AccessKit with `accesskit_unix`
-publishes the accessible tree, and Vello draws. The widgets, the layout, the focus chain, the
+publishes the accessible tree, and `vello_cpu` draws, `vello_gpu` staying behind a cargo feature
+that is off by default (decision 16). The widgets, the layout, the focus chain, the
 keyboard navigation, the popups and menus, and the test harness are ours; Masonry and Xilem are
 read as references, not depended on. A windowing driver of its own, on smithay-client-toolkit,
 gives layer-shell surfaces, popups, text-input-v3, fractional scale and cursor shapes. Gaps in
@@ -200,12 +386,20 @@ and carried until upstream takes them, as CO3 does for cosmic-comp. `verify.py l
 ours and admits an exception only for a crate that links `greetd_ipc`, is generalised in the
 change that adds the toolkit, so that each exception carries its own reason, and names the
 toolkit's crates there.
+A group and a radio group take AT-SPI's `panel` role, as W3C Core-AAM 1.2 maps them and AccessKit
+follows, where GTK gives `grouping`, so Orca says "panel" where it said "grouping" (T1 results, task
+5). The title bar the toolkit draws itself (maintainer decision of 2026-10-17) takes the names of
+its Minimize and Close buttons from `athanor-i18n` before the first surface moves: both choosers
+name them in English under Italian today (T1 results, task 5).
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's
 speech transcript for a scripted walk through the surface, in English and in Italian, holds every
 name, role, state and value of the GTK transcript. The GTK transcripts are recorded first and kept
-as the reference.
+as the reference. A role Orca speaks differently from the GTK transcript's, such as "panel" for
+"grouping", does not hold a surface back when the toolkit's role is the one W3C Core-AAM 1.2
+prescribes; the comparison records it as a difference with that reason, as milestone T1's did by the
+maintainer's decision of 2026-10-17 (decision 25).
 
 **OS9. Harnesses before surfaces.** Writing code is not the bottleneck; checking it is. Before the
 first surface moves:
@@ -245,6 +439,14 @@ takes it as a git dependency pinned to a commit:
 what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
 revision records the direction only; a later revision specifies stage 2 before its code starts.
 
+**OS20. The first surface's acceptance.** The layout chooser moves to the toolkit when, besides OS8
+and OS9, each visible difference milestone T1 recorded against the GTK goldens is closed or recorded
+with its reason: the window's border and shadow, the title bar, the headings, the toggle buttons,
+the accent, the background, the font, the padding, the dark variant, the right-to-left row height
+(42 px against GTK's 30, from Parley's locale fallback font) and the window's placement (T1 results,
+task 4). Before the dock moves, this document gains the tier measurement, the live blur and the
+dock's window geometry (ADR-0124).
+
 ## 5. The first two milestones
 
 Both start at once, beside release 0.9, as the first steps of the real crates: the compositor
@@ -269,6 +471,47 @@ holds (OS8), and a text field takes composed input from the simulated input meth
 against the GTK version: binary size, start-up time and memory, with `vello_cpu` and with
 `vello_gpu`, in the VM and on the NVIDIA desktop, and the lines the widget layer took.
 
+**What milestone C1 measured** (C1 results):
+
+- **Lines:** 8297 in `src/` by `wc -l` at `f12b0cc7`, 5641 of them outside the fixture; 54 test
+  attributes, 52 passing and 2 ignored (#679); `tokei` was not run (section 2).
+- **Protocols:** Smithay, pinned at `023b78b1`, gives the server side of the standard protocols the
+  shell uses; the five COSMIC protocols have no equivalent yet, and the bar shows 6 of its 8
+  interactive widgets (sections 1 and 4).
+- **Goldens:** the toolkit's chooser matches its goldens under the compositor with 0 differing
+  pixels. The bar, the dock and the launcher were compared before the identity check only, with
+  eight causes not tied to cases; none was re-recorded or compared at the head (section 3).
+- **Draw times:** nested on NVIDIA's EGL for an hour, a mean draw of 0.17 ms (the median of the
+  reports) and a longest draw of 6.91 ms (#646). On a console, the laptop (`i915`, one output, about
+  61 minutes, unattended) drew in 0.97 ms on average and 4.20 ms at the longest; the NVIDIA desktop
+  (RTX 4070 Ti SUPER, two outputs, 13 minutes, attended, stopped on its defects) in 0.39 ms and 3.67
+  ms (sections 6 and 7.1). They are draw times, not frame times on a display.
+- **Events:** explicit sync negotiated on both machines; on the laptop one suspend and resume and
+  one forced output unplug survived; the switch to a text console and Super+Escape were not run
+  (section 7.2).
+- **Defects** (section 7.3): no output capture (T9-1); input devices logged only after the resume
+  (T9-2, fixed by #714); no pointer seen on NVIDIA (T9-3); a draw stall, fixed by #754, while what
+  paces Firefox stays open (T9-4); the bar's launcher buttons opening on the other session and the
+  dock unable to raise a window (T9-5); cosmic-workspaces' overview refused the top layer, the
+  process then ending on SIGSEGV (T9-6); popups unknown to the popup manager (T9-7); no interactive
+  move or resize (T9-8).
+- **Not measured** (sections 8 and 11): an hour on the NVIDIA desktop's monitors; anything seen on
+  the laptop's screen; headless on NVIDIA's render node with explicit sync; the FUSE stall; the
+  golden differences case by case; the shell's surfaces at the head under the allow-list.
+
+**What milestone T1 measured** (T1 results):
+
+- **The gates:** the chooser drawn in its twelve cases, with eleven visible differences from GTK
+  (task 4); the AT-SPI and Orca comparisons passing in English and Italian, a group spoken as
+  "panel" where GTK gives "grouping" (task 5); composed input taken from the simulated input method.
+- **Start-up and memory:** section 1.3.
+- **Binary:** 5.85 MiB stripped without the `gpu` feature and 10.18 MiB with it, against GTK's 1.34
+  MiB; GTK maps 120 shared objects in the rig and 150 on the NVIDIA desktop, the toolkit with
+  `vello_cpu` 20 (task 7).
+- **Lines:** 2532 in `system/athanor-toolkit`, 510 of them tests (task 7).
+- **Not measured:** the development VM's virgl (task 7). Revision 2 does not ask for it, since the
+  rig's llvmpipe gives the case without a GPU and virgl is no user's hardware.
+
 ## 6. Order
 
 1. This document, ADR-0121 and the plans of the first two milestones.
@@ -277,16 +520,16 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    their measurements.
 3. The rest of the harnesses of OS9.
 4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
-   the GTK4 shell unchanged on top. Revision 2 writes that acceptance: every surface 1.0 carries
+   the GTK4 shell unchanged on top. Its acceptance is OS19: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
    as a recorded run. Before that acceptance, as soon as milestone C1's DRM backend has passed the
    console sessions, the image installs the compositor as an optional session chosen at the
    greeter, cosmic-comp staying the default, under the conditions of decision 10.
-5. The toolkit, in parallel with the compositor, one surface at a time under OS8: the layout chooser first, then the dock, the
-   launcher, the bar and the control centre; the greeter last, because it handles the password
-   (AGENTS.md, "Stop and ask before editing").
+5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the
+   layout chooser first, then the dock, the launcher, the bar and the control centre; the greeter
+   last, because it handles the password (AGENTS.md, "Stop and ask before editing").
 6. In parallel with steps 4 and 5 and with the rebase to Fedora 45, on the laptop: stage 1 of
    OS10, a toolkit developers outside Athanor can build on. Its widgets, most of which step 5
    needs, pass the gates of OS8 and OS9 in the gallery; the guide and the rustdoc complete it, and
@@ -343,17 +586,42 @@ Taken by the maintainer on 2026-10-19 and recorded in ADR-0126, as its rules 5 t
     a name there is permanent; until then a git dependency pinned to a commit. The alternative
     weighed, publication now as `athanor-toolkit`, was not taken.
 
-Open, settled by milestone T1's measurements: **the toolkit's renderer.** Recommended: `vello_cpu` by
-default and `vello_gpu` where T1 measures it faster, because no figure for NVIDIA or the VM exists.
+Taken by the maintainer on 2026-10-18, after milestone T1's measurements (T1 results, task 8):
+
+16. **The toolkit's renderer is `vello_cpu`** (OS7). `vello_gpu` stays in the crate behind the `gpu`
+    cargo feature, off by default, and is turned on for a surface only when that surface is measured
+    faster with it. Before it is on by default for any surface, a frame wgpu cannot acquire no
+    longer ends the client: it is skipped on `Timeout` and `Occluded`, the surface is reconfigured
+    on `Outdated` and recreated on `Lost`, each with a test. This settles the decision revision 1
+    left open, whose recommendation, `vello_gpu` where T1 measured it faster, met no such case.
+
+Taken by the maintainer on 2026-10-23, each on the draft's recommendation, written above where
+"(decision N)" marks it; C1 items are those of the C1 results, section 10. Tiling at 1.0 is not
+among them: OS2 keeps the bar's toggle as shipped behaviour (F-bar-34). Nor are virgl figures for
+the toolkit: the T1 results leave them to revision 2, which does not ask for them (section 5):
+
+17. **Identity at connect, without a check at each bind** (OS4; C1 item 2).
+18. **A non-blocking executable check** (OS4; C1 item 3).
+19. **The private protocols and their shape** (OS5; C1 item 5).
+20. **The output model of 1.0** (OS14; C1 item 9).
+21. **8-bit outputs at 1.0** (OS15; C1 item 10).
+22. **dmabuf capture and damage before the screen cast** (OS16; C1 item 11).
+23. **The class of each protocol not yet offered** (OS17; C1 item 12).
+24. **The frame-time thresholds** (OS19; C1 item 15; OS9 plan, question 6).
+25. **A role spoken differently** (OS8; T1 results, task 8, item 3).
+26. **The full-screen border and the reveal key** (OS4; SN16, gap 2).
 
 ## 8. Risks
 
 - **Smithay has no release this year** and its main branch breaks its API; every revision bump is
   work, as a cosmic-comp rebase is today.
 - **NVIDIA.** cosmic-comp's open NVIDIA defects show the cost of the matrix; the own compositor
-  meets the same driver.
+  meets the same driver. Its first console session on the NVIDIA desktop stopped after 13 minutes on
+  its defects: no pointer was seen, and Firefox committed a frame every 23 to 81 ms on average (C1
+  results, section 7.3, T9-3 and T9-4).
 - **Accessibility.** AccessKit's AT-SPI adapter lacks structural navigation and combo box state
-  today; the gate of OS8 may hold a surface back until upstream or we close them.
+  today; the gate of OS8 may hold a surface back until upstream or we close them. A group is
+  spoken as "panel" where GTK gives "grouping" (OS7, OS8).
 - **The widget layer is ours** (decision 7): widgets, layout, focus, menus and the test harness
   are written before the first surface moves, where Masonry would have given some of them.
 - **Stage 1 of the toolkit runs beside the compositor** (decision 12): the widgets the surfaces
@@ -363,7 +631,7 @@ default and `vello_gpu` where T1 measures it faster, because no figure for NVIDI
   acceptance, a defect of the hardware matrix found late moves it, and until then each Fedora
   rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
-  upstream or we add them.
+  upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.
