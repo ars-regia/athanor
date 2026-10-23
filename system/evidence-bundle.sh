@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The evidence bundle of a promotion (ADR-0103 D23, doc_pipeline.md PL42): the plan
-# promotion-plan.sh wrote, the run's digests, the evidence and the package sets, with a
+# promotion-plan.sh wrote, the GitHub Release github-release.sh plan chose (release.json),
+# the run's digests, the evidence and the package sets, with a
 # bundle.sha256 signed keylessly by promote-stable.yml. It is copied to a registry off
 # GitHub, pulled back and verified before :stable moves, so a promotion whose record did
 # not reach that copy intact does not happen. No key: the signature is the workflow's
@@ -10,6 +11,7 @@
 #        evidence-bundle.sh verify REF ARTIFACTS_DIR
 #        evidence-bundle.sh verify-dir COPY_DIR ARTIFACTS_DIR
 #        evidence-bundle.sh summary ARTIFACTS_DIR
+#        evidence-bundle.sh summary --promotion ARTIFACTS_DIR TAG
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -27,8 +29,12 @@ create() {
         echo "${0##*/}: $1/promotion.json is missing: run scripts/ci/promotion-plan.sh first" >&2
         exit 1
     }
+    [[ -f $1/release.json ]] || {
+        echo "${0##*/}: $1/release.json is missing: run system/github-release.sh plan first" >&2
+        exit 1
+    }
     mkdir -p "$2"
-    cp "$1/promotion.json" "$1/image-digests.txt" "$2/"
+    cp "$1/promotion.json" "$1/release.json" "$1/image-digests.txt" "$2/"
     cp -r "$1/evidence" "$1/packages" "$2/"
     # verify-dir compares names line by line: refuse what it could not, before anything is signed.
     local nl=$'\n' bad
@@ -62,7 +68,9 @@ verify_dir() {
         }
 }
 
-summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release approval covers (PL60)
+# The promotion and its evidence, from promotion.json and the evidence alone: the part of the
+# summary the Release notes repeat, so github-release.sh plan and publish build the same bytes.
+promotion_summary() { # promotion_summary ARTIFACTS_DIR
     # A missing field is an error, never "none": the text is what the approval covers.
     jq -r 'def must(k): .[k] // error("promotion.json has no \(k)");
     "### Promotion plan of build run \(must("run_id"))", "",
@@ -76,6 +84,33 @@ summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release ap
     jq -r -s 'def must(k): .[k] // error("an evidence file has no \(k)");
     "| Evidence | Image | Verdict | Finished |", "| --- | --- | --- | --- |",
     (.[] | "| \(must("gate")) | \(must("image")) | \(must("verdict")) | \(must("finished_at")) |")' "$1"/evidence/*.json
+}
+
+summary() { # summary ARTIFACTS_DIR: Markdown for the job summary the release approval covers (PL60)
+    promotion_summary "$1"
+    [[ -f $1/release.json ]] || {
+        echo "${0##*/}: $1/release.json is missing: run system/github-release.sh plan first" >&2
+        exit 1
+    }
+    # The GitHub Release github-release.sh plan chose, and the fallback it may use (ADR-0131).
+    jq -r 'def must(k): if has(k) and .[k] != null then .[k] else error("release.json has no \(k)") end;
+    def release: "tag `\(must("tag"))`, title \(must("title")), latest \(must("latest")), notes SHA-256 `\(must("notes_sha256"))`";
+    "", "GitHub Release (doc_pipeline.md PL42): " + release, "",
+    if has("fallback") then "If that Release holds the evidence of another build: " + (.fallback | release), "" else empty end' "$1/release.json"
+}
+
+promotion_notes() { # promotion_notes ARTIFACTS_DIR TAG: the promotion, then how to verify its asset on the Release at TAG
+    promotion_summary "$1"
+    local asset
+    asset=$(jq -er '"evidence-\(.run_id)-\(.trigger | capture("/actions/runs/(?<id>[0-9]+)$").id).tar"' "$1/promotion.json") || {
+        echo "${0##*/}: $1/promotion.json names no build run_id or no promotion run trigger" >&2
+        exit 1
+    }
+    printf '%s\n' "" "Verify the evidence bundle of this promotion against its keyless signature:" "" '```sh' \
+        "gh release download $2 -R ${GITHUB_REPOSITORY:-ars-regia/athanor} -p $asset" \
+        "mkdir ${asset%.tar} && tar -xf $asset -C ${asset%.tar} && cd ${asset%.tar}" \
+        "cosign verify-blob --bundle bundle.sha256.sigstore.json --certificate-identity $identity --certificate-oidc-issuer $issuer bundle.sha256" \
+        "sha256sum --strict -c bundle.sha256" '```'
 }
 
 case ${1:-} in
@@ -102,8 +137,12 @@ verify-dir)
     verify_dir "$2" "$3"
     ;;
 summary)
-    [[ $# -eq 2 ]] || usage
-    summary "$2"
+    if [[ $# -eq 4 && $2 == --promotion ]]; then
+        promotion_notes "$3" "$4"
+    else
+        [[ $# -eq 2 ]] || usage
+        summary "$2"
+    fi
     ;;
 *) usage ;;
 esac

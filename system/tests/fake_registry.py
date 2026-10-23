@@ -44,6 +44,18 @@ Fixture keys:
   runs          [{"databaseId": 1, "headBranch": "iso-v0"}]
   api           {"/repos/owner/repo/actions/runs/N": {...}}  the JSON `gh api` prints for that path (`--jq .a.b` prints that key path)
   run_artifacts {"run id": {"artifact name": {"relative path": "text"}}}  what `gh run download` writes
+  releases      {tag: {"draft": bool, "latest": bool, "target": sha, "title": str, "body": str,
+                "assets": {name: sha256}}}  the GitHub Releases `gh release` reads and writes; the
+                bytes of an asset are the file release-assets/<sha256> beside the fixture, which
+                `create` and `upload` write and `download` reads
+  git_tags      {name: {"sha": object sha, "type": "commit"|"tag", "commit": sha, "message": str,
+                "tagger_email": str, "verified": bool}}  the git tags of the repository, answered
+                on the `gh api` paths git/matching-refs/tags/<prefix>, git/ref/tags/<name> and
+                git/tags/<object sha>; publishing a draft whose tag is absent adds it, lightweight,
+                on the draft's target. (`tags` holds registry tags.)
+  gh_errors     ["text", ...]  a `gh` call whose arguments, joined by spaces, contain the text fails
+                with a server error
+  release_edits_lost  true: `gh release edit` succeeds and changes nothing
 """
 
 import base64
@@ -181,7 +193,102 @@ def cosign(args, fx):
     return fail(f"fake cosign: unsupported call {args}", 2)
 
 
+def save(fx):
+    with open(os.environ["FAKE_REGISTRY"], "w") as f:
+        json.dump(fx, f)
+
+
+def assets_dir():
+    return pathlib.Path(os.environ["FAKE_REGISTRY"]).parent / "release-assets"
+
+
+def git_api(path, fx):
+    """The git tag endpoints: the JSON for PATH, or None when PATH is not one of them."""
+    tags = fx.get("git_tags", {})
+    match = re.fullmatch(r"/repos/[^/]+/[^/]+/git/(matching-refs/tags/|ref/tags/|tags/)(.*)", path)
+    if not match:
+        return None
+
+    def ref(name):
+        return {"ref": f"refs/tags/{name}", "object": {"sha": tags[name]["sha"], "type": tags[name]["type"]}}
+
+    kind, rest = match.groups()
+    if kind == "matching-refs/tags/":
+        return [ref(name) for name in sorted(tags) if name.startswith(rest)]
+    if kind == "ref/tags/":
+        return ref(rest) if rest in tags else False
+    for name, tag in tags.items():
+        if tag["type"] == "tag" and tag["sha"] == rest:
+            return {"sha": rest, "tag": name, "message": tag["message"], "tagger": {"email": tag["tagger_email"]},
+                    "object": {"sha": tag["commit"], "type": "commit"}, "verification": {"verified": tag["verified"]}}
+    return False
+
+
+def release(args, fx):
+    releases = fx.setdefault("releases", {})
+    verb, tag = args[1], args[2]
+    flags = {a.split("=", 1)[0]: (a.split("=", 1)[1] if "=" in a else True) for a in args if a.startswith("--")}
+
+    def value(flag):
+        return args[args.index(flag) + 1]
+
+    def store(path):
+        data = pathlib.Path(path).read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        assets_dir().mkdir(exist_ok=True)
+        (assets_dir() / sha).write_bytes(data)
+        return pathlib.Path(path).name, sha
+
+    if verb == "create":
+        if tag in releases:
+            return fail(f"a release with the same tag name already exists: {tag}")
+        name, sha = store(args[3])
+        releases[tag] = {"draft": "--draft" in flags, "latest": False, "target": value("--target"),
+                         "title": value("--title"), "body": pathlib.Path(value("--notes-file")).read_text(),
+                         "assets": {name: sha}}
+        save(fx)
+        return 0
+    if tag not in releases:
+        return fail("release not found")
+    rel = releases[tag]
+    if verb == "view":
+        print(json.dumps({"isDraft": rel["draft"], "tagName": tag, "name": rel["title"], "targetCommitish": rel["target"],
+                          "url": f"https://github.com/ars-regia/athanor/releases/tag/{tag}",
+                          "assets": [{"name": name, "size": 1} for name in sorted(rel["assets"])]}))
+        return 0
+    if verb == "upload":
+        name = pathlib.Path(args[3]).name
+        if name in rel["assets"] and "--clobber" not in flags:
+            return fail(f"asset under the same name already exists: [{name}]")
+        rel["assets"][name] = store(args[3])[1]
+        save(fx)
+        return 0
+    if verb == "edit":
+        if fx.get("release_edits_lost"):
+            return 0
+        if flags.get("--draft") == "false":
+            rel["draft"] = False
+            fx.setdefault("git_tags", {}).setdefault(tag, {"sha": rel["target"], "type": "commit", "commit": rel["target"],
+                                                           "message": "", "tagger_email": "", "verified": False})
+        if "--latest" in flags:
+            rel["latest"] = flags["--latest"] is True or flags["--latest"] == "true"
+        save(fx)
+        return 0
+    if verb == "download":
+        name = value("-p")
+        if name not in rel["assets"]:
+            return fail(f"no assets match the file pattern")
+        (pathlib.Path(value("-D")) / name).write_bytes((assets_dir() / rel["assets"][name]).read_bytes())
+        return 0
+    return fail(f"fake gh: unsupported call {args}", 2)
+
+
 def gh(args, fx):
+    for text in fx.get("gh_errors", []):
+        if text in " ".join(args):
+            return fail("gh: Server Error (HTTP 502)")
+    if args[0] == "release":
+        return release(args, fx)
     if args[:2] == ["run", "list"]:
         print(json.dumps(fx.get("runs", [])))
         return 0
@@ -210,6 +317,13 @@ def gh(args, fx):
                 print(body)
             else:
                 print(json.dumps(body))
+            return 0
+        body = git_api(path, fx)
+        if body is False:
+            print(json.dumps({"message": "Not Found", "status": "404"}))
+            return fail("gh: Not Found (HTTP 404)")
+        if body is not None:
+            print(json.dumps(body))
             return 0
         if re.fullmatch(r"/users/[^/?]+", path):
             print(fx.get("owner_type", "User"))

@@ -11,6 +11,7 @@ from test_kernel_artifacts import Tool
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "system" / "evidence-bundle.sh"
 IDENTITY = "https://github.com/ars-regia/athanor/.github/workflows/promote-stable.yml@refs/heads/iso-v0"
+RELEASE = {"tag": "promoted-412", "title": "43.20261024.5123", "latest": False, "notes_sha256": "d" * 64}
 
 
 class EvidenceBundle(Tool):
@@ -21,6 +22,7 @@ class EvidenceBundle(Tool):
         (a / "evidence").mkdir(parents=True)
         (a / "packages").mkdir()
         (a / "promotion.json").write_text(json.dumps({"run_id": 412}))
+        (a / "release.json").write_text(json.dumps(RELEASE))
         (a / "image-digests.txt").write_text(
             "r/athanor-system 412 sha256:" + "a" * 64 + "\n"
         )
@@ -59,6 +61,7 @@ class EvidenceBundle(Tool):
                     "image-digests.txt",
                     "packages/athanor-system.txt",
                     "promotion.json",
+                    "release.json",
                 ]
             ),
         )
@@ -70,6 +73,13 @@ class EvidenceBundle(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn("promotion-plan.sh", r.stderr)
         self.assertFalse(self.bundle.exists())
+
+    def test_create_refuses_a_plan_without_release_json(self):
+        (self.artifacts / "release.json").unlink()
+        r = self.run_script("create", str(self.artifacts), str(self.bundle))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("github-release.sh plan", r.stderr)
+        self.assertFalse((self.bundle / "bundle.sha256").exists())
 
     def test_create_refuses_a_symlink(self):
         (self.artifacts / "evidence" / "link.json").symlink_to(
@@ -180,6 +190,40 @@ class EvidenceBundle(Tool):
                 r = self.run_script("summary", str(self.artifacts))
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn(field, r.stderr)
+
+    def test_summary_names_the_release_tag_title_and_notes_hash(self):
+        self.plan()
+        release = {"tag": "v0.9.0", "title": 'Athanor 0.9 "surface" (43.20261024.5123)', "latest": True,
+                   "notes_sha256": "e" * 64,
+                   "fallback": {"tag": "promoted-412", "title": "43.20261024.5123", "latest": False,
+                                "notes_sha256": "d" * 64}}
+        (self.artifacts / "release.json").write_text(json.dumps(release))
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for text in ("`v0.9.0`", 'Athanor 0.9 "surface" (43.20261024.5123)', "latest true", "`" + "e" * 64 + "`",
+                     "`promoted-412`", "latest false", "`" + "d" * 64 + "`"):
+            self.assertIn(text, r.stdout)
+        for field in ("tag", "title", "latest", "notes_sha256"):
+            with self.subTest(field=field):
+                (self.artifacts / "release.json").write_text(json.dumps({k: v for k, v in release.items() if k != field}))
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+        (self.artifacts / "release.json").unlink()
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("release.json", r.stderr)
+
+    def test_summary_promotion_mode_reads_no_release_json(self):
+        self.plan(trigger="https://github.com/ars-regia/athanor/actions/runs/9001")
+        (self.artifacts / "release.json").unlink()
+        r = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for text in ("build run 412", "Version: 43.20261024.5123", "| iso-acceptance | athanor-system | pass |",
+                     "gh release download promoted-412 -R ars-regia/athanor -p evidence-412-9001.tar",
+                     "--certificate-identity " + IDENTITY, "sha256sum --strict -c bundle.sha256"):
+            self.assertIn(text, r.stdout)
+        self.assertNotIn("GitHub Release", r.stdout)
 
     def test_the_summary_refuses_a_missing_field(self):
         # A plan without overrides would read "Hardware override: none" in the approval.
