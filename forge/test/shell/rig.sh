@@ -57,6 +57,10 @@
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)|toolkit-gallery (the same)|gtk-gallery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
+#
+# RIG_COMPOSITOR=athanor runs a scene under athanor-compositor on its headless backend, with
+# RIG_HEADLESS_OUTPUTS (default 1) outputs side by side in each capture; `surface layout` sets
+# it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors.
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
@@ -115,9 +119,10 @@ fi
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
-# RIG_COMPOSITOR=athanor reaches session.sh, which nests athanor-compositor in place of cosmic-comp,
-# and runs the container in systemd mode, whose cgroup tree is writable: bar_session.py --unit
-# puts the bar in its unit's cgroup there, for the compositor's allow-list (OS4).
+# RIG_COMPOSITOR=athanor reaches scene.sh, which runs athanor-compositor headless in place of
+# cosmic-comp (session.sh) on RIG_HEADLESS_OUTPUTS outputs, and runs the container in systemd
+# mode, whose cgroup tree is writable: bar_session.py --unit and in-unit.sh put a client in its
+# unit's cgroup there, for the compositor's allow-list (OS4).
 # ATHANOR_TOOLKIT_RENDERER reaches athanor-toolkit's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
@@ -128,6 +133,9 @@ in_rig() { # in_rig <image> <command...>
     fi
     if [ -n "${RIG_COMPOSITOR:-}" ]; then
         opts+=(-e RIG_COMPOSITOR)
+        if [ -n "${RIG_HEADLESS_OUTPUTS:-}" ]; then
+            opts+=(-e RIG_HEADLESS_OUTPUTS)
+        fi
     fi
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
         opts+=(--systemd=always)
@@ -218,14 +226,20 @@ seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
 }
 
 # The layout cases: the bar and the dock as the session runs them, drawing the seeded preset.
+# Under athanor-compositor the case's outputs are its headless outputs, captured until stable.
 capture_layout() {
+    local compositor=()
     require athanor-bar build-bar
     require athanor-dock build-dock
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+        compositor=(RIG_HEADLESS_OUTPUTS="${RIG_LAYOUT_OUTPUTS:-1}" RIG_STABLE=5)
+    fi
     stage_greeter_icons
     while IFS=$'\t' read -r tag preset panel dock scale width height; do
         tags+=("$tag")
         seed_layout "$out/seed-$tag" "$preset" "$panel" "$dock"
-        in_rig "$(rig_image)" env RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
+        in_rig "$(rig_image)" env "${compositor[@]}" RIG_SETTLE=8 RIG_LOCALE=en_US.UTF-8 RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY="$bar_overlay" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh "$width" "$height" "$scale" "$tag" -- \
             python3 /repo/forge/test/shell/bar_session.py --log --beside athanor-dock
@@ -567,8 +581,8 @@ build-toolkit)
     ;;
 compositor-globals)
     # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1 and 2: what a client of athanor-compositor binds.
-    # session.sh installs the shipped allow-list, but wayland-info is not listed in it and runs
-    # in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
+    # session.sh installs the shipped allow-list and the rig's lines, but wayland-info is listed
+    # in neither and runs in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
     # the grant.
     require athanor-compositor build-compositor
     rm -f "$out/compositor-globals.txt"
