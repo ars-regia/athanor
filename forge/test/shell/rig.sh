@@ -20,6 +20,8 @@
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
 #   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
+#   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
+#   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
@@ -639,6 +641,34 @@ cargo)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
+    ;;
+seal-bin)
+    shift
+    [ "$#" -gt 0 ] || { echo "rig.sh: seal-bin needs a binary name" >&2; exit 2; }
+    for f in "$@"; do require "$f" "the build recipe of $f"; done
+    {
+        echo "commit $(git -C "$root" rev-parse HEAD)"
+        (cd "$out/bin" && sha256sum -- "$@")
+    } > "$out/bin/SEALED"
+    ;;
+verify-bin)
+    shift
+    [ "$#" -gt 0 ] || { echo "rig.sh: verify-bin needs a binary name" >&2; exit 2; }
+    if [ ! -s "$out/bin/SEALED" ]; then
+        echo "rig.sh: $out/bin/SEALED is missing; download the artifact of the build job" >&2
+        exit 1
+    fi
+    sealed=$(head -n 1 "$out/bin/SEALED")
+    if [ "$sealed" != "commit $(git -C "$root" rev-parse HEAD)" ]; then
+        echo "rig.sh: the binaries were sealed at '$sealed', not at this commit" >&2
+        exit 1
+    fi
+    for f in "$@"; do
+        grep -q -- "  $f\$" "$out/bin/SEALED" || { echo "rig.sh: $f is not sealed" >&2; exit 1; }
+    done
+    # Artifacts drop the mode bits, so the check runs on the content and the mode is restored after.
+    (cd "$out/bin" && tail -n +2 SEALED | sha256sum --check --strict -)
+    for f in "$@"; do chmod 0755 "$out/bin/$f"; done
     ;;
 build-bar)
     mkdir -p "$out/bin" "$out/target"
