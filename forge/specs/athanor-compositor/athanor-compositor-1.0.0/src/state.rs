@@ -56,7 +56,9 @@ use smithay::wayland::drm_syncobj::DrmSyncobjState;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::idle_notify::IdleNotifierState;
-use smithay::wayland::image_capture_source::ToplevelCaptureSourceState;
+use smithay::wayland::image_capture_source::{
+    OutputCaptureSourceState, ToplevelCaptureSourceState,
+};
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
@@ -141,6 +143,7 @@ pub struct State {
 
     pub foreign_toplevel_state: ForeignToplevelListState,
     pub toplevel_capture_state: ToplevelCaptureSourceState,
+    pub output_capture_state: OutputCaptureSourceState,
     pub image_copy_capture_state: ImageCopyCaptureState,
     /// The capture sessions in progress; dropping one stops it.
     pub capture_sessions: Vec<Session>,
@@ -224,6 +227,9 @@ impl State {
             ToplevelCaptureSourceState::new_with_filter::<Self, _>(&dh, |c| {
                 granted(c, Privilege::ToplevelCaptureSource)
             });
+        let output_capture_state = OutputCaptureSourceState::new_with_filter::<Self, _>(&dh, |c| {
+            granted(c, Privilege::OutputCaptureSource)
+        });
         let image_copy_capture_state =
             ImageCopyCaptureState::new_with_filter::<Self, _>(&dh, |c| {
                 granted(c, Privilege::ImageCopyCapture)
@@ -275,6 +281,7 @@ impl State {
             client_gone,
             foreign_toplevel_state,
             toplevel_capture_state,
+            output_capture_state,
             image_copy_capture_state,
             capture_sessions: Vec::new(),
             captures: Vec::new(),

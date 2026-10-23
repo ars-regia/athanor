@@ -3,6 +3,7 @@
 //! GLES, and offers linux-dmabuf with its feedback and linux-drm-syncobj-v1 when the node can
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
+use crate::capture::Target;
 use crate::lock::Lock;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
@@ -291,14 +292,14 @@ impl Headless {
         Ok(())
     }
 
-    /// Draws `window` off screen at scale 1 and reads it back (`capture::read_window`).
-    pub fn read_window(&mut self, window: &Window) -> Result<Vec<u8>, Error> {
+    /// Draws what a capture source names off screen and reads it back (`capture::read_back`).
+    pub fn read_back(&mut self, what: &Target, space: &Space<Window>) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
             Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_window::<_, GlesTexture>(gles(manager, node)?, window)
+                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space)
             }
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_window::<_, Image>(renderer, window)
+                crate::capture::read_back::<_, Image>(renderer, what, space)
             }
         }
     }
