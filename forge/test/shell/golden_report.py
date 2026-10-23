@@ -7,10 +7,10 @@ differ from its golden (compare.py's measure and tolerance) and writes golden-re
 case the count and the explanation from golden/athanor-differences.toml, or `unexplained`.
 It fails on a difference without an explanation, on an explanation without a difference (a
 cause that was fixed, or never held), and on an explanation without a cause or an issue, so a
-difference never passes as tolerated noise.
+difference never passes as tolerated noise. A case may have several explanations, one per cause.
 
 `surfaces` prints the surfaces the report runs: every one of cases.SURFACES except the
-toolkit's, and the layout cases.
+toolkit's and the greeter's, and the layout cases.
 """
 
 import argparse
@@ -27,6 +27,9 @@ GOLDEN = HERE / "golden"
 EXPLANATIONS = GOLDEN / "athanor-differences.toml"
 # The toolkit's surfaces have no cosmic-comp golden to match: OS10 compares them with the GTK twin.
 TOOLKIT = ("toolkit-chooser",)
+# The greeter runs on cosmic-comp in greetd's session until it moves (doc_session.md SN12,
+# doc_own_stack.md section 6 step 5): the own compositor has no allow-list line for it.
+EXCLUDED = ("greeter",)
 # What the compositor logs when it closes a layer surface its client has no grant for (src/layer.rs).
 CLOSED = "not granted them was closed"
 
@@ -35,7 +38,7 @@ Result = namedtuple("Result", "surface case differing allowed closed")
 
 
 def surfaces():
-    return [s for s in cases.SURFACES if s not in TOOLKIT] + ["layout"]
+    return [s for s in cases.SURFACES if s not in TOOLKIT + EXCLUDED] + ["layout"]
 
 
 def expected(wanted):
@@ -61,11 +64,11 @@ def check_explanations(explanations):
         if not isinstance(case, str) or not case:
             problems.append("an explanation has no case")
             continue
-        if case in by_case:
-            problems.append(f"{case}: explained twice")
-            continue
-        by_case[case] = entry
         cause, issue = entry.get("cause"), entry.get("issue")
+        if any(e.get("cause") == cause for e in by_case.get(case, [])):
+            problems.append(f"{case}: the cause is explained twice")
+            continue
+        by_case.setdefault(case, []).append(entry)
         if not isinstance(cause, str) or not cause.strip():
             problems.append(f"{case}: the explanation has no cause")
         if not isinstance(issue, int) or isinstance(issue, bool) or issue < 1:
@@ -87,8 +90,9 @@ def report(results, explanations):
                 differing += 1
                 if r.case in by_case:
                     explained += 1
-                    entry = by_case[r.case]
-                    note = f"{entry.get('cause', '')} (#{entry.get('issue', '?')})"
+                    note = "; ".join(
+                        f"{e.get('cause', '')} (#{e.get('issue', '?')})" for e in by_case[r.case]
+                    )
                 else:
                     problems.append(
                         f"{r.case}: {r.differing} pixel(s) differ (tolerance {r.allowed}) and nothing explains it"
@@ -110,6 +114,7 @@ def report(results, explanations):
         "# Golden report: athanor-compositor against cosmic-comp's goldens",
         "",
         f"{len(results)} cases, {differing} differing, {explained} explained, {len(problems)} problem(s).",
+        f"Left out: {', '.join(EXCLUDED)}, which runs on cosmic-comp until it moves (doc_session.md SN12).",
         "",
     ]
     if problems:

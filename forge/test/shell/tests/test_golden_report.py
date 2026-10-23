@@ -54,6 +54,16 @@ class GoldenReportTest(unittest.TestCase):
         _, problems = gr.report([result("a", None)], [])
         self.assertEqual(len(problems), 1)
 
+    def test_a_case_may_have_several_causes(self):
+        other = {"case": "a", "cause": "shadows", "issue": 592}
+        text, problems = gr.report([result("a", 100)], [GOOD, other])
+        self.assertEqual(problems, [])
+        self.assertIn("the clear colour (#591); shadows (#592)", text)
+
+    def test_the_report_says_the_greeter_is_left_out(self):
+        text, _ = gr.report([result("a", 0)], [])
+        self.assertIn("Left out: greeter", text)
+
     def test_an_explanation_twice_fails(self):
         _, problems = gr.report([result("a", 100)], [GOOD, GOOD])
         self.assertEqual(len(problems), 1)
@@ -65,13 +75,16 @@ class GoldenReportTest(unittest.TestCase):
     def test_the_report_runs_every_surface_but_the_toolkit(self):
         wanted = gr.surfaces()
         self.assertNotIn("toolkit-chooser", wanted)
-        self.assertEqual(set(wanted), (set(cases.SURFACES) - {"toolkit-chooser"}) | {"layout"})
+        self.assertNotIn("greeter", wanted)
+        self.assertEqual(
+            set(wanted), (set(cases.SURFACES) - {"toolkit-chooser", "greeter"}) | {"layout"}
+        )
         found = gr.expected(wanted)
         self.assertEqual(len(found), len({tag for _, tag in found}))
         layout = [tag for surface, tag in found if surface == "layout"]
         self.assertEqual((len(layout), sum("-2o-" in tag for tag in layout)), (27, 6))
-        self.assertEqual(len(found) - len(layout), 18 * 12)
-        self.assertEqual(len(found), 243)
+        self.assertEqual(len(found) - len(layout), 17 * 12)
+        self.assertEqual(len(found), 231)
         # No cosmic component has a case (open question 1).
         self.assertFalse([s for s in wanted if s.startswith("cosmic")])
 
