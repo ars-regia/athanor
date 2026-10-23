@@ -303,3 +303,24 @@ stands. The maintainer, from their own machine:
 4. Restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes`
    again, then `diff`, which must print no drift for `rulesets`.
 5. Pushes the corrected signed tag, which `version-tags-create` lets the admin create.
+
+**Recovery from a wrong `promoted-*` tag.** `promotion-tags` blocks the update and deletion of
+`refs/tags/promoted-*` but leaves their creation open, because the job token of the
+`github-release` job creates them and a bypass for `GITHUB_TOKEN` is not verified. A
+`promoted-<run>` tag created by anyone else on the wrong commit fails the promotion closed:
+`system/github-release.sh` refuses a promotion tag that names another commit than the
+revision. The maintainer, from their own machine:
+
+1. Sets `"enforcement": "disabled"` on `promotion-tags` in a local, uncommitted
+   `rulesets.json`, runs `python3 scripts/github-settings/ghsettings.py apply`, reads the plan,
+   then `apply --yes`.
+2. If a Release exists at the tag, deletes it first with
+   `gh release delete promoted-<run> -R ars-regia/athanor`.
+3. Deletes the tag with `git push origin --delete promoted-<run>`.
+4. Restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes`
+   again, then `diff`, which must print no drift for `rulesets`.
+5. Re-runs the `github-release` job of the promotion run.
+
+A tag on the right commit with a forged Release at it is no recovery case: `github-release.sh`
+publishes only on a Release that is the approved one exactly, or that holds verified evidence
+of an earlier promotion of that tag and commit, and refuses any other, naming the recovery.
