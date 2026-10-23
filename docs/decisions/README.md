@@ -196,3 +196,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | accepted | shell, process, security |
 | ADR-0127 | 0127 | [Settle the release attestation and the open details of security-class updates](0127-release-attestation-and-ut13-details.md) | accepted | update, security, build, release |
 | ADR-0128 | 0128 | [Move row 7 and image key 2 to 1.0, with a transitional release 0.11](0128-row-7-and-key-2-in-1-0.md) | accepted | process, docs, security, update, build |
+| ADR-0130 | 0130 | [The upgrade acceptance seeds a file the image ships and requires the attestation](0130-upgrade-acceptance-seed-and-attestation.md) | accepted | update, security, process |
