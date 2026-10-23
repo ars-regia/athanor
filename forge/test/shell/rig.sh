@@ -566,7 +566,7 @@ build-toolkit)
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 tasks 1, 4 and 5: what a client of athanor-compositor binds.
+    # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 task 1: what a client of athanor-compositor binds.
     # session.sh installs the shipped allow-list, but wayland-info is not listed in it and runs
     # in no unit, so it is granted none of the privileged globals of task 5; the fixture checks
     # the grant.
@@ -578,22 +578,22 @@ compositor-globals)
     missing=()
     for interface in wl_compositor wl_shm wl_seat wl_output xdg_wm_base zwp_linux_dmabuf_v1 wp_viewporter \
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1 \
-        wl_data_device_manager zwlr_layer_shell_v1 ext_workspace_manager_v1 \
-        wp_security_context_manager_v1 ext_idle_notifier_v1; do
+        wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
     for capability in pointer keyboard; do
         grep -Eq "capabilities:.*\b$capability\b" "$out/compositor-globals.txt" || missing+=("wl_seat $capability")
     done
     for interface in ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1 \
-        ext_foreign_toplevel_image_capture_source_manager_v1 ext_session_lock_manager_v1; do
+        ext_foreign_toplevel_image_capture_source_manager_v1 ext_session_lock_manager_v1 \
+        ext_workspace_manager_v1 zwlr_output_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the 16 standard globals, a seat with pointer and keyboard, and none of the 4 privileged ones"
+    echo "compositor-globals: the 15 standard globals, a seat with pointer and keyboard, and none of the 6 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;

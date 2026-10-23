@@ -22,10 +22,14 @@ pub enum Privilege {
     ToplevelCaptureSource,
     ImageCopyCapture,
     SessionLock,
+    /// `ext_workspace_manager_v1`: the workspaces, which a client may switch.
+    Workspaces,
+    /// `zwlr_output_manager_v1`: the outputs' configuration, the control center's.
+    OutputManagement,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 5] = [
+    const ALL: [(Self, &'static str); 7] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -34,6 +38,8 @@ impl Privilege {
         ),
         (Self::ImageCopyCapture, "ext_image_copy_capture_manager_v1"),
         (Self::SessionLock, "ext_session_lock_manager_v1"),
+        (Self::Workspaces, "ext_workspace_manager_v1"),
+        (Self::OutputManagement, "zwlr_output_manager_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -42,6 +48,12 @@ impl Privilege {
             .find(|(_, name)| *name == interface)
             .map(|(privilege, _)| *privilege)
     }
+}
+
+/// The interface of every privileged global, as the allow-list names it.
+#[cfg(test)]
+pub(crate) fn names() -> impl Iterator<Item = &'static str> {
+    Privilege::ALL.iter().map(|(_, name)| *name)
 }
 
 /// A process, as the compositor reads it at connect.

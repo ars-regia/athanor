@@ -5,6 +5,7 @@ use crate::handlers::HeldCommit;
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::lock::Lock;
+use crate::output_management::OutputManagement;
 use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
@@ -47,13 +48,13 @@ use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
+    send_surface_state, CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
 };
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
-use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::ToplevelCaptureSourceState;
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
@@ -151,6 +152,8 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
+    /// The heads sent to the clients of wlr-output-management, and their configurations.
+    pub output_management: OutputManagement,
 
     /// Which client is granted which privileged global (OS4), read when the compositor starts.
     pub allow_list: AllowList,
@@ -227,8 +230,8 @@ impl State {
             });
         let lock_state =
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
-        // ext-workspace-v1 is not among OS4's privileged protocols: every unconfined client's.
         crate::workspace::global(&dh);
+        crate::output_management::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -279,6 +282,7 @@ impl State {
             lock: None,
             idle_notifier_state,
             workspace_groups: Vec::new(),
+            output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
         })
@@ -335,6 +339,7 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        self.output_heads_changed();
     }
 
     /// An output that goes: its layer surfaces are closed, and the windows no output left shows
@@ -380,6 +385,7 @@ impl State {
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
         }
+        self.output_heads_changed();
     }
 
     /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
@@ -453,8 +459,10 @@ impl State {
         Ok(())
     }
 
-    /// After a frame of `output`: the output each surface is shown on, presentation feedback
-    /// when the frame changed, and the frame callbacks.
+    /// After a frame of `output`: the output each surface is shown on, and the scale of that
+    /// output as the surface's preferred one, presentation feedback when the frame changed, and
+    /// the frame callbacks. The scale is sent here, whatever changed it: a surface hears of a new
+    /// scale at the first frame of its output that shows it.
     pub fn frame_done(
         &mut self,
         output: &Output,
@@ -465,8 +473,10 @@ impl State {
     ) {
         // Collected: the output's layer map is not held while the surfaces are visited.
         let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        let scale = output.current_scale();
+        let transform = output.current_transform();
         let scanout = |surface: &WlSurface, surface_states: &SurfaceData| {
-            update_surface_primary_scanout_output(
+            let primary = update_surface_primary_scanout_output(
                 surface,
                 output,
                 surface_states,
@@ -474,6 +484,13 @@ impl State {
                 states,
                 default_primary_scanout_output_compare,
             );
+            // Both send only what changed since they last sent it.
+            if primary.as_ref() == Some(output) {
+                with_fractional_scale(surface_states, |fractional| {
+                    fractional.set_preferred_scale(scale.fractional_scale())
+                });
+                send_surface_state(surface, surface_states, scale.integer_scale(), transform);
+            }
         };
         for window in self.space.elements() {
             window.with_surfaces(scanout);
@@ -816,8 +833,8 @@ pub fn granted(client: &Client, privilege: Privilege) -> bool {
         .is_some_and(|data| data.grants.contains(&privilege))
 }
 
-/// Whether `client` connected outside a security context: only such a client sees
-/// ext-workspace-v1 and the security context manager.
+/// Whether `client` connected outside a security context: only such a client sees the security
+/// context manager.
 pub fn unconfined(client: &Client) -> bool {
     client
         .get_data::<ClientState>()

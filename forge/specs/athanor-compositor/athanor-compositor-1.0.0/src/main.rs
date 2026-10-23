@@ -13,6 +13,7 @@ mod identity;
 mod input;
 mod layer;
 mod lock;
+mod output_management;
 mod state;
 mod udev;
 mod winit;

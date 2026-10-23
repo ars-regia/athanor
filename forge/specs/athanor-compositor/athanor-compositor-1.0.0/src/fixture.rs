@@ -17,6 +17,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
 use smithay::utils::{Point, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
@@ -52,6 +53,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1, ext_workspace_handle_v1, ext_workspace_manager_v1,
 };
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
+};
 use wayland_protocols::wp::security_context::v1::client::{
     wp_security_context_manager_v1, wp_security_context_v1,
 };
@@ -59,6 +63,10 @@ use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+use wayland_protocols_wlr::output_management::v1::client::{
+    zwlr_output_configuration_head_v1, zwlr_output_configuration_v1, zwlr_output_head_v1,
+    zwlr_output_manager_v1, zwlr_output_mode_v1,
+};
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 const WIDTH: i32 = 200;
@@ -138,6 +146,24 @@ struct Client {
     workspaces_done: bool,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
+    /// The heads of wlr-output-management, as the client has seen them.
+    heads: Vec<OutputHead>,
+    /// The serial of the output manager's last `done`.
+    output_serial: Option<u32>,
+    /// The answer to the last output configuration: `succeeded`, `failed` or `cancelled`.
+    configured: Option<&'static str>,
+    /// The last preferred scale of wp-fractional-scale, in 120ths.
+    fractional_scale: Option<u32>,
+}
+
+/// A head of wlr-output-management as the client has seen it: its name, its last scale and its
+/// modes.
+struct OutputHead {
+    head: zwlr_output_head_v1::ZwlrOutputHeadV1,
+    name: String,
+    scale: f64,
+    /// Every mode sent for the head, the finished ones included.
+    modes: Vec<zwlr_output_mode_v1::ZwlrOutputModeV1>,
 }
 
 /// A window of the foreign toplevel list as the client has seen it.
@@ -277,6 +303,9 @@ delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
 delegate_noop!(Client: ext_idle_notifier_v1::ExtIdleNotifierV1);
 delegate_noop!(Client: wp_security_context_manager_v1::WpSecurityContextManagerV1);
 delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
+delegate_noop!(Client: ignore zwlr_output_mode_v1::ZwlrOutputModeV1);
+delegate_noop!(Client: zwlr_output_configuration_head_v1::ZwlrOutputConfigurationHeadV1);
+delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
 
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
     fn event(
@@ -530,6 +559,90 @@ impl Dispatch<ext_workspace_handle_v1::ExtWorkspaceHandleV1, ()> for Client {
     }
 }
 
+impl Dispatch<zwlr_output_manager_v1::ZwlrOutputManagerV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &zwlr_output_manager_v1::ZwlrOutputManagerV1,
+        event: zwlr_output_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwlr_output_manager_v1::Event::Head { head } => client.heads.push(OutputHead {
+                head,
+                name: String::new(),
+                scale: 0.0,
+                modes: Vec::new(),
+            }),
+            zwlr_output_manager_v1::Event::Done { serial } => client.output_serial = Some(serial),
+            _ => {}
+        }
+    }
+
+    event_created_child!(Client, zwlr_output_manager_v1::ZwlrOutputManagerV1, [
+        zwlr_output_manager_v1::EVT_HEAD_OPCODE => (zwlr_output_head_v1::ZwlrOutputHeadV1, ()),
+    ]);
+}
+
+impl Dispatch<zwlr_output_head_v1::ZwlrOutputHeadV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        head: &zwlr_output_head_v1::ZwlrOutputHeadV1,
+        event: zwlr_output_head_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let Some(seen) = client.heads.iter_mut().find(|seen| &seen.head == head) else {
+            return;
+        };
+        match event {
+            zwlr_output_head_v1::Event::Name { name } => seen.name = name,
+            zwlr_output_head_v1::Event::Scale { scale } => seen.scale = scale,
+            zwlr_output_head_v1::Event::Mode { mode } => seen.modes.push(mode),
+            _ => {}
+        }
+    }
+
+    event_created_child!(Client, zwlr_output_head_v1::ZwlrOutputHeadV1, [
+        zwlr_output_head_v1::EVT_MODE_OPCODE => (zwlr_output_mode_v1::ZwlrOutputModeV1, ()),
+    ]);
+}
+
+impl Dispatch<zwlr_output_configuration_v1::ZwlrOutputConfigurationV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &zwlr_output_configuration_v1::ZwlrOutputConfigurationV1,
+        event: zwlr_output_configuration_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        client.configured = match event {
+            zwlr_output_configuration_v1::Event::Succeeded => Some("succeeded"),
+            zwlr_output_configuration_v1::Event::Failed => Some("failed"),
+            zwlr_output_configuration_v1::Event::Cancelled => Some("cancelled"),
+            _ => None,
+        };
+    }
+}
+
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wp_fractional_scale_v1::WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            client.fractional_scale = Some(scale);
+        }
+    }
+}
+
 /// A new file, already unlinked, for a client's buffers.
 fn unlinked() -> Result<std::fs::File, Error> {
     let path = std::env::temp_dir().join(format!(
@@ -654,18 +767,31 @@ const BAR: (&str, &str) = (
     "0::/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-bar.service\n",
 );
 
-/// What the fixture grants the bar: every privileged global, so that the tests of the earlier
-/// tasks run as the bar.
+/// The control center, as a fixture's client connects when a test names it: its executable and
+/// its cgroup.
+const CONTROL_CENTER: (&str, &str) = (
+    "/usr/bin/athanor-control-center",
+    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-control-center.service\n",
+);
+
+/// What the fixture grants: the bar every privileged global but the output manager, so that the
+/// tests of the earlier tasks run as the bar; the control center, as its real line does, its top
+/// layers and the output manager.
 const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 \
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
-    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1\n";
+    ext_image_copy_capture_manager_v1 ext_session_lock_manager_v1 ext_workspace_manager_v1\n\
+    /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
+    zwlr_output_manager_v1\n";
 
 /// The bar's executable file, as the compositor sees it.
 const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
 
+/// The control center's executable file, as the compositor sees it.
+const CONTROL_CENTER_FILE: FileId = FileId { dev: 1, ino: 3 };
+
 /// The process at the other end of the fixture's sockets, which is the test's own, as whatever
 /// executable, file and cgroup the test sets: the pidfd is read as the compositor reads it. The
-/// compositor's file system holds the bar's executable only.
+/// compositor's file system holds the bar's and the control center's executables only.
 struct Fake(
     Arc<Mutex<(&'static str, &'static str)>>,
     Arc<Mutex<FileId>>,
@@ -686,6 +812,8 @@ impl Process for Fake {
     fn file(&self, path: &Path) -> std::io::Result<FileId> {
         if path == Path::new(BAR.0) {
             Ok(BAR_FILE)
+        } else if path == Path::new(CONTROL_CENTER.0) {
+            Ok(CONTROL_CENTER_FILE)
         } else {
             Err(std::io::ErrorKind::NotFound.into())
         }
@@ -1937,6 +2065,15 @@ impl Local {
         self.client.globals.iter().any(|(_, i, _)| i == interface)
     }
 
+    /// The interfaces of the globals the client sees.
+    fn listed(&self) -> BTreeSet<&str> {
+        self.client
+            .globals
+            .iter()
+            .map(|(_, interface, _)| interface.as_str())
+            .collect()
+    }
+
     /// A buffer of `width` by `height` pixels in XRGB8888, each `bgrx`, and its file.
     fn buffer(
         &mut self,
@@ -1966,16 +2103,65 @@ impl Local {
     }
 }
 
-/// The globals of C1 task 4, each offered once.
-const TASK4_GLOBALS: [&str; 7] = [
-    "ext_foreign_toplevel_list_v1",
-    "ext_workspace_manager_v1",
-    "ext_image_copy_capture_manager_v1",
-    "ext_foreign_toplevel_image_capture_source_manager_v1",
-    "wp_security_context_manager_v1",
-    "ext_session_lock_manager_v1",
-    "ext_idle_notifier_v1",
-];
+/// Who receives a global: the classes of `data/globals`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Class {
+    /// Offered to every client.
+    Standard,
+    /// Offered to every client outside a security context.
+    Unconfined,
+    /// Offered to every client; its top and overlay layers only to the allow-list's.
+    LayerGated,
+    /// Offered only to the allow-list's clients, each by its own line.
+    Privileged,
+}
+
+/// Every global the compositor can offer, with its class, from `data/globals`.
+fn classified() -> Vec<(&'static str, Class)> {
+    include_str!("../data/globals")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let [interface, class] = fields[..] else {
+                panic!("not `<interface> <class>`: {line}");
+            };
+            let class = match class {
+                "standard" => Class::Standard,
+                "unconfined" => Class::Unconfined,
+                "layer-gated" => Class::LayerGated,
+                "privileged" => Class::Privileged,
+                other => panic!("{interface}: no class {other}"),
+            };
+            (interface, class)
+        })
+        .collect()
+}
+
+/// The globals offered only on a render node: the tests below run on Pixman, without one
+/// (`fixture` checks them on a node).
+const RENDER_NODE_GLOBALS: [&str; 2] = ["zwp_linux_dmabuf_v1", "wp_linux_drm_syncobj_manager_v1"];
+
+/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them.
+fn rows(admitted: impl Fn(Class) -> bool) -> BTreeSet<&'static str> {
+    classified()
+        .into_iter()
+        .filter(|(interface, class)| admitted(*class) && !RENDER_NODE_GLOBALS.contains(interface))
+        .map(|(interface, _)| interface)
+        .collect()
+}
+
+/// A security context as Flatpak creates one, made by the fixture's own client.
+fn sandbox(run: &Running) -> SecurityContext {
+    let (_, creator) = fixture_window(run);
+    SecurityContext {
+        sandbox_engine: Some("org.flatpak".into()),
+        app_id: Some("org.example.App".into()),
+        instance_id: None,
+        creator_client_id: creator,
+    }
+}
 
 /// The fixture's window and the id of its client.
 fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
@@ -1994,32 +2180,34 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
     (window, id)
 }
 
-/// The globals of task 4 are offered once each; a client inside a security context sees only
-/// the idle notifier among them (spike Q4: the privileged ones are refused to sandboxes).
+/// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and
+/// `zwlr_output_manager_v1`, which its line does not name, not at all; a client inside a
+/// security context sees only the standard and layer-gated ones (spike Q4: the privileged ones
+/// are refused to sandboxes).
 #[test]
 fn task4_standard_globals_are_offered() {
     let mut run = Running::start(None);
-    for global in TASK4_GLOBALS {
+    for global in rows(|_| true) {
         let count = run.globals.iter().filter(|g| *g == global).count();
-        assert_eq!(count, 1, "{global}");
+        let once = usize::from(global != "zwlr_output_manager_v1");
+        let expected = if global == "wl_output" {
+            OUTPUTS.len()
+        } else {
+            once
+        };
+        assert_eq!(count, expected, "{global}");
     }
-    let (_, creator) = fixture_window(&run);
-    let context = SecurityContext {
-        sandbox_engine: Some("org.flatpak".into()),
-        app_id: Some("org.example.App".into()),
-        instance_id: None,
-        creator_client_id: creator,
-    };
+    let context = sandbox(&run);
     let sandboxed = Local::connect(&mut run, Some(context));
-    for global in TASK4_GLOBALS {
-        let expected = global == "ext_idle_notifier_v1";
+    for (global, class) in classified() {
+        let expected = matches!(class, Class::Standard | Class::LayerGated)
+            && !RENDER_NODE_GLOBALS.contains(&global);
         assert_eq!(
             sandboxed.sees(global),
             expected,
             "{global} inside a context"
         );
     }
-    assert!(sandboxed.sees("wl_compositor"), "the core stays");
     run.stop();
 }
 
@@ -2405,13 +2593,20 @@ fn task4_each_output_has_an_active_workspace() {
     run.stop();
 }
 
-/// The privileged globals of OS4 that the compositor offers (C1 task 5).
-const PRIVILEGED: [&str; 4] = [
-    "ext_foreign_toplevel_list_v1",
-    "ext_foreign_toplevel_image_capture_source_manager_v1",
-    "ext_image_copy_capture_manager_v1",
-    "ext_session_lock_manager_v1",
-];
+/// The privileged globals the fixture's allow-list grants the bar: every one of
+/// `data/globals` its line names.
+fn bar_privileges() -> BTreeSet<&'static str> {
+    let named: Vec<&str> = FIXTURE_ALLOW_LIST
+        .lines()
+        .find(|line| line.trim_start().starts_with(BAR.0))
+        .expect("the bar's line")
+        .split_whitespace()
+        .collect();
+    rows(|class| class == Class::Privileged)
+        .into_iter()
+        .filter(|global| named.contains(global))
+        .collect()
+}
 
 /// Another executable, and another unit: a shell started in an application scope.
 const SH: &str = "/usr/bin/sh";
@@ -2419,12 +2614,16 @@ const OTHER_UNIT: &str =
     "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-sh-1.scope\n";
 
 impl Local {
-    /// Whether the client sees every privileged global (true) or none (false); a mix fails.
+    /// Whether the client sees the privileged globals the bar is granted, all of them (true), or
+    /// no privileged global (false); a mix fails.
     fn privileged(&self) -> bool {
-        let seen: Vec<bool> = PRIVILEGED.iter().map(|g| self.sees(g)).collect();
+        let seen: BTreeSet<&str> = rows(|class| class == Class::Privileged)
+            .into_iter()
+            .filter(|g| self.sees(g))
+            .collect();
         assert!(
-            seen.iter().all(|s| *s == seen[0]),
-            "some privileged globals but not all: {seen:?}"
+            seen.is_empty() || seen == bar_privileges(),
+            "some privileged globals but not the bar's: {seen:?}"
         );
         assert!(
             [
@@ -2436,7 +2635,43 @@ impl Local {
             .all(|g| self.sees(g)),
             "the standard globals stay"
         );
-        seen[0]
+        !seen.is_empty()
+    }
+
+    /// Connects as the control center; the clients connecting after it do as well, until the
+    /// test names another identity.
+    fn control_center(run: &mut Running) -> Self {
+        *run.identity.lock().expect("identity") = CONTROL_CENTER;
+        *run.executable_file.lock().expect("file") = CONTROL_CENTER_FILE;
+        Self::connect(run, None)
+    }
+
+    /// Sends an output configuration on `serial` that enables every head and calls `change` on
+    /// the configuration of the head named `name`, applies it and returns the compositor's
+    /// answer.
+    fn configure(
+        &mut self,
+        run: &mut Running,
+        manager: &zwlr_output_manager_v1::ZwlrOutputManagerV1,
+        serial: u32,
+        name: &str,
+        change: impl Fn(&zwlr_output_configuration_head_v1::ZwlrOutputConfigurationHeadV1),
+    ) -> &'static str {
+        let qh = self.queue.handle();
+        let configuration = manager.create_configuration(serial, &qh, ());
+        for seen in &self.client.heads {
+            let head = configuration.enable_head(&seen.head, &qh, ());
+            if seen.name == name {
+                change(&head);
+            }
+        }
+        self.client.configured = None;
+        configuration.apply();
+        self.pump(run, "an answer to the configuration", |client, _| {
+            client.configured.is_some()
+        });
+        configuration.destroy();
+        self.client.configured.expect("an answer")
     }
 
     /// Lists the globals again, on a new registry.
@@ -2568,7 +2803,7 @@ fn task5_security_context_gets_standard_globals() {
         creator_client_id: creator,
     };
     let sandboxed = Local::connect(&mut run, Some(context));
-    for global in PRIVILEGED {
+    for global in rows(|class| class == Class::Privileged) {
         assert!(!sandboxed.sees(global), "{global} inside a context");
     }
     run.stop();
@@ -2597,7 +2832,7 @@ fn task5_a_security_context_listener_gets_standard_globals() {
     std::fs::remove_file(&path).expect("remove");
     let sandboxed = Local::over(&mut run, stream, None);
     assert!(sandboxed.sees("wl_compositor"), "the core");
-    for global in PRIVILEGED {
+    for global in rows(|class| class == Class::Privileged) {
         assert!(!sandboxed.sees(global), "{global} through the listener");
     }
     run.stop();
@@ -2652,5 +2887,262 @@ fn task5_top_layers_are_closed_to_a_client_not_granted_them() {
     assert!(kept, "another's bottom layer");
     layer.set_layer(Layer::Top);
     assert!(!other.answer(&mut run, &surface), "moved to the top layer");
+    run.stop();
+}
+
+/// Each client is offered exactly the globals `data/globals` gives its class of client (OS4,
+/// OS5): the bar every one but the output manager, which its line does not name; the control
+/// center the unprivileged ones and the output manager; a client with no line the unprivileged
+/// ones; a client inside a security context the standard and layer-gated ones. An offered global
+/// with no row fails with its name.
+#[test]
+fn os9_every_global_is_classified() {
+    let classes = classified();
+    let offered = |local: &Local, who: &str, expected: BTreeSet<&str>| {
+        let listed = local.listed();
+        for interface in &listed {
+            assert!(
+                classes.iter().any(|(row, _)| row == interface),
+                "{interface}, offered to {who}, has no row in data/globals"
+            );
+        }
+        assert_eq!(listed, expected, "{who}");
+    };
+    let unprivileged = rows(|class| class != Class::Privileged);
+    let mut run = Running::start(None);
+
+    let bar = Local::connect(&mut run, None);
+    let mut expected = rows(|_| true);
+    expected.remove("zwlr_output_manager_v1");
+    offered(&bar, "the bar", expected);
+
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    let standard = rows(|class| matches!(class, Class::Standard | Class::LayerGated));
+    offered(&sandboxed, "a client inside a security context", standard);
+
+    let control_center = Local::control_center(&mut run);
+    let mut expected = unprivileged.clone();
+    expected.insert("zwlr_output_manager_v1");
+    offered(&control_center, "the control center", expected);
+
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    offered(&other, "a client with no line", unprivileged);
+    run.stop();
+}
+
+/// The privileged and layer-gated rows of `data/globals` are the names of the allow-list, each
+/// one a grant on a line of its own.
+#[test]
+fn os9_the_table_matches_the_allow_list_names() {
+    let mut gated: Vec<&str> = classified()
+        .into_iter()
+        .filter(|(_, class)| matches!(class, Class::Privileged | Class::LayerGated))
+        .map(|(interface, _)| interface)
+        .collect();
+    let mut names: Vec<&str> = crate::identity::names().collect();
+    gated.sort_unstable();
+    names.sort_unstable();
+    assert_eq!(gated, names);
+    for name in gated {
+        let line = format!("/usr/bin/athanor-bar athanor-bar.service {name}\n");
+        assert!(
+            AllowList::parse(&line).is_ok(),
+            "{name} on a line of its own"
+        );
+    }
+}
+
+/// `ext_workspace_manager_v1` is privileged (open question 7 of the OS9 plan): neither a client
+/// with no line nor one inside a security context sees it; the bar, granted it, does.
+#[test]
+fn os9_the_workspace_list_is_privileged() {
+    const WORKSPACES: &str = "ext_workspace_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(WORKSPACES), "the bar, granted it");
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(WORKSPACES), "the bar inside a context");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(WORKSPACES), "a client with no line");
+    run.stop();
+}
+
+/// `zwlr_output_manager_v1` is the control center's only (open question 10 of the OS9 plan):
+/// the bar, whose line does not name it, does not see it. The control center sets the first
+/// output's scale through it, which the output keeps in the next frame and a window already
+/// mapped there is told as its preferred scale; a configuration that asks for more than a scale
+/// fails, and one on a stale serial is cancelled.
+#[test]
+fn os9_the_output_manager_is_granted_to_the_control_center_only() {
+    const MANAGER: &str = "zwlr_output_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(!bar.sees(MANAGER), "the bar");
+    let mut control_center = Local::control_center(&mut run);
+    assert!(control_center.sees(MANAGER), "the control center");
+
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let names: Vec<&str> = control_center
+        .client
+        .heads
+        .iter()
+        .map(|head| head.name.as_str())
+        .collect();
+    assert_eq!(names, ["headless-0", "headless-1"], "one head per output");
+    let serial = control_center.client.output_serial.expect("a serial");
+
+    // A window on the first output, mapped before the change, with its fractional scale. It is
+    // larger than the fixture's, centred at the same place, so that a frame shows part of it
+    // whichever is on top: only a surface shown on an output is sent that output's scale.
+    let compositor: wl_compositor::WlCompositor = control_center.bind(4);
+    let shm: wl_shm::WlShm = control_center.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = control_center.bind(1);
+    let fractional: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1 =
+        control_center.bind(1);
+    let qh = control_center.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let _scale = fractional.get_fractional_scale(&surface, &qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    control_center.pump(&mut run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(control_center.client.configure.expect("a configure"));
+    let (buffer, _) = control_center.buffer(&shm, 2 * WIDTH, 2 * HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    control_center.pump(&mut run, "the window is mapped at scale 1", |client, _| {
+        client.fractional_scale == Some(120)
+    });
+
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .expect("the first output")
+        .clone();
+
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_scale(1.5);
+        head.set_transform(wl_output::Transform::_90);
+    });
+    assert_eq!(turned, "failed", "a transform");
+    let stale = serial.wrapping_add(1);
+    let late = control_center.configure(&mut run, &manager, stale, "headless-0", |head| {
+        head.set_scale(1.5)
+    });
+    assert_eq!(late, "cancelled", "a stale serial");
+    assert_eq!(first.current_scale().fractional_scale(), 1.0, "unchanged");
+
+    let scaled = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_scale(1.5)
+    });
+    assert_eq!(scaled, "succeeded");
+    let frame = run.state.capture(0).expect("the next frame");
+    assert_eq!(
+        frame.len(),
+        (OUTPUTS[0].width * OUTPUTS[0].height * 4) as usize
+    );
+    assert_eq!(
+        first.current_scale().fractional_scale(),
+        1.5,
+        "the new scale"
+    );
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    assert!(
+        area.size.w < OUTPUTS[0].width,
+        "a smaller logical size: {area:?}"
+    );
+    control_center.pump(&mut run, "the new scale is sent", |client, _| {
+        client.output_serial != Some(serial)
+            && client
+                .heads
+                .iter()
+                .any(|head| head.name == "headless-0" && head.scale == 1.5)
+    });
+    control_center.pump(&mut run, "the window is told the new scale", |client, _| {
+        client.fractional_scale == Some(180)
+    });
+    run.stop();
+}
+
+/// A mode the compositor finished between the client's last `done` and its configuration is a
+/// race with a hot-plug, not a protocol error: the configuration fails and the client stays
+/// connected. A mode list that loses one mode and gains another, as many as before, is still a
+/// change, sent with a new serial.
+#[test]
+fn os9_a_mode_finished_in_a_race_fails_the_configuration() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .expect("the first output")
+        .clone();
+    let sent = |client: &Client| {
+        client
+            .heads
+            .iter()
+            .find(|head| head.name == "headless-0")
+            .map_or(0, |head| head.modes.len())
+    };
+    let before = sent(&control_center.client);
+    let extra = |width: i32| smithay::output::Mode {
+        size: (width, OUTPUTS[0].height).into(),
+        refresh: 60_000,
+    };
+
+    first.add_mode(extra(OUTPUTS[0].width + 16));
+    run.state.output_heads_changed();
+    control_center.pump(&mut run, "the extra mode is sent", |client, _| {
+        sent(client) == before + 1
+    });
+    control_center.roundtrip(&mut run);
+    let serial = control_center.client.output_serial.expect("a serial");
+    let gone = control_center
+        .client
+        .heads
+        .iter()
+        .find(|head| head.name == "headless-0")
+        .and_then(|head| head.modes.last())
+        .cloned()
+        .expect("the extra mode");
+
+    first.delete_mode(extra(OUTPUTS[0].width + 16));
+    first.add_mode(extra(OUTPUTS[0].width + 32));
+    run.state.output_heads_changed();
+    control_center.pump(&mut run, "one mode for another is a change", |client, _| {
+        client.output_serial.is_some_and(|now| now != serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    assert_eq!(
+        sent(&control_center.client),
+        before + 2,
+        "the new mode is sent"
+    );
+
+    let raced = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_mode(&gone)
+    });
+    assert_eq!(raced, "failed", "a finished mode");
+    let scaled = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_scale(1.5)
+    });
+    assert_eq!(scaled, "succeeded", "the client is still connected");
     run.stop();
 }
