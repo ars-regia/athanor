@@ -9,8 +9,8 @@ outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measu
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
 2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12
-to 15 in ADR-0126, and decisions 16 to 26 in section 7. Text marked "(decision N)" is what the maintainer chose for decision N of
-section 7.
+to 15 in ADR-0126, and decisions 16 to 26 in section 7. Text marked "(decision N)" is what the
+maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`. Their results are
@@ -284,10 +284,11 @@ four-finger swipes; Super+Space for the input source (`doc_languages.md` LN9); S
 (`doc_lock_and_prompts.md` section 1 and its acceptance, item 1) and Super+Alt+Escape (LP10);
 Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7), and the
 magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
-decision 26); the keys of `doc_osd.md` OD3; and the switch to a text console. The bindings a user assigns in Settings, system actions and custom commands, keep
-`athanor_compositor_client::shortcuts` as their interface (OS5, `doc_settings.md`). While the
-session is locked only the actions `doc_lock_and_prompts.md` allows then act (section 1; L14). Each
-default binding has a fixture test (`doc_session.md` SN16, gap 7).
+decision 26); the keys of `doc_osd.md` OD3; and the switch to a text console. The bindings a user
+assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
+as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
+`doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
+(`doc_session.md` SN16, gap 7).
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
@@ -334,13 +335,14 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
-   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's, which pass the gates
-   of OS8 and OS9 in the gallery (OS10): the 243 of today's 18 surfaces and layouts, the greeter's
-   12 included, which the report leaves out while the greeter runs on cosmic-comp in greetd's
-   session (`doc_session.md` SN12; section 6, step 5), and the 24 of the lock screen and the polkit
-   agent once installed, against cosmic-comp's goldens; each difference has its cause and its issue in `athanor-differences.toml`, and a second set of
-   goldens is recorded only when cosmic-comp leaves the image (OS9 plan, questions 1 and 2). The
-   eight causes milestone C1 listed are tied to cases there (C1 results, section 3).
+   `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
+   toolkit's (those pass the gates of OS8 and OS9 in the gallery, OS10): the 243 of today's 18
+   surfaces and layouts, the greeter's 12 included, which the report leaves out while the greeter
+   runs on cosmic-comp in greetd's session (`doc_session.md` SN12; section 6, step 5), and the 24 of
+   the lock screen and the polkit agent once installed. Each difference has its cause and its issue
+   in `athanor-differences.toml`, and a second set of goldens is recorded only when cosmic-comp
+   leaves the image (OS9 plan, questions 1 and 2). The eight causes milestone C1 listed are tied to
+   cases there (C1 results, section 3).
 2. **OS4 and OS5 tested in the fixture of OS6:** each requirement of OS4, OS5 and OS12 to OS17 has a
    fixture test, the identity's limits and the trusted path included, and the bar shows its 8
    interactive widgets.
@@ -359,11 +361,12 @@ default session:
    Vulkan client, which milestone C1 did not record (C1 results, section 8).
 5. **Frame times within their thresholds** on each console run, per output (decision
    24, set from the desktop's console session and the laptop's unattended run, in place of the
-   attended laptop run the OS9 plan's question 6 named): a mean draw under 2 ms; a longest draw under one refresh period of the output; and a
-   client that animates on an otherwise idle output committing at a median interval within 10 % of
-   the refresh period. Milestone C1's console runs met the first two, with longest draws of 4.20 ms
-   on the laptop and 3.67 ms on the desktop, and not the third on NVIDIA, where Firefox committed a
-   frame every 23 to 81 ms on average (C1 results, sections 7.1 and 7.3, T9-4).
+   attended laptop run the OS9 plan's question 6 named): a mean draw under 2 ms; a longest draw
+   under one refresh period of the output; and a client that animates on an otherwise idle output
+   committing at a median interval within 10 % of the refresh period. Milestone C1's console runs
+   met the first two, with longest draws of 4.20 ms on the laptop and 3.67 ms on the desktop, and
+   not the third on NVIDIA, where Firefox committed a frame every 23 to 81 ms on average (C1
+   results, sections 7.1 and 7.3, T9-4).
 
 This acceptance closes the gaps 2 to 5 and 7 of `doc_session.md` SN16: the trusted path and Orca's
 keyboard monitor (OS4), the aids, the magnifier and the filters (item 3), the identity's limits
@@ -393,10 +396,10 @@ name them in English under Italian today (T1 results, task 5).
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's
 speech transcript for a scripted walk through the surface, in English and in Italian, holds every
 name, role, state and value of the GTK transcript. The GTK transcripts are recorded first and kept
-as the reference. A role Orca speaks differently from the GTK transcript's, such as "panel" for "grouping", does not
-hold a surface back when the toolkit's role is the one W3C Core-AAM 1.2 prescribes; the comparison
-records it as a difference with that reason, as milestone T1's did by the maintainer's decision of
-2026-10-17 (decision 25).
+as the reference. A role Orca speaks differently from the GTK transcript's, such as "panel" for
+"grouping", does not hold a surface back when the toolkit's role is the one W3C Core-AAM 1.2
+prescribes; the comparison records it as a difference with that reason, as milestone T1's did by the
+maintainer's decision of 2026-10-17 (decision 25).
 
 **OS9. Harnesses before surfaces.** Writing code is not the bottleneck; checking it is. Before the
 first surface moves:
@@ -479,18 +482,19 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
   pixels. The bar, the dock and the launcher were compared before the identity check only, with
   eight causes not tied to cases; none was re-recorded or compared at the head (section 3).
 - **Draw times:** nested on NVIDIA's EGL for an hour, a mean draw of 0.17 ms (the median of the
-  reports) and a longest draw of 6.91 ms (#646). On a console, the laptop (`i915`, one output, about 61 minutes,
-  unattended) drew in 0.97 ms on average and 4.20 ms at the longest; the NVIDIA desktop (RTX 4070 Ti
-  SUPER, two outputs, 13 minutes, attended, stopped on its defects) in 0.39 ms and 3.67 ms (sections
-  6 and 7.1). They are draw times, not frame times on a display.
+  reports) and a longest draw of 6.91 ms (#646). On a console, the laptop (`i915`, one output, about
+  61 minutes, unattended) drew in 0.97 ms on average and 4.20 ms at the longest; the NVIDIA desktop
+  (RTX 4070 Ti SUPER, two outputs, 13 minutes, attended, stopped on its defects) in 0.39 ms and 3.67
+  ms (sections 6 and 7.1). They are draw times, not frame times on a display.
 - **Events:** explicit sync negotiated on both machines; on the laptop one suspend and resume and
   one forced output unplug survived; the switch to a text console and Super+Escape were not run
   (section 7.2).
 - **Defects** (section 7.3): no output capture (T9-1); input devices logged only after the resume
   (T9-2, fixed by #714); no pointer seen on NVIDIA (T9-3); a draw stall, fixed by #754, while what
   paces Firefox stays open (T9-4); the bar's launcher buttons opening on the other session and the
-  dock unable to raise a window (T9-5); cosmic-workspaces' overview refused the top layer, the process
-  then ending on SIGSEGV (T9-6); popups unknown to the popup manager (T9-7); no interactive move or resize (T9-8).
+  dock unable to raise a window (T9-5); cosmic-workspaces' overview refused the top layer, the
+  process then ending on SIGSEGV (T9-6); popups unknown to the popup manager (T9-7); no interactive
+  move or resize (T9-8).
 - **Not measured** (sections 8 and 11): an hour on the NVIDIA desktop's monitors; anything seen on
   the laptop's screen; headless on NVIDIA's render node with explicit sync; the FUSE stall; the
   golden differences case by case; the shell's surfaces at the head under the allow-list.
@@ -523,9 +527,9 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    as a recorded run. Before that acceptance, as soon as milestone C1's DRM backend has passed the
    console sessions, the image installs the compositor as an optional session chosen at the
    greeter, cosmic-comp staying the default, under the conditions of decision 10.
-5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the layout chooser first, then the dock, the
-   launcher, the bar and the control centre; the greeter last, because it handles the password
-   (AGENTS.md, "Stop and ask before editing").
+5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the
+   layout chooser first, then the dock, the launcher, the bar and the control centre; the greeter
+   last, because it handles the password (AGENTS.md, "Stop and ask before editing").
 6. In parallel with steps 4 and 5 and with the rebase to Fedora 45, on the laptop: stage 1 of
    OS10, a toolkit developers outside Athanor can build on. Its widgets, most of which step 5
    needs, pass the gates of OS8 and OS9 in the gallery; the guide and the rustdoc complete it, and
@@ -593,8 +597,8 @@ Taken by the maintainer on 2026-10-18, after milestone T1's measurements (T1 res
 
 Taken by the maintainer on 2026-10-23, each on the draft's recommendation, written above where
 "(decision N)" marks it; C1 items are those of the C1 results, section 10. Tiling at 1.0 is not
-among them: OS2 keeps the bar's toggle as shipped behaviour (F-bar-34). Nor are virgl figures for the
-toolkit: the T1 results leave them to revision 2, which does not ask for them (section 5):
+among them: OS2 keeps the bar's toggle as shipped behaviour (F-bar-34). Nor are virgl figures for
+the toolkit: the T1 results leave them to revision 2, which does not ask for them (section 5):
 
 17. **Identity at connect, without a check at each bind** (OS4; C1 item 2).
 18. **A non-blocking executable check** (OS4; C1 item 3).
