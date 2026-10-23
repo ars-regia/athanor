@@ -1314,12 +1314,19 @@ golden-report)
         echo "rig.sh golden-report: run it as RIG_COMPOSITOR=athanor rig.sh golden-report" >&2
         exit 2
     fi
-    require athanor-compositor build-compositor
+    mapfile -t known < <(python3 -B "$rig/golden_report.py" surfaces)
     if [ "$#" -gt 1 ]; then
         surfaces=("${@:2}")
+        for surface in "${surfaces[@]}"; do
+            if ! printf '%s\n' "${known[@]}" | grep -qxF -- "$surface"; then
+                echo "rig.sh golden-report: not a surface of the report: $surface (known: ${known[*]})" >&2
+                exit 2
+            fi
+        done
     else
-        mapfile -t surfaces < <(python3 -B "$rig/golden_report.py" surfaces)
+        surfaces=("${known[@]}")
     fi
+    require athanor-compositor build-compositor
     started=$SECONDS
     since=$(date +%s)
     tags=()

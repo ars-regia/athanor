@@ -104,6 +104,8 @@ def report(results, explanations):
                     problems.append(
                         f"{r.case}: explained, but {r.differing} pixel(s) differ (tolerance {r.allowed}); remove the entry"
                     )
+        if r.closed:
+            problems.append(f"{r.case}: the compositor closed the surface (no allow-list line for it)")
         closed = "closed" if r.closed else ""
         rows.append(f"| {r.case} | {count} | {r.allowed} | {closed} | {note.replace('|', '/')} |")
     known = {r.case for r in results}
@@ -144,7 +146,12 @@ def measure(out, wanted, since):
             except RuntimeError as error:
                 print(f"golden_report.py: {tag}: {error}", file=sys.stderr)
         log = out / f"{tag}-compositor.log"
-        closed = log.exists() and CLOSED in log.read_text(encoding="utf-8", errors="replace")
+        # A log older than the run is the log of an earlier one.
+        closed = (
+            log.exists()
+            and log.stat().st_mtime >= since
+            and CLOSED in log.read_text(encoding="utf-8", errors="replace")
+        )
         results.append(Result(surface, tag, count, allowed, closed))
     return results
 

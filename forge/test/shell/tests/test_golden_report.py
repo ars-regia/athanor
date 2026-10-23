@@ -1,4 +1,7 @@
+import os
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -49,6 +52,22 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertIn("2 cases, 1 differing, 1 explained", text)
         self.assertIn("the clear colour (#591)", text)
+
+    def test_a_closed_surface_fails_even_when_explained(self):
+        _, problems = gr.report([result("a", 100, closed=True)], [GOOD])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("closed", problems[0])
+
+    def test_a_log_older_than_the_run_is_not_counted(self):
+        tag = gr.expected(["bar"])[0][1]
+        with tempfile.TemporaryDirectory() as out:
+            log = Path(out) / f"{tag}-compositor.log"
+            log.write_text(gr.CLOSED, encoding="utf-8")
+            since = time.time()
+            os.utime(log, (since - 100, since - 100))
+            self.assertFalse(gr.measure(Path(out), ["bar"], since)[0].closed)
+            os.utime(log, (since + 100, since + 100))
+            self.assertTrue(gr.measure(Path(out), ["bar"], since)[0].closed)
 
     def test_a_case_without_a_capture_fails(self):
         _, problems = gr.report([result("a", None)], [])
