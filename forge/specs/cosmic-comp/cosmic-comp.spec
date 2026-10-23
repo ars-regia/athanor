@@ -1,5 +1,5 @@
 # Athanor's cosmic-comp: the upstream release at Fedora's version, built from upstream's
-# archive with three patches of ours; Fedora's own downstream patches are not carried, and
+# archive with four patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
 # forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
@@ -11,7 +11,7 @@
 
 Name:           cosmic-comp
 Version:        1.10.0
-Release:        %{fedora_release}.athanor2
+Release:        %{fedora_release}.athanor3
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
@@ -24,6 +24,9 @@ Patch1:         0002-build-Take-the-commit-hash-from-GIT_HASH-when-it-is-.patch
 # A command makes cosmic-comp a kiosk with no key bindings; athanor-session starts the
 # desktop as that command and passes --keep-shortcuts to keep them (#144). Not submitted yet.
 Patch2:         0003-main-Add-keep-shortcuts-to-keep-the-key-bindings-wit.patch
+# A session locked with no window and no keyboard focus never focused the lock surface, so the
+# locker's password field took no keys until a click (pop-os/cosmic-greeter#474). Not submitted yet.
+Patch3:         0004-shell-focus-Focus-the-lock-surface-when-nothing-hold.patch
 
 BuildRequires:  cargo rust
 
@@ -63,6 +66,10 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor3
+- Focus the lock surface when the session locks with no window and no keyboard focus: the
+  locker's password field took no keys until a click (pop-os/cosmic-greeter#474).
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor2
 - Add --keep-shortcuts: with a command on the command line cosmic-comp ran as a kiosk and
   loaded no key bindings, so the desktop session had no shortcuts, volume keys included (#144).
