@@ -7,10 +7,15 @@ set -euo pipefail
 if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
     # The allow-list of OS4 where the compositor reads it at start, so that a client run as its
     # unit (bar_session.py --unit, in-unit.sh) is granted what the image would grant it; the
-    # rig's own lines (grim) follow the shipped ones, in the rig only.
+    # rig's own lines (grim) follow the shipped ones, in the rig only, after a newline of their
+    # own: a shipped list without a final newline would otherwise join its last line to the
+    # rig's first. The compositor skips the blank line this can leave (identity.rs).
     install -d /usr/share/athanor/compositor
-    cat /repo/forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients \
-        /repo/forge/test/shell/rig-privileged-clients > /usr/share/athanor/compositor/privileged-clients
+    {
+        cat /repo/forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients
+        echo
+        cat /repo/forge/test/shell/rig-privileged-clients
+    } > /usr/share/athanor/compositor/privileged-clients
     chmod 0644 /usr/share/athanor/compositor/privileged-clients
     exec /out/bin/athanor-compositor --headless "$@" &> "/out/${RIG_TAG:-scene}-compositor.log"
 fi
