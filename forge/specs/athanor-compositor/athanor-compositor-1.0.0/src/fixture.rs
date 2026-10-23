@@ -163,6 +163,8 @@ struct Client {
     keymap_size: u32,
     /// The size of the keymap each key of `keys` was read under.
     keys_under: Vec<u32>,
+    /// The depressed modifiers of each `wl_keyboard.modifiers` the client was sent.
+    modifiers: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -352,6 +354,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             wl_keyboard::Event::Keymap { size, .. } => {
                 client.keymaps += 1;
                 client.keymap_size = size;
+            }
+            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                client.modifiers.push(mods_depressed);
             }
             _ => {}
         }
@@ -3319,6 +3324,20 @@ impl VirtualKeyboard {
         local.roundtrip(run);
     }
 
+    /// Sets the depressed modifiers `depressed`, none latched or locked, in the first group.
+    fn modifiers(&self, local: &mut Local, run: &mut Running, depressed: u32) {
+        self.send(
+            2,
+            [
+                Argument::Uint(depressed),
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(0),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
     fn send<const N: usize>(&self, opcode: u16, args: [Argument<ObjectId, i32>; N]) {
         let message = Message {
             sender_id: self.id.clone(),
@@ -3437,46 +3456,7 @@ fn os9_a_virtual_key_takes_the_hardware_path() {
 #[test]
 fn os9_the_keymap_follows_the_last_keyboard() {
     let mut run = Running::start(None);
-    let mut local = Local::connect(&mut run, None);
-    let compositor: wl_compositor::WlCompositor = local.bind(4);
-    let shm: wl_shm::WlShm = local.bind(1);
-    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
-    let seat: wl_seat::WlSeat = local.bind(1);
-    let qh = local.queue.handle();
-    let _keyboard = seat.get_keyboard(&qh, ());
-    let surface = compositor.create_surface(&qh, ());
-    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
-    let _toplevel = xdg.get_toplevel(&qh, ());
-    surface.commit();
-    local.pump(&mut run, "the window is configured", |client, _| {
-        client.configure.is_some()
-    });
-    xdg.ack_configure(local.client.configure.expect("a configure"));
-    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
-    surface.attach(Some(&buffer), 0, 0);
-    surface.commit();
-    let id = local.id.clone().expect("a client the fixture inserted");
-    let ours = |state: &State| {
-        state
-            .space
-            .elements()
-            .find(|w| {
-                w.toplevel()
-                    .and_then(|t| t.wl_surface().client())
-                    .map(|c| c.id())
-                    == Some(id.clone())
-            })
-            .cloned()
-    };
-    local.pump(&mut run, "the window is mapped", |_, state| {
-        ours(state).is_some()
-    });
-    let window = ours(&run.state).expect("the window");
-    run.state.focus(&window);
-    local.pump(&mut run, "the window has the keyboard", |client, state| {
-        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
-        client.keymaps > 0 && focus.and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
-    });
+    let (mut local, _) = focused_window(&mut run);
     let seat_size = local.client.keymap_size;
     let keymap = seat_keymap(&mut run.state);
     let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
@@ -3537,6 +3517,96 @@ fn os9_the_keymap_follows_the_last_keyboard() {
         keymap,
         "the seat has its keymap back once more"
     );
+    run.stop();
+}
+
+/// A client with a mapped toplevel and a `wl_keyboard`, given the keyboard, and its window.
+fn focused_window(run: &mut Running) -> (Local, smithay::desktop::Window) {
+    let mut local = Local::connect(run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    local.pump(run, "the window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let id = local.id.clone().expect("a client the fixture inserted");
+    let ours = |state: &State| {
+        state
+            .space
+            .elements()
+            .find(|w| {
+                w.toplevel()
+                    .and_then(|t| t.wl_surface().client())
+                    .map(|c| c.id())
+                    == Some(id.clone())
+            })
+            .cloned()
+    };
+    local.pump(run, "the window is mapped", |_, state| {
+        ours(state).is_some()
+    });
+    let window = ours(&run.state).expect("the window");
+    run.state.focus(&window);
+    local.pump(run, "the window has the keyboard", |client, state| {
+        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
+        client.keymaps > 0 && focus.and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
+    });
+    (local, window)
+}
+
+/// A virtual keyboard's modifiers reach the seat at once while its keymap is current (OS9 task 6
+/// audit): a Shift it lets go of with no key after it is let go for the focused client, and a
+/// client focused afterwards is not entered with Shift.
+#[test]
+fn os9_a_virtual_modifier_change_reaches_the_seat_at_once() {
+    const SHIFT: u32 = 1;
+    let mut run = Running::start(None);
+    let (mut other, other_window) = focused_window(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.modifiers(&mut local, &mut run, SHIFT);
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(
+        local.client.modifiers.last(),
+        Some(&SHIFT),
+        "the key is read with Shift"
+    );
+    typist.modifiers(&mut local, &mut run, 0);
+    assert_eq!(
+        local.client.modifiers.last(),
+        Some(&0),
+        "Shift is let go with no key after it"
+    );
+    let sent = other.client.modifiers.len();
+    run.state.focus(&other_window);
+    other.pump(&mut run, "the other window has the keyboard", |client, _| {
+        client.modifiers.len() > sent
+    });
+    assert_eq!(
+        other.client.modifiers.last(),
+        Some(&0),
+        "a client focused afterwards is not entered with Shift"
+    );
+    let shift = run
+        .state
+        .seat
+        .get_keyboard()
+        .expect("a keyboard")
+        .modifier_state()
+        .shift;
+    assert!(!shift, "the seat holds no Shift");
     run.stop();
 }
 

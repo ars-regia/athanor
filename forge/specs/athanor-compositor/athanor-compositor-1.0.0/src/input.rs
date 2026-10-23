@@ -395,6 +395,25 @@ impl VirtualKeyboardHandler for State {
                 mods_locked,
                 group,
             }) => {
+                // While this keyboard's keymap is current the seat reads its modifiers, and a
+                // change with no key after it, a Shift let go, reaches the focused client at
+                // once; otherwise its next key applies it.
+                let current = self
+                    .virtual_keymap
+                    .as_ref()
+                    .is_some_and(|current| current.device == device);
+                if current && !self.drops_virtual_input() {
+                    if let Some(keyboard) = self.seat.get_keyboard() {
+                        keyboard.with_xkb_state(self, |mut context| {
+                            context.set_modifier_mask(
+                                mods_depressed,
+                                mods_latched,
+                                mods_locked,
+                                group,
+                            )
+                        });
+                    }
+                }
                 self.virtual_modifiers
                     .insert(device, [mods_depressed, mods_latched, mods_locked, group]);
             }
