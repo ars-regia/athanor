@@ -94,7 +94,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1` | every client outside a security context |
@@ -107,6 +107,11 @@ plan): the bar's line carries the workspaces, and the output manager is the cont
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
 position, transform or adaptive sync fails.
+`ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
+and `ext-image-copy-capture-v1` copies the output, drawn whole as it draws itself, into a
+client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
+binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
+client.
 
 The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
 the bar what the plan names, and the fixture grants its clients every privileged global but the

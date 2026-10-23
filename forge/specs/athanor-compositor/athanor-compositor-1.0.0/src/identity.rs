@@ -20,6 +20,9 @@ pub enum Privilege {
     TopLayers,
     ToplevelList,
     ToplevelCaptureSource,
+    /// `ext_output_image_capture_source_manager_v1`: a source of an output's pixels, by its
+    /// `wl_output`.
+    OutputCaptureSource,
     ImageCopyCapture,
     SessionLock,
     /// `ext_workspace_manager_v1`: the workspaces, which a client may switch.
@@ -29,12 +32,16 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 7] = [
+    const ALL: [(Self, &'static str); 8] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
             Self::ToplevelCaptureSource,
             "ext_foreign_toplevel_image_capture_source_manager_v1",
+        ),
+        (
+            Self::OutputCaptureSource,
+            "ext_output_image_capture_source_manager_v1",
         ),
         (Self::ImageCopyCapture, "ext_image_copy_capture_manager_v1"),
         (Self::SessionLock, "ext_session_lock_manager_v1"),
