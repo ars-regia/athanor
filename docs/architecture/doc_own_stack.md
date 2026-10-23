@@ -334,8 +334,8 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
-   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's (OS10 compares those
-   with their GTK twins): the 243 of today's 18 surfaces and layouts, the greeter's 12 included, which
+   `rig.sh golden-report` passes every case of `cases.py` except the toolkit's, which pass the gates
+   of OS8 and OS9 in the gallery (OS10): the 243 of today's 18 surfaces and layouts, the greeter's 12 included, which
    the report leaves out while the greeter runs on cosmic-comp in greetd's session (`doc_session.md`
    SN12; section 6, step 5), and the 24 of the lock screen and the polkit agent once installed,
    against cosmic-comp's goldens;
