@@ -377,10 +377,6 @@ mod tests {
         out
     }
 
-    /// One fake compositor's client at a time: `Client::connect_wayland` acquires the default
-    /// main context, which a test on another thread may hold.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
     /// A compositor speaking the wire protocol: it offers `OFFERED`, answers each sync, records
     /// the interface of every bind, and announces one window on the toplevel list, until the
     /// client hangs up.
@@ -433,7 +429,9 @@ mod tests {
     /// where the compositor offers them; only `Client::capture` binds them.
     #[test]
     fn connecting_binds_no_capture_global() {
-        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (ours, theirs) = UnixStream::pair().expect("socket pair");
         let bound = Arc::new(Mutex::new(Vec::new()));
         let record = bound.clone();
@@ -450,7 +448,9 @@ mod tests {
     /// its captures. Without `wl_shm` each capture then stops before it asks for a frame.
     #[test]
     fn capturing_binds_each_capture_global_once() {
-        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (ours, theirs) = UnixStream::pair().expect("socket pair");
         let bound = Arc::new(Mutex::new(Vec::new()));
         let record = bound.clone();
