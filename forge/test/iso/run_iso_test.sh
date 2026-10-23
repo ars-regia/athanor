@@ -18,11 +18,23 @@
 # Everything the run learns goes to OUTPUT_DIR: the console log, the screenshots, and
 # greeter.txt with the verdict. The screenshots are there to be looked at by a person,
 # not only asserted on.
+#
+# UPDATE_TO=<digest> UPDATE_REPOSITORY=<repository> runs the upgrade case of
+# doc_update_delivery.md UD18 on top, on Secure Boot firmware only: the candidate is served
+# as :stable from a registry on the runner (serve_candidate.sh), and once the first boot is
+# judged and the serial login ended, scripts/devvm/acceptance/run.sh --ci upgrades the
+# installed system to it, checks it, goes back and checks again, over SSH.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: run_iso_test.sh ISO OUTPUT_DIR" >&2; exit 2; }
 iso=$1 output=$2
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
+    [[ -n ${UPDATE_TO:-} && -n ${UPDATE_REPOSITORY:-} ]] || { echo "UPDATE_TO and UPDATE_REPOSITORY go together" >&2; exit 2; }
+    [[ $UPDATE_TO =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "UPDATE_TO is not a digest: ${UPDATE_TO}" >&2; exit 2; }
+    [[ ${SECURE_BOOT:-0} == 1 ]] || { echo "the upgrade case runs on Secure Boot firmware: set SECURE_BOOT=1" >&2; exit 2; }
+fi
 
 [[ -f $iso ]] || { echo "ISO not found: $iso" >&2; exit 2; }
 [[ -f "${here}/collaudo.ks" ]] || { echo "collaudo.ks missing next to this script" >&2; exit 2; }
@@ -34,7 +46,12 @@ DISK_GIB=${DISK_GIB:-30}
 # Measured on a KVM runner, the install itself takes about eight minutes and the whole
 # job under twelve, so twenty-five is room to spare rather than a budget to spend. Raise
 # it for a host without KVM, where everything is emulated and hours are normal.
-TIMEOUT=${TIMEOUT:-1500}
+# The upgrade case adds the candidate's download, two reboots each way and the checks of
+# both boots: STAGES_TIMEOUT bounds those stages, and the outer bound grows to match.
+timeout_default=1500
+if [[ -n ${UPDATE_TO:-} ]]; then timeout_default=3600; fi
+TIMEOUT=${TIMEOUT:-$timeout_default}
+STAGES_TIMEOUT=${STAGES_TIMEOUT:-2100}
 # Reported next to the time the first boot actually took, so a run that is getting slower
 # says so before it starts failing.
 GREETER_WAIT=${GREETER_WAIT:-600}
@@ -103,11 +120,16 @@ qemu-img create -f raw "$disk" "${DISK_GIB}G" > /dev/null
 ks="${output}/collaudo.ks"
 netdev=user,id=n0
 keydir=''
+serve=''
 # shellcheck disable=SC2329 # the EXIT trap calls it
 cleanup() {
     if [[ -n $keydir ]]; then
         rm -f "${keydir}/id" "${keydir}/id.pub"
         rmdir "$keydir"
+    fi
+    if [[ -n $serve ]]; then
+        if [[ -s ${serve}/registry.pid ]] && kill -0 "$(< "${serve}/registry.pid")"; then kill "$(< "${serve}/registry.pid")"; fi
+        rm -r "$serve"
     fi
 }
 trap cleanup EXIT
@@ -123,6 +145,10 @@ if [[ -n ${UPDATE_TO:-} ]]; then
     fi
     SSH_PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
     netdev+=",hostfwd=tcp:127.0.0.1:${SSH_PORT}-:22"
+    verdict_case+=(upgrade)
+    # The candidate's registry holds a whole image: outside OUTPUT_DIR, which is uploaded.
+    serve=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/var/tmp}}/candidate.XXXXXX")
+    bash "${here}/serve_candidate.sh" "$UPDATE_REPOSITORY" "$UPDATE_TO" "$serve"
 else
     sed '/# upgrade-acceptance begin/,/# upgrade-acceptance end/d' "${here}/collaudo.ks" > "$ks"
     if grep -q -e @COLLAUDO_SSH_KEY@ -e upgrade-acceptance "$ks"; then
@@ -155,7 +181,11 @@ rm -f "$serial" "$monitor"
 
 # The console watcher reports the markers and tells this script when each phase is done.
 # It is given the monitor too: the password is typed at the greeter through it.
-python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
+# In the upgrade case it holds the console past Settings (ATHANOR_CONSOLE_HOLD), so the
+# reboots of the stages are on the serial log and their markers in phases.txt.
+hold=0
+if [[ -n ${UPDATE_TO:-} ]]; then hold=1; fi
+ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
 console_pid=$!
 
 # Screenshots on a timer: the installer and the greeter are graphical and say nothing on
@@ -217,6 +247,24 @@ qemu_pid=$!
 # left to wait for. Whichever it is, the virtual machine is shut down at that moment
 # instead of being left running against the timeout. TIMEOUT is only the outer bound for
 # a guest that never stops talking, and reaching it is itself reported as a failure.
+#
+# The upgrade case goes on once the console has written `ready`: the stages run over SSH,
+# their status lands in upgrade-status for the verdict, and the machine is then shut down,
+# which ends the console's hold. A console that ends first leaves no `ready`, and the
+# verdict says the stages never ran.
+if [[ -n ${UPDATE_TO:-} ]]; then
+    while kill -0 "$console_pid" 2> /dev/null && [[ ! -e ${output}/ready ]]; do sleep 5; done
+    if [[ -e ${output}/ready ]]; then
+        stages_status=0
+        ATHANOR_UPDATE_TO=$UPDATE_TO ATHANOR_UPDATE_REPOSITORY=$UPDATE_REPOSITORY \
+            ATHANOR_UPDATE_MIRROR=$(< "${serve}/mirror") ACC_CI_OUT=$output SSH_PORT=$SSH_PORT ACC_SSH_KEY=${keydir}/id \
+            timeout "$STAGES_TIMEOUT" bash "${here}/../../../scripts/devvm/acceptance/run.sh" --ci > "${output}/upgrade.log" 2>&1 ||
+            stages_status=$?
+        echo "$stages_status" > "${output}/upgrade-status"
+        echo "=== upgrade stages exited ${stages_status} (upgrade.log)"
+        kill "$qemu_pid"
+    fi
+fi
 wait "$console_pid" 2> /dev/null
 if kill -0 "$qemu_pid" 2> /dev/null; then
     kill "$qemu_pid" 2> /dev/null

@@ -33,12 +33,14 @@ import zlib
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str):
+def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
     (out / "serial.log").write_bytes(b"console output\n")
+    for name, text in (files or {}).items():
+        (out / name).write_text(text)
     proc = subprocess.run(
         [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
@@ -935,6 +937,110 @@ def test_secure_boot_case_requires_enforcement(tmp: pathlib.Path) -> None:
     assert proc.returncode == 2, "an unknown case must be refused, not ignored"
 
 
+# The upgrade case: the first boot passed on Secure Boot firmware, the console wrote `ready`,
+# and the stages of run.sh --ci recorded the probes of both later boots.
+FIRST_BOOT = COMPLETE + [("secureboot-enabled", 381), ("ready", 510)]
+BOOT_PROBES = ("mok-enrolled", "secureboot-enabled", "greeter-alive", "session-alive", "settings-alive")
+
+
+def upgrade_files(status="0", log="PASS  UD18 4: Apply() from the active session boots the candidate\n",
+                  replace: dict[str, str] | None = None) -> dict[str, str]:
+    lines = []
+    for prefix in ("upgraded-", "rolled-back-"):
+        for name in BOOT_PROBES:
+            name = (replace or {}).get(prefix + name, prefix + name)
+            lines.append(f"{name} 2000\n")
+    files = {"upgrade-phases.txt": "".join(lines), "upgrade.log": log}
+    if status is not None:
+        files["upgrade-status"] = f"{status}\n"
+    return files
+
+
+def test_upgrade_pass(tmp: pathlib.Path) -> None:
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files())
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and data["pass"] is True, report
+    for check in ("upgrade-stages", "upgraded-secure-boot", "rolled-back-secure-boot",
+                  "upgraded-settings", "rolled-back-session", "secure-boot"):
+        assert data["checks"][check] is True, (check, data)
+
+
+def test_upgrade_missing_status_fails(tmp: pathlib.Path) -> None:
+    """No upgrade-status: the console never wrote `ready`, so the stages never ran."""
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status=None))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgrade-stages"] is False, data
+    assert "never ran" in report, report
+
+
+def test_upgrade_old_deployment_fails(tmp: pathlib.Path) -> None:
+    """A stage that failed is quoted from upgrade.log: the first FAIL line says which."""
+    log = ("PASS  UD18 2: seeded\n"
+           "FAIL  UD18 4: Apply() from the active session boots the candidate: booted sha256:old, expected sha256:new\n"
+           "FAIL  a later line\n")
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status="1", log=log))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgrade-stages"] is False, data
+    assert "booted sha256:old, expected sha256:new" in report and "a later line" not in report, report
+
+
+def test_upgrade_timeout_fails(tmp: pathlib.Path) -> None:
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status="124"))
+    assert code != 0 and "timed out" in report, report
+
+
+def test_upgrade_secure_boot_lost_fails(tmp: pathlib.Path) -> None:
+    """The candidate booted with shim validation off: Secure Boot reads enabled and is not."""
+    files = upgrade_files(replace={"upgraded-secureboot-enabled": "upgraded-secureboot-not-enforced"})
+    code, _ = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=files)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgraded-secure-boot"] is False, data
+    assert data["checks"]["rolled-back-secure-boot"] is True, data
+
+
+def test_upgrade_rollback_session_dead_fails(tmp: pathlib.Path) -> None:
+    files = upgrade_files(replace={"rolled-back-session-alive": "rolled-back-session-dead"})
+    code, _ = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=files)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["rolled-back-session"] is False, data
+
+
+def test_upgrade_shim_refusal_fails(tmp: pathlib.Path) -> None:
+    """shim refusing a kernel on a reboot of the stages is a guest failure, seen on the
+    held console even when the stages report nothing."""
+    code, _ = verdict(tmp, FIRST_BOOT + [("secure-boot-refused", 700)], 143, "secure-boot", "upgrade",
+                      files=upgrade_files())
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["no-guest-failure"] is False, data
+
+
+def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
+    """The upgrade case is a Secure Boot case: verdict.py refuses it alone, and
+    run_iso_test.sh refuses UPDATE_TO without SECURE_BOOT=1 before touching anything."""
+    out = tmp / "run"
+    out.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run([sys.executable, str(HERE / "verdict.py"), str(out), "900", "0", "upgrade"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2, proc
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    env = {k: v for k, v in os.environ.items() if k != "SECURE_BOOT"}
+    env.update(UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
+    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 2 and "Secure Boot" in proc.stderr, proc
+    assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
+
+
+def test_plain_case_unchanged(tmp: pathlib.Path) -> None:
+    """Without `upgrade` nothing of the upgrade is read, even if its files are there."""
+    code, _ = verdict(tmp, COMPLETE + [("secureboot-enabled", 381)], 0, "secure-boot",
+                      files=upgrade_files(status="1"))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0, data
+    assert not any("upgrade" in name or name.startswith("rolled-back") for name in data["checks"]), data
+
+
 def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
     """The password the installer shows is acknowledged with Enter, and at the first boot
     each MokManager screen gets its keys, the password typed letter by letter, in order."""
@@ -1094,6 +1200,15 @@ def main() -> int:
             test_console_logs_out_then_holds,
             test_classify_maps_probe_output,
             test_print_probe_is_the_typed_probe,
+            test_upgrade_pass,
+            test_upgrade_missing_status_fails,
+            test_upgrade_old_deployment_fails,
+            test_upgrade_timeout_fails,
+            test_upgrade_secure_boot_lost_fails,
+            test_upgrade_rollback_session_dead_fails,
+            test_upgrade_shim_refusal_fails,
+            test_upgrade_requires_secure_boot,
+            test_plain_case_unchanged,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,
