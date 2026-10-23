@@ -48,13 +48,13 @@ use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
+    send_surface_state, CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
 };
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
 use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
-use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::ToplevelCaptureSourceState;
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
@@ -459,8 +459,10 @@ impl State {
         Ok(())
     }
 
-    /// After a frame of `output`: the output each surface is shown on, presentation feedback
-    /// when the frame changed, and the frame callbacks.
+    /// After a frame of `output`: the output each surface is shown on, and the scale of that
+    /// output as the surface's preferred one, presentation feedback when the frame changed, and
+    /// the frame callbacks. The scale is sent here, whatever changed it: a surface hears of a new
+    /// scale at the first frame of its output that shows it.
     pub fn frame_done(
         &mut self,
         output: &Output,
@@ -471,8 +473,10 @@ impl State {
     ) {
         // Collected: the output's layer map is not held while the surfaces are visited.
         let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        let scale = output.current_scale();
+        let transform = output.current_transform();
         let scanout = |surface: &WlSurface, surface_states: &SurfaceData| {
-            update_surface_primary_scanout_output(
+            let primary = update_surface_primary_scanout_output(
                 surface,
                 output,
                 surface_states,
@@ -480,6 +484,13 @@ impl State {
                 states,
                 default_primary_scanout_output_compare,
             );
+            // Both send only what changed since they last sent it.
+            if primary.as_ref() == Some(output) {
+                with_fractional_scale(surface_states, |fractional| {
+                    fractional.set_preferred_scale(scale.fractional_scale())
+                });
+                send_surface_state(surface, surface_states, scale.integer_scale(), transform);
+            }
         };
         for window in self.space.elements() {
             window.with_surfaces(scanout);
