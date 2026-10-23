@@ -70,7 +70,10 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
+use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -109,6 +112,16 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
+    /// The modifiers each virtual keyboard last set, applied to its own keys only
+    /// (`with_keymap_of`).
+    pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
+    /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
+    /// none while the seat has its own (`with_keymap_of`).
+    pub virtual_keymap: Option<crate::input::VirtualKeymap>,
+    /// The buttons each virtual pointer holds, whose release goes on while the session is
+    /// locked; a pointer's entry goes with it. Only evdev's button codes are counted, so an entry
+    /// holds at most 512.
+    pub virtual_buttons: HashMap<VirtualPointerDevice, Vec<u32>>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
     /// on any connection, hold it again only after a click on one of their surfaces
@@ -238,6 +251,11 @@ impl State {
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
         crate::workspace::global(&dh);
         crate::output_management::global(&dh);
+        // Synthetic input, which takes the hardware's path (`input.rs`).
+        VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
+            granted(c, Privilege::VirtualKeyboard)
+        });
+        VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -261,6 +279,9 @@ impl State {
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
+            virtual_modifiers: HashMap::new(),
+            virtual_keymap: None,
+            virtual_buttons: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,
             fatal: None,
