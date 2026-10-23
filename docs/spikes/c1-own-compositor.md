@@ -385,8 +385,10 @@ Each item names the finding that makes it necessary.
    say which of per-output scale, per-output damage, a second GPU and layers that follow a removed
    output 1.0 needs.
 10. **Colour and cursors.** Findings: `udev.rs:59`, `udev.rs:63`. 10-bit formats, and the cursor
-    surface and a themed cursor. On the NVIDIA desktop's console the pointer was not drawn at
-    all (T9-3); nobody has looked at the laptop's.
+    surface and a themed cursor. On the NVIDIA desktop's console the maintainer saw no pointer
+    in either run, though the second run's trace has the square composited at the mouse's
+    positions (T9-3); nobody has looked at the laptop's. A cursor drawn from a buffer smithay
+    can read goes to the cursor plane instead.
 11. **Capture.** Findings: `capture.rs:70`, `capture.rs:132`. The portal needs dmabuf capture and
     damage tracking before screen casting; the output capture source is not offered.
 12. **Protocols not offered.** Finding: section 4, "Not offered at the head": input method,
@@ -410,6 +412,9 @@ Each item names the finding that makes it necessary.
     step 4): every surface 1.0 carries on the compositor, as a recorded run. This spike supplies
     the instruments (the fixture, the rig scenes, the frame-time report, the identity tests); the
     thresholds are not set here: one unattended run on one machine is not a basis for them.
+16. **Window actions.** Finding: T9-8. A window cannot be moved or resized: `xdg_toplevel.move`
+    and `.resize` start no grab. Specify the interactive move and resize, and the window actions
+    (maximise, minimise, fullscreen) the session owes the user, with the tiling model of OS2.
 
 ## 11. Not measured
 
