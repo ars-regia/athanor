@@ -2,7 +2,7 @@
 id: ADR-0115
 title: "Ship 0.9 within one week and move rows to 1.1"
 date: 2026-10-14
-status: amended by ADR-0121, ADR-0123, ADR-0129
+status: amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131
 issues: [124, 126, 146, 231, 252]
 areas: [process, docs, platform, security, shell]
 ---
