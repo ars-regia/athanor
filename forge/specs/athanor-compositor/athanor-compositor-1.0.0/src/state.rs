@@ -121,6 +121,9 @@ pub struct State {
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
+    /// The keys each virtual keyboard holds that went past the input method's grab, whose
+    /// release goes past it too.
+    pub past_grab_keys: HashMap<VirtualKeyboardDevice, Vec<Keycode>>,
     /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
     /// none while the seat has its own (`with_keymap_of`).
     pub virtual_keymap: Option<crate::input::VirtualKeymap>,
@@ -290,6 +293,7 @@ impl State {
             last_input_serial: None,
             kept_keys: Vec::new(),
             virtual_modifiers: HashMap::new(),
+            past_grab_keys: HashMap::new(),
             virtual_keymap: None,
             composing: Default::default(),
             virtual_buttons: HashMap::new(),

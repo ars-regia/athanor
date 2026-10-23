@@ -162,6 +162,8 @@ struct Client {
     workspaces_done: bool,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
+    /// The evdev code of each key released while the client had the keyboard.
+    released: Vec<u32>,
     /// The evdev codes of the keys held, as the last `enter` told them.
     entered_keys: Vec<u32>,
     /// The keymaps the client was sent.
@@ -354,6 +356,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
             }
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Released),
+                ..
+            } => client.released.push(key),
             wl_keyboard::Event::Enter { keys, .. } => {
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
@@ -5185,5 +5192,42 @@ fn os9_an_edit_sent_with_no_active_field_is_dropped() {
         field.names_after(before).contains(&"done")
     });
     assert_eq!(field.names_after(before), ["done"]);
+    run.stop();
+}
+
+/// A key the input method forwards past its grab is let go past it too, to the window that saw
+/// the press: when the input method's client goes with the key held, after another input method
+/// has taken the keyboard, the release reaches the window and not the new grab.
+#[test]
+fn os9_a_forwarded_key_held_when_the_input_method_goes_is_let_go_for_the_window() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    window.pump(&mut run, "the window takes the press", |client, _| {
+        client.keys == [30]
+    });
+    method.method.send("destroy", vec![]);
+    ime.roundtrip(&mut run);
+    let mut next = Local::connect(&mut run, None);
+    let mut successor = SimulatedInputMethod::new(&mut next, &mut run);
+    successor.grab_keyboard(&mut next, &mut run);
+
+    drop(forwarder);
+    drop(method);
+    drop(ime);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    next.roundtrip(&mut run);
+    let sent = successor.grabs[0].names_after(0);
+    assert!(!sent.contains(&"key"), "the new grab: {sent:?}");
+    assert!(
+        run.state.past_grab_keys.is_empty(),
+        "no key is held past the grab"
+    );
     run.stop();
 }

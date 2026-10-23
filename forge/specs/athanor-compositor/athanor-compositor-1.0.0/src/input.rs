@@ -418,6 +418,14 @@ impl VirtualKeyboardHandler for State {
                 let device = event.device();
                 let (code, key_state, time) =
                     (event.key_code(), event.state(), Event::time(&event));
+                // The release of a key forwarded past the input method's grab goes past it too,
+                // to the surface that saw the press, even once the grab or its client is gone:
+                // smithay lets go of a gone keyboard's keys when its client may be gone too.
+                let forwarded = key_state == KeyState::Released
+                    && self.past_grab_keys.get_mut(&device).is_some_and(|held| {
+                        let at = held.iter().position(|key| *key == code);
+                        at.map(|at| held.swap_remove(at)).is_some()
+                    });
                 // While locked a press is dropped before anything, and a release lets go of a
                 // key the seat holds under the keymap the seat has: no client is sent this
                 // client's keymap, and the idle timers keep running.
@@ -429,10 +437,13 @@ impl VirtualKeyboardHandler for State {
                 }
                 self.activity();
                 self.request_redraw();
-                let past_grab = self.holds_keyboard_grab(device.client());
+                let past_grab = forwarded || self.holds_keyboard_grab(device.client());
                 self.with_keymap_of(&device, |state| {
                     state.typed(code, key_state, time, device.source(), past_grab)
                 });
+                if past_grab && key_state == KeyState::Pressed {
+                    self.past_grab_keys.entry(device).or_default().push(code);
+                }
             }
             InputEvent::Special(VirtualKeyboardSpecialEvent::Modifiers {
                 device,
@@ -459,6 +470,7 @@ impl VirtualKeyboardHandler for State {
             }
             InputEvent::DeviceRemoved { device } => {
                 self.virtual_modifiers.remove(&device);
+                self.past_grab_keys.remove(&device);
                 if self
                     .virtual_keymap
                     .as_ref()
