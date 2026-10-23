@@ -4981,3 +4981,41 @@ fn os9_a_popup_of_a_destroyed_surface_is_not_drawn() {
     assert_eq!(drawn(&run.state), 0, "its surface is gone");
     run.stop();
 }
+
+/// A client has at most 32 text inputs: its 33rd is inert, never entered, and its requests are
+/// ignored, so enabling it activates no input method.
+#[test]
+fn os9_a_client_s_33rd_text_input_is_inert() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let seat: wl_seat::WlSeat = window.bind(1);
+    let manager = Raw::bind(&mut window, &ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE);
+    let fields: Vec<Raw> = (0..33)
+        .map(|_| {
+            manager.create(
+                "get_text_input",
+                vec![
+                    Argument::NewId(ObjectId::null()),
+                    Argument::Object(seat.id()),
+                ],
+                &ZWP_TEXT_INPUT_V3_INTERFACE,
+            )
+        })
+        .collect();
+    window.roundtrip(&mut run);
+    for field in &fields[..32] {
+        assert_eq!(field.names_after(0), ["enter"]);
+    }
+    assert_eq!(fields[32].names_after(0), [] as [&str; 0], "the 33rd");
+    enable(&fields[32], &mut window, &mut run, "caf");
+    ime.roundtrip(&mut run);
+    assert!(
+        !method.method.names_after(0).contains(&"activate"),
+        "{:?}",
+        method.method.events()
+    );
+    assert_eq!(fields[32].names_after(0), [] as [&str; 0], "the 33rd");
+    run.stop();
+}

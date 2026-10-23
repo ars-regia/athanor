@@ -40,6 +40,9 @@ use std::os::fd::AsFd;
 /// The role of an input method's popup surface.
 const POPUP_ROLE: &str = "zwp_input_popup_surface_v2";
 
+/// The text inputs a client may have at once.
+const TEXT_INPUTS_PER_CLIENT: usize = 32;
+
 /// The user data of both globals and of every object of the two protocols.
 pub struct InputMethods;
 
@@ -361,6 +364,16 @@ impl Dispatch2<ZwpTextInputManagerV3, State> for InputMethods {
         if let zwp_text_input_manager_v3::Request::GetTextInput { id, .. } = request {
             let object = data_init.init(id, InputMethods);
             let composing = &mut state.composing;
+            // Each focus change walks the list: a client's share of it is bounded, and the
+            // objects past it, never listed, are inert.
+            let owned = composing
+                .text_inputs
+                .iter()
+                .filter(|entry| entry.object.id().same_client_as(&object.id()))
+                .count();
+            if owned >= TEXT_INPUTS_PER_CLIENT {
+                return;
+            }
             if let (Some(_), Some(focus)) = (&composing.method, &composing.focus) {
                 if object.id().same_client_as(&focus.id()) {
                     object.enter(focus);
