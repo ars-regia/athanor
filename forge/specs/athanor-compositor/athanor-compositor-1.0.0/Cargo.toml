@@ -16,7 +16,7 @@ libc = { workspace = true }
 # The lock request to logind (`lock.rs`), a blocking call on its own thread.
 zbus = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dev-dependencies]
 wayland-client = { workspace = true }
