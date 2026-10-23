@@ -7,6 +7,8 @@
 #![deny(unsafe_code)]
 
 mod capture;
+mod cursor;
+mod grabs;
 mod handlers;
 mod headless;
 mod identity;

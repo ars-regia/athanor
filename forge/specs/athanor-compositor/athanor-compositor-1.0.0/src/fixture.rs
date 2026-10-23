@@ -3,6 +3,7 @@
 //! window from a wl_shm buffer and waits for its frame callback; the compositor's frames are then
 //! read back and their pixels compared.
 
+use crate::grabs::{MoveGrab, ResizeGrab};
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
 use crate::identity::{AllowList, FileId, Process};
@@ -10,8 +11,10 @@ use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::KeyboardSource;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
     ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE, ZWP_TEXT_INPUT_V3_INTERFACE,
@@ -26,7 +29,7 @@ use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server:
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::utils::{Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -40,8 +43,8 @@ use std::time::{Duration, Instant};
 use wayland_client::backend::protocol::{Argument, Interface, Message};
 use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
+    wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, Proxy, QueueHandle, WEnum,
@@ -85,6 +88,8 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
+/// The left button's evdev code.
+const BTN_LEFT: u32 = 0x110;
 const WIDTH: i32 = 200;
 const HEIGHT: i32 = 100;
 
@@ -135,6 +140,8 @@ struct Client {
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
+    /// The width, height and states of the last configure of a toplevel.
+    toplevel_configure: Option<(i32, i32, Vec<u32>)>,
     /// The serial, width and height of the last configure of a layer surface.
     layer_configure: Option<(u32, u32, u32)>,
     /// A layer surface was closed by the compositor.
@@ -182,6 +189,10 @@ struct Client {
     configured: Option<&'static str>,
     /// The last preferred scale of wp-fractional-scale, in 120ths.
     fractional_scale: Option<u32>,
+    /// The serial of the last `wl_pointer.enter` the client was sent.
+    pointer_enter: Option<u32>,
+    /// The serial of the last `wl_pointer.button` press the client was sent.
+    button: Option<u32>,
 }
 
 /// A head of wlr-output-management as the client has seen it: its name, its last scale and its
@@ -292,6 +303,32 @@ impl Dispatch<wl_callback::WlCallback, ()> for Client {
     }
 }
 
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        event: xdg_toplevel::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_toplevel::Event::Configure {
+            width,
+            height,
+            states,
+        } = event
+        {
+            let states = states
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|state| u32::from_ne_bytes(*state))
+                .collect();
+            client.toplevel_configure = Some((width, height, states));
+        }
+    }
+}
+
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
     fn event(
         client: &mut Self,
@@ -319,7 +356,6 @@ delegate_noop!(Client: wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
-delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 delegate_noop!(Client: xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
@@ -372,6 +408,27 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
                 client.modifiers.push(mods_depressed);
             }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
+            wl_pointer::Event::Button {
+                serial,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => client.button = Some(serial),
             _ => {}
         }
     }
@@ -2055,6 +2112,11 @@ struct Local {
     id: Option<ClientId>,
     /// The buffers' files, open while their buffers are.
     files: Vec<std::fs::File>,
+    /// The seat and its pointer, once `toplevel` has bound them.
+    seat: Option<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
+    /// The surface of the window `toplevel` mapped.
+    window: Option<(wl_surface::WlSurface, xdg_surface::XdgSurface)>,
 }
 
 impl Local {
@@ -2084,9 +2146,111 @@ impl Local {
             client: Client::default(),
             id,
             files: Vec::new(),
+            seat: None,
+            pointer: None,
+            window: None,
         };
         local.roundtrip(run);
         local
+    }
+
+    /// Binds the seat and its pointer, maps a `WIDTH`x`HEIGHT` window and gives it the keyboard.
+    /// The fixture's own window holds the keyboard, so `place` leaves the new window at the
+    /// bottom, exactly under the fixture's: raised, the new window is the one under the pointer,
+    /// and `fixture_window`, the bottom element, is the fixture's again.
+    fn toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        self.pointer = Some(seat.get_pointer(&qh, ()));
+        self.seat = Some(seat);
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg.get_toplevel(&qh, ());
+        self.client.configure = None;
+        surface.commit();
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        xdg.ack_configure(self.client.configure.expect("a configure"));
+        let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        let id = self.id.clone().expect("an id");
+        // The window is in the space from its first commit; it is placed once it has a size.
+        self.pump(run, "the window is placed", |_, state| {
+            state
+                .space
+                .elements()
+                .any(|window| owned_by(window, &id) && !window.geometry().is_empty())
+        });
+        let window = window_of(run, &id);
+        run.state.focus(&window);
+        // The configure that activates it is not one a test waits for.
+        self.roundtrip(run);
+        self.client.configure = None;
+        self.window = Some((surface, xdg));
+        toplevel
+    }
+
+    /// Waits for the next configure of the window `toplevel` mapped, acknowledges it and draws
+    /// a buffer of the size it names, or of the fixture's size when it leaves the size to the
+    /// client: the configure's width, height and states.
+    fn redraw(&mut self, run: &mut Running) -> (i32, i32, Vec<u32>) {
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        let (surface, xdg) = self.window.clone().expect("a window");
+        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let (width, height, states) = self
+            .client
+            .toplevel_configure
+            .take()
+            .expect("a toplevel configure");
+        let shm: wl_shm::WlShm = self.bind(1);
+        let (buffer, _) = self.buffer(
+            &shm,
+            if width > 0 { width } else { WIDTH },
+            if height > 0 { height } else { HEIGHT },
+            [0, 0, 0, 255],
+        );
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        (width, height, states)
+    }
+
+    /// Maps a bar: a surface on the top layer along the output's top edge, `height` high, with
+    /// an exclusive zone of its height.
+    fn bar(&mut self, run: &mut Running, height: i32) -> wl_surface::WlSurface {
+        use zwlr_layer_surface_v1::Anchor;
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = self.bind(4);
+        let qh = self.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "bar".into(),
+            &qh,
+            (),
+        );
+        layer.set_anchor(Anchor::Top | Anchor::Left | Anchor::Right);
+        layer.set_size(0, height.unsigned_abs());
+        layer.set_exclusive_zone(height);
+        assert!(self.answer(run, &surface), "the bar is configured");
+        let (serial, width, _) = self.client.layer_configure.expect("a configure");
+        layer.ack_configure(serial);
+        let width = i32::try_from(width).expect("a width");
+        let (buffer, _) = self.buffer(&shm, width, height, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        surface
     }
 
     /// Runs the compositor and the client in turn until `done` holds.
@@ -2250,6 +2414,407 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
         .expect("the fixture's client")
         .id();
     (window, id)
+}
+
+/// Whether `window` belongs to the client `id`.
+fn owned_by(window: &smithay::desktop::Window, id: &ClientId) -> bool {
+    window
+        .toplevel()
+        .and_then(|t| t.wl_surface().client())
+        .is_some_and(|client| client.id() == *id)
+}
+
+/// The mapped window of the client `id`.
+fn window_of(run: &Running, id: &ClientId) -> smithay::desktop::Window {
+    run.state
+        .space
+        .elements()
+        .find(|window| owned_by(window, id))
+        .expect("the client's window")
+        .clone()
+}
+
+/// Where the window of the client `id` is in the space.
+fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical> {
+    run.state
+        .space
+        .element_location(&window_of(run, id))
+        .expect("a location")
+}
+
+/// Whether a `MoveGrab` holds the pointer: any press installs Smithay's click grab, so
+/// `is_grabbed` cannot tell a move from a click.
+fn moving(run: &Running) -> bool {
+    run.state
+        .seat
+        .get_pointer()
+        .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<MoveGrab>()))
+        .unwrap_or(false)
+}
+
+/// Moves the pointer to `at` and presses the left button.
+fn press(run: &mut Running, at: Point<f64, Logical>) {
+    run.state.pointer_to(at, InputTime::now());
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+}
+
+/// Releases the left button.
+fn release(run: &mut Running) {
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+}
+
+/// A client's window, moved on the press it was sent: the client's id and where the press was.
+fn moved(run: &mut Running, local: &mut Local) -> (ClientId, Point<f64, Logical>) {
+    let toplevel = local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(run, at);
+    local.pump(run, "the press", |client, _| client.button.is_some());
+    toplevel._move(&seat, local.client.button.expect("a press"));
+    local.roundtrip(run);
+    assert!(moving(run), "the client's own press grants the move");
+    (id, at)
+}
+
+/// A move is granted only for the last press, sent to the client that asks, while it is held
+/// (OS12).
+#[test]
+fn a_move_needs_the_clients_own_button_press() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+
+    // A serial no press sent the client.
+    toplevel._move(&seat, SERIAL_COUNTER.next_serial().into());
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a serial no press sent is refused");
+
+    // An older press's serial.
+    press(&mut run, at);
+    release(&mut run);
+    local.pump(&mut run, "the first press", |client, _| {
+        client.button.is_some()
+    });
+    let older = local.client.button.take().expect("a press");
+    press(&mut run, at);
+    local.pump(&mut run, "the second press", |client, _| {
+        client.button.is_some()
+    });
+    toplevel._move(&seat, older);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "an older press's serial is refused");
+
+    // The current press's serial, recorded as sent to another client.
+    let current = local.client.button.expect("a press");
+    let (_, other) = fixture_window(&run);
+    assert_ne!(other, id, "the fixture's window belongs to another client");
+    run.state.grab_serials.button = Some((current.into(), other));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a press sent to another client is refused");
+
+    // The current press, sent to this client: granted.
+    run.state.grab_serials.button = Some((current.into(), id));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(moving(&run), "the client's own press grants the move");
+    run.stop();
+}
+
+/// The window follows the pointer until the button is up, and stays (OS12).
+#[test]
+fn a_window_follows_the_pointer_while_moved() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before + Point::from((100, 50)));
+    release(&mut run);
+    assert!(!moving(&run), "the release ends the move");
+    run.state.pointer_to(at, InputTime::now());
+    assert_eq!(
+        location_of(&run, &id),
+        before + Point::from((100, 50)),
+        "the window stays"
+    );
+    run.stop();
+}
+
+/// A window dragged off the area keeps its top edge, and 32 pixels across, inside it (OS12).
+#[test]
+fn a_moved_window_keeps_its_top_edge_reachable() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .pointer_to(at - Point::from((10_000.0, 10_000.0)), InputTime::now());
+    let location = location_of(&run, &id);
+    assert_eq!(location.y, area.loc.y, "the top edge stays in the area");
+    let width = window_of(&run, &id).geometry().size.w;
+    assert!(
+        location.x + width >= area.loc.x + 32,
+        "32 pixels stay in the area"
+    );
+    run.stop();
+}
+
+/// The lock ends a move: the pointer goes to the lock, and the window stays (OS12).
+#[test]
+fn the_lock_ends_a_move() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    let mut locker = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let _lock = locks.lock(&locker.queue.handle(), ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    assert!(!moving(&run), "the lock ends the move");
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before, "the window stays");
+    run.stop();
+}
+
+/// A resize sends configures with the `resizing` state and the size the pointer asks for, and
+/// one without it at the release; from the top-left corner the bottom-right one stays (OS12).
+#[test]
+fn a_resize_sends_resizing_configures() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let resizing = xdg_toplevel::State::Resizing as u32;
+    let geometry = |run: &Running| {
+        run.state
+            .space
+            .element_geometry(&window_of(run, &id))
+            .expect("mapped")
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&resizing), "the configure is resizing");
+    assert_eq!((width, height), (WIDTH + 50, HEIGHT + 20));
+    release(&mut run);
+    let (_, _, states) = local.redraw(&mut run);
+    assert!(!states.contains(&resizing), "the release ends the resize");
+
+    let before = geometry(&run);
+    let at = before.loc.to_f64() + Point::from((5.0, 5.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::TopLeft);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at - Point::from((30.0, 40.0)), InputTime::now());
+    let (width, height, _) = local.redraw(&mut run);
+    assert_eq!((width, height), (before.size.w + 30, before.size.h + 40));
+    let after = geometry(&run);
+    assert_eq!(
+        (after.loc.x + after.size.w, after.loc.y + after.size.h),
+        (before.loc.x + before.size.w, before.loc.y + before.size.h),
+        "the bottom-right corner stays"
+    );
+    release(&mut run);
+    run.stop();
+}
+
+/// A window maximised while it is resized ends the resize and takes the area, and the pointer
+/// no longer moves it (OS12).
+#[test]
+fn maximising_ends_a_resize() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let area = run.state.window_area().expect("an area");
+    let resizing = |run: &Running| {
+        run.state
+            .seat
+            .get_pointer()
+            .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<ResizeGrab>()))
+            .unwrap_or(false)
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    assert!(resizing(&run), "the client's own press grants the resize");
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    local.redraw(&mut run);
+
+    toplevel.set_maximized();
+    local.roundtrip(&mut run);
+    assert!(!resizing(&run), "maximising ends the resize");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&(xdg_toplevel::State::Maximized as u32)));
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+    run.state
+        .pointer_to(at + Point::from((90.0, 60.0)), InputTime::now());
+    local.roundtrip(&mut run);
+    assert!(
+        local.client.configure.is_none(),
+        "no resizing configure follows"
+    );
+    assert_eq!(location_of(&run, &id), area.loc, "the window stays");
+    release(&mut run);
+    run.stop();
+}
+
+/// A maximised window takes the area the bar's zone leaves at the commit that draws that size,
+/// is fitted again when the zone changes, and goes back where it was, at its size, when
+/// restored (OS12).
+#[test]
+fn a_window_is_maximised_and_restored() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let before = location_of(&run, &id);
+    let area = run.state.window_area().expect("an area");
+    let maximized = xdg_toplevel::State::Maximized as u32;
+
+    toplevel.set_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "the configure is maximised");
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+
+    let mut shell = Local::connect(&mut run, None);
+    let _bar = shell.bar(&mut run, 32);
+    let fitted = run.state.window_area().expect("an area");
+    assert_ne!(fitted, area, "the bar's zone changes the area");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "still maximised");
+    assert_eq!((width, height), (fitted.size.w, fitted.size.h));
+    assert_eq!(location_of(&run, &id), fitted.loc);
+
+    toplevel.unset_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(
+        !states.contains(&maximized),
+        "the configure is not maximised"
+    );
+    assert_eq!((width, height), (WIDTH, HEIGHT));
+    assert_eq!(location_of(&run, &id), before);
+    run.stop();
+}
+
+/// A client with its own window and the pointer over it: the serial of the pointer's enter.
+fn pointed_at(run: &mut Running, local: &mut Local) -> u32 {
+    local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    run.state.pointer_to(at, InputTime::now());
+    local.pump(run, "the pointer enters the window", |client, _| {
+        client.pointer_enter.is_some()
+    });
+    local.client.pointer_enter.expect("an enter")
+}
+
+/// A cursor a client sets is shown only while that client holds the pointer's focus: over
+/// another client's window, and over the background, the default is drawn (OS15).
+#[test]
+fn another_clients_cursor_is_not_shown() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, None, 0, 0);
+    local.roundtrip(&mut run);
+    let id = local.id.clone().expect("an id");
+    assert_eq!(
+        run.state.cursor_status,
+        (CursorImageStatus::Hidden, Some(id.clone())),
+        "a cursor without a surface belongs to the client the pointer is over"
+    );
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::Hidden,
+        "over its own window"
+    );
+
+    // The client's window moves off the fixture's, which the pointer is then over.
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .space
+        .map_element(window_of(&run, &id), area.loc, true);
+    let (other, _) = fixture_window(&run);
+    let over = run
+        .state
+        .space
+        .element_location(&other)
+        .expect("a location");
+    run.state
+        .pointer_to(over.to_f64() + Point::from((20.0, 10.0)), InputTime::now());
+    // Smithay resets the cursor when the focus changes: the client's is put back, as if it had
+    // been set late, here and over the background.
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id.clone()));
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over another client's window"
+    );
+
+    let corner = (area.loc + area.size - Size::from((1, 1))).to_f64();
+    assert!(run.state.surface_under(corner).is_none(), "the background");
+    run.state.pointer_to(corner, InputTime::now());
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id));
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over the background"
+    );
+    run.stop();
+}
+
+/// A cursor surface is sent its frame callbacks while the pointer is over its output, as a
+/// window is.
+#[test]
+fn task_pointer_a_cursor_surface_gets_its_frame_callbacks() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let cursor = compositor.create_surface(&qh, ());
+    let (buffer, _) = local.buffer(&shm, 16, 16, [255, 255, 255, 255]);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, Some(&cursor), 0, 0);
+    cursor.attach(Some(&buffer), 0, 0);
+    cursor.frame(&qh, ());
+    local.client.frame_done = false;
+    cursor.commit();
+    local.pump(&mut run, "the cursor's frame callback", |client, _| {
+        client.frame_done
+    });
+    run.stop();
 }
 
 /// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and

@@ -1,6 +1,7 @@
 //! Smithay's handler traits: what the compositor does when a client commits, maps a window,
 //! opens a popup, imports a dmabuf or asks for activation.
 
+use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
 use crate::state::{ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
@@ -8,11 +9,12 @@ use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
-use smithay::input::pointer::Focus;
+use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{
@@ -111,6 +113,8 @@ impl CompositorHandler for State {
             if let Some(window) = self.window_for(&root) {
                 window.on_commit();
                 self.place(&window);
+                self.relocated(&window);
+                self.anchor_resized(&window);
             }
         }
         self.layer_commit(surface);
@@ -280,6 +284,29 @@ impl State {
         }
     }
 
+    /// The pointer, the start of its grab and the window, when the client of `surface` may
+    /// start a window grab with `serial`: the session is not locked, and `serial` is the last
+    /// button press, sent to that client and still held. A client cannot take the pointer when
+    /// it likes, as the popup grab checks.
+    fn window_grab(
+        &self,
+        surface: &ToplevelSurface,
+        seat: &wl_seat::WlSeat,
+        serial: Serial,
+    ) -> Option<(PointerHandle<Self>, GrabStartData<Self>, Window)> {
+        if self.lock.is_some() {
+            return None;
+        }
+        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        let client = surface.wl_surface().client()?.id();
+        if !self.grab_serials.clicked(serial, &client) || !pointer.has_grab(serial) {
+            return None;
+        }
+        let start = pointer.grab_start_data()?;
+        let window = self.window_for(surface.wl_surface())?;
+        Some((pointer, start, window))
+    }
+
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
     /// the keyboard exclusively; the others are deactivated.
     pub fn focus(&mut self, window: &Window) {
@@ -409,6 +436,70 @@ impl XdgShellHandler for State {
         self.refocus(surface.wl_surface());
     }
 
+    /// The window follows the pointer until every button is up. A maximised window is
+    /// restored first, its top edge where it was and its centre under the pointer.
+    fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(mut from) = self.space.element_geometry(&window).map(|g| g.loc) else {
+            return;
+        };
+        if let Some(kept) = self.restore(&window) {
+            from.x = start
+                .location
+                .to_i32_round::<i32>()
+                .x
+                .saturating_sub(kept.size.w / 2);
+            if let Some(area) = self.window_area() {
+                self.move_window(&window, kept_reachable(area, from, kept.size));
+            }
+        }
+        let grab = MoveGrab {
+            start,
+            window,
+            from,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    /// The window's `edges` follow the pointer until every button is up. A maximised window
+    /// keeps its size.
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let maximised = surface
+            .with_pending_state(|state| state.states.contains(xdg_toplevel::State::Maximized));
+        if edges == xdg_toplevel::ResizeEdge::None || maximised {
+            return;
+        }
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(from) = self.space.element_geometry(&window) else {
+            return;
+        };
+        let grab = ResizeGrab::new(start, window, edges, from);
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.end_window_grab(&window);
+            self.maximise(&window);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.restore(&window);
+        }
+    }
+
     fn title_changed(&mut self, surface: ToplevelSurface) {
         self.rename(&surface);
     }
@@ -514,6 +605,24 @@ impl SeatHandler for State {
 
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
+    }
+
+    /// A client set the cursor with `wl_pointer.set_cursor` or `wp_cursor_shape_v1`, or Smithay
+    /// reset it to the default when the pointer's focus changed. Its owner is the client of the
+    /// cursor surface, else the client the pointer is over.
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        let owner = match &image {
+            CursorImageStatus::Surface(surface) => surface.client(),
+            // Smithay resets from inside the pointer's motion, which holds the pointer: asking
+            // it for its focus there deadlocks, and the default needs no owner.
+            _ if image == CursorImageStatus::default_named() => None,
+            _ => seat
+                .get_pointer()
+                .and_then(|pointer| pointer.current_focus())
+                .and_then(|surface| surface.client()),
+        };
+        self.cursor_status = (image, owner.map(|client| client.id()));
+        self.request_redraw();
     }
 
     /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of
