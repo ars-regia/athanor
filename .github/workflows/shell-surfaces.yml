@@ -177,8 +177,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Rig image
-        run: bash forge/test/shell/rig.sh build-image
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
         with:
           name: shell-rig-bin
@@ -238,6 +236,7 @@ jobs:
             .scratch/shell-rig/bin/athanor-shelld
             .scratch/shell-rig/bin/SEALED
           if-no-files-found: error
+          retention-days: 1
 
   bar-scenes:
     name: Bar scene ${{ matrix.scene }} (12 cases) against the goldens
