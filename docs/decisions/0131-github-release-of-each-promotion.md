@@ -51,12 +51,13 @@ yet. Planning it, and auditing the plan, found points that the approved text lea
      in the repository, under its own review.
 4. **The Release carries today's bundle, and release 0.9 does not wait for the VSA.** The 0.9
    release notes name each PL42 item the bundle does not carry yet; each joins the bundle with
-   the work that produces it.
+   the work that produces it. This record places the VSA in no release.
    - Option A, chosen: **the bundle as it is, the gaps named.**
    - Option B: **0.9 waits for the VSA of PL29.** Rejected: it holds the release for work that
      has no plan yet.
 5. **The maintainer pushes the signed `v0.x` tag before dispatching that release's promotion**
-   (ADR-0105 item 2), so the promotion finds the tag and publishes the 0.x Release.
+   (a 0.x release is a signed tag plus a `:stable` promotion, ADR-0105 item 2), so the
+   promotion finds the tag and publishes the 0.x Release. The order is this record's rule.
 6. **A second promotion of a build adds its bundle to the build's Release** as an asset of its
    own, named after the promotion run; a re-run of a promotion run changes nothing.
    - Option A, chosen: **add the asset.** Each promotion keeps its evidence on the Release.
@@ -67,8 +68,8 @@ yet. Planning it, and auditing the plan, found points that the approved text lea
    - Option B: **fall back to `promoted-<build run id>`.** Rejected: it would hide a bad tag.
 8. **A tag ruleset protects the tags a Release names, in 0.9:** `refs/tags/v*` and
    `refs/tags/promoted-*` cannot be moved or deleted, and only the maintainer creates `v*`. It
-   lives in `.github/settings/rulesets.json`, the maintainer applies it, and the App is not a
-   bypass actor.
+   is added to `.github/settings/rulesets.json` with the Release job, the maintainer applies it,
+   and the App is not a bypass actor.
    - Option A, chosen: **the ruleset in 0.9.**
    - Option B: **after 0.9.** Rejected: anyone with write access could move a tag a Release
      names.
@@ -77,5 +78,6 @@ yet. Planning it, and auditing the plan, found points that the approved text lea
 
 - Amended: ADR-0115 item 2, for the VSA of PL29 only; its status line and its row in the index
   name this record, and its text keeps its words.
-- `doc_pipeline.md` PL42 is implemented with decisions 1 to 3; its status line names this record.
+- `doc_pipeline.md` PL42 is implemented with decisions 1 to 4, 6 and 7; its status line names
+  this record.
 - The 0.9 release notes list the bundle's missing items.
