@@ -73,7 +73,15 @@ class AllowList(unittest.TestCase):
         )
 
     def problems(self):
-        return verify.allow_list_problems(self.root)
+        """The problems of the fixture tree, which installs no executable of OUTSIDE_THE_LIST."""
+        return verify.allow_list_problems(self.root, outside=set())
+
+    def exempt(self):
+        """(problems, notes) of the fixture tree with the shipped OUTSIDE_THE_LIST."""
+        notes = []
+        return verify.allow_list_problems(
+            self.root, notes, verify.OUTSIDE_THE_LIST
+        ), notes
 
     def test_a_top_layer_target_without_a_line_fails(self):
         self.package(
@@ -273,6 +281,38 @@ class AllowList(unittest.TestCase):
         self.assertIn("src/ui.rs:2", out[0])
         self.lines("/usr/bin/athanor-greeter-ui greeter.scope zwlr_layer_shell_v1\n")
         self.assertEqual(self.problems(), [])
+
+    def greeter(self):
+        self.package(
+            "athanor-greeter-ui",
+            files={
+                "src/main.rs": "fn build() {\n    window.set_layer(Layer::Overlay);\n}\n"
+            },
+        )
+
+    def test_the_greeter_is_outside_the_list_and_noted(self):
+        # doc_session.md SN12: named in the test as outside the list until it moves.
+        self.assertIn("/usr/bin/athanor-greeter-ui", verify.OUTSIDE_THE_LIST)
+        self.greeter()
+        out, notes = self.exempt()
+        self.assertEqual(out, [])
+        self.assertEqual(len(notes), 1, notes)
+        self.assertIn("/usr/bin/athanor-greeter-ui", notes[0])
+        self.assertIn("src/main.rs:2", notes[0])
+
+    def test_a_line_for_the_greeter_while_it_is_outside_the_list_fails(self):
+        self.greeter()
+        self.lines("/usr/bin/athanor-greeter-ui greeter.scope zwlr_layer_shell_v1\n")
+        out, notes = self.exempt()
+        self.assertEqual(notes, [])
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("OUTSIDE_THE_LIST", out[0])
+
+    def test_an_exemption_no_spec_installs_fails(self):
+        out, notes = self.exempt()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
+        self.assertIn("installed by no spec", out[0])
 
     def test_a_target_naming_the_session_lock_needs_its_line(self):
         self.package(

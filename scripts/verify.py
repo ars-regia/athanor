@@ -2086,6 +2086,10 @@ def check_panics():
 ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
 GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
 LAYER_SHELL = "zwlr_layer_shell_v1"
+# Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
+# step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
+# A line for it, or no spec installing it, ends the exemption with a failure.
+OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
@@ -2325,13 +2329,16 @@ def build_flags(spec, package):
     return set(), True, False
 
 
-def allow_list_problems(root=None):
+def allow_list_problems(root=None, notes=None, outside=None):
     """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
     a crate of the tree, that asks for the top or overlay layer or names a privileged global
     of data/globals has a line in data/privileged-clients, with zwlr_layer_shell_v1 when it
     asks for those layers; each line names an executable a spec installs. A line's other
-    interfaces are the maintainer's grants, never derived here."""
+    interfaces are the maintainer's grants, never derived here. An executable of
+    `outside` (OUTSIDE_THE_LIST by default) is appended to `notes` in place of its problem."""
     root = Path(root or ROOT)
+    notes = [] if notes is None else notes
+    outside = OUTSIDE_THE_LIST if outside is None else outside
     problems = []
     privileged = set()
     for line in read(root / GLOBALS_FILE).splitlines():
@@ -2393,7 +2400,10 @@ def allow_list_problems(root=None):
             continue
         asks = ([f"the top or overlay layer ({layer})"] if layer else []) + \
             [f"{n} ({at})" for n, at in sorted(names.items())]
-        if executable not in lines:
+        if executable in outside and executable not in lines:
+            notes.append(f"{executable}: asks for {', '.join(asks)}, outside the list until it moves "
+                         "(doc_session.md SN12)")
+        elif executable not in lines:
             problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
         elif layer:
             problems += [f"{executable}: asks for the top or overlay layer ({layer}) and its line for "
@@ -2403,14 +2413,23 @@ def allow_list_problems(root=None):
     for executable in lines:
         if executable not in installed:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    for executable in sorted(outside):
+        if executable in lines:
+            problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
+                            "remove it from OUTSIDE_THE_LIST (doc_session.md SN12)")
+        if executable not in installed:
+            problems.append(f"{executable} is outside the list and installed by no spec under forge/specs: "
+                            "remove it from OUTSIDE_THE_LIST")
     return problems
 
 
 @check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
 def check_allow_list():
-    r = Result()
-    for problem in allow_list_problems():
+    r, notes = Result(), []
+    for problem in allow_list_problems(notes=notes):
         r.fail(problem)
+    for note in notes:
+        r.note(note)
     return r
 
 
