@@ -884,12 +884,14 @@ impl State {
             .seat
             .get_pointer()
             .map(|pointer| pointer.current_location());
+        let popups = self.composing.popups_on(&self.space, &output);
         let drawn = match gles(&mut drm.gpus, &drm.render_node) {
             Ok(renderer) => render(
                 renderer,
                 head,
                 &self.space,
                 self.lock.as_ref(),
+                &popups,
                 pointer,
                 &drm.pointer,
             ),
@@ -1108,6 +1110,7 @@ fn render(
     head: &mut Head,
     space: &smithay::desktop::Space<Window>,
     lock: Option<&crate::lock::Lock>,
+    popups: &[crate::input_method::PlacedPopup],
     pointer: Option<smithay::utils::Point<f64, smithay::utils::Logical>>,
     pointer_buffer: &SolidColorBuffer,
 ) -> Result<(bool, RenderElementStates), SwapBuffersError> {
@@ -1146,6 +1149,20 @@ fn render(
             }
         }
         None => {
+            for (surface, at) in popups {
+                elements.extend(
+                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                        renderer,
+                        surface,
+                        at.to_physical_precise_round(scale),
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                    .into_iter()
+                    .map(Element::Surface),
+                );
+            }
             let space_elements = space_render_elements(renderer, [space], output, 1.0)
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
             elements.extend(space_elements.into_iter().map(Element::Space));
