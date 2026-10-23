@@ -3815,8 +3815,64 @@ fn os9_a_virtual_button_released_while_locked_lets_a_click_end() {
         .button_input(0x111, ButtonState::Released, InputTime::now());
     assert!(!seat_pointer.is_grabbed(), "the click's grab ended");
     assert!(
-        run.state.virtual_buttons.is_empty(),
+        run.state.virtual_buttons.values().all(Vec::is_empty),
         "no virtual button is held"
     );
+    run.stop();
+}
+
+/// A virtual pointer's release while the session is locked goes on only for a button that same
+/// pointer holds, and is no activity (the second OS9 task 6 audit): A holds the left button from
+/// before the lock; on the lock surface the user presses it on the hardware; B's release of it
+/// reaches no client and leaves the user's click held; A's release lets go, and the locked
+/// session stays idle.
+#[test]
+fn os9_a_virtual_release_while_locked_is_the_same_pointers() {
+    use smithay::backend::input::{ButtonState, InputTime};
+    use wayland_client::protocol::wl_pointer;
+    let mut run = Running::start(None);
+    let _ = window_under_pointer(&run);
+    let mut clicker = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = clicker.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = clicker.bind(2);
+    let qh = clicker.queue.handle();
+    let a = manager.create_virtual_pointer(Some(&seat), &qh, ());
+    let b = manager.create_virtual_pointer(Some(&seat), &qh, ());
+    // BTN_LEFT, over the window.
+    a.button(0, 0x110, wl_pointer::ButtonState::Pressed);
+    a.frame();
+    clicker.roundtrip(&mut run);
+
+    let (_locker, _lock) = lock_session(&mut run);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = clicker.bind(1);
+    let _notification = notifier.get_idle_notification(100, &seat, &qh, ());
+    clicker.pump(&mut run, "the locked session is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
+    run.state
+        .button_input(0x110, ButtonState::Pressed, InputTime::now());
+    assert!(
+        seat_pointer.is_grabbed(),
+        "the user's click on the lock surface"
+    );
+
+    b.button(0, 0x110, wl_pointer::ButtonState::Released);
+    b.frame();
+    clicker.roundtrip(&mut run);
+    assert!(
+        seat_pointer.is_grabbed(),
+        "B's release leaves the user's click held"
+    );
+
+    a.button(0, 0x110, wl_pointer::ButtonState::Released);
+    a.frame();
+    clicker.roundtrip(&mut run);
+    assert!(!seat_pointer.is_grabbed(), "A's release lets go");
+    assert!(
+        run.state.virtual_buttons.values().all(Vec::is_empty),
+        "no virtual button is held"
+    );
+    assert_eq!(clicker.client.idle, ["idled"], "the session stays idle");
     run.stop();
 }

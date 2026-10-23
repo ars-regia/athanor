@@ -337,21 +337,35 @@ impl VirtualPointerHandler for State {
     /// session is locked (`drops_virtual_input`); its absolute motion spans the output it names,
     /// or all of them, and stays on the outputs.
     fn process_virtual_pointer_event(&mut self, event: InputEvent<VirtualPointerBackend>) {
-        // While locked only the release of a button a virtual pointer holds goes on, or a click
-        // on the lock surface would keep its grab after unlock. Smithay keeps the seat's held
-        // buttons to its grabs, so the compositor counts the virtual ones itself.
+        // While locked only the release of a button the same virtual pointer holds goes on, or a
+        // click on the lock surface would keep its grab after unlock. Smithay keeps the seat's
+        // held buttons to its grabs, so the compositor counts each virtual pointer's itself.
         let locked = self.drops_virtual_input();
-        if let InputEvent::PointerButton { event } = &event {
-            let button = event.button_code();
-            let held = self.virtual_buttons.contains(&button);
-            match event.state() {
-                ButtonState::Pressed if !locked && !held => self.virtual_buttons.push(button),
-                ButtonState::Released if held => self.virtual_buttons.retain(|b| *b != button),
-                _ if locked => return,
-                _ => {}
+        match &event {
+            InputEvent::DeviceRemoved { device } => {
+                self.virtual_buttons.remove(device);
             }
-        } else if locked {
-            return;
+            InputEvent::PointerButton { event } => {
+                let (device, button) = (event.device(), event.button_code());
+                let held = self.virtual_buttons.entry(device).or_default();
+                let holds = held.contains(&button);
+                match event.state() {
+                    ButtonState::Pressed if locked => return,
+                    ButtonState::Pressed if !holds => held.push(button),
+                    ButtonState::Released if holds => {
+                        held.retain(|b| *b != button);
+                        // Not through `process_input_event`: letting go is no activity, and the
+                        // locked session keeps going idle.
+                        if locked {
+                            return self.button_input(button, ButtonState::Released, event.time());
+                        }
+                    }
+                    _ if locked => return,
+                    _ => {}
+                }
+            }
+            _ if locked => return,
+            _ => {}
         }
         let InputEvent::PointerMotionAbsolute { event } = event else {
             return self.process_input_event(event);

@@ -69,7 +69,7 @@ use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
-use smithay::wayland::virtual_pointer::VirtualPointerManagerState;
+use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -113,8 +113,9 @@ pub struct State {
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
-    /// The buttons the virtual pointers hold, whose release goes on while the session is locked.
-    pub virtual_buttons: Vec<u32>,
+    /// The buttons each virtual pointer holds, whose release goes on while the session is
+    /// locked; a pointer's entry goes with it.
+    pub virtual_buttons: HashMap<VirtualPointerDevice, Vec<u32>>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
     /// on any connection, hold it again only after a click on one of their surfaces
@@ -269,7 +270,7 @@ impl State {
             last_input_serial: None,
             kept_keys: Vec::new(),
             virtual_modifiers: HashMap::new(),
-            virtual_buttons: Vec::new(),
+            virtual_buttons: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,
             fatal: None,
