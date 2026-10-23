@@ -68,6 +68,12 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        // While locked no grab holds the keyboard: the lock ended the one it found, and one an
+        // input method takes while locked, which Smithay sets at its request, ends here, before
+        // it can read a key typed on the lock.
+        if self.lock.is_some() && keyboard.is_grabbed() {
+            keyboard.unset_grab(self);
+        }
         let serial = SERIAL_COUNTER.next_serial();
         let to = keyboard
             .current_focus()

@@ -94,10 +94,10 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
-| `wp_security_context_manager_v1` | every client outside a security context |
+| `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
 
 `data/globals` gives the class of every global the compositor can offer, and the fixture fails
 on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
@@ -114,6 +114,13 @@ virtual terminal, a virtual key press reaches no client (open question 12), and 
 or scrolling, nor a virtual keyboard's keymap; the release of a key or button held from before
 the lock still goes on, so that nothing stays held after unlock. The hardware keyboard and
 pointer still reach the lock surface.
+The input method of OS9 item 3 is granted to no shipped client; the rig grants its test input
+method (`forge/test/shell/rig-privileged-clients`). Text input is offered outside a security
+context only (open question 13). While the session is locked no keyboard grab holds: locking
+ends the input method's, a grab it takes while locked ends at the next key, and unlocking ends
+any grab rather than restoring it, so the keys typed on the lock reach the lock surface only.
+The lock surface has no text input either: the input method is not activated for it nor told
+its text, and what it commits reaches no client.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,

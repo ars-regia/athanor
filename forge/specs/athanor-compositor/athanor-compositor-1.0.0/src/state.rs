@@ -39,6 +39,7 @@ use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -60,6 +61,7 @@ use smithay::wayland::image_capture_source::{
     OutputCaptureSourceState, ToplevelCaptureSourceState,
 };
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
+use smithay::wayland::input_method::InputMethodManagerState;
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
 use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
@@ -256,6 +258,9 @@ impl State {
             granted(c, Privilege::VirtualKeyboard)
         });
         VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
+        // Composed text (OS9 item 3): the input method by grant, text input outside a sandbox.
+        InputMethodManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::InputMethod));
+        dh.create_global::<Self, ZwpTextInputManagerV3, _>(1, crate::handlers::TextInputs);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());

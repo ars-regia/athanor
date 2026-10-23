@@ -27,6 +27,7 @@ ext_idle_notifier_v1 standard
 zwp_linux_dmabuf_v1 standard
 wp_linux_drm_syncobj_manager_v1 standard
 wp_security_context_manager_v1 unconfined
+zwp_text_input_manager_v3 unconfined
 zwlr_layer_shell_v1 layer-gated
 ext_foreign_toplevel_list_v1 privileged
 ext_foreign_toplevel_image_capture_source_manager_v1 privileged
@@ -37,3 +38,4 @@ ext_workspace_manager_v1 privileged
 zwlr_output_manager_v1 privileged
 zwp_virtual_keyboard_manager_v1 privileged
 zwlr_virtual_pointer_manager_v1 privileged
+zwp_input_method_manager_v2 privileged

@@ -1,6 +1,7 @@
 //! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
-//! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
+//! captured (spike Q7). No keyboard grab holds while locked, an input method's included (OS9
+//! item 3). The lock is confirmed once every output has been drawn locked.
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
@@ -80,7 +81,12 @@ impl SessionLockHandler for State {
         self.lock_taken();
     }
 
+    /// A keyboard grab taken while locked ends here, unused: nothing restores a grab after
+    /// unlock, an input method's included.
     fn unlock(&mut self) {
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.unset_grab(self);
+        }
         self.lock = None;
         self.focus_top();
         self.refresh_pointer();

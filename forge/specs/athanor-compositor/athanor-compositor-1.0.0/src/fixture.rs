@@ -13,6 +13,13 @@ use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::KeyboardSource;
 use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
+    ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE, ZWP_TEXT_INPUT_V3_INTERFACE,
+};
+use smithay::reexports::wayland_protocols_misc::zwp_input_method_v2::server::__interfaces::{
+    ZWP_INPUT_METHOD_KEYBOARD_GRAB_V2_INTERFACE, ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE,
+    ZWP_INPUT_METHOD_V2_INTERFACE,
+};
 use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server::__interfaces::{
     ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE, ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE,
 };
@@ -30,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use wayland_client::backend::protocol::{Argument, Message};
+use wayland_client::backend::protocol::{Argument, Interface, Message};
 use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
@@ -817,7 +824,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
-    zwlr_virtual_pointer_manager_v1\n\
+    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -4356,5 +4363,386 @@ fn os9_output_capture_is_refused_while_locked() {
         "a session is refused while locked",
         |client, _| client.stopped.contains(&refused),
     );
+    run.stop();
+}
+
+/// The events a raw object was sent, in order: each one's name, and its string and number
+/// arguments as text.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(&'static str, Vec<String>)>>);
+
+impl ObjectData for Recorder {
+    fn event(
+        self: Arc<Self>,
+        backend: &Backend,
+        message: Message<ObjectId, OwnedFd>,
+    ) -> Option<Arc<dyn ObjectData>> {
+        let name = backend
+            .info(message.sender_id)
+            .ok()
+            .and_then(|info| info.interface.events.get(usize::from(message.opcode)))
+            .map_or("unknown", |event| event.name);
+        let args = message
+            .args
+            .into_iter()
+            .map(|arg| match arg {
+                Argument::Str(Some(text)) => text.to_string_lossy().into_owned(),
+                Argument::Uint(n) => n.to_string(),
+                Argument::Int(n) => n.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        self.0.lock().expect("events").push((name, args));
+        None
+    }
+    fn destroyed(&self, _: ObjectId) {}
+}
+
+/// An object of a protocol whose client side no crate of the workspace generates
+/// (zwp-input-method-v2, text-input-v3): its requests are sent raw, by name, on the interfaces
+/// Smithay's server side describes, and its events are recorded.
+struct Raw {
+    backend: Backend,
+    id: ObjectId,
+    interface: &'static Interface,
+    events: Arc<Recorder>,
+}
+
+impl Raw {
+    /// Binds the global of `interface`, version 1.
+    fn bind(local: &mut Local, interface: &'static Interface) -> Self {
+        let (name, _, _) = local
+            .client
+            .globals
+            .iter()
+            .find(|(_, listed, _)| listed == interface.name)
+            .unwrap_or_else(|| panic!("{} is listed", interface.name));
+        let bind = wl_registry::Request::Bind {
+            name: *name,
+            id: (interface, 1),
+        };
+        let events = Arc::new(Recorder::default());
+        let id = local
+            .connection
+            .send_request(&local.registry, bind, Some(events.clone()))
+            .expect("bind");
+        Self {
+            backend: local.connection.backend(),
+            id,
+            interface,
+            events,
+        }
+    }
+
+    fn opcode(&self, request: &str) -> u16 {
+        self.interface
+            .requests
+            .iter()
+            .position(|desc| desc.name == request)
+            .and_then(|at| u16::try_from(at).ok())
+            .unwrap_or_else(|| panic!("{}.{request}", self.interface.name))
+    }
+
+    fn send(&self, request: &str, args: Vec<Argument<ObjectId, i32>>) {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode: self.opcode(request),
+            args: args.into_iter().collect(),
+        };
+        self.backend
+            .send_request(message, None, None)
+            .unwrap_or_else(|error| panic!("{}.{request}: {error}", self.interface.name));
+    }
+
+    /// Sends `request`, whose `args` hold a placeholder `NewId`, for an object of `interface`.
+    fn create(
+        &self,
+        request: &str,
+        args: Vec<Argument<ObjectId, i32>>,
+        interface: &'static Interface,
+    ) -> Self {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode: self.opcode(request),
+            args: args.into_iter().collect(),
+        };
+        let events = Arc::new(Recorder::default());
+        let id = self
+            .backend
+            .send_request(message, Some(events.clone()), Some((interface, 1)))
+            .unwrap_or_else(|error| panic!("{}.{request}: {error}", self.interface.name));
+        Self {
+            backend: self.backend.clone(),
+            id,
+            interface,
+            events,
+        }
+    }
+
+    fn events(&self) -> Vec<(&'static str, Vec<String>)> {
+        self.events.0.lock().expect("events").clone()
+    }
+
+    /// The names of the events after the first `skip`.
+    fn names_after(&self, skip: usize) -> Vec<&'static str> {
+        self.events()
+            .into_iter()
+            .skip(skip)
+            .map(|(name, _)| name)
+            .collect()
+    }
+}
+
+fn text(text: &str) -> Argument<ObjectId, i32> {
+    Argument::Str(Some(Box::new(
+        std::ffi::CString::new(text).expect("no NUL in the text"),
+    )))
+}
+
+/// A text-input-v3 object of `local`, on its seat.
+fn text_input(local: &mut Local, run: &mut Running) -> Raw {
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager = Raw::bind(local, &ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE);
+    let text_input = manager.create(
+        "get_text_input",
+        vec![Argument::NewId(ObjectId::null()), Argument::Object(seat.id())],
+        &ZWP_TEXT_INPUT_V3_INTERFACE,
+    );
+    local.roundtrip(run);
+    text_input
+}
+
+/// Enables `text_input` with `surrounding` around the cursor, as a focused text field does.
+fn enable(text_input: &Raw, local: &mut Local, run: &mut Running, surrounding: &str) {
+    text_input.send("enable", vec![]);
+    let end = Argument::Int(i32::try_from(surrounding.len()).expect("short text"));
+    text_input.send(
+        "set_surrounding_text",
+        vec![text(surrounding), end.clone(), end],
+    );
+    text_input.send("commit", vec![]);
+    local.roundtrip(run);
+}
+
+/// An input method of zwp-input-method-v2 on the seat of its client (OS9 item 3): it pre-edits
+/// and commits text into the focused text input, and takes the keyboard. Every request is
+/// answered once the compositor has handled it.
+struct SimulatedInputMethod {
+    method: Raw,
+    /// Its keyboard grabs, each one's keys recorded.
+    grabs: Vec<Raw>,
+}
+
+impl SimulatedInputMethod {
+    fn new(local: &mut Local, run: &mut Running) -> Self {
+        let seat: wl_seat::WlSeat = local.bind(1);
+        let manager = Raw::bind(local, &ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE);
+        let method = manager.create(
+            "get_input_method",
+            vec![Argument::Object(seat.id()), Argument::NewId(ObjectId::null())],
+            &ZWP_INPUT_METHOD_V2_INTERFACE,
+        );
+        local.roundtrip(run);
+        Self {
+            method,
+            grabs: Vec::new(),
+        }
+    }
+
+    /// Commits the pending state, with the serial the protocol asks: the `done` events received.
+    fn commit(&self, local: &mut Local, run: &mut Running) {
+        let done = self.method.names_after(0).iter().filter(|name| **name == "done").count();
+        let serial = u32::try_from(done).expect("serial");
+        self.method.send("commit", vec![Argument::Uint(serial)]);
+        local.roundtrip(run);
+    }
+
+    /// Shows `preedit` with the cursor at its end.
+    fn preedit(&self, local: &mut Local, run: &mut Running, preedit: &str) {
+        let end = Argument::Int(i32::try_from(preedit.len()).expect("short text"));
+        self.method
+            .send("set_preedit_string", vec![text(preedit), end.clone(), end]);
+        self.commit(local, run);
+    }
+
+    /// Commits `string`, which replaces the preedit.
+    fn commit_string(&self, local: &mut Local, run: &mut Running, string: &str) {
+        self.method.send("commit_string", vec![text(string)]);
+        self.commit(local, run);
+    }
+
+    /// Takes the keyboard: the keys go to the grab, not to the focused surface.
+    fn grab_keyboard(&mut self, local: &mut Local, run: &mut Running) {
+        self.grabs.push(self.method.create(
+            "grab_keyboard",
+            vec![Argument::NewId(ObjectId::null())],
+            &ZWP_INPUT_METHOD_KEYBOARD_GRAB_V2_INTERFACE,
+        ));
+        local.roundtrip(run);
+    }
+
+    /// The evdev codes of the keys pressed on its grabs.
+    fn keys(&self) -> Vec<u32> {
+        self.grabs.iter().flat_map(Raw::events).filter_map(|(name, args)| match (name, &args[..]) {
+            ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
+            _ => None,
+        })
+        .collect()
+    }
+}
+
+/// A focused window and an input method, granted the protocol, with the window's text input
+/// enabled and the input method activated for it.
+fn composing(run: &mut Running) -> (Local, Raw, Local, SimulatedInputMethod) {
+    let (mut window, _) = focused_window(run);
+    let mut ime = Local::connect(run, None);
+    let method = SimulatedInputMethod::new(&mut ime, run);
+    let field = text_input(&mut window, run);
+    enable(&field, &mut window, run, "caf");
+    ime.pump(run, "the input method is activated", |_, _| {
+        method.method.names_after(0).contains(&"activate")
+    });
+    (window, field, ime, method)
+}
+
+/// OS9 item 3: an input method's preedit and commit reach the focused window's text input, in
+/// order, each followed by `done`.
+#[test]
+fn os9_a_committed_string_reaches_the_focused_text_input() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let before = field.events().len();
+    method.preedit(&mut ime, &mut run, "e");
+    method.commit_string(&mut ime, &mut run, "è");
+    window.pump(&mut run, "the text input is done twice", |_, _| {
+        field.names_after(before).iter().filter(|name| **name == "done").count() == 2
+    });
+    let received: Vec<(&str, Vec<String>)> = field.events().into_iter().skip(before).collect();
+    let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    assert_eq!(received[0], ("preedit_string", args(&["e", "1", "1"])));
+    assert_eq!(received[1].0, "done");
+    assert_eq!(received[2], ("commit_string", args(&["è"])));
+    assert_eq!(received[3].0, "done");
+    assert_eq!(received.len(), 4, "{received:?}");
+    run.stop();
+}
+
+/// Register row 8: the lock ends the input method's keyboard grab, and a grab it takes while
+/// locked does not hold; the keys typed on the lock reach the lock surface only, and after
+/// unlock the grab is not restored on its own.
+#[test]
+fn os9_the_input_method_grab_is_dropped_while_locked() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the grab takes the key", |_, _| method.keys() == [30]);
+    window.roundtrip(&mut run);
+    assert!(window.client.keys.is_empty(), "the window saw no key");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    let grabbed = |state: &State| state.seat.get_keyboard().is_some_and(|k| k.is_grabbed());
+    assert!(!grabbed(&run.state), "the lock ends the grab");
+    chord(&mut run.state, &[31]);
+    locker.pump(&mut run, "the lock surface takes the key", |client, _| {
+        client.keys == [31]
+    });
+    // A grab asked for while locked does not hold either.
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[32]);
+    locker.pump(&mut run, "the lock surface takes the next key", |client, _| {
+        client.keys == [31, 32]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [30], "the input method saw no key typed on the lock");
+
+    lock.unlock_and_destroy();
+    let id = window.id.clone().expect("a client the fixture inserted");
+    locker.pump(&mut run, "unlocking gives the window the keyboard", |_, state| {
+        state
+            .seat
+            .get_keyboard()
+            .and_then(|k| k.current_focus())
+            .and_then(|s| s.client())
+            .map(|c| c.id())
+            == Some(id.clone())
+    });
+    assert!(!grabbed(&run.state), "unlocking restores no grab");
+    chord(&mut run.state, &[33]);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [33]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [30], "nor did it after unlock");
+    run.stop();
+}
+
+/// While locked the input method is cut off from the lock surface: it is not activated for the
+/// lock's text field nor told its text, and what it commits reaches no text input.
+#[test]
+fn os9_the_input_method_never_reaches_the_lock_surface() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let told = method.method.events().len();
+    let password = text_input(&mut locker, &mut run);
+    enable(&password, &mut locker, &mut run, "secret");
+    method.preedit(&mut ime, &mut run, "e");
+    method.commit_string(&mut ime, &mut run, "è");
+    locker.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    let seen = method.method.events().into_iter().skip(told);
+    for (name, args) in seen {
+        assert!(
+            !matches!(name, "activate" | "surrounding_text" | "content_type"),
+            "the input method was sent {name} {args:?} while locked"
+        );
+    }
+    let reached = |raw: &Raw| {
+        raw.events()
+            .into_iter()
+            .filter(|(name, _)| matches!(*name, "preedit_string" | "commit_string" | "done"))
+            .count()
+    };
+    assert_eq!(reached(&password), 0, "{:?}", password.events());
+    assert_eq!(reached(&field), 0, "{:?}", field.events());
+    run.stop();
+}
+
+/// Open question 13 of the OS9 plan: a client inside a security context cannot be an input
+/// method; only a client the allow-list grants it, the bar here, sees the manager.
+#[test]
+fn os9_a_sandboxed_client_cannot_be_an_input_method() {
+    let mut run = Running::start(None);
+    let manager = ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE.name;
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(manager), "inside a security context");
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(manager), "the bar, granted it");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(manager), "a client with no line");
+    run.stop();
+}
+
+/// Open question 13 of the OS9 plan: text input is offered to every client outside a security
+/// context, and to none inside one.
+#[test]
+fn os9_a_sandboxed_client_has_no_text_input() {
+    let mut run = Running::start(None);
+    let manager = ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE.name;
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(manager), "inside a security context");
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(manager), "the bar");
+    let control_center = Local::control_center(&mut run);
+    assert!(control_center.sees(manager), "the control center");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(other.sees(manager), "a client with no line");
     run.stop();
 }
