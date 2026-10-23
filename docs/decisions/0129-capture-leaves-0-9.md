@@ -3,7 +3,7 @@ id: ADR-0129
 title: "Release 0.9 ships without screenshot and screen share"
 date: 2026-10-23
 status: accepted
-issues: [133, 134, 538]
+issues: []
 areas: [process, docs, shell]
 ---
 
@@ -40,6 +40,7 @@ acceptance.
 
 - Amended: ADR-0115 item 7, for screenshot and screen share only. Its status line, and its row in
   the index, name this record; its text keeps its words.
-- `docs/operations/release-1.0.md` becomes revision 6: the status line and the 0.9 row of
-  section 4.1.
-- The capture acceptance on the dev VM, which row 12 lists as to add, is written with step 4.
+- `docs/operations/release-1.0.md` becomes revision 6: the status line, the 0.9 row of
+  section 4.1 and the row 12 entry of section 4.2.
+- The capture acceptance on the dev VM, which row 12 lists as to add, is written with the
+  step it accepts: screenshots with step 4, screen share with step 5.

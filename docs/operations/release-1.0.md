@@ -146,7 +146,8 @@ rows narrowed below.
   components packaged in Fedora, confined and checked; the pull request that ships them
   chooses the components. Screenshot and screen share, bar, dock, launcher and the coexistence
   of cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings are the graphical surface.
-  All of this is 0.9. Athanor's own lock, polkit agent and SystemPrompter
+  All of this is 0.9 except screenshot and screen share, which ship in the first release after
+  steps 4 and 5 of `doc_portal.md` are ready ([ADR-0129](../decisions/0129-capture-leaves-0-9.md)). Athanor's own lock, polkit agent and SystemPrompter
   (`doc_lock_and_prompts.md` LP18) are in 1.1 (section 3). In 1.0 the same tier runs on the own
   compositor, which provides cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings the
   protocols they use or replaces them (`doc_own_stack.md` OS5, ADR-0121).
