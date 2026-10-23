@@ -17,9 +17,10 @@ import sys
 import time
 from pathlib import Path
 
-SERVICE = "org.gnome.Orca.Service"
-# Orca logs each utterance quoted, then the voice it speaks with: SPEECH OUTPUT: 'text' {voice}.
-SPEECH = re.compile(r"SPEECH OUTPUT: '(.*?)'(?: \{|$)", re.MULTILINE)
+SERVICE = "org.gnome.Orca1.Service"
+# Orca logs each utterance quoted, then the voice it speaks with: SPEECH OUTPUT: 'text'{voice}
+# (a space before the brace before Orca 51, none from Orca 51).
+SPEECH = re.compile(r"SPEECH OUTPUT: '(.*?)'(?: ?\{|$)", re.MULTILINE)
 STARTUP, PAUSE = 30, 1.5
 
 
@@ -74,7 +75,7 @@ def walk(orca, keys):
         "--user",
         "call",
         SERVICE,
-        "/org/gnome/Orca/Service",
+        "/org/gnome/Orca1/Service",
         SERVICE,
         "Quit",
     ]

@@ -1,43 +1,44 @@
 Lettore schermo attivo.
 Galleria
-Pulsanti pulsante di commutazione premuto.
-Scelte pulsante di commutazione non premuto.
-Valori pulsante di commutazione non premuto.
-Elenchi pulsante di commutazione non premuto.
-Testo pulsante di commutazione non premuto.
-Un pulsante button.
-Uno pulsante di commutazione premuto.
-Due pulsante di commutazione non premuto.
-Tre pulsante di commutazione non premuto.
-Nome testo.
+Pulsanti pulsante di commutazione premuto
+Scelte pulsante di commutazione non premuto
+Valori pulsante di commutazione non premuto
+Elenchi pulsante di commutazione non premuto
+Testo pulsante di commutazione non premuto
+Un pulsante pulsante
+Uno pulsante di commutazione premuto
+Due pulsante di commutazione non premuto
+Tre pulsante di commutazione non premuto
+Nome testo
+apre un popup
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Scelte pulsante di commutazione premuto.
-Valori pulsante di commutazione non premuto.
-Elenchi pulsante di commutazione non premuto.
-Testo pulsante di commutazione non premuto.
-Opzione uno casella di spunta spuntata.
-Opzione due casella di spunta non spuntata.
-Un interruttore casella di spunta spuntata.
+Scelte pulsante di commutazione premuto
+Valori pulsante di commutazione non premuto
+Elenchi pulsante di commutazione non premuto
+Testo pulsante di commutazione non premuto
+Opzione uno casella di spunta spuntata
+Opzione due casella di spunta non spuntata
+Un interruttore attivo selettore
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Valori pulsante di commutazione premuto.
-Elenchi pulsante di commutazione non premuto.
-Testo pulsante di commutazione non premuto.
+Valori pulsante di commutazione premuto
+Elenchi pulsante di commutazione non premuto
+Testo pulsante di commutazione non premuto
 Un cursore controllo scorrevole orizzontale 50 50 percento.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Elenchi pulsante di commutazione premuto.
-Testo pulsante di commutazione non premuto.
+Elenchi pulsante di commutazione premuto
+Testo pulsante di commutazione non premuto
 Un elenco Elenco con 50 voci
-Riga 1.
+Riga 1
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Testo pulsante di commutazione premuto.
-Note testo.
+Testo pulsante di commutazione premuto
+Note testo
 Il cursore parte da qui.
 Lettore schermo disattivato.

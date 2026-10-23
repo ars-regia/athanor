@@ -39,7 +39,7 @@ Sources: the Koji `f45`, `f44` and `f43-updates` tags (`getLatestBuilds`), Bodhi
   - digest `sha256:ba11ea3a4087b14e12e71331fe4745d11170ebee86b97e237f663b6da0b972c5`;
   - `ostree.linux=7.2.11-300.fc45`;
   - daily tags `45.YYYYMMDD.0`, labelled `quay.expires-after=4w`.
-- `fedora:45` is `sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42`.
+- `fedora:45` is `sha256:01f161e3776a4032437618baff61192baf51c00a34d17577f9789fed59fc0fdc`.
 - In Bodhi, Fedora 45 is frozen, with its final release due 2026-10-20 and its end of life on 2027-11-24.
 - `base-atomic:44` and `:46` also exist.
 
@@ -89,6 +89,7 @@ The two columns at the right say which task moves each pin and how much of it do
 | `forge/specs/athanor-selinux/*.te`, spec :67-68 | policy 43.10 and rawhide behaviour | 5, 7 | 45.20 (45.21 since 2026-10-19) makes the power-profiles domain enforcing; the image build loads every module with `semodule -i` (`system/Containerfile:220-222`) |
 | `scripts/devvm/acceptance/images.sh:71` | version label `43.${created}` | — | Cosmetic: machines order images by `created`, never by the version string (`system/build-image.sh:135-137`) |
 | `forge/test/shell/kvm/guest.sh:16`, `scripts/devvm/shelld-acceptance.sh:112`, `scripts/devvm/lock-acceptance.sh:30` | 43 in text and in the kernel choice | 11 / 7 | — |
+| `scripts/devvm/switch-acceptance.sh:327-334` | Orca service `org.gnome.Orca.Service` | 11 / 7 | Orca 51 names it `org.gnome.Orca1.Service` (object `/org/gnome/Orca1/Service`), as `forge/test/shell/orca_walk.py` now does; change it when the devvm moves to Fedora 45 |
 | `forge/test/shell/Containerfile:8` | `fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809` (Fedora 43) | 11 | The goldens depend on its GTK |
 | `scripts/runner/runner.env:11` (not read: the gate blocks it) | Fedora Cloud Base 43 guest | 10 | The value comes from grep output only |
 | 21 test files (the lists in `forge/scripts/tests`, `forge/specs/azoth/tests`, `scripts/ci/tests`, `scripts/tests`, `system/nvidia/tests`, `system/tests`) | `fc43` and `F43` fixtures | where read | Fixtures that do not read the Containerfile stay as sample data |
@@ -147,7 +148,7 @@ Forks keep spelling out Fedora's release with its dist tag (`%global fedora_rele
 - Runs on: laptop. Depends on: nothing.
 - *(estimated)* BIB looks for the exact `<ID>-<VERSION_ID>.yaml` and does not fall back to `athanor-43.yaml`.
 
-FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42` in every command of this plan.
+FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:01f161e3776a4032437618baff61192baf51c00a34d17577f9789fed59fc0fdc` in every command of this plan.
 
 ### Task 4a: every fork names the base's release
 
@@ -181,7 +182,7 @@ FEDORA45 is `registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd78
 The spec only compiles: `checkmodule -M -m -C` (`athanor-selinux.spec:40`) does not check a module against any policy. The modules meet the policy when the image build loads them with `semodule -i` (`system/Containerfile:220-222`). The check repeats both steps on a copy, against Fedora 45's policy store. It fails if no module is compiled, and it writes nothing into the checkout:
 
 ```
-base=registry.fedoraproject.org/fedora:45@sha256:cdfc05e94a5ea508a56bd784e82de74acbff18b20679ed74ff235841d716ee42
+base=registry.fedoraproject.org/fedora:45@sha256:01f161e3776a4032437618baff61192baf51c00a34d17577f9789fed59fc0fdc
 policy=45.21
 podman run --rm --security-opt label=disable -e POLICY="$policy" \
   -v "$PWD/forge/specs/athanor-selinux/SOURCES:/src:ro" \
