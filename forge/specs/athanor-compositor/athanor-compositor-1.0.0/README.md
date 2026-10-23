@@ -1,9 +1,9 @@
 # athanor-compositor
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
-(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). It is a spike in the
-workspace: no package ships it, and cosmic-comp stays the image's compositor until revision 2
-of the specification accepts this one.
+(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). It lives in the workspace: no
+package ships it, and cosmic-comp stays the image's compositor until this one passes the
+acceptance of the specification's revision 2 (OS19).
 
 ## Smithay
 
