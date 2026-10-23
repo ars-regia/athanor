@@ -43,7 +43,7 @@ class GateShapeTest(unittest.TestCase):
         self.assertNotIn("name", gate)
 
     def test_every_build_job_is_named_after_its_area(self):
-        build_jobs = set(self.jobs) - {"changes", "check", "gate"}
+        build_jobs = set(self.jobs) - {"changes", "check-static", "check-system", "check-other", "check-rust", "gate"}
         self.assertLessEqual(build_jobs, set(changes.AREAS))
         for name in build_jobs:
             with self.subTest(job=name):

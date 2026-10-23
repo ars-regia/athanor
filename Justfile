@@ -107,14 +107,25 @@ lint:
     just system/lint
     just check-syntax
 
-# The pull request gate (ADR-0075, doc_pipeline.md PL3): the `check` job of pr.yml runs exactly
-# this, and a contributor runs it before pushing. Workflow lint (actionlint, with shellcheck on
-# every run: block), Justfile syntax, every verify.py check with the findings listed in
-# scripts/ci/known-red.txt excused (the list may only shrink against BASE), every Python
+# The pull request gate (ADR-0075, doc_pipeline.md PL3): a contributor runs this before pushing,
+# and the jobs of pr.yml run its parts in parallel, one recipe each: check-static,
+# `check-unit system`, `check-unit other`, check-rust and check-deny. Workflow lint (actionlint,
+# with shellcheck on every run: block), Justfile syntax, every verify.py check with the findings
+# listed in scripts/ci/known-red.txt excused (the list may only shrink against BASE), every Python
 # test directory of the repository, `cargo test` over the root workspace (check-rust) and the
 # licence, ban and source policy of deny.toml (check-deny).
 [group('QA & Security')]
 check base="HEAD":
+    just check-static "{{ base }}"
+    just check-unit system
+    just check-unit other
+    just check-rust
+    just check-deny
+
+# The static half of the gate: workflow lint, Justfile syntax, every verify.py check, the kernel
+# profile, the Calmo palette and the suites of forge/test/iso (about 2 minutes on a runner).
+[group('QA & Security')]
+check-static base="HEAD":
     #!/usr/bin/env bash
     set -euo pipefail
     command -v actionlint >/dev/null || { echo "check: actionlint is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
@@ -128,13 +139,25 @@ check base="HEAD":
     # These suites hold no TestCase: their own main() runs the cases, and discovery would find none.
     python3 -B forge/test/iso/test_verdict.py
     python3 -B forge/test/iso/test_report.py
-    dirs=$(git ls-files -- ':(glob)**/test_*.py' | xargs -n1 dirname | sort -u | grep -vx 'forge/test/iso')
+
+# The Python unit tests, in two shards that together cover every test directory of the
+# repository: `system` is system/tests (about 3 minutes on a runner), `other` is every other
+# directory with a test_*.py file but forge/test/iso, which check-static runs. A new
+# directory falls into `other`, so no test is left out.
+[group('QA & Security')]
+check-unit shard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    all=$(git ls-files -- ':(glob)**/test_*.py' | xargs -n1 dirname | sort -u | grep -vx 'forge/test/iso')
+    case "{{ shard }}" in
+        system) dirs=system/tests ;;
+        other) dirs=$(grep -vx 'system/tests' <<<"$all") ;;
+        *) echo "check-unit: the shard is 'system' or 'other', not '{{ shard }}'" >&2; exit 1 ;;
+    esac
     for dir in $dirs; do
         echo "check: unit tests in $dir"
         python3 -B -m unittest discover -s "$dir"
     done
-    just check-rust
-    just check-deny
 
 # The Rust half of the gate: the tests of every crate of the root workspace, in the build stage
 # of the shell rig (forge/test/shell/Containerfile), which carries the GTK, glycin, PAM, TPM and
