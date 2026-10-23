@@ -5,6 +5,7 @@
 #   rig.sh build-image      build the rig and build stages locally, layered on the published rig;
 #                           with the build stage pinned (build-image.digest, a full reference), pull it instead
 #   rig.sh build-image-ref  print the reference of the build stage that rig.sh runs: the pinned one, an explicit one or the local build
+#   rig.sh build-inputs     print the hash of the build stage's inputs (build-inputs.sh), the label of the published stage
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
@@ -88,6 +89,7 @@ esac
 registry=${ATHANOR_REGISTRY:-ghcr.io/ars-regia}
 registry=${registry,,} # OCI references are lowercase; an owner such as "Ars-Regia" is not
 local_image=localhost/athanor-shell-rig
+build_label=org.athanor.rig.build-inputs
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.
 rig_image() {
@@ -456,7 +458,19 @@ build-image)
         podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     else
         podman pull "$build_ref"
+        if [ -z "${ATHANOR_RIG_BUILD_IMAGE:-}" ]; then
+            want=$(bash "$rig/build-inputs.sh")
+            have=$(podman image inspect --format '{{ index .Labels "'"$build_label"'" }}' "$build_ref")
+            if [ "$have" != "$want" ]; then
+                echo "rig.sh: the pinned build stage $build_ref is stale: its $build_label label is '${have:-absent}', the Containerfile and rig-image.digest hash to '$want'." >&2
+                echo "Run the workflow publish-rig-build-image.yml and merge the pin it opens." >&2
+                exit 1
+            fi
+        fi
     fi
+    ;;
+build-inputs)
+    bash "$rig/build-inputs.sh"
     ;;
 publish-image)
     mkdir -p "$out"
@@ -469,7 +483,8 @@ publish-build-image)
     # The build stage only compiles and runs unit tests, so it is published on its own: the rig's
     # digest, and with it the pixels of the goldens, stay where they are.
     mkdir -p "$out"
-    podman build "${rig_base[@]}" --target build -t "$local_image:build" -f "$rig/Containerfile" "$rig"
+    podman build "${rig_base[@]}" --target build --label "$build_label=$(bash "$rig/build-inputs.sh")" \
+        -t "$local_image:build" -f "$rig/Containerfile" "$rig"
     podman push --digestfile "$out/build-image.digest" "$local_image:build" "docker://$registry/athanor-shell-rig-build:latest"
     echo "$registry/athanor-shell-rig-build@$(cat "$out/build-image.digest")" > "$out/build-image.ref"
     echo "published $(cat "$out/build-image.ref")"
