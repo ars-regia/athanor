@@ -8,10 +8,9 @@ started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a tool
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18 and 2026-10-19, and those revision 2 leaves open; decisions 10 and 11 are recorded in
-ADR-0122, decisions 12 to 15 in ADR-0126. Text marked "(recommended; decision N, open)" is this
-draft's recommendation for an open decision of section 7, and holds only once the maintainer takes
-it.
+2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12
+to 15 in ADR-0126. Text marked "(decision N)" is what the maintainer chose for decision N of
+section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
 `docs/superpowers/plans/2026-10-17-spike-t1-toolkit.md`. Their results are
@@ -35,7 +34,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - New, for the toolkit: OS20 the first surface's acceptance.
 - Section 5: what milestones C1 and T1 measured.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
-- Section 7: decision 16, the renderer; decisions 17 to 28, open.
+- Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -167,10 +166,10 @@ is a barrier against it.
 - **The identity's limits** (C1 results, section 5). The identity is the one read at connect: a
   client that `exec`s another program keeps it, and a process handed a connection acts with the
   identity of the process that connected. For programs under `/usr` this is accepted, and no check
-  is repeated at each bind (recommended; decision 17, open). Reading the identity never waits on a
+  is repeated at each bind (decision 17). Reading the identity never waits on a
   file system a client controls: the executable is checked with `statx` and `AT_STATX_DONT_SYNC`,
   and a fixture test with a stalled FUSE server at an allow-listed path shows the compositor still
-  drawing (recommended; decision 18, open). A kernel that answers `SO_PEERPIDFD` with `ENOPROTOOPT`
+  drawing (decision 18). A kernel that answers `SO_PEERPIDFD` with `ENOPROTOOPT`
   grants nothing, and a test exercises that answer. A client still running an executable that an
   update replaced is granted nothing on a new connection until it restarts; this is recorded, not
   prevented.
@@ -187,8 +186,8 @@ is a barrier against it.
   a full-screen window the border is drawn inside the window's edge, over the client's content. The
   reveal key is handled by the compositor and never delivered to a client: while it is held, every
   window shows whether it carries the border and the name of its application as the security context
-  gives it, never the client's own title; it is bound to Super+Alt+T (recommended; decision 27,
-  open). The fixture tests a confined client's window bordered in each state and the agent's window,
+  gives it, never the client's own title; it is bound to Super+Alt+T (decision 26).
+  The fixture tests a confined client's window bordered in each state and the agent's window,
   outside a security context, without one (`doc_session.md` SN16, gap 2).
 - **The lock path.** `ext_session_lock_manager_v1` is granted only by the locker's line in the
   allow-list, which lands with the change that installs the locker (`doc_session.md` SN16, gap 1;
@@ -238,8 +237,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   `cosmic_a11y_manager_v1` (`doc_accessibility.md`): a standard protocol where one covers it,
   otherwise a private Athanor protocol, documented here before it is written. Without them the bar
   shows 6 of its 8 interactive widgets, the input source and the tiling toggle missing (C1 results,
-  section 4), and the dock cannot raise a window (section 7.3, T9-5). The set (recommended; decision
-  19, open), from the C1 protocols, section 3: `ext_foreign_toplevel_list_v1` for the list of
+  section 4), and the dock cannot raise a window (section 7.3, T9-5). The set (decision
+  19), from the C1 protocols, section 3: `ext_foreign_toplevel_list_v1` for the list of
   windows, with a private `athanor_toplevel_state_v1` keyed by its handle for the state and the
   outputs of a window and a manager interface for activate, minimise, unminimise and close;
   `ext_workspace_manager_v1` for workspaces, with a private `athanor_workspace_tiling_v1` for the
@@ -272,8 +271,8 @@ and `.resize` start an interactive grab, so a press on a title bar the client dr
 requests of `xdg_toplevel`, and the actions the shell gives the user through the private manager of
 OS5: activate, minimise, unminimise and close. The model is the one OS2 keeps: floating windows, and
 per workspace the tiling state the bar's toggle sets; with tiling on, each new window splits the
-focused one along its longer side, and with it off the windows float (recommended; decision 25,
-open). Any other model enters through the register (CO2).
+focused one along its longer side, and with it off the windows float (OS2: the bar's toggle is
+shipped behaviour, F-bar-34). Any other model enters through the register (CO2).
 
 **OS13. Key bindings.** The compositor binds by default the keys the approved documents name: Super
 for the launcher and Super+A for the application library (`doc_launcher.md` LA8); Super+C and
@@ -288,7 +287,7 @@ default binding has a fixture test (`doc_session.md` SN16, gap 7).
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
-For 1.0 (recommended; decision 20, open): fractional scale per output; damage tracked per output, so
+For 1.0 (decision 20): fractional scale per output; damage tracked per output, so
 that an output redraws only what changed; on an output's removal, its layer surfaces closed and
 their clients told, and its windows moved to a remaining output; outputs of a second GPU recorded as
 a known limit, since no machine of the matrix connects one (C1 results, section 7: the desktop's RTX
@@ -301,12 +300,12 @@ that it can take the cursor plane. Milestone C1's solid square could not, and on
 nobody saw a pointer in either run, although the second run's trace has the square composited where
 the mouse was (C1 results, section 7.3, T9-3). The acceptance's console runs record the pointer seen
 by someone at the console (OS19). At 1.0 outputs are driven in 8-bit formats; 10-bit formats, colour
-management and HDR come after 1.0 (recommended; decision 21, open).
+management and HDR come after 1.0 (decision 21).
 
 **OS16. Capture.** Windows and outputs are captured through `ext-image-copy-capture-v1`, by identity
 (OS4) and never while locked. Before the portal's screen cast (`doc_portal.md`) runs on the
 compositor, capture serves dmabuf buffers and reports damage, so that a stream copies only what
-changed; screenshots keep shared-memory buffers (recommended; decision 22, open). Milestone C1 has
+changed; screenshots keep shared-memory buffers (decision 22). Milestone C1 has
 neither dmabuf capture nor damage (C1 results, section 10, item 11).
 
 **OS17. Every global has a class.** The compositor's `data/globals` gives each global it offers one
@@ -315,7 +314,7 @@ layer-gated, whose top and overlay layers the allow-list grants; or privileged (
 fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` is unconfined (OS9
 plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
 (questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
-written (recommended; decision 23, open): data control, privileged, as OS4 says; primary selection,
+written (decision 23): data control, privileged, as OS4 says; primary selection,
 idle inhibit, single-pixel buffer and server-side decoration, standard;
 `zwlr_output_power_manager_v1`, privileged, for `athanor-idle` (`doc_session_daemons.md` SD4).
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
@@ -352,8 +351,8 @@ default session:
    Super+Escape with the bar, the dock and a terminal open (C1 results, section 10, items 13 and
    14). The fixture runs headless on the desktop's NVIDIA render node with explicit sync and a
    Vulkan client, which milestone C1 did not record (C1 results, section 8).
-5. **Frame times within their thresholds** on each console run, per output (recommended; decision
-   24, open): a mean draw under 2 ms; a longest draw under one refresh period of the output; and a
+5. **Frame times within their thresholds** on each console run, per output (decision
+   24): a mean draw under 2 ms; a longest draw under one refresh period of the output; and a
    client that animates on an otherwise idle output committing at a median interval within 10 % of
    the refresh period. Milestone C1's console runs met the first two, with longest draws of 4.20 ms
    on the laptop and 3.67 ms on the desktop, and not the third on NVIDIA, where Firefox committed a
@@ -390,7 +389,7 @@ name, role, state and value of the GTK transcript. The GTK transcripts are recor
 as the reference. A role Orca speaks differently from the GTK transcript's, such as "panel" for "grouping", does not
 hold a surface back when the toolkit's role is the one W3C Core-AAM 1.2 prescribes; the comparison
 records it as a difference with that reason, as milestone T1's did by the maintainer's decision of
-2026-10-17 (recommended; decision 26, open).
+2026-10-17 (decision 25).
 
 **OS9. Harnesses before surfaces.** Writing code is not the bottleneck; checking it is. Before the
 first surface moves:
@@ -500,7 +499,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
   `vello_cpu` 20 (task 7).
 - **Lines:** 2532 in `system/athanor-toolkit`, 510 of them tests (task 7).
 - **Not measured:** the development VM's virgl (task 7). Revision 2 does not ask for it, since the
-  rig's llvmpipe gives the case without a GPU (recommended; decision 28, open).
+  rig's llvmpipe gives the case without a GPU and virgl is no user's hardware.
 
 ## 6. Order
 
@@ -585,8 +584,10 @@ Taken by the maintainer on 2026-10-18, after milestone T1's measurements (T1 res
     on `Outdated` and recreated on `Lost`, each with a test. This settles the decision revision 1
     left open, whose recommendation, `vello_gpu` where T1 measured it faster, met no such case.
 
-Open in revision 2. Each is written above as its recommendation, and the maintainer takes each
-before this revision is approved; C1 items are those of the C1 results, section 10:
+Taken by the maintainer on 2026-10-23, each on the draft's recommendation, written above where
+"(decision N)" marks it; C1 items are those of the C1 results, section 10. Tiling at 1.0 is not
+among them: OS2 keeps the bar's toggle as shipped behaviour (F-bar-34). Nor are virgl figures for the
+toolkit: the T1 results leave them to revision 2, which does not ask for them (section 5):
 
 17. **Identity at connect, without a check at each bind** (OS4; C1 item 2).
 18. **A non-blocking executable check** (OS4; C1 item 3).
@@ -596,10 +597,8 @@ before this revision is approved; C1 items are those of the C1 results, section 
 22. **dmabuf capture and damage before the screen cast** (OS16; C1 item 11).
 23. **The class of each protocol not yet offered** (OS17; C1 item 12).
 24. **The frame-time thresholds** (OS19; C1 item 15; OS9 plan, question 6).
-25. **Tiling at 1.0** (OS12; C1 item 16).
-26. **A role spoken differently** (OS8; T1 results, task 8, item 3).
-27. **The full-screen border and the reveal key** (OS4; SN16, gap 2).
-28. **No virgl figures for the toolkit** (section 5; T1 results, task 7).
+25. **A role spoken differently** (OS8; T1 results, task 8, item 3).
+26. **The full-screen border and the reveal key** (OS4; SN16, gap 2).
 
 ## 8. Risks
 
