@@ -3654,7 +3654,7 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
 
 /// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
 /// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
-/// beside it, which `confine` alone accepts.
+/// beside it, which `confine` alone accepts. The height is one both outputs have.
 #[test]
 fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
     let mut run = Running::start(None);
@@ -3668,7 +3668,7 @@ fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
         &local.queue.handle(),
         (),
     );
-    pointer.motion_absolute(0, 100, 50, 100, 100);
+    pointer.motion_absolute(0, 100, 10, 100, 100);
     pointer.frame();
     local.roundtrip(&mut run);
     let first = run
@@ -3678,6 +3678,16 @@ fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
         .find(|output| output.name() == "headless-0")
         .and_then(|output| run.state.space.output_geometry(output))
         .expect("the first output");
+    let y = first.loc.y + first.size.h / 10;
+    let beside = Point::from((first.loc.x + first.size.w, y));
+    assert!(
+        run.state
+            .space
+            .outputs()
+            .filter_map(|output| run.state.space.output_geometry(output))
+            .any(|area| area.contains(beside)),
+        "the unclamped point is on the other output"
+    );
     let at = run
         .state
         .seat
@@ -3686,10 +3696,7 @@ fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
         .current_location();
     assert_eq!(
         at,
-        Point::from((
-            f64::from(first.loc.x + first.size.w - 1),
-            f64::from(first.loc.y + first.size.h / 2)
-        )),
+        Point::from((f64::from(first.loc.x + first.size.w - 1), f64::from(y))),
         "on the first output's last column"
     );
     run.stop();
