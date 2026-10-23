@@ -335,8 +335,8 @@ pub fn resized(
 ) -> Size<i32, Logical> {
     let delta = delta.to_i32_round::<i32>();
     let along = |length: i32, before: bool, after: bool, moved: i32| match (before, after) {
-        (true, _) => length - moved,
-        (_, true) => length + moved,
+        (true, _) => length.saturating_sub(moved),
+        (_, true) => length.saturating_add(moved),
         _ => length,
     };
     let fit = |length: i32, min: i32, max: i32| {
@@ -356,12 +356,12 @@ pub fn anchored(
     size: Size<i32, Logical>,
 ) -> Point<i32, Logical> {
     let x = if left(edges) {
-        start.loc.x + start.size.w - size.w
+        start.loc.x.saturating_add(start.size.w).saturating_sub(size.w)
     } else {
         start.loc.x
     };
     let y = if top(edges) {
-        start.loc.y + start.size.h - size.h
+        start.loc.y.saturating_add(start.size.h).saturating_sub(size.h)
     } else {
         start.loc.y
     };
@@ -375,10 +375,12 @@ pub fn kept_reachable(
     at: Point<i32, Logical>,
     size: Size<i32, Logical>,
 ) -> Point<i32, Logical> {
+    let right = area.loc.x.saturating_add(area.size.w);
     let x =
-        at.x.max(area.loc.x + REACHABLE - size.w)
-            .min(area.loc.x + area.size.w - REACHABLE);
-    let y = at.y.min(area.loc.y + area.size.h - 1).max(area.loc.y);
+        at.x.max(area.loc.x.saturating_add(REACHABLE).saturating_sub(size.w))
+            .min(right.saturating_sub(REACHABLE));
+    let bottom = area.loc.y.saturating_add(area.size.h);
+    let y = at.y.min(bottom.saturating_sub(1)).max(area.loc.y);
     (x, y).into()
 }
 
@@ -405,6 +407,28 @@ mod tests {
         assert_eq!(
             kept_reachable(area, (1500, 100).into(), size),
             (1248, 100).into()
+        );
+    }
+
+    /// A client's surface tree can be as large as `i32::MAX`: nothing overflows.
+    #[test]
+    fn the_largest_window_does_not_overflow() {
+        let huge = Size::from((i32::MAX, i32::MAX));
+        let none = Size::from((0, 0));
+        let grown = resized(ResizeEdge::BottomRight, huge, (1.0, 1.0).into(), none, none);
+        assert_eq!(grown, huge);
+        let from_corner =
+            resized(ResizeEdge::TopLeft, (1, 1).into(), (-1e12, -1e12).into(), none, none);
+        assert_eq!(from_corner, (i32::MAX, i32::MAX).into());
+        let start = Rectangle::new((0, 32).into(), huge);
+        assert_eq!(
+            anchored(ResizeEdge::TopLeft, start, (1, 1).into()),
+            (i32::MAX - 1, i32::MAX - 1).into()
+        );
+        let area = Rectangle::new((-1280, 0).into(), (1280, 720).into());
+        assert_eq!(
+            kept_reachable(area, (i32::MIN, 0).into(), huge),
+            (i32::MIN, 0).into()
         );
     }
 
