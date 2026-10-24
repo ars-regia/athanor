@@ -3,8 +3,32 @@
 # Sourced, never run. Everything here uses a throwaway registry and throwaway keys.
 ACC_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$ACC_HERE/../../.." && pwd)
-# shellcheck source-path=SCRIPTDIR
-source "$ACC_HERE/../devvm.env"
+if [[ ${ACC_CI:-} == 1 ]]; then
+  # run.sh --ci: the VM of forge/test/iso/run_iso_test.sh, not the dev VM. That script hands
+  # over the forwarded SSH port and the key of the run; the guest's user is the kickstart's.
+  die() {
+    echo "$*" >&2
+    exit 1
+  }
+  for var in ATHANOR_UPDATE_TO ATHANOR_UPDATE_CLASS ATHANOR_UPDATE_REPOSITORY ATHANOR_UPDATE_MIRROR ACC_CI_OUT SSH_PORT ACC_SSH_KEY; do
+    [[ -n ${!var:-} ]] || die "run.sh --ci needs $var (forge/test/iso/run_iso_test.sh sets it)"
+  done
+  [[ $ATHANOR_UPDATE_TO =~ ^sha256:[0-9a-f]{64}$ ]] || die "ATHANOR_UPDATE_TO is not a digest: '$ATHANOR_UPDATE_TO'"
+  [[ $SSH_PORT =~ ^[0-9]+$ ]] || die "SSH_PORT is not a port: '$SSH_PORT'"
+  [[ $ATHANOR_UPDATE_CLASS == feature || $ATHANOR_UPDATE_CLASS == security ]] ||
+    die "ATHANOR_UPDATE_CLASS is not feature or security: '$ATHANOR_UPDATE_CLASS'"
+  STATE=$ACC_CI_OUT/acceptance-state
+  GUEST_USER=collaudo
+  SYSTEM_IMAGE=$ATHANOR_UPDATE_REPOSITORY
+  ssh_key() { echo "$ACC_SSH_KEY"; }
+  guest_ssh() {
+    ssh -i "$ACC_SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -p "$SSH_PORT" \
+      -o "UserKnownHostsFile=$STATE/known_hosts" -o StrictHostKeyChecking=accept-new "$GUEST_USER@127.0.0.1" "$@"
+  }
+else
+  # shellcheck source-path=SCRIPTDIR
+  source "$ACC_HERE/../devvm.env"
+fi
 
 ACC_PORT=${ACC_PORT:-5000}
 # The container and the systemd user unit of the registry, and the image prefix on its port: set
@@ -40,8 +64,11 @@ wait_ssh() {
 }
 
 # The guest reaches the host's registry on its own 127.0.0.1, so signer and verifier spell
-# the repository identically (a signature records the reference it was made for).
+# the repository identically (a signature records the reference it was made for). In CI the
+# guest reaches the candidate's mirror through QEMU's gateway instead: no tunnel, and so no
+# second session of the guest user to open or close.
 tunnel() {
+  [[ ${ACC_CI:-} != 1 ]] || return 0
   guest_ssh -q "ss -ltn | grep -q ':$ACC_PORT '" 2> /dev/null && return 0
   ssh -i "$(ssh_key)" -p "$SSH_PORT" -o "UserKnownHostsFile=$STATE/known_hosts" -o ExitOnForwardFailure=yes \
     -f -N -R "$ACC_PORT:127.0.0.1:$ACC_PORT" "$GUEST_USER@127.0.0.1"
@@ -52,6 +79,7 @@ tunnel() {
 # session of the caller's user. A call from the active session closes it, so that the cases
 # make every session the service counts; check_now opens it again, as the check needs it.
 untunnel() {
+  [[ ${ACC_CI:-} != 1 ]] || return 0
   if pgrep -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT" > /dev/null; then
     pkill -f -- "-R $ACC_PORT:127.0.0.1:$ACC_PORT"
   fi
@@ -189,6 +217,33 @@ request_and_reboot() { # request_and_reboot CALLER METHOD EXPECTED-MARKER DESCRI
   wait_reboot "$boot" || die "FAIL  $4: no reboot in 10 minutes (call exit $status: $out)"
   [[ $(marker) == "$3" ]] || die "FAIL  $4: booted $(marker), expected $3 (call exit $status: $out)"
   pass "$4"
+}
+
+# The image digest the guest booted, as bootc reports it.
+booted_digest() { guest_ssh sudo bootc status --format json | jq -r .status.booted.image.imageDigest; }
+# request_and_reboot for a guest without the acceptance marker: what is asserted is the digest
+# that boots.
+reboot_into_digest() { # reboot_into_digest CALLER METHOD EXPECTED-DIGEST DESCRIPTION
+  local out status=0 boot got
+  boot=$(boot_id)
+  out=$("$1" "$2") || status=$?
+  wait_reboot "$boot" || die "FAIL  $4: no reboot in 10 minutes (call exit $status: $out)"
+  got=$(booted_digest)
+  [[ $got == "$3" ]] || die "FAIL  $4: booted $got, expected $3 (call exit $status: $out)"
+  pass "$4"
+}
+# Stops the check timer and lets a check it already started, or queued before the stop, end:
+# a check holds the store, and a request meanwhile answers Busy (#547).
+quiet_checks() { # quiet_checks DESCRIPTION
+  local check
+  guest_ssh sudo systemctl stop athanor-update-check.timer
+  for _ in $(seq 60); do
+    check=$(guest_ssh 'systemctl show -p ActiveState --value athanor-update-check.service && systemctl list-jobs --no-legend athanor-update-check.service') ||
+      die "FAIL  $1: cannot read the check's state"
+    [[ $check == activating* || $check == *athanor-update-check* ]] || return 0
+    sleep 5
+  done
+  die "FAIL  $1: the check the timer started still runs after five minutes"
 }
 
 # --- The other-session rule of UT6 (doc_update_trust.md section 6, item 2; ADR-0103 D22) ---

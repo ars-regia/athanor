@@ -8,7 +8,9 @@
 - **Status:** revision 4 (2026-10-15), approved by the maintainer on 2026-10-15
   ([ADR-0118](../decisions/0118-pipeline-revision-4-approval.md)): it places the three workflows that
   revision 3 left to #406, `bot-merge.yml` as a target entry of its own, `fuzz.yml` in
-  `maintenance.yml` and the shell rig build image in `bots.yml` (section 3.5).
+  `maintenance.yml` and the shell rig build image in `bots.yml` (section 3.5). PL42's GitHub
+  Release is settled by [ADR-0131](../decisions/0131-github-release-of-each-promotion.md)
+  (2026-10-24).
   Revision 3 (2026-10-09) was approved by the maintainer on 2026-10-11 with the fixes
   of its review, as an exception to the freeze of ADR-0103 D3 ([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md)): it moves
   the image signing into `release.yml`, signs `:latest` with no approval and gates the

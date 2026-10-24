@@ -203,7 +203,12 @@ def bluetooth():
     if rc != 0:
         raise Failed(f"`bluetoothctl show` exited {rc}: {err.strip()[-200:]}")
     powered = re.search(r"^\s*Powered: (\S+)", out, re.M)
-    controller = out.strip().splitlines()[0] if out.strip() else ""
+    # The records are committed publicly: the controller's hardware address stays out of them.
+    controller = re.sub(
+        r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}",
+        "XX:XX:XX:XX:XX:XX",
+        out.strip().splitlines()[0] if out.strip() else "",
+    )
     ok = powered is not None and powered.group(1) == "yes"
     return (
         "pass" if ok else "fail"

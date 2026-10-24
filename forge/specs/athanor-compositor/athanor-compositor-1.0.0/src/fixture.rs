@@ -3,6 +3,7 @@
 //! window from a wl_shm buffer and waits for its frame callback; the compositor's frames are then
 //! read back and their pixels compared.
 
+use crate::grabs::{MoveGrab, ResizeGrab};
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::headless::{self, VirtualOutput};
 use crate::identity::{AllowList, FileId, Process};
@@ -10,16 +11,25 @@ use crate::state::{State, Under, BACKGROUND};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::layer_map_for_output;
 use smithay::input::keyboard::KeyboardSource;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::calloop::{EventLoop, Interest};
+use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
+    ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE, ZWP_TEXT_INPUT_V3_INTERFACE,
+};
+use smithay::reexports::wayland_protocols_misc::zwp_input_method_v2::server::__interfaces::{
+    ZWP_INPUT_METHOD_KEYBOARD_GRAB_V2_INTERFACE, ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE,
+    ZWP_INPUT_METHOD_V2_INTERFACE, ZWP_INPUT_POPUP_SURFACE_V2_INTERFACE,
+};
 use smithay::reexports::wayland_protocols_misc::zwp_virtual_keyboard_v1::server::__interfaces::{
     ZWP_VIRTUAL_KEYBOARD_MANAGER_V1_INTERFACE, ZWP_VIRTUAL_KEYBOARD_V1_INTERFACE,
 };
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Display, Resource};
-use smithay::utils::{Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
 use smithay::wayland::security_context::SecurityContext;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -30,11 +40,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use wayland_client::backend::protocol::{Argument, Message};
+use wayland_client::backend::protocol::{Argument, Interface, Message};
 use wayland_client::backend::{Backend, ObjectData, ObjectId, WaylandError};
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
+    wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{
     delegate_noop, event_created_child, Connection, Dispatch, Proxy, QueueHandle, WEnum,
@@ -78,6 +88,8 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
 };
 
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
+/// The left button's evdev code.
+const BTN_LEFT: u32 = 0x110;
 const WIDTH: i32 = 200;
 const HEIGHT: i32 = 100;
 
@@ -128,6 +140,8 @@ struct Client {
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
+    /// The width, height and states of the last configure of a toplevel.
+    toplevel_configure: Option<(i32, i32, Vec<u32>)>,
     /// The serial, width and height of the last configure of a layer surface.
     layer_configure: Option<(u32, u32, u32)>,
     /// A layer surface was closed by the compositor.
@@ -155,6 +169,8 @@ struct Client {
     workspaces_done: bool,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
+    /// The evdev code of each key released while the client had the keyboard.
+    released: Vec<u32>,
     /// The evdev codes of the keys held, as the last `enter` told them.
     entered_keys: Vec<u32>,
     /// The keymaps the client was sent.
@@ -173,6 +189,10 @@ struct Client {
     configured: Option<&'static str>,
     /// The last preferred scale of wp-fractional-scale, in 120ths.
     fractional_scale: Option<u32>,
+    /// The serial of the last `wl_pointer.enter` the client was sent.
+    pointer_enter: Option<u32>,
+    /// The serial of the last `wl_pointer.button` press the client was sent.
+    button: Option<u32>,
 }
 
 /// A head of wlr-output-management as the client has seen it: its name, its last scale and its
@@ -283,6 +303,32 @@ impl Dispatch<wl_callback::WlCallback, ()> for Client {
     }
 }
 
+impl Dispatch<xdg_toplevel::XdgToplevel, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &xdg_toplevel::XdgToplevel,
+        event: xdg_toplevel::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_toplevel::Event::Configure {
+            width,
+            height,
+            states,
+        } = event
+        {
+            let states = states
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|state| u32::from_ne_bytes(*state))
+                .collect();
+            client.toplevel_configure = Some((width, height, states));
+        }
+    }
+}
+
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for Client {
     fn event(
         client: &mut Self,
@@ -310,7 +356,6 @@ delegate_noop!(Client: wl_shm_pool::WlShmPool);
 delegate_noop!(Client: ignore wl_surface::WlSurface);
 delegate_noop!(Client: ignore wl_shm::WlShm);
 delegate_noop!(Client: ignore wl_buffer::WlBuffer);
-delegate_noop!(Client: ignore xdg_toplevel::XdgToplevel);
 delegate_noop!(Client: xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
@@ -347,6 +392,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
             }
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Released),
+                ..
+            } => client.released.push(key),
             wl_keyboard::Event::Enter { keys, .. } => {
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
@@ -358,6 +408,27 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
                 client.modifiers.push(mods_depressed);
             }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<wl_pointer::WlPointer, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &wl_pointer::WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
+            wl_pointer::Event::Button {
+                serial,
+                state: WEnum::Value(wl_pointer::ButtonState::Pressed),
+                ..
+            } => client.button = Some(serial),
             _ => {}
         }
     }
@@ -817,7 +888,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
-    zwlr_virtual_pointer_manager_v1\n\
+    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -2041,6 +2112,11 @@ struct Local {
     id: Option<ClientId>,
     /// The buffers' files, open while their buffers are.
     files: Vec<std::fs::File>,
+    /// The seat and its pointer, once `toplevel` has bound them.
+    seat: Option<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
+    /// The surface of the window `toplevel` mapped.
+    window: Option<(wl_surface::WlSurface, xdg_surface::XdgSurface)>,
 }
 
 impl Local {
@@ -2070,9 +2146,111 @@ impl Local {
             client: Client::default(),
             id,
             files: Vec::new(),
+            seat: None,
+            pointer: None,
+            window: None,
         };
         local.roundtrip(run);
         local
+    }
+
+    /// Binds the seat and its pointer, maps a `WIDTH`x`HEIGHT` window and gives it the keyboard.
+    /// The fixture's own window holds the keyboard, so `place` leaves the new window at the
+    /// bottom, exactly under the fixture's: raised, the new window is the one under the pointer,
+    /// and `fixture_window`, the bottom element, is the fixture's again.
+    fn toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        self.pointer = Some(seat.get_pointer(&qh, ()));
+        self.seat = Some(seat);
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg.get_toplevel(&qh, ());
+        self.client.configure = None;
+        surface.commit();
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        xdg.ack_configure(self.client.configure.expect("a configure"));
+        let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        let id = self.id.clone().expect("an id");
+        // The window is in the space from its first commit; it is placed once it has a size.
+        self.pump(run, "the window is placed", |_, state| {
+            state
+                .space
+                .elements()
+                .any(|window| owned_by(window, &id) && !window.geometry().is_empty())
+        });
+        let window = window_of(run, &id);
+        run.state.focus(&window);
+        // The configure that activates it is not one a test waits for.
+        self.roundtrip(run);
+        self.client.configure = None;
+        self.window = Some((surface, xdg));
+        toplevel
+    }
+
+    /// Waits for the next configure of the window `toplevel` mapped, acknowledges it and draws
+    /// a buffer of the size it names, or of the fixture's size when it leaves the size to the
+    /// client: the configure's width, height and states.
+    fn redraw(&mut self, run: &mut Running) -> (i32, i32, Vec<u32>) {
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        let (surface, xdg) = self.window.clone().expect("a window");
+        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let (width, height, states) = self
+            .client
+            .toplevel_configure
+            .take()
+            .expect("a toplevel configure");
+        let shm: wl_shm::WlShm = self.bind(1);
+        let (buffer, _) = self.buffer(
+            &shm,
+            if width > 0 { width } else { WIDTH },
+            if height > 0 { height } else { HEIGHT },
+            [0, 0, 0, 255],
+        );
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        (width, height, states)
+    }
+
+    /// Maps a bar: a surface on the top layer along the output's top edge, `height` high, with
+    /// an exclusive zone of its height.
+    fn bar(&mut self, run: &mut Running, height: i32) -> wl_surface::WlSurface {
+        use zwlr_layer_surface_v1::Anchor;
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = self.bind(4);
+        let qh = self.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let layer = shell.get_layer_surface(
+            &surface,
+            None,
+            zwlr_layer_shell_v1::Layer::Top,
+            "bar".into(),
+            &qh,
+            (),
+        );
+        layer.set_anchor(Anchor::Top | Anchor::Left | Anchor::Right);
+        layer.set_size(0, height.unsigned_abs());
+        layer.set_exclusive_zone(height);
+        assert!(self.answer(run, &surface), "the bar is configured");
+        let (serial, width, _) = self.client.layer_configure.expect("a configure");
+        layer.ack_configure(serial);
+        let width = i32::try_from(width).expect("a width");
+        let (buffer, _) = self.buffer(&shm, width, height, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        surface
     }
 
     /// Runs the compositor and the client in turn until `done` holds.
@@ -2236,6 +2414,407 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
         .expect("the fixture's client")
         .id();
     (window, id)
+}
+
+/// Whether `window` belongs to the client `id`.
+fn owned_by(window: &smithay::desktop::Window, id: &ClientId) -> bool {
+    window
+        .toplevel()
+        .and_then(|t| t.wl_surface().client())
+        .is_some_and(|client| client.id() == *id)
+}
+
+/// The mapped window of the client `id`.
+fn window_of(run: &Running, id: &ClientId) -> smithay::desktop::Window {
+    run.state
+        .space
+        .elements()
+        .find(|window| owned_by(window, id))
+        .expect("the client's window")
+        .clone()
+}
+
+/// Where the window of the client `id` is in the space.
+fn location_of(run: &Running, id: &ClientId) -> Point<i32, Logical> {
+    run.state
+        .space
+        .element_location(&window_of(run, id))
+        .expect("a location")
+}
+
+/// Whether a `MoveGrab` holds the pointer: any press installs Smithay's click grab, so
+/// `is_grabbed` cannot tell a move from a click.
+fn moving(run: &Running) -> bool {
+    run.state
+        .seat
+        .get_pointer()
+        .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<MoveGrab>()))
+        .unwrap_or(false)
+}
+
+/// Moves the pointer to `at` and presses the left button.
+fn press(run: &mut Running, at: Point<f64, Logical>) {
+    run.state.pointer_to(at, InputTime::now());
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+}
+
+/// Releases the left button.
+fn release(run: &mut Running) {
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+}
+
+/// A client's window, moved on the press it was sent: the client's id and where the press was.
+fn moved(run: &mut Running, local: &mut Local) -> (ClientId, Point<f64, Logical>) {
+    let toplevel = local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(run, at);
+    local.pump(run, "the press", |client, _| client.button.is_some());
+    toplevel._move(&seat, local.client.button.expect("a press"));
+    local.roundtrip(run);
+    assert!(moving(run), "the client's own press grants the move");
+    (id, at)
+}
+
+/// A move is granted only for the last press, sent to the client that asks, while it is held
+/// (OS12).
+#[test]
+fn a_move_needs_the_clients_own_button_press() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+
+    // A serial no press sent the client.
+    toplevel._move(&seat, SERIAL_COUNTER.next_serial().into());
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a serial no press sent is refused");
+
+    // An older press's serial.
+    press(&mut run, at);
+    release(&mut run);
+    local.pump(&mut run, "the first press", |client, _| {
+        client.button.is_some()
+    });
+    let older = local.client.button.take().expect("a press");
+    press(&mut run, at);
+    local.pump(&mut run, "the second press", |client, _| {
+        client.button.is_some()
+    });
+    toplevel._move(&seat, older);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "an older press's serial is refused");
+
+    // The current press's serial, recorded as sent to another client.
+    let current = local.client.button.expect("a press");
+    let (_, other) = fixture_window(&run);
+    assert_ne!(other, id, "the fixture's window belongs to another client");
+    run.state.grab_serials.button = Some((current.into(), other));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(!moving(&run), "a press sent to another client is refused");
+
+    // The current press, sent to this client: granted.
+    run.state.grab_serials.button = Some((current.into(), id));
+    toplevel._move(&seat, current);
+    local.roundtrip(&mut run);
+    assert!(moving(&run), "the client's own press grants the move");
+    run.stop();
+}
+
+/// The window follows the pointer until the button is up, and stays (OS12).
+#[test]
+fn a_window_follows_the_pointer_while_moved() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before + Point::from((100, 50)));
+    release(&mut run);
+    assert!(!moving(&run), "the release ends the move");
+    run.state.pointer_to(at, InputTime::now());
+    assert_eq!(
+        location_of(&run, &id),
+        before + Point::from((100, 50)),
+        "the window stays"
+    );
+    run.stop();
+}
+
+/// A window dragged off the area keeps its top edge, and 32 pixels across, inside it (OS12).
+#[test]
+fn a_moved_window_keeps_its_top_edge_reachable() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .pointer_to(at - Point::from((10_000.0, 10_000.0)), InputTime::now());
+    let location = location_of(&run, &id);
+    assert_eq!(location.y, area.loc.y, "the top edge stays in the area");
+    let width = window_of(&run, &id).geometry().size.w;
+    assert!(
+        location.x + width >= area.loc.x + 32,
+        "32 pixels stay in the area"
+    );
+    run.stop();
+}
+
+/// The lock ends a move: the pointer goes to the lock, and the window stays (OS12).
+#[test]
+fn the_lock_ends_a_move() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    let mut locker = Local::connect(&mut run, None);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let _lock = locks.lock(&locker.queue.handle(), ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    assert!(!moving(&run), "the lock ends the move");
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(location_of(&run, &id), before, "the window stays");
+    run.stop();
+}
+
+/// A resize sends configures with the `resizing` state and the size the pointer asks for, and
+/// one without it at the release; from the top-left corner the bottom-right one stays (OS12).
+#[test]
+fn a_resize_sends_resizing_configures() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let resizing = xdg_toplevel::State::Resizing as u32;
+    let geometry = |run: &Running| {
+        run.state
+            .space
+            .element_geometry(&window_of(run, &id))
+            .expect("mapped")
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&resizing), "the configure is resizing");
+    assert_eq!((width, height), (WIDTH + 50, HEIGHT + 20));
+    release(&mut run);
+    let (_, _, states) = local.redraw(&mut run);
+    assert!(!states.contains(&resizing), "the release ends the resize");
+
+    let before = geometry(&run);
+    let at = before.loc.to_f64() + Point::from((5.0, 5.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::TopLeft);
+    local.roundtrip(&mut run);
+    run.state
+        .pointer_to(at - Point::from((30.0, 40.0)), InputTime::now());
+    let (width, height, _) = local.redraw(&mut run);
+    assert_eq!((width, height), (before.size.w + 30, before.size.h + 40));
+    let after = geometry(&run);
+    assert_eq!(
+        (after.loc.x + after.size.w, after.loc.y + after.size.h),
+        (before.loc.x + before.size.w, before.loc.y + before.size.h),
+        "the bottom-right corner stays"
+    );
+    release(&mut run);
+    run.stop();
+}
+
+/// A window maximised while it is resized ends the resize and takes the area, and the pointer
+/// no longer moves it (OS12).
+#[test]
+fn maximising_ends_a_resize() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+    let area = run.state.window_area().expect("an area");
+    let resizing = |run: &Running| {
+        run.state
+            .seat
+            .get_pointer()
+            .and_then(|pointer| pointer.with_grab(|_, grab| grab.is::<ResizeGrab>()))
+            .unwrap_or(false)
+    };
+
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+    let serial = local.client.button.take().expect("a press");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    assert!(resizing(&run), "the client's own press grants the resize");
+    run.state
+        .pointer_to(at + Point::from((50.0, 20.0)), InputTime::now());
+    local.redraw(&mut run);
+
+    toplevel.set_maximized();
+    local.roundtrip(&mut run);
+    assert!(!resizing(&run), "maximising ends the resize");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&(xdg_toplevel::State::Maximized as u32)));
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+    run.state
+        .pointer_to(at + Point::from((90.0, 60.0)), InputTime::now());
+    local.roundtrip(&mut run);
+    assert!(
+        local.client.configure.is_none(),
+        "no resizing configure follows"
+    );
+    assert_eq!(location_of(&run, &id), area.loc, "the window stays");
+    release(&mut run);
+    run.stop();
+}
+
+/// A maximised window takes the area the bar's zone leaves at the commit that draws that size,
+/// is fitted again when the zone changes, and goes back where it was, at its size, when
+/// restored (OS12).
+#[test]
+fn a_window_is_maximised_and_restored() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let before = location_of(&run, &id);
+    let area = run.state.window_area().expect("an area");
+    let maximized = xdg_toplevel::State::Maximized as u32;
+
+    toplevel.set_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "the configure is maximised");
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+
+    let mut shell = Local::connect(&mut run, None);
+    let _bar = shell.bar(&mut run, 32);
+    let fitted = run.state.window_area().expect("an area");
+    assert_ne!(fitted, area, "the bar's zone changes the area");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&maximized), "still maximised");
+    assert_eq!((width, height), (fitted.size.w, fitted.size.h));
+    assert_eq!(location_of(&run, &id), fitted.loc);
+
+    toplevel.unset_maximized();
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(
+        !states.contains(&maximized),
+        "the configure is not maximised"
+    );
+    assert_eq!((width, height), (WIDTH, HEIGHT));
+    assert_eq!(location_of(&run, &id), before);
+    run.stop();
+}
+
+/// A client with its own window and the pointer over it: the serial of the pointer's enter.
+fn pointed_at(run: &mut Running, local: &mut Local) -> u32 {
+    local.toplevel(run);
+    let id = local.id.clone().expect("an id");
+    let at = location_of(run, &id).to_f64() + Point::from((20.0, 10.0));
+    run.state.pointer_to(at, InputTime::now());
+    local.pump(run, "the pointer enters the window", |client, _| {
+        client.pointer_enter.is_some()
+    });
+    local.client.pointer_enter.expect("an enter")
+}
+
+/// A cursor a client sets is shown only while that client holds the pointer's focus: over
+/// another client's window, and over the background, the default is drawn (OS15).
+#[test]
+fn another_clients_cursor_is_not_shown() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, None, 0, 0);
+    local.roundtrip(&mut run);
+    let id = local.id.clone().expect("an id");
+    assert_eq!(
+        run.state.cursor_status,
+        (CursorImageStatus::Hidden, Some(id.clone())),
+        "a cursor without a surface belongs to the client the pointer is over"
+    );
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::Hidden,
+        "over its own window"
+    );
+
+    // The client's window moves off the fixture's, which the pointer is then over.
+    let area = run.state.window_area().expect("an area");
+    run.state
+        .space
+        .map_element(window_of(&run, &id), area.loc, true);
+    let (other, _) = fixture_window(&run);
+    let over = run
+        .state
+        .space
+        .element_location(&other)
+        .expect("a location");
+    run.state
+        .pointer_to(over.to_f64() + Point::from((20.0, 10.0)), InputTime::now());
+    // Smithay resets the cursor when the focus changes: the client's is put back, as if it had
+    // been set late, here and over the background.
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id.clone()));
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over another client's window"
+    );
+
+    let corner = (area.loc + area.size - Size::from((1, 1))).to_f64();
+    assert!(run.state.surface_under(corner).is_none(), "the background");
+    run.state.pointer_to(corner, InputTime::now());
+    run.state.cursor_status = (CursorImageStatus::Hidden, Some(id));
+    assert_eq!(
+        run.state.shown_cursor(),
+        CursorImageStatus::default_named(),
+        "over the background"
+    );
+    run.stop();
+}
+
+/// A cursor surface is sent its frame callbacks while the pointer is over its output, as a
+/// window is.
+#[test]
+fn task_pointer_a_cursor_surface_gets_its_frame_callbacks() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let serial = pointed_at(&mut run, &mut local);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let cursor = compositor.create_surface(&qh, ());
+    let (buffer, _) = local.buffer(&shm, 16, 16, [255, 255, 255, 255]);
+    let pointer = local.pointer.clone().expect("a pointer");
+    pointer.set_cursor(serial, Some(&cursor), 0, 0);
+    cursor.attach(Some(&buffer), 0, 0);
+    cursor.frame(&qh, ());
+    local.client.frame_done = false;
+    cursor.commit();
+    local.pump(&mut run, "the cursor's frame callback", |client, _| {
+        client.frame_done
+    });
+    run.stop();
 }
 
 /// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and
@@ -4356,5 +4935,933 @@ fn os9_output_capture_is_refused_while_locked() {
         "a session is refused while locked",
         |client, _| client.stopped.contains(&refused),
     );
+    run.stop();
+}
+
+/// The events a raw object was sent, in order: each one's name, and its string and number
+/// arguments as text.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(&'static str, Vec<String>)>>);
+
+impl ObjectData for Recorder {
+    fn event(
+        self: Arc<Self>,
+        backend: &Backend,
+        message: Message<ObjectId, OwnedFd>,
+    ) -> Option<Arc<dyn ObjectData>> {
+        let name = backend
+            .info(message.sender_id)
+            .ok()
+            .and_then(|info| info.interface.events.get(usize::from(message.opcode)))
+            .map_or("unknown", |event| event.name);
+        let args = message
+            .args
+            .into_iter()
+            .map(|arg| match arg {
+                Argument::Str(Some(text)) => text.to_string_lossy().into_owned(),
+                Argument::Uint(n) => n.to_string(),
+                Argument::Int(n) => n.to_string(),
+                _ => String::new(),
+            })
+            .collect();
+        self.0.lock().expect("events").push((name, args));
+        None
+    }
+    fn destroyed(&self, _: ObjectId) {}
+}
+
+/// An object of a protocol whose client side no crate of the workspace generates
+/// (zwp-input-method-v2, text-input-v3): its requests are sent raw, by name, on the interfaces
+/// Smithay's server side describes, and its events are recorded.
+struct Raw {
+    backend: Backend,
+    id: ObjectId,
+    interface: &'static Interface,
+    events: Arc<Recorder>,
+}
+
+impl Raw {
+    /// Binds the global of `interface`, version 1.
+    fn bind(local: &mut Local, interface: &'static Interface) -> Self {
+        let (name, _, _) = local
+            .client
+            .globals
+            .iter()
+            .find(|(_, listed, _)| listed == interface.name)
+            .unwrap_or_else(|| panic!("{} is listed", interface.name));
+        let bind = wl_registry::Request::Bind {
+            name: *name,
+            id: (interface, 1),
+        };
+        let events = Arc::new(Recorder::default());
+        let id = local
+            .connection
+            .send_request(&local.registry, bind, Some(events.clone()))
+            .expect("bind");
+        Self {
+            backend: local.connection.backend(),
+            id,
+            interface,
+            events,
+        }
+    }
+
+    fn opcode(&self, request: &str) -> u16 {
+        self.interface
+            .requests
+            .iter()
+            .position(|desc| desc.name == request)
+            .and_then(|at| u16::try_from(at).ok())
+            .unwrap_or_else(|| panic!("{}.{request}", self.interface.name))
+    }
+
+    fn send(&self, request: &str, args: Vec<Argument<ObjectId, i32>>) {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode: self.opcode(request),
+            args: args.into_iter().collect(),
+        };
+        self.backend
+            .send_request(message, None, None)
+            .unwrap_or_else(|error| panic!("{}.{request}: {error}", self.interface.name));
+    }
+
+    /// Sends `request`, whose `args` hold a placeholder `NewId`, for an object of `interface`.
+    fn create(
+        &self,
+        request: &str,
+        args: Vec<Argument<ObjectId, i32>>,
+        interface: &'static Interface,
+    ) -> Self {
+        let message = Message {
+            sender_id: self.id.clone(),
+            opcode: self.opcode(request),
+            args: args.into_iter().collect(),
+        };
+        let events = Arc::new(Recorder::default());
+        let id = self
+            .backend
+            .send_request(message, Some(events.clone()), Some((interface, 1)))
+            .unwrap_or_else(|error| panic!("{}.{request}: {error}", self.interface.name));
+        Self {
+            backend: self.backend.clone(),
+            id,
+            interface,
+            events,
+        }
+    }
+
+    fn events(&self) -> Vec<(&'static str, Vec<String>)> {
+        self.events.0.lock().expect("events").clone()
+    }
+
+    /// The names of the events after the first `skip`.
+    fn names_after(&self, skip: usize) -> Vec<&'static str> {
+        self.events()
+            .into_iter()
+            .skip(skip)
+            .map(|(name, _)| name)
+            .collect()
+    }
+}
+
+fn text(text: &str) -> Argument<ObjectId, i32> {
+    Argument::Str(Some(Box::new(
+        std::ffi::CString::new(text).expect("no NUL in the text"),
+    )))
+}
+
+/// A text-input-v3 object of `local`, on its seat.
+fn text_input(local: &mut Local, run: &mut Running) -> Raw {
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let manager = Raw::bind(local, &ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE);
+    let text_input = manager.create(
+        "get_text_input",
+        vec![
+            Argument::NewId(ObjectId::null()),
+            Argument::Object(seat.id()),
+        ],
+        &ZWP_TEXT_INPUT_V3_INTERFACE,
+    );
+    local.roundtrip(run);
+    text_input
+}
+
+/// Enables `text_input` with `surrounding` around the cursor, as a focused text field does.
+fn enable(text_input: &Raw, local: &mut Local, run: &mut Running, surrounding: &str) {
+    text_input.send("enable", vec![]);
+    let end = Argument::Int(i32::try_from(surrounding.len()).expect("short text"));
+    text_input.send(
+        "set_surrounding_text",
+        vec![text(surrounding), end.clone(), end],
+    );
+    text_input.send("commit", vec![]);
+    local.roundtrip(run);
+}
+
+/// An input method of zwp-input-method-v2 on the seat of its client (OS9 item 3): it pre-edits
+/// and commits text into the focused text input, and takes the keyboard. Every request is
+/// answered once the compositor has handled it.
+struct SimulatedInputMethod {
+    method: Raw,
+    /// Its keyboard grabs, each one's keys recorded.
+    grabs: Vec<Raw>,
+}
+
+impl SimulatedInputMethod {
+    fn new(local: &mut Local, run: &mut Running) -> Self {
+        let seat: wl_seat::WlSeat = local.bind(1);
+        let manager = Raw::bind(local, &ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE);
+        let method = manager.create(
+            "get_input_method",
+            vec![
+                Argument::Object(seat.id()),
+                Argument::NewId(ObjectId::null()),
+            ],
+            &ZWP_INPUT_METHOD_V2_INTERFACE,
+        );
+        local.roundtrip(run);
+        Self {
+            method,
+            grabs: Vec::new(),
+        }
+    }
+
+    /// Commits the pending state, with the serial the protocol asks: the `done` events received.
+    fn commit(&self, local: &mut Local, run: &mut Running) {
+        let done = self
+            .method
+            .names_after(0)
+            .iter()
+            .filter(|name| **name == "done")
+            .count();
+        let serial = u32::try_from(done).expect("serial");
+        self.method.send("commit", vec![Argument::Uint(serial)]);
+        local.roundtrip(run);
+    }
+
+    /// Shows `preedit` with the cursor at its end.
+    fn preedit(&self, local: &mut Local, run: &mut Running, preedit: &str) {
+        let end = Argument::Int(i32::try_from(preedit.len()).expect("short text"));
+        self.method
+            .send("set_preedit_string", vec![text(preedit), end.clone(), end]);
+        self.commit(local, run);
+    }
+
+    /// Commits `string`, which replaces the preedit.
+    fn commit_string(&self, local: &mut Local, run: &mut Running, string: &str) {
+        self.method.send("commit_string", vec![text(string)]);
+        self.commit(local, run);
+    }
+
+    /// Takes the keyboard: the keys go to the grab, not to the focused surface.
+    fn grab_keyboard(&mut self, local: &mut Local, run: &mut Running) {
+        self.grabs.push(self.method.create(
+            "grab_keyboard",
+            vec![Argument::NewId(ObjectId::null())],
+            &ZWP_INPUT_METHOD_KEYBOARD_GRAB_V2_INTERFACE,
+        ));
+        local.roundtrip(run);
+    }
+
+    /// A popup surface of its own, on a new `wl_surface` of `local`.
+    fn popup(&self, local: &mut Local, run: &mut Running) -> (wl_surface::WlSurface, Raw) {
+        let compositor: wl_compositor::WlCompositor = local.bind(4);
+        let surface = compositor.create_surface(&local.queue.handle(), ());
+        let popup = self.method.create(
+            "get_input_popup_surface",
+            vec![
+                Argument::NewId(ObjectId::null()),
+                Argument::Object(surface.id()),
+            ],
+            &ZWP_INPUT_POPUP_SURFACE_V2_INTERFACE,
+        );
+        local.roundtrip(run);
+        (surface, popup)
+    }
+
+    /// The evdev codes of the keys pressed on its grabs.
+    fn keys(&self) -> Vec<u32> {
+        self.grabs
+            .iter()
+            .flat_map(Raw::events)
+            .filter_map(|(name, args)| match (name, &args[..]) {
+                ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// A focused window and an input method, granted the protocol, with the window's text input
+/// enabled and the input method activated for it.
+fn composing(run: &mut Running) -> (Local, Raw, Local, SimulatedInputMethod) {
+    let (mut window, _) = focused_window(run);
+    let mut ime = Local::connect(run, None);
+    let method = SimulatedInputMethod::new(&mut ime, run);
+    let field = text_input(&mut window, run);
+    enable(&field, &mut window, run, "caf");
+    ime.pump(run, "the input method is activated", |_, _| {
+        method.method.names_after(0).contains(&"activate")
+    });
+    (window, field, ime, method)
+}
+
+/// OS9 item 3: an input method's preedit and commit reach the focused window's text input, in
+/// order, each followed by `done`.
+#[test]
+fn os9_a_committed_string_reaches_the_focused_text_input() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let before = field.events().len();
+    method.preedit(&mut ime, &mut run, "e");
+    method.commit_string(&mut ime, &mut run, "è");
+    window.pump(&mut run, "the text input is done twice", |_, _| {
+        field
+            .names_after(before)
+            .iter()
+            .filter(|name| **name == "done")
+            .count()
+            == 2
+    });
+    let received: Vec<(&str, Vec<String>)> = field.events().into_iter().skip(before).collect();
+    let args = |list: &[&str]| list.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    assert_eq!(received[0], ("preedit_string", args(&["e", "1", "1"])));
+    assert_eq!(received[1].0, "done");
+    assert_eq!(received[2], ("commit_string", args(&["è"])));
+    assert_eq!(received[3].0, "done");
+    assert_eq!(received.len(), 4, "{received:?}");
+    run.stop();
+}
+
+/// Register row 8: the lock ends the input method's keyboard grab, and a grab it takes while
+/// locked does not hold; the keys typed on the lock reach the lock surface only, and after
+/// unlock the grab is not restored on its own.
+#[test]
+fn os9_the_input_method_grab_is_dropped_while_locked() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
+    window.roundtrip(&mut run);
+    assert!(window.client.keys.is_empty(), "the window saw no key");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    let grabbed = |state: &State| state.seat.get_keyboard().is_some_and(|k| k.is_grabbed());
+    assert!(!grabbed(&run.state), "the lock ends the grab");
+    chord(&mut run.state, &[31]);
+    locker.pump(&mut run, "the lock surface takes the key", |client, _| {
+        client.keys == [31]
+    });
+    // A grab asked for while locked does not hold either.
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[32]);
+    locker.pump(
+        &mut run,
+        "the lock surface takes the next key",
+        |client, _| client.keys == [31, 32],
+    );
+    ime.roundtrip(&mut run);
+    assert_eq!(
+        method.keys(),
+        [30],
+        "the input method saw no key typed on the lock"
+    );
+
+    lock.unlock_and_destroy();
+    let id = window.id.clone().expect("a client the fixture inserted");
+    locker.pump(
+        &mut run,
+        "unlocking gives the window the keyboard",
+        |_, state| {
+            state
+                .seat
+                .get_keyboard()
+                .and_then(|k| k.current_focus())
+                .and_then(|s| s.client())
+                .map(|c| c.id())
+                == Some(id.clone())
+        },
+    );
+    assert!(!grabbed(&run.state), "unlocking restores no grab");
+    chord(&mut run.state, &[33]);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [33]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [30], "nor did it after unlock");
+    run.stop();
+}
+
+/// While locked the input method is cut off from the lock surface: it is not activated for the
+/// lock's text field nor told its text, and what it commits reaches no text input.
+#[test]
+fn os9_the_input_method_never_reaches_the_lock_surface() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let told = method.method.events().len();
+    let password = text_input(&mut locker, &mut run);
+    enable(&password, &mut locker, &mut run, "secret");
+    method.preedit(&mut ime, &mut run, "e");
+    method.commit_string(&mut ime, &mut run, "è");
+    locker.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    let seen = method.method.events().into_iter().skip(told);
+    for (name, args) in seen {
+        assert!(
+            !matches!(name, "activate" | "surrounding_text" | "content_type"),
+            "the input method was sent {name} {args:?} while locked"
+        );
+    }
+    let reached = |raw: &Raw| {
+        raw.events()
+            .into_iter()
+            .filter(|(name, _)| matches!(*name, "preedit_string" | "commit_string" | "done"))
+            .count()
+    };
+    assert_eq!(reached(&password), 0, "{:?}", password.events());
+    assert_eq!(reached(&field), 0, "{:?}", field.events());
+    run.stop();
+}
+
+/// Open question 13 of the OS9 plan: a client inside a security context cannot be an input
+/// method; only a client the allow-list grants it, the bar here, sees the manager.
+#[test]
+fn os9_a_sandboxed_client_cannot_be_an_input_method() {
+    let mut run = Running::start(None);
+    let manager = ZWP_INPUT_METHOD_MANAGER_V2_INTERFACE.name;
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(manager), "inside a security context");
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(manager), "the bar, granted it");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(manager), "a client with no line");
+    run.stop();
+}
+
+/// Open question 13 of the OS9 plan: text input is offered to every client outside a security
+/// context, and to none inside one.
+#[test]
+fn os9_a_sandboxed_client_has_no_text_input() {
+    let mut run = Running::start(None);
+    let manager = ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE.name;
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(manager), "inside a security context");
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(manager), "the bar");
+    let control_center = Local::control_center(&mut run);
+    assert!(control_center.sees(manager), "the control center");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(other.sees(manager), "a client with no line");
+    run.stop();
+}
+
+/// Presses the key of evdev code `code`, or releases it, as the backend hands it to the seat.
+fn key(state: &mut State, code: u32, pressed: bool) {
+    use smithay::backend::input::{InputTime, KeyState};
+    let key_state = if pressed {
+        KeyState::Pressed
+    } else {
+        KeyState::Released
+    };
+    state.key_input(
+        (code + 8).into(),
+        key_state,
+        InputTime::now(),
+        KeyboardSource::Physical,
+    );
+}
+
+/// Left Shift, as evdev numbers it.
+const SHIFT: u32 = 42;
+
+/// A keyboard grab asked for while locked is sent nothing, not even the keymap, the repeat
+/// rate or the modifiers held on the lock: a modifier pressed while the password is typed
+/// stays unknown to the input method, when pressed and when released.
+#[test]
+fn os9_a_grab_taken_while_locked_is_sent_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let (mut locker, _lock) = lock_session(&mut run);
+    key(&mut run.state, SHIFT, true);
+    method.grab_keyboard(&mut ime, &mut run);
+    locker.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "with Shift held on the lock");
+    key(&mut run.state, SHIFT, false);
+    chord(&mut run.state, &[30]);
+    locker.pump(&mut run, "the lock surface takes the keys", |client, _| {
+        client.keys == [SHIFT, 30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "after Shift is released");
+    run.stop();
+}
+
+/// After unlock a grab taken while locked stays inert, and the input method takes the keyboard
+/// with a new grab, which is sent the keymap, the repeat rate and the modifiers, then the keys.
+#[test]
+fn os9_a_grab_taken_while_locked_stays_inert_after_unlock() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "unlocking ends the lock", |_, state| {
+        state.lock.is_none()
+    });
+    chord(&mut run.state, &[30]);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.grabs[0].events(), [], "the grab taken while locked");
+
+    method.grab_keyboard(&mut ime, &mut run);
+    let names = |raw: &Raw| raw.names_after(0);
+    assert_eq!(
+        names(&method.grabs[1]),
+        ["repeat_info", "keymap", "modifiers"]
+    );
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the new grab takes the key", |_, _| {
+        method.keys() == [31]
+    });
+    assert_eq!(method.grabs[0].events(), [], "the old grab still");
+    run.stop();
+}
+
+/// An input method releasing its keyboard grab ends that grab only: a popup's grab that
+/// replaced it goes on.
+#[test]
+fn os9_an_input_method_releasing_its_grab_leaves_a_popup_grab() {
+    let mut run = Running::start(None);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let grabbed = |state: &State| state.seat.get_keyboard().is_some_and(|k| k.is_grabbed());
+    assert!(grabbed(&run.state), "the input method holds the keyboard");
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    let exclusive = focus(&run.state).expect("the exclusive surface");
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, shell_id.clone()));
+    steps
+        .send(Step::Popup(serial.into()))
+        .expect("the shell's client");
+    run.until("the popup's grab takes the keyboard", |state| {
+        focus(state).is_some_and(|surface| {
+            surface != exclusive && state.popups.find_popup(&surface).is_some()
+        })
+    });
+    let popup = focus(&run.state);
+
+    method.grabs[0].send("release", vec![]);
+    ime.roundtrip(&mut run);
+    assert!(grabbed(&run.state), "the popup's grab goes on");
+    assert_eq!(focus(&run.state), popup, "the popup keeps the keyboard");
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    run.stop();
+}
+
+/// One input method per seat: a second is told it is unavailable, as the only event it gets,
+/// and the first goes on serving the focused text input.
+#[test]
+fn os9_a_second_input_method_is_unavailable() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let mut other = Local::connect(&mut run, None);
+    let second = SimulatedInputMethod::new(&mut other, &mut run);
+    assert_eq!(second.method.names_after(0), ["unavailable"]);
+    let before = field.events().len();
+    method.commit_string(&mut ime, &mut run, "è");
+    window.pump(&mut run, "the text input is done", |_, _| {
+        field.names_after(before).contains(&"done")
+    });
+    assert_eq!(field.names_after(before), ["commit_string", "done"]);
+    run.stop();
+}
+
+/// A cursor rectangle of negative size, which a client may send, is taken as an empty one: the
+/// input method's popup is told the cursor's place with a size of zero.
+#[test]
+fn os9_a_negative_cursor_rectangle_is_empty() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let at = |n: i32| Argument::Int(n);
+    field.send("set_cursor_rectangle", vec![at(5), at(6), at(-1), at(-1)]);
+    field.send("commit", vec![]);
+    window.roundtrip(&mut run);
+    let (_surface, popup) = method.popup(&mut ime, &mut run);
+    let rectangle = ["5", "6", "0", "0"].map(String::from).to_vec();
+    assert_eq!(popup.events(), [("text_input_rectangle", rectangle)]);
+    run.stop();
+}
+
+/// An input method's popup whose `wl_surface` is destroyed is drawn no more, though the popup
+/// object lives on.
+#[test]
+fn os9_a_popup_of_a_destroyed_surface_is_not_drawn() {
+    let mut run = Running::start(None);
+    let (_window, _field, mut ime, method) = composing(&mut run);
+    let (surface, _popup) = method.popup(&mut ime, &mut run);
+    let drawn = |state: &State| {
+        let output = state.space.outputs().next().expect("an output");
+        state.composing.popups_on(&state.space, output).len()
+    };
+    assert_eq!(drawn(&run.state), 1, "the popup is drawn");
+    surface.destroy();
+    ime.roundtrip(&mut run);
+    assert_eq!(drawn(&run.state), 0, "its surface is gone");
+    run.stop();
+}
+
+/// A client has at most 32 text inputs: its 33rd is inert, never entered, and its requests are
+/// ignored, so enabling it activates no input method.
+#[test]
+fn os9_a_client_s_33rd_text_input_is_inert() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let seat: wl_seat::WlSeat = window.bind(1);
+    let manager = Raw::bind(&mut window, &ZWP_TEXT_INPUT_MANAGER_V3_INTERFACE);
+    let fields: Vec<Raw> = (0..33)
+        .map(|_| {
+            manager.create(
+                "get_text_input",
+                vec![
+                    Argument::NewId(ObjectId::null()),
+                    Argument::Object(seat.id()),
+                ],
+                &ZWP_TEXT_INPUT_V3_INTERFACE,
+            )
+        })
+        .collect();
+    window.roundtrip(&mut run);
+    for field in &fields[..32] {
+        assert_eq!(field.names_after(0), ["enter"]);
+    }
+    assert_eq!(fields[32].names_after(0), [] as [&str; 0], "the 33rd");
+    enable(&fields[32], &mut window, &mut run, "caf");
+    ime.roundtrip(&mut run);
+    assert!(
+        !method.method.names_after(0).contains(&"activate"),
+        "{:?}",
+        method.method.events()
+    );
+    assert_eq!(fields[32].names_after(0), [] as [&str; 0], "the 33rd");
+    run.stop();
+}
+
+/// What an input method sends waits for its `commit`, and a commit that names an old serial
+/// applies none of it: a string sent for one window, then committed after the keyboard moved to
+/// another client's field, reaches neither field, nor does a later commit carry it over.
+#[test]
+fn os9_a_stale_input_method_commit_reaches_no_field() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let dones = |raw: &Raw| raw.names_after(0).iter().filter(|n| **n == "done").count();
+    let stale = u32::try_from(dones(&method.method)).expect("serial");
+    window.roundtrip(&mut run);
+    let before = field.events().len();
+    method.method.send("commit_string", vec![text("x")]);
+    ime.roundtrip(&mut run);
+
+    let (mut other, _) = focused_window(&mut run);
+    let other_field = text_input(&mut other, &mut run);
+    enable(&other_field, &mut other, &mut run, "caf");
+    ime.pump(&mut run, "the input method serves the other field", |_, _| {
+        method
+            .method
+            .names_after(0)
+            .iter()
+            .filter(|name| **name == "activate")
+            .count()
+            == 2
+    });
+    let other_before = other_field.events().len();
+    method.method.send("commit", vec![Argument::Uint(stale)]);
+    ime.roundtrip(&mut run);
+    other.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(field.names_after(before), ["leave"], "the first field");
+    assert_eq!(
+        other_field.names_after(other_before),
+        [] as [&str; 0],
+        "the other field"
+    );
+
+    method.commit(&mut ime, &mut run);
+    other.pump(&mut run, "the other field is done", |_, _| {
+        other_field.names_after(other_before).contains(&"done")
+    });
+    assert_eq!(other_field.names_after(other_before), ["done"]);
+    run.stop();
+}
+
+/// A key the input method forwards through its own virtual keyboard while it holds the
+/// keyboard goes to the focused window, not back to its grab.
+#[test]
+fn os9_a_key_the_input_method_forwards_reaches_the_window() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [] as [u32; 0], "the grab saw no key");
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the grab takes a hardware key", |_, _| {
+        method.keys() == [31]
+    });
+    run.stop();
+}
+
+/// Modifiers a virtual keyboard sets with no key after them reach the input method's grab, as
+/// they reach the focused window: Shift let go is let go for the input method too.
+#[test]
+fn os9_a_virtual_modifier_change_reaches_the_input_method_grab() {
+    const SHIFT: u32 = 1;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let mut local = Local::connect(&mut run, None);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
+    let grab = &method.grabs[0];
+    for (depressed, change) in [(SHIFT, "Shift held"), (0, "Shift let go")] {
+        let before = grab.events().len();
+        typist.modifiers(&mut local, &mut run, depressed);
+        ime.roundtrip(&mut run);
+        let sent: Vec<_> = grab.events().into_iter().skip(before).collect();
+        assert!(
+            matches!(&sent[..], [("modifiers", args)] if args[1] == depressed.to_string()),
+            "{change}: {sent:?}"
+        );
+    }
+
+    // Left Shift forwarded by the input method itself goes past its grab, which is sent the
+    // modifiers it changed and not the key. A first key gives the seat its keymap back.
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.chord(&mut ime, &mut run, &[31]);
+    window.pump(&mut run, "the window takes S", |client, _| {
+        client.keys.ends_with(&[31])
+    });
+    ime.roundtrip(&mut run);
+    let before = grab.events().len();
+    forwarder.key(&mut ime, &mut run, 42, true);
+    window.pump(&mut run, "the window takes Shift", |client, _| {
+        client.keys.ends_with(&[42])
+    });
+    let sent = grab.names_after(before);
+    assert!(sent.contains(&"modifiers") && !sent.contains(&"key"), "{sent:?}");
+    run.stop();
+}
+
+/// A key the input method forwards past its grab is read with the seat's modifiers: a hardware
+/// Shift held, which only the grab was sent, reaches the window with the key.
+#[test]
+fn os9_a_forwarded_key_carries_the_modifiers_the_grab_saw() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    key(&mut run.state, SHIFT, true);
+    ime.pump(&mut run, "the grab takes Shift", |_, _| {
+        method.keys() == [SHIFT]
+    });
+    forwarder.key(&mut ime, &mut run, 30, true);
+    window.pump(&mut run, "the window takes the key", |client, _| {
+        client.keys == [30]
+    });
+    assert_eq!(
+        window.client.modifiers.last(),
+        Some(&1),
+        "the key is read with Shift"
+    );
+    run.stop();
+}
+
+/// The input method's edits are kept only while it serves a text input: a string it sends while
+/// none is active is dropped, and a field enabled afterwards never receives it.
+#[test]
+fn os9_an_edit_sent_with_no_active_field_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let field = text_input(&mut window, &mut run);
+    method.method.send("commit_string", vec![text("x")]);
+    ime.roundtrip(&mut run);
+    enable(&field, &mut window, &mut run, "caf");
+    ime.pump(&mut run, "the input method is activated", |_, _| {
+        method.method.names_after(0).contains(&"activate")
+    });
+    window.roundtrip(&mut run);
+    let before = field.events().len();
+    method.commit(&mut ime, &mut run);
+    window.pump(&mut run, "the field is done", |_, _| {
+        field.names_after(before).contains(&"done")
+    });
+    assert_eq!(field.names_after(before), ["done"]);
+    run.stop();
+}
+
+/// A key the input method forwards past its grab is let go past it too, to the window that saw
+/// the press: when the input method's client goes with the key held, after another input method
+/// has taken the keyboard, the release reaches the window and not the new grab.
+#[test]
+fn os9_a_forwarded_key_held_when_the_input_method_goes_is_let_go_for_the_window() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    window.pump(&mut run, "the window takes the press", |client, _| {
+        client.keys == [30]
+    });
+    method.method.send("destroy", vec![]);
+    ime.roundtrip(&mut run);
+    let mut next = Local::connect(&mut run, None);
+    let mut successor = SimulatedInputMethod::new(&mut next, &mut run);
+    successor.grab_keyboard(&mut next, &mut run);
+
+    drop(forwarder);
+    drop(method);
+    drop(ime);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    next.roundtrip(&mut run);
+    let sent = successor.grabs[0].names_after(0);
+    assert!(!sent.contains(&"key"), "the new grab: {sent:?}");
+    assert!(
+        run.state.past_grab_keys.is_empty(),
+        "no key is held past the grab"
+    );
+    run.stop();
+}
+
+/// A key the input method forwards past its grab is kept once, however often it is pressed: a
+/// press repeated before the release leaves nothing held past the grab after it.
+#[test]
+fn os9_a_forwarded_key_pressed_twice_is_let_go_once() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    assert!(
+        run.state.past_grab_keys.values().all(|held| held.is_empty()),
+        "no key is held past the grab"
+    );
+    // A code past evdev's last key, KEY_MAX, is not kept.
+    forwarder.key(&mut ime, &mut run, 0x300, true);
+    assert!(
+        run.state.past_grab_keys.values().all(|held| held.is_empty()),
+        "a code past KEY_MAX is not kept"
+    );
+    run.stop();
+}
+
+/// A key pressed twice past one input method's grab, then let go, leaves nothing behind that
+/// would send a later release past another's: the next input method's grab, which sees the
+/// first one's keyboard press the key, sees it let go too.
+#[test]
+fn os9_a_key_let_go_past_the_grab_is_not_let_go_past_the_next_one() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let forwarder = VirtualKeyboard::new(&mut ime, &mut run, None);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    window.pump(&mut run, "the window sees the release", |client, _| {
+        client.released == [30]
+    });
+    method.method.send("destroy", vec![]);
+    ime.roundtrip(&mut run);
+    let mut next = Local::connect(&mut run, None);
+    let mut successor = SimulatedInputMethod::new(&mut next, &mut run);
+    successor.grab_keyboard(&mut next, &mut run);
+
+    forwarder.key(&mut ime, &mut run, 30, true);
+    forwarder.key(&mut ime, &mut run, 30, false);
+    next.roundtrip(&mut run);
+    let states: Vec<String> = successor.grabs[0]
+        .events()
+        .into_iter()
+        .filter_map(|(name, args)| match (name, &args[..]) {
+            ("key", [_, _, key, state]) if key == "30" => Some(state.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(states, ["1", "0"], "the next grab sees the press and the release");
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.released, [30], "the window sees no second release");
     run.stop();
 }

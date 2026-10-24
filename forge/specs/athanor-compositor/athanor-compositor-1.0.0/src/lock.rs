@@ -1,6 +1,8 @@
 //! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
-//! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
+//! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
+//! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
+//! output has been drawn locked.
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
@@ -75,6 +77,7 @@ impl SessionLockHandler for State {
             locker: Some(locker),
             surfaces: Vec::new(),
         });
+        self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
         self.lock_taken();

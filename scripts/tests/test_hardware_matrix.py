@@ -233,6 +233,14 @@ class Checks(unittest.TestCase):
                 server.listen(1)
                 self.assertEqual(matrix.peer_pid(path), os.getpid())
 
+    def test_the_bluetooth_evidence_masks_the_controller_address(self):
+        out = "Controller 5C:80:B6:BA:69:DA (public)\n\tPowered: yes\n"
+        with mock.patch.object(matrix, "run", return_value=(0, out, "")):
+            self.assertEqual(
+                matrix.bluetooth(),
+                ("pass", "Controller XX:XX:XX:XX:XX:XX (public), powered yes"),
+            )
+
     def test_an_exception_is_recorded_as_a_failure(self):
         gone = mock.Mock(side_effect=FileNotFoundError("gone"))
         with mock.patch.dict(matrix.CHECKS, {"kernel": gone}):

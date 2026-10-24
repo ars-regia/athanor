@@ -7,6 +7,7 @@
 //! at all while idle.
 
 use crate::capture::Target;
+use crate::cursor::{pointer_elements, Cursor, PointerElement};
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -25,7 +26,6 @@ use smithay::backend::libinput::{
     LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis,
 };
 use smithay::backend::renderer::damage::Error as DamageError;
-use smithay::backend::renderer::element::solid::{SolidColorBuffer, SolidColorRenderElement};
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
@@ -66,11 +66,6 @@ use std::time::{Duration, Instant};
 // ponytail: no 10-bit formats; anvil tries them first when a monitor needs deep colour.
 const COLOR_FORMATS: [Fourcc; 2] = [Fourcc::Abgr8888, Fourcc::Argb8888];
 
-/// The pointer, a square of this side in logical pixels.
-// ponytail: a solid square, not the cursor surface a client sets or a themed cursor; the
-// console session (C1 task 9) draws those.
-const POINTER_SIDE: i32 = 12;
-
 type Gpus = GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>;
 type Allocator = GbmAllocator<DrmDeviceFd>;
 type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
@@ -81,7 +76,7 @@ smithay::backend::renderer::element::render_elements! {
     Element<=GlesRenderer>;
     Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
-    Pointer=SolidColorRenderElement,
+    Pointer=PointerElement<GlesRenderer>,
 }
 
 /// The session, the GPU and its monitors, and the input devices.
@@ -101,7 +96,17 @@ pub struct Drm {
     failed: HashMap<connector::Handle, (connector::Info, crtc::Handle)>,
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
-    pointer: SolidColorBuffer,
+    cursor: Cursor,
+}
+
+/// What a scheduled draw of an output is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wake {
+    /// A draw that is due.
+    Draw,
+    /// The frame callbacks of a surface shown on no output, at `FRAME_THROTTLE`: a request to
+    /// draw does not wait for it.
+    Throttle,
 }
 
 /// A monitor: the output and what draws it.
@@ -112,8 +117,8 @@ struct Head {
     queued: bool,
     /// Whether its frames showed the lock.
     lock: LockFrames,
-    /// The next draw, when one is scheduled.
-    timer: Option<RegistrationToken>,
+    /// The next draw, when one is scheduled, and what it is for.
+    timer: Option<(RegistrationToken, Wake)>,
     /// Whether its draws keep failing, so that the log says so once (`FailureLog`).
     failing: FailureLog,
     /// Something may have changed since the last draw (`request_redraw`).
@@ -215,7 +220,7 @@ pub fn start(
         outputs: HashMap::new(),
         failed: HashMap::new(),
         nvidia,
-        pointer: SolidColorBuffer::new((POINTER_SIDE, POINTER_SIDE), [0.9, 0.9, 0.9, 1.0]),
+        cursor: Cursor::from_env(),
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
@@ -717,7 +722,7 @@ impl State {
         let Some(head) = drm.outputs.remove(&crtc) else {
             return;
         };
-        if let Some(timer) = head.timer {
+        if let Some((timer, _)) = head.timer {
             self.loop_handle.remove(timer);
         }
         let output = head.output.clone();
@@ -745,13 +750,18 @@ impl State {
 
     /// Draws the output of `crtc` after `delay`, in place of a draw scheduled before.
     fn schedule(&mut self, crtc: crtc::Handle, delay: Duration) {
+        self.wake(crtc, delay, Wake::Draw);
+    }
+
+    /// Schedules the next draw of `crtc` after `delay`, in place of the one scheduled.
+    fn wake(&mut self, crtc: crtc::Handle, delay: Duration, wake: Wake) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
-        if let Some(timer) = head.timer.take() {
+        if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
         let timer = Timer::from_duration(delay);
@@ -764,7 +774,7 @@ impl State {
             state.draw(crtc);
             TimeoutAction::Drop
         }) {
-            Ok(timer) => head.timer = Some(timer),
+            Ok(timer) => head.timer = Some((timer, wake)),
             Err(error) => {
                 tracing::warn!(error = %error.error, "the next frame could not be scheduled")
             }
@@ -823,9 +833,14 @@ impl State {
         }
         head.not_before = Some(Instant::now() + period.mul_f64(0.6));
         let next = next_draw(head, Instant::now());
+        let idle = next.is_none() && head.timer.is_none();
         self.confirm_lock();
         if let Some(delay) = next {
             self.schedule(crtc, delay);
+        } else if idle && self.frame_callbacks_waiting() {
+            // Only a draw sends a frame callback, and a request may have taken the throttle's
+            // place: with no draw to follow, a surface still waiting is drawn for at the throttle.
+            self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
         }
         // `locked` and the presentation feedback are sent here, and nothing else flushes an idle
         // seat.
@@ -863,6 +878,7 @@ impl State {
     /// surface still waits for a frame callback another frame's throttle sends, it draws again
     /// after that throttle.
     fn draw(&mut self, crtc: crtc::Handle) {
+        let status = self.shown_cursor();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -883,15 +899,17 @@ impl State {
         let pointer = self
             .seat
             .get_pointer()
-            .map(|pointer| pointer.current_location());
+            .map(|pointer| (pointer.current_location(), status));
+        let popups = self.composing.popups_on(&self.space, &output);
         let drawn = match gles(&mut drm.gpus, &drm.render_node) {
             Ok(renderer) => render(
                 renderer,
                 head,
                 &self.space,
                 self.lock.as_ref(),
-                pointer,
-                &drm.pointer,
+                &popups,
+                pointer.as_ref(),
+                &mut drm.cursor,
             ),
             Err(error) => {
                 tracing::error!(%error, "no renderer: the output draws again in a second");
@@ -947,7 +965,7 @@ impl State {
             if redraw {
                 self.schedule(crtc, period);
             } else if waiting {
-                self.schedule(crtc, FRAME_THROTTLE);
+                self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
             }
         }
         self.serve_captures();
@@ -1080,19 +1098,28 @@ fn lock_shown<'a>(heads: impl IntoIterator<Item = &'a LockFrames>) -> bool {
 
 /// The delay of the next draw of `head`, when it must be scheduled at `now`: when something
 /// may have changed and neither a queued frame (whose VBlank draws the next) nor a scheduled
-/// draw will draw it.
+/// draw will draw it. A wake-up at the throttle does not count: it would hold the request back
+/// for up to a second.
 fn next_draw(head: &Head, now: Instant) -> Option<Duration> {
     pacing(
         head.wanted,
-        head.queued || head.timer.is_some(),
+        head.queued,
+        head.timer.map(|(_, wake)| wake),
         head.not_before,
         now,
     )
 }
 
-/// `next_draw`, of what it reads of the head: `wanted`, a frame queued or a draw scheduled
-/// (`busy`), and the earliest next draw.
-fn pacing(wanted: bool, busy: bool, not_before: Option<Instant>, now: Instant) -> Option<Duration> {
+/// `next_draw`, of what it reads of the head: `wanted`, a frame queued, what the scheduled
+/// draw is for, and the earliest next draw.
+fn pacing(
+    wanted: bool,
+    queued: bool,
+    scheduled: Option<Wake>,
+    not_before: Option<Instant>,
+    now: Instant,
+) -> Option<Duration> {
+    let busy = queued || scheduled == Some(Wake::Draw);
     (wanted && !busy).then(|| {
         not_before.map_or(Duration::ZERO, |not_before| {
             not_before.saturating_duration_since(now)
@@ -1101,31 +1128,31 @@ fn pacing(wanted: bool, busy: bool, not_before: Option<Instant>, now: Instant) -
 }
 
 /// Draws the frame of `head`: the space, or the lock surface while `lock` holds the session,
-/// with the pointer on top when it is over the output. Whether there was anything new to
+/// with the pointer on top, the cursor its status names, when it is over the output. Whether there was anything new to
 /// show, and the elements' states.
 fn render(
     renderer: &mut GlesRenderer,
     head: &mut Head,
     space: &smithay::desktop::Space<Window>,
     lock: Option<&crate::lock::Lock>,
-    pointer: Option<smithay::utils::Point<f64, smithay::utils::Logical>>,
-    pointer_buffer: &SolidColorBuffer,
+    popups: &[crate::input_method::PlacedPopup],
+    pointer: Option<&(
+        smithay::utils::Point<f64, smithay::utils::Logical>,
+        smithay::input::pointer::CursorImageStatus,
+    )>,
+    cursor: &mut Cursor,
 ) -> Result<(bool, RenderElementStates), SwapBuffersError> {
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
     let mut elements: Vec<Element> = Vec::new();
-    if let (Some(location), Some(area)) = (pointer, space.output_geometry(output)) {
-        if area.to_f64().contains(location) {
-            let at = (location - area.loc.to_f64())
-                .to_physical(scale)
-                .to_i32_round();
-            elements.push(Element::Pointer(SolidColorRenderElement::from_buffer(
-                pointer_buffer,
-                at,
-                scale,
-                1.0,
-                Kind::Cursor,
-            )));
+    if let (Some((location, status)), Some(area)) = (pointer, space.output_geometry(output)) {
+        if area.to_f64().contains(*location) {
+            let at = *location - area.loc.to_f64();
+            elements.extend(
+                pointer_elements(renderer, cursor, status, at, scale)
+                    .into_iter()
+                    .map(Element::Pointer),
+            );
         }
     }
     match lock {
@@ -1146,6 +1173,20 @@ fn render(
             }
         }
         None => {
+            for (surface, at) in popups {
+                elements.extend(
+                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                        renderer,
+                        surface,
+                        at.to_physical_precise_round(scale),
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                    .into_iter()
+                    .map(Element::Surface),
+                );
+            }
             let space_elements = space_render_elements(renderer, [space], output, 1.0)
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
             elements.extend(space_elements.into_iter().map(Element::Space));
@@ -1187,31 +1228,46 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 
 #[cfg(test)]
 mod tests {
-    use super::{lock_shown, pacing, FailureLog, LockFrames};
+    use super::{lock_shown, pacing, FailureLog, LockFrames, Wake};
     use std::time::{Duration, Instant};
 
     #[test]
     fn an_output_draws_only_when_asked_and_at_most_once_a_refresh() {
         let now = Instant::now();
         let period = Duration::from_millis(16);
-        assert_eq!(pacing(false, false, None, now), None, "idle: no draw");
+        assert_eq!(pacing(false, false, None, None, now), None, "idle: no draw");
         assert_eq!(
-            pacing(true, false, None, now),
+            pacing(true, false, None, None, now),
             Some(Duration::ZERO),
             "asked: at once"
         );
         assert_eq!(
-            pacing(true, true, None, now),
+            pacing(true, true, None, None, now),
             None,
-            "a queued frame or a scheduled draw draws it"
+            "a queued frame draws it"
         );
         assert_eq!(
-            pacing(true, false, Some(now + period), now),
+            pacing(true, false, Some(Wake::Draw), None, now),
+            None,
+            "a scheduled draw draws it"
+        );
+        assert_eq!(
+            pacing(true, false, Some(Wake::Throttle), None, now),
+            Some(Duration::ZERO),
+            "a wake-up at the throttle does not hold a request back"
+        );
+        assert_eq!(
+            pacing(false, false, Some(Wake::Throttle), None, now),
+            None,
+            "nor draws unasked"
+        );
+        assert_eq!(
+            pacing(true, false, None, Some(now + period), now),
             Some(period),
             "not before a refresh after the last draw"
         );
         assert_eq!(
-            pacing(true, false, Some(now), now + period),
+            pacing(true, false, None, Some(now), now + period),
             Some(Duration::ZERO),
             "at once when that refresh is over"
         );
