@@ -4,7 +4,8 @@
 # by hand and recorded with `matrix.py set`. `machines` names the machines the row is checked on.
 # The development VM is not a column: the VM acceptance (scripts/devvm/acceptance) covers the
 # KVM guest at every release. Hardware the maintainer does not have is an [[untested]] entry,
-# recorded as untested, never as passed (D17).
+# recorded as untested, never as passed (D17). An entry with `since` counts from that release
+# on: a release recorded before it keeps the matrix it was recorded against.
 
 machines = ["desktop", "laptop"]
 
@@ -100,6 +101,7 @@ area = "shell"
 title = "The session runs on the own compositor (athanor-compositor)"
 check = "compositor"
 machines = ["desktop", "laptop"]
+since = "0.10"
 
 # --- by hand ---------------------------------------------------------------------------------
 
@@ -108,7 +110,7 @@ id = "outputs-hotplug"
 area = "graphics"
 title = "An output unplugged and plugged back"
 steps = "Unplug an external output and plug it back: the bar and the dock return to it in place within five seconds."
-machines = ["laptop"]
+machines = ["desktop", "laptop"]
 
 [[row]]
 id = "output-scale"
@@ -129,7 +131,7 @@ id = "suspend-resume"
 area = "power"
 title = "Suspend and resume"
 steps = "Run `systemctl suspend` and wake the machine with the keyboard: the session, every output and the GPU come back, and `matrix.py run` afterwards finds no failed unit."
-machines = ["laptop"]
+machines = ["desktop", "laptop"]
 
 [[row]]
 id = "frame-times"
@@ -137,6 +139,7 @@ area = "graphics"
 title = "Frame times after one hour on the own compositor"
 steps = "After one hour of ordinary use, read the compositor's frame summary lines in its log and record the mean and the maximum frame time."
 machines = ["desktop", "laptop"]
+since = "0.10"
 
 [[row]]
 id = "explicit-sync"
@@ -144,6 +147,7 @@ area = "graphics"
 title = "Explicit sync on the NVIDIA desktop"
 steps = "Read the compositor's log: record its `explicit sync:` line."
 machines = ["desktop"]
+since = "0.10"
 
 [[row]]
 id = "audio"
@@ -273,26 +277,19 @@ title = "The laptop's GeForce MX150 (Pascal)"
 reason = "Pascal needs the -nvidia-legacy image, whose evidence moved to 1.1 (release-1.0.md section 4.3)"
 
 [[untested]]
-id = "suspend-resume-desktop"
-title = "Suspend and resume on the NVIDIA desktop"
-reason = "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)"
-
-[[untested]]
-id = "outputs-hotplug-desktop"
-title = "An output unplugged and plugged back on the NVIDIA desktop"
-reason = "the NVIDIA desktop's GPU falls off the bus on resume and on an output unplug (#604)"
-
-[[untested]]
 id = "vrr"
 title = "Variable refresh rate"
 reason = "no machine has a variable refresh rate output"
+since = "0.10"
 
 [[untested]]
 id = "tablet"
 title = "A graphics tablet"
 reason = "no machine has a graphics tablet"
+since = "0.10"
 
 [[untested]]
 id = "touch"
 title = "A touch screen"
 reason = "no machine has a touch screen"
+since = "0.10"

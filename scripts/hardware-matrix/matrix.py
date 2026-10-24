@@ -303,14 +303,34 @@ def load(path=HERE / "rows.toml"):
         return tomllib.load(f)
 
 
+def version(release):
+    return tuple(int(part) for part in release.split("."))
+
+
+def scoped(matrix, release):
+    """The matrix of RELEASE: the entries without `since`, or whose `since` it has reached."""
+
+    def counts(entry):
+        return version(release) >= version(entry.get("since", "0.0"))
+
+    return {
+        **matrix,
+        "row": [r for r in matrix.get("row", []) if counts(r)],
+        "untested": [u for u in matrix.get("untested", []) if counts(u)],
+    }
+
+
 def validate(matrix):
     """Problems of rows.toml: duplicate ids, unknown checks or machines, a row both automatic
-    and by hand or neither, an untested entry without a reason."""
+    and by hand or neither, an untested entry without a reason, a `since` that is not a
+    release."""
     problems, seen = [], set()
     for entry in matrix.get("row", []) + matrix.get("untested", []):
         if entry["id"] in seen:
             problems.append(f"{entry['id']}: duplicate id")
         seen.add(entry["id"])
+        if "since" in entry and not RELEASE.fullmatch(str(entry["since"])):
+            problems.append(f"{entry['id']}: since must be a release such as 0.10")
     for row in matrix.get("row", []):
         if ("check" in row) == ("steps" in row):
             problems.append(f"{row['id']}: needs exactly one of check and steps")
@@ -454,6 +474,7 @@ def main(argv):
         sys.exit("rows.toml: " + "; ".join(problems))
     if len(argv) < 2 or not RELEASE.fullmatch(argv[1]):
         sys.exit(__doc__)
+    matrix = scoped(matrix, argv[1])
     if len(argv) >= 3 and argv[2] not in matrix["machines"]:
         sys.exit(f"MACHINE must be one of {', '.join(matrix['machines'])}")
     if len(argv) == 3 and argv[0] == "run":

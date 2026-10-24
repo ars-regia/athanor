@@ -65,6 +65,28 @@ class Rows(unittest.TestCase):
         self.assertIn("needs a reason", problems)
 
 
+    def test_since_must_be_a_release(self):
+        bad = {**SMALL, "untested": [{**SMALL["untested"][0], "since": "next"}]}
+        self.assertIn("since", " ".join(matrix.validate(bad)))
+
+    def test_an_entry_counts_from_its_since(self):
+        later = {
+            **SMALL,
+            "row": SMALL["row"] + [{**SMALL["row"][1], "id": "c", "since": "0.10"}],
+            "untested": [{**SMALL["untested"][0], "since": "0.10"}],
+        }
+        for release, ids in (("0.9", ["a", "b"]), ("0.10", ["a", "b", "c"]), ("1.0", ["a", "b", "c"])):
+            with self.subTest(release=release):
+                scoped = matrix.scoped(later, release)
+                self.assertEqual([r["id"] for r in scoped["row"]], ids)
+                self.assertEqual(len(scoped["untested"]), 0 if release == "0.9" else 1)
+
+    def test_the_committed_0_9_matrix_stays_complete(self):
+        # Rows added after a release must not reopen the matrix recorded for it.
+        with open(os.devnull, "w") as null, contextlib.redirect_stdout(null):
+            self.assertEqual(matrix.main(["summary", "0.9"]), 0)
+
+
 class Summary(unittest.TestCase):
     def test_complete_when_every_row_has_a_result(self):
         text, complete = matrix.summary(
