@@ -570,6 +570,12 @@ ci_stage_seed() { # UD18 2
   pass "UD18 2: $from seeded in /home, /var and $ETC_PROBE"
 }
 
+# What the check saw, for a failure of UD18 3: the guest and its journal are gone after the run.
+check_seen() { # check_seen JOURNAL
+  printf "update '%s', last_error '%s' from '%s'; the check's journal:\n%s" \
+    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "$1"
+}
+
 ci_stage_upgrade() { # UD18 3 and 4
   local since journal class settled=downloaded ttys
   disk_floor
@@ -581,9 +587,10 @@ ci_stage_upgrade() { # UD18 3 and 4
   check_now
   # Required since ADR-0130: without the attestation the client only warns and goes on.
   journal=$(journal_since "$since" athanor-update-check.service)
-  [[ $journal != *"release attestation could not be fetched"* ]] || die "FAIL  UD18 3: the candidate's attestation was not read"
+  [[ $journal != *"release attestation could not be fetched"* ]] ||
+    die "FAIL  UD18 3: the candidate's attestation was not read: $(check_seen "$journal")"
   guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
-    die "FAIL  UD18 3: the candidate's attestation was not stored"
+    die "FAIL  UD18 3: the candidate's attestation was not stored: $(check_seen "$journal")"
   # A stored attestation is not a verified one: the client reads an attestation no key of its
   # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
   # verified on the runner, read from the lines of check.rs, as the state does not keep it.
@@ -592,7 +599,7 @@ ci_stage_upgrade() { # UD18 3 and 4
   elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
     class=security
   else
-    die "FAIL  UD18 3: the check's journal names no class for the candidate"
+    die "FAIL  UD18 3: the check's journal names no class for the candidate: $(check_seen "$journal")"
   fi
   [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
     die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
