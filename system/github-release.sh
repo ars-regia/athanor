@@ -240,6 +240,37 @@ differs() {
     echo "$fields"
 }
 
+# check_assets TAG RELEASE NAME REVISION: every asset of the Release besides NAME is the signed
+# evidence bundle of a promotion of this tag and REVISION: named evidence-<run>-<run>.tar, regular
+# files and directories only, passing verify-dir (the identity and issuer pins of
+# evidence-bundle.sh) without the job token, its release.json naming TAG and its promotion.json
+# REVISION. This proves a planned promotion, not an approved one, so the Release itself must still
+# be this promotion's approved one exactly; it keeps a forged asset off a genuine Release.
+check_assets() {
+    local tag=$1 release=$2 name=$3 revision=$4 fix others asset into tree types named at
+    fix=$(recovery "$tag")
+    others=$(jq -r --arg name "$name" '.assets[].name | select(. != $name)' <<< "$release")
+    [[ -n $others ]] || return 0
+    while read -r asset; do
+        [[ $asset =~ ^evidence-[0-9]+-[0-9]+\.tar$ ]] ||
+            die "the Release at $tag holds $asset, which is not the evidence bundle of a promotion. Recovery, by the maintainer only: $fix"
+        into=$(mktemp -d -p "$work")
+        tree=$(mktemp -d -p "$work")
+        gh_must release download "$tag" -R "$repo" -p "$asset" -D "$into" > /dev/null
+        # Regular files and directories only: a link in an untrusted tar could write outside it.
+        types=$(tar -tvf "$into/$asset" | cut -c1 | sort -u | tr -d '\n')
+        [[ $types =~ ^[-d]+$ ]] || die "$asset on the Release at $tag holds links or special files. Recovery, by the maintainer only: $fix"
+        tar -xf "$into/$asset" -C "$tree" --no-same-owner --no-same-permissions
+        # Without the job token, as the step that verifies this promotion's own bundle.
+        env -u GH_TOKEN -u GITHUB_TOKEN bash "$root/system/evidence-bundle.sh" verify-dir "$tree" "$tree" >&2 ||
+            die "$asset on the Release at $tag does not verify as a signed evidence bundle of a promotion. Recovery, by the maintainer only: $fix"
+        named=$(jq -r --arg tag "$tag" '.tag == $tag or (.fallback.tag // "") == $tag' "$tree/release.json")
+        [[ $named == true ]] || die "$asset on the Release at $tag was planned for another tag. Recovery, by the maintainer only: $fix"
+        at=$(field .revision "$tree/promotion.json")
+        [[ $at == "$revision" ]] || die "$asset on the Release at $tag is the evidence of revision $at, not $revision. Recovery, by the maintainer only: $fix"
+    done <<< "$others"
+}
+
 # publish_state TAG TITLE LATEST NOTES ASSET SHA REVISION: the table of decision 7 of the plan.
 publish_state() {
     local tag=$1 title=$2 latest=$3 notes=$4 asset=$5 sha=$6 revision=$7 release name have='' draft kind fields
@@ -265,6 +296,7 @@ publish_state() {
     fields=$(differs "$release" "$tag" "$title" "$latest" "$want" "$revision")
     [[ -z $fields ]] ||
         die "the $kind Release at $tag is not the approved one ('$title' on $revision): $fields. Recovery, by the maintainer only: $recovery"
+    check_assets "$tag" "$release" "$name" "$revision"
     if jq -e --arg name "$name" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null; then have=$(asset_sha "$tag" "$name"); fi
     if [[ -z $have ]]; then
         gh_must release upload "$tag" "$asset" -R "$repo"
@@ -286,6 +318,7 @@ read_back() {
     want=$(body_sha < "$7")
     fields=$(differs "$release" "$1" "$5" "$6" "$want" "$4")
     [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
+    check_assets "$1" "$release" "$2" "$4"
     jq -e --arg name "$2" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null || die "the Release at $1 does not hold $2"
     have=$(asset_sha "$1" "$2")
     [[ $have == "$3" ]] || die "the Release at $1 holds $2 with SHA-256 $have, not this bundle's $3"

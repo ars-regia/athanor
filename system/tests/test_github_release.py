@@ -633,14 +633,31 @@ class Publish(GithubRelease):
         self.release("promoted-412", body="forged notes", assets={"evidence-412-8999.tar": self.blob(b"x")})
         self.refused(self.publish(bundle), "promoted-412", "body", f"gh release delete promoted-412 -R {REPO}")
         self.nothing_published()
+    def test_an_approved_release_with_an_extra_asset_that_does_not_verify_is_refused(self):
+        bundle = self.planned()
+        forged = self.bundle("forged")
+        (forged / "bundle.sha256").write_text("0" * 64 + "  promotion.json\n")
+        name = "evidence-412-8999.tar"
+        self.release("promoted-412", assets={name: self.blob(self.tar_of(forged))})
+        self.refused(self.publish(bundle), "promoted-412", name, "does not verify", f"gh release delete promoted-412 -R {REPO}")
+        self.nothing_published()
+
+    def test_an_approved_release_with_an_extra_asset_not_named_as_evidence_is_refused(self):
+        bundle = self.planned()
+        for name in ("evidence-412-oops.tar", "evidence-412-8999.tar.gz", "notes.txt"):
+            with self.subTest(name=name):
+                self.release("promoted-412", assets={name: self.blob(b"x")})
+                self.refused(self.publish(bundle), "promoted-412", name, f"gh release delete promoted-412 -R {REPO}")
+                self.nothing_published()
+
     def test_only_a_strictly_named_asset_is_another_builds_evidence(self):
         self.tag()
         bundle = self.planned()
         self.release("v0.9.0", title=TITLE, latest=True, assets={"evidence-411-x.tar": self.blob(b"x")})
-        r = self.publish(bundle)
-        self.assertEqual(r.returncode, 0, r.stderr)
+        # Not another build's evidence, so no fallback; not evidence at all, so refused.
+        self.refused(self.publish(bundle), "v0.9.0", "evidence-411-x.tar")
         self.assertNotIn("promoted-412", self.fx["releases"])
-        self.assertIn(ASSET, self.fx["releases"]["v0.9.0"]["assets"])
+        self.assertNotIn(ASSET, self.fx["releases"]["v0.9.0"]["assets"])
     def test_a_genuine_earlier_bundle_on_a_release_with_forged_notes_is_refused(self):
         self.first_promotion()
         bundle = self.planned()
