@@ -87,6 +87,38 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
+/// The client side of athanor-toplevel-state-v1, laid out as the client crate's `generated!`.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_toplevel {
+    use wayland_client;
+    use wayland_client::protocol::*;
+    use wayland_protocols::ext::foreign_toplevel_list::v1::client::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        use wayland_protocols::ext::foreign_toplevel_list::v1::client::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml"
+    );
+}
+
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 /// The left button's evdev code.
 const BTN_LEFT: u32 = 0x110;
@@ -888,7 +920,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
-    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2\n\
+    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1\n";
 
@@ -3605,6 +3637,23 @@ fn os9_the_workspace_list_is_privileged() {
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
     let other = Local::connect(&mut run, None);
     assert!(!other.sees(WORKSPACES), "a client with no line");
+    run.stop();
+}
+
+/// `athanor_toplevel_manager_v1` is privileged (OS4, OS5): the bar, granted it, sees it; the
+/// bar's identity inside a security context, and a client with no line, do not.
+#[test]
+fn the_toplevel_manager_is_privileged() {
+    const MANAGER: &str = "athanor_toplevel_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(MANAGER), "the bar, granted it");
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(MANAGER), "the bar inside a context");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(MANAGER), "a client with no line");
     run.stop();
 }
 

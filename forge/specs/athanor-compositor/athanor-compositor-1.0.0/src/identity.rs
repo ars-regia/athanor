@@ -36,10 +36,12 @@ pub enum Privilege {
     /// `zwp_input_method_manager_v2`: the seat's input method, which is told the focused text
     /// field's text, commits text into it and may take the keyboard.
     InputMethod,
+    /// `athanor_toplevel_manager_v1`: every window's state, and the shell's actions on it.
+    ToplevelState,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 11] = [
+    const ALL: [(Self, &'static str); 12] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -57,6 +59,7 @@ impl Privilege {
         (Self::VirtualKeyboard, "zwp_virtual_keyboard_manager_v1"),
         (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
         (Self::InputMethod, "zwp_input_method_manager_v2"),
+        (Self::ToplevelState, "athanor_toplevel_manager_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {

@@ -39,3 +39,4 @@ zwlr_output_manager_v1 privileged
 zwp_virtual_keyboard_manager_v1 privileged
 zwlr_virtual_pointer_manager_v1 privileged
 zwp_input_method_manager_v2 privileged
+athanor_toplevel_manager_v1 privileged

@@ -7,6 +7,7 @@ use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
+use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
@@ -186,6 +187,8 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
+    /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
+    pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
     pub output_management: OutputManagement,
 
@@ -268,6 +271,7 @@ impl State {
         let lock_state =
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
         crate::workspace::global(&dh);
+        crate::toplevel_state::global(&dh);
         crate::output_management::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
         VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
@@ -333,6 +337,7 @@ impl State {
             lock: None,
             idle_notifier_state,
             workspace_groups: Vec::new(),
+            toplevel_states: Vec::new(),
             output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),

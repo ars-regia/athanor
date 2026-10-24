@@ -95,7 +95,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
