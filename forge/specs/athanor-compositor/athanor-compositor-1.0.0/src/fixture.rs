@@ -72,6 +72,7 @@ use wayland_protocols::ext::workspace::v1::client::{
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
 };
+use wayland_protocols::xdg::activation::v1::client::{xdg_activation_token_v1, xdg_activation_v1};
 use wayland_protocols::wp::security_context::v1::client::{
     wp_security_context_manager_v1, wp_security_context_v1,
 };
@@ -225,6 +226,19 @@ struct Client {
     pointer_enter: Option<u32>,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
+    /// The events of every athanor_toplevel_state_v1 object, in order.
+    toplevel_states: Vec<(ObjectId, StateEvent)>,
+    /// The token of the last xdg_activation_v1 token done.
+    activation_token: Option<String>,
+}
+
+/// An event of an athanor_toplevel_state_v1 object.
+#[derive(Debug, PartialEq)]
+enum StateEvent {
+    State(u32),
+    Enter(ObjectId),
+    Leave(ObjectId),
+    Done,
 }
 
 /// A head of wlr-output-management as the client has seen it: its name, its last scale and its
@@ -405,6 +419,48 @@ delegate_noop!(Client: zwlr_output_configuration_head_v1::ZwlrOutputConfiguratio
 delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
 delegate_noop!(Client: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
 delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
+delegate_noop!(Client: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1);
+delegate_noop!(Client: xdg_activation_v1::XdgActivationV1);
+
+impl Dispatch<athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1,
+        event: athanor_toplevel::athanor_toplevel_state_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use athanor_toplevel::athanor_toplevel_state_v1::Event;
+        let event = match event {
+            Event::State {
+                state: WEnum::Value(state),
+            } => StateEvent::State(state.bits()),
+            Event::State {
+                state: WEnum::Unknown(state),
+            } => StateEvent::State(state),
+            Event::OutputEnter { output } => StateEvent::Enter(output.id()),
+            Event::OutputLeave { output } => StateEvent::Leave(output.id()),
+            Event::Done => StateEvent::Done,
+        };
+        client.toplevel_states.push((object.id(), event));
+    }
+}
+
+impl Dispatch<xdg_activation_token_v1::XdgActivationTokenV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        _: &xdg_activation_token_v1::XdgActivationTokenV1,
+        event: xdg_activation_token_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done { token } = event {
+            client.activation_token = Some(token);
+        }
+    }
+}
 
 impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
     fn event(
@@ -1033,6 +1089,20 @@ impl Running {
                 .dispatch(Some(Duration::from_millis(5)), &mut self.state)
                 .expect("dispatch");
         }
+    }
+
+    /// An xdg_activation_v1 token that `client` asks for with `serial`, done.
+    fn activation_token(&mut self, client: &mut Local, serial: u32) -> String {
+        let activation: xdg_activation_v1::XdgActivationV1 = client.bind(1);
+        let seat: wl_seat::WlSeat = client.bind(1);
+        let token = activation.get_activation_token(&client.queue.handle(), ());
+        token.set_serial(serial, &seat);
+        client.client.activation_token = None;
+        token.commit();
+        client.pump(self, "the token is done", |client, _| {
+            client.activation_token.is_some()
+        });
+        client.client.activation_token.take().expect("a token")
     }
 
     fn stop(self) {
@@ -3654,6 +3724,595 @@ fn the_toplevel_manager_is_privileged() {
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
     let other = Local::connect(&mut run, None);
     assert!(!other.sees(MANAGER), "a client with no line");
+    run.stop();
+}
+
+/// A window of a fixture client besides the one `Local::toplevel` maps: its surface, its xdg
+/// surface and its toplevel.
+struct Other {
+    surface: wl_surface::WlSurface,
+    xdg: xdg_surface::XdgSurface,
+    toplevel: xdg_toplevel::XdgToplevel,
+}
+
+impl Local {
+    /// Maps a `WIDTH`x`HEIGHT` window titled `title`; `place` decides its place and focus.
+    fn another(&mut self, run: &mut Running, title: &str) -> Other {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let shm: wl_shm::WlShm = self.bind(1);
+        let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
+        let qh = self.queue.handle();
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg.get_toplevel(&qh, ());
+        toplevel.set_title(title.into());
+        self.client.configure = None;
+        surface.commit();
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+        self.client.configure = None;
+        Other {
+            surface,
+            xdg,
+            toplevel,
+        }
+    }
+
+    /// The compositor's window of this client's `surface`, mapped or minimised.
+    fn server_window(
+        &self,
+        run: &Running,
+        surface: &wl_surface::WlSurface,
+    ) -> smithay::desktop::Window {
+        let id = self.id.clone().expect("an id");
+        let protocol_id = surface.id().protocol_id();
+        run.state
+            .space
+            .elements()
+            .chain(run.state.minimised.iter().map(|(window, _)| window))
+            .find(|window| {
+                owned_by(window, &id)
+                    && window
+                        .toplevel()
+                        .is_some_and(|t| t.wl_surface().id().protocol_id() == protocol_id)
+            })
+            .expect("the window")
+            .clone()
+    }
+
+    /// The foreign toplevel handle of the window titled `title`, once it is listed.
+    fn handle(
+        &mut self,
+        run: &mut Running,
+        title: &str,
+    ) -> ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1 {
+        self.pump(run, "the window is listed", |client, _| {
+            client.listed.iter().any(|l| l.done && l.title == title)
+        });
+        self.client
+            .listed
+            .iter()
+            .find(|l| l.title == title)
+            .map(|l| l.handle.clone())
+            .expect("the handle")
+    }
+
+    /// This client's `wl_output` of output `index`, bound now.
+    fn output(&self, index: usize) -> wl_output::WlOutput {
+        let (name, version) = self
+            .client
+            .globals
+            .iter()
+            .filter(|(_, interface, _)| interface == "wl_output")
+            .nth(index)
+            .map(|(name, _, version)| (*name, *version))
+            .expect("the output's global");
+        self.registry
+            .bind(name, version.min(4), &self.queue.handle(), ())
+    }
+
+    /// The events of `object` until its next `done`, which they end with; taken.
+    fn state_events(
+        &mut self,
+        run: &mut Running,
+        object: &athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1,
+    ) -> Vec<StateEvent> {
+        let id = object.id();
+        self.pump(run, "the state object's done", |client, _| {
+            client
+                .toplevel_states
+                .iter()
+                .any(|(of, event)| *of == id && *event == StateEvent::Done)
+        });
+        let events = &mut self.client.toplevel_states;
+        let end = events
+            .iter()
+            .position(|(of, event)| *of == id && *event == StateEvent::Done)
+            .expect("a done");
+        let mut taken = Vec::new();
+        let mut kept = Vec::new();
+        for (index, (of, event)) in events.drain(..).enumerate() {
+            if of == id && index <= end {
+                taken.push(event);
+            } else {
+                kept.push((of, event));
+            }
+        }
+        *events = kept;
+        taken
+    }
+
+    /// Runs the compositor and the client for `frames` frames of the headless outputs.
+    fn frames(&mut self, run: &mut Running, frames: u32) {
+        let until = Instant::now() + Duration::from_millis(u64::from(frames) * 1000 / 60 + 1);
+        self.pump(run, "the frames", |_, _| Instant::now() > until);
+    }
+}
+
+/// The surface that has the keyboard.
+fn keyboard_focus(run: &Running) -> Option<WlSurface> {
+    run.state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.current_focus())
+}
+
+/// The toplevel surface of `window`.
+fn surface_of(window: &smithay::desktop::Window) -> WlSurface {
+    window
+        .toplevel()
+        .expect("a toplevel")
+        .wl_surface()
+        .clone()
+}
+
+/// A window minimised leaves the space and the keyboard to the window under it; it keeps
+/// committing, and its new title reaches the foreign toplevel list; a token restores it where it
+/// was, on top, with the keyboard (doc_own_stack.md OS5).
+#[test]
+fn a_window_is_minimised_and_restored() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    local.toplevel(&mut run);
+    let (first_surface, _) = local.window.clone().expect("the first window");
+    let first = local.server_window(&run, &first_surface);
+    let second = local.another(&mut run, "second");
+    let window = local.server_window(&run, &second.surface);
+    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "the second is focused");
+    let at = run.state.space.element_location(&window).expect("mapped");
+
+    second.toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert!(
+        !run.state.space.elements().any(|kept| *kept == window),
+        "it leaves the space"
+    );
+    assert_eq!(run.state.minimised.len(), 1);
+    assert_eq!(keyboard_focus(&run), Some(surface_of(&first)), "the first has the keyboard");
+
+    second.toplevel.set_title("second, renamed".into());
+    second.surface.commit();
+    local.handle(&mut run, "second, renamed");
+
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut local, serial.into());
+    let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
+    activation.activate(token, &second.surface);
+    local.roundtrip(&mut run);
+    assert!(run.state.minimised.is_empty(), "restored");
+    assert_eq!(run.state.space.element_location(&window), Some(at), "where it was");
+    assert_eq!(run.state.space.elements().last(), Some(&window), "on top");
+    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "with the keyboard");
+    run.stop();
+}
+
+/// A window that asks to be minimised before its first commit is refused: it gets its initial
+/// configure and maps (Review Focus 1).
+#[test]
+fn a_window_minimised_before_its_first_commit_maps() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let toplevel = xdg.get_toplevel(&qh, ());
+    // Nothing holds the keyboard: the window takes it when it is placed.
+    run.state.set_keyboard_focus(None);
+    toplevel.set_minimized();
+    surface.commit();
+    local.pump(&mut run, "the initial configure", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let window = local.server_window(&run, &surface);
+    assert!(run.state.space.elements().any(|kept| *kept == window), "mapped");
+    assert!(!window.geometry().is_empty(), "with its size");
+    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "with the keyboard");
+    assert!(run.state.minimised.is_empty());
+    run.stop();
+}
+
+/// A minimised window destroyed by its client, or whose client is gone, leaves `minimised` and
+/// the list says it is closed (Review Focus 4).
+#[test]
+fn a_minimised_window_can_be_destroyed() {
+    let closed = |title: &'static str| {
+        move |client: &Client, state: &State| {
+            state.minimised.is_empty()
+                && client.listed.iter().any(|l| l.title == title && l.closed)
+        }
+    };
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let gone = local.another(&mut run, "destroyed");
+    local.handle(&mut run, "destroyed");
+    gone.toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.minimised.len(), 1);
+    gone.toplevel.destroy();
+    gone.xdg.destroy();
+    gone.surface.destroy();
+    local.pump(&mut run, "the destroyed window is closed", closed("destroyed"));
+
+    let mut other = Local::connect(&mut run, None);
+    let dropped = other.another(&mut run, "disconnected");
+    local.handle(&mut run, "disconnected");
+    dropped.toplevel.set_minimized();
+    other.roundtrip(&mut run);
+    assert_eq!(run.state.minimised.len(), 1);
+    drop(dropped);
+    drop(other);
+    local.pump(&mut run, "the gone client's window is closed", closed("disconnected"));
+    run.stop();
+}
+
+/// A window minimised on an output that then goes is restored centred in the window area.
+#[test]
+fn a_window_restored_after_its_output_left_is_centred() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .expect("the second output")
+        .clone();
+    let area = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("the second output's area");
+    run.state
+        .space
+        .relocate_element(&window, area.loc + Point::from((10, 10)));
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.minimised.len(), 1);
+    run.state.remove_output(&second);
+    assert!(run.state.unminimise(&window), "restored");
+    let free = run.state.window_area().expect("an area");
+    assert_eq!(
+        run.state.space.element_location(&window),
+        Some(crate::state::centred(free, window.geometry()))
+    );
+    run.stop();
+}
+
+/// A maximised window minimised keeps committing; restored after a bar's zone changed the area,
+/// it is configured to the new area and takes it at the commit that answers (Review Focus 2).
+#[test]
+fn a_maximised_window_restored_fits_the_area() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.minimised.len(), 1);
+    // The configure that deactivates it, answered while it is minimised.
+    local.redraw(&mut run);
+    assert_eq!(run.state.minimised.len(), 1, "a commit does not map it");
+
+    let mut shell = Local::connect(&mut run, None);
+    let _bar = shell.bar(&mut run, 30);
+    let fitted = run.state.window_area().expect("an area");
+    assert!(run.state.unminimise(&window), "restored");
+    let (width, height, states) = local.redraw(&mut run);
+    assert!(states.contains(&(xdg_toplevel::State::Maximized as u32)));
+    assert_eq!((width, height), (fitted.size.w, fitted.size.h));
+    assert_eq!(location_of(&run, &id), fitted.loc);
+    assert_eq!(window.geometry().size, fitted.size);
+    run.stop();
+}
+
+/// A minimised window that commits a null buffer, as an app hiding into the tray does, is not
+/// restored by a token: it stays minimised and the keyboard stays where it is.
+#[test]
+fn a_hidden_minimised_window_stays_minimised() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let (surface, _) = local.window.clone().expect("the window");
+    let window = local.server_window(&run, &surface);
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    surface.attach(None, 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut other, serial.into());
+    let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
+    activation.activate(token, &surface);
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.minimised.iter().any(|(kept, _)| *kept == window),
+        "still minimised"
+    );
+    assert!(!run.state.space.elements().any(|kept| *kept == window));
+    assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
+    run.stop();
+}
+
+/// While the session is locked, a token restores no minimised window, and the keyboard stays
+/// on the lock surface (L14).
+#[test]
+fn a_token_restores_nothing_while_locked() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let (surface, _) = local.window.clone().expect("the window");
+    let window = local.server_window(&run, &surface);
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut other, serial.into());
+    let (locker, _lock) = lock_session(&mut run);
+    let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
+    activation.activate(token, &surface);
+    local.roundtrip(&mut run);
+    assert!(
+        run.state.minimised.iter().any(|(kept, _)| *kept == window),
+        "still minimised"
+    );
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
+    run.stop();
+}
+
+/// A state object is sent the window's state and outputs at once, then each change: another
+/// window focused, its own focus back, and the minimise, after which its client's configure no
+/// longer says activated.
+#[test]
+fn the_state_follows_focus_and_minimise() {
+    use athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let manager: AthanorToplevelManagerV1 = local.bind(1);
+    let output = local.output(0);
+    let probe = local.another(&mut run, "probe");
+    let window = local.server_window(&run, &probe.surface);
+    run.state.focus(&window);
+    let handle = local.handle(&mut run, "probe");
+    let object = manager.get_toplevel_state(&handle, &local.queue.handle(), ());
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [
+            StateEvent::State(1),
+            StateEvent::Enter(output.id()),
+            StateEvent::Done
+        ]
+    );
+
+    let (fixture, _) = fixture_window(&run);
+    run.state.focus(&fixture);
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [StateEvent::State(0), StateEvent::Done]
+    );
+    run.state.focus(&window);
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [StateEvent::State(1), StateEvent::Done]
+    );
+
+    local.client.toplevel_configure = None;
+    probe.toplevel.set_minimized();
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [
+            StateEvent::State(2),
+            StateEvent::Leave(output.id()),
+            StateEvent::Done
+        ]
+    );
+    let (_, _, states) = local
+        .client
+        .toplevel_configure
+        .clone()
+        .expect("a configure");
+    assert!(
+        !states.contains(&(xdg_toplevel::State::Activated as u32)),
+        "no longer activated"
+    );
+    run.stop();
+}
+
+/// A window moved between outputs: the state object says it left one and entered the other,
+/// once; a client that binds `wl_output` after making its state object is sent the output then
+/// (Review Focus 5).
+#[test]
+fn outputs_follow_the_window() {
+    use athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let manager: AthanorToplevelManagerV1 = local.bind(1);
+    let (first, second) = (local.output(0), local.output(1));
+    let probe = local.another(&mut run, "probe");
+    let window = local.server_window(&run, &probe.surface);
+    run.state.focus(&window);
+    let handle = local.handle(&mut run, "probe");
+    let object = manager.get_toplevel_state(&handle, &local.queue.handle(), ());
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [
+            StateEvent::State(1),
+            StateEvent::Enter(first.id()),
+            StateEvent::Done
+        ]
+    );
+
+    let area = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .and_then(|output| run.state.space.output_geometry(output))
+        .expect("the second output's area");
+    run.state
+        .move_window(&window, area.loc + Point::from((10, 10)));
+    assert_eq!(
+        local.state_events(&mut run, &object),
+        [
+            StateEvent::Leave(first.id()),
+            StateEvent::Enter(second.id()),
+            StateEvent::Done
+        ]
+    );
+    local.frames(&mut run, 3);
+    assert!(local.client.toplevel_states.is_empty(), "nothing more");
+
+    let mut late = Local::connect(&mut run, None);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = late.bind(1);
+    let manager: AthanorToplevelManagerV1 = late.bind(1);
+    let handle = late.handle(&mut run, "probe");
+    let object = manager.get_toplevel_state(&handle, &late.queue.handle(), ());
+    assert_eq!(
+        late.state_events(&mut run, &object),
+        [StateEvent::State(1), StateEvent::Done]
+    );
+    let bound = late.output(1);
+    assert_eq!(
+        late.state_events(&mut run, &object),
+        [StateEvent::Enter(bound.id()), StateEvent::Done]
+    );
+    run.stop();
+}
+
+/// A click with no motion after a minimise misses the hidden window, which no longer has the
+/// pointer; restored, it has the pointer and the click again.
+#[test]
+fn a_click_after_minimise_misses_the_hidden_window() {
+    let click = |run: &mut Running| {
+        run.state
+            .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+        release(run);
+    };
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let at = location_of(&run, &id).to_f64() + Point::from((f64::from(WIDTH) / 2.0, 10.0));
+    run.state.pointer_to(at, InputTime::now());
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    local.client.button = None;
+    click(&mut run);
+    local.roundtrip(&mut run);
+    assert!(local.client.button.is_none(), "the hidden window misses the click");
+
+    assert!(run.state.unminimise(&window), "restored");
+    click(&mut run);
+    local.pump(&mut run, "the restored window has the click", |client, _| {
+        client.button.is_some()
+    });
+    run.stop();
+}
+
+/// A window captured while it is minimised is still drawn, at its size, from its last buffer.
+#[test]
+fn a_minimised_window_keeps_its_thumbnail() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let sources: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1 =
+        local.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = local.bind(1);
+    let thumb = local.another(&mut run, "thumbnail");
+    let handle = local.handle(&mut run, "thumbnail");
+    let qh = local.queue.handle();
+    let source = sources.create_source(&handle, &qh, ());
+    let session = copy.create_session(&source, Options::empty(), &qh, ());
+    local.pump(&mut run, "the session has its constraints", |client, _| {
+        client.capture_size.is_some()
+    });
+    thumb.toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.minimised.len(), 1);
+
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0x55; 4]);
+    let frame = session.create_frame(&qh, ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, WIDTH, HEIGHT);
+    frame.capture();
+    local.pump(&mut run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(local.client.captured, Some(Ok(())), "the frame is ready");
+    assert_eq!(
+        local.client.capture_size,
+        Some((WIDTH as u32, HEIGHT as u32))
+    );
     run.stop();
 }
 
