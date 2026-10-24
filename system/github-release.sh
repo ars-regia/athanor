@@ -241,24 +241,27 @@ differs() {
 }
 
 # check_assets TAG RELEASE NAME REVISION: every asset of the Release besides NAME is the signed
-# evidence bundle of a promotion of this tag and REVISION: named evidence-<run>-<run>.tar, regular
-# files and directories only, passing verify-dir (the identity and issuer pins of
-# evidence-bundle.sh) without the job token, its release.json naming TAG and its promotion.json
-# REVISION. This proves a planned promotion, not an approved one, so the Release itself must still
-# be this promotion's approved one exactly; it keeps a forged asset off a genuine Release.
+# evidence bundle of a promotion of this tag and REVISION: named evidence-<run>-<promotion run>.tar,
+# regular files and directories only, passing verify-dir (the identity and issuer pins of
+# evidence-bundle.sh) without the job token, its release.json naming TAG, and its promotion.json
+# REVISION, the build run and the promotion run of its name. This proves a planned promotion, not
+# an approved one, so the Release itself must still be this promotion's approved one exactly; it
+# keeps a forged asset off a genuine Release, and off the v0.x fallback decision.
 check_assets() {
-    local tag=$1 release=$2 name=$3 revision=$4 fix others asset into tree types named at
+    local tag=$1 release=$2 name=$3 revision=$4 fix others asset into tree types named at build promotion
     fix=$(recovery "$tag")
     others=$(jq -r --arg name "$name" '.assets[].name | select(. != $name)' <<< "$release")
     [[ -n $others ]] || return 0
     while read -r asset; do
-        [[ $asset =~ ^evidence-[0-9]+-[0-9]+\.tar$ ]] ||
+        [[ $asset =~ ^evidence-([0-9]+)-([0-9]+)\.tar$ ]] ||
             die "the Release at $tag holds $asset, which is not the evidence bundle of a promotion. Recovery, by the maintainer only: $fix"
+        build=${BASH_REMATCH[1]} promotion=${BASH_REMATCH[2]}
         into=$(mktemp -d -p "$work")
         tree=$(mktemp -d -p "$work")
         gh_must release download "$tag" -R "$repo" -p "$asset" -D "$into" > /dev/null
         # Regular files and directories only: a link in an untrusted tar could write outside it.
-        types=$(tar -tvf "$into/$asset" | cut -c1 | sort -u | tr -d '\n')
+        types=$(tar -tvf "$into/$asset" | cut -c1 | sort -u | tr -d '\n') ||
+            die "$asset on the Release at $tag does not verify: it is not a tar archive. Recovery, by the maintainer only: $fix"
         [[ $types =~ ^[-d]+$ ]] || die "$asset on the Release at $tag holds links or special files. Recovery, by the maintainer only: $fix"
         tar -xf "$into/$asset" -C "$tree" --no-same-owner --no-same-permissions
         # Without the job token, as the step that verifies this promotion's own bundle.
@@ -268,6 +271,12 @@ check_assets() {
         [[ $named == true ]] || die "$asset on the Release at $tag was planned for another tag. Recovery, by the maintainer only: $fix"
         at=$(field .revision "$tree/promotion.json")
         [[ $at == "$revision" ]] || die "$asset on the Release at $tag is the evidence of revision $at, not $revision. Recovery, by the maintainer only: $fix"
+        # The name is bound to the contents: a genuine bundle renamed is refused.
+        at=$(field .run_id "$tree/promotion.json")
+        [[ $at == "$build" ]] || die "$asset on the Release at $tag is the evidence of build run $at, not $build. Recovery, by the maintainer only: $fix"
+        at=$(field .trigger "$tree/promotion.json")
+        [[ $at == "$GITHUB_SERVER_URL/$repo/actions/runs/$promotion" ]] ||
+            die "$asset on the Release at $tag was planned by $at, not by promotion run $promotion. Recovery, by the maintainer only: $fix"
     done <<< "$others"
 }
 
@@ -346,6 +355,9 @@ publish() {
         release=$(release_view "$tag")
         other=$(other_build "$release" "$run")
         if [[ -n $other ]]; then
+            # A name alone is no other build: every asset at the tag must be genuine before the
+            # bundle goes to the fallback, or the job fails closed.
+            check_assets "$tag" "$release" "evidence-$run-$GITHUB_RUN_ID.tar" "$revision"
             key=.fallback chosen=$tag
             tag=$(field .fallback.tag "$dir/release.json")
             echo "The Release of $chosen holds the evidence of build run $other: build run $run is published at $tag, the fallback the release approval covered (ADR-0131 decision 6)."

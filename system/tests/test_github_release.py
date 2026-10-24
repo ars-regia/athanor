@@ -154,6 +154,21 @@ class GithubRelease(Tool):
         record["trigger"] = trigger
         promotion.write_text(json.dumps(record, sort_keys=True, indent=2))
 
+    def other_build_asset(self, run="411", promotion_run="8000", tag="v0.9.0"):
+        """The blob of a genuine signed bundle of build RUN, planned by PROMOTION_RUN for TAG."""
+        path = self.dir / f"bundle-{run}-{promotion_run}"
+        if path.exists():
+            return self.blob(self.tar_of(path))
+        other = self.dir / f"artifacts-{run}-{promotion_run}"
+        shutil.copytree(self.artifacts, other)
+        record = json.loads((other / "promotion.json").read_text())
+        record.update(run_id=int(run), trigger=f"https://github.com/{REPO}/actions/runs/{promotion_run}")
+        (other / "promotion.json").write_text(json.dumps(record, sort_keys=True, indent=2))
+        (other / "release.json").write_text(json.dumps({"tag": tag, "title": TITLE, "latest": True, "notes_sha256": "0" * 64}))
+        r = subprocess.run(["bash", str(BUNDLE), "create", str(other), str(path)], capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return self.blob(self.tar_of(path))
+
     def tar_of(self, directory):
         return subprocess.run(["tar", "-cf", "-", "-C", str(directory), "."], capture_output=True, check=True).stdout
 
@@ -464,14 +479,11 @@ class Publish(GithubRelease):
     ):
         self.tag()
         bundle = self.planned()
-        self.release(
-            "v0.9.0", draft=True, title=TITLE, assets={OTHER_BUILD_ASSET: "0" * 64}
-        )
+        other = self.other_build_asset()
+        self.release("v0.9.0", draft=True, title=TITLE, assets={OTHER_BUILD_ASSET: other})
         r = self.publish(bundle)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(
-            self.fx["releases"]["v0.9.0"]["assets"], {OTHER_BUILD_ASSET: "0" * 64}
-        )
+        self.assertEqual(self.fx["releases"]["v0.9.0"]["assets"], {OTHER_BUILD_ASSET: other})
         self.assertTrue(self.fx["releases"]["v0.9.0"]["draft"])
         fallback = self.fx["releases"]["promoted-412"]
         self.assertEqual(
@@ -485,20 +497,35 @@ class Publish(GithubRelease):
     ):
         self.tag()
         bundle = self.planned()
-        self.release("v0.9.0", title=TITLE, assets={OTHER_BUILD_ASSET: "0" * 64})
+        other = self.other_build_asset()
+        self.release("v0.9.0", title=TITLE, assets={OTHER_BUILD_ASSET: other})
         r = self.publish(bundle)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(
-            self.fx["releases"]["v0.9.0"]["assets"], {OTHER_BUILD_ASSET: "0" * 64}
-        )
+        self.assertEqual(self.fx["releases"]["v0.9.0"]["assets"], {OTHER_BUILD_ASSET: other})
         self.assertIn(ASSET, self.fx["releases"]["promoted-412"]["assets"])
+
+    def test_a_fake_evidence_asset_on_the_version_release_is_refused_not_taken_as_another_build(self):
+        self.tag()
+        bundle = self.planned()
+        self.release("v0.9.0", title=TITLE, assets={OTHER_BUILD_ASSET: self.blob(b"not a bundle")})
+        self.refused(self.publish(bundle), "v0.9.0", OTHER_BUILD_ASSET, "does not verify", f"gh release delete v0.9.0 -R {REPO}")
+        self.assertNotIn("promoted-412", self.fx["releases"])
+        self.nothing_published()
+
+    def test_another_builds_bundle_under_another_name_is_refused(self):
+        self.tag()
+        bundle = self.planned()
+        for name, why in (("evidence-410-8000.tar", "build run 411, not 410"), ("evidence-411-8001.tar", "runs/8000")):
+            with self.subTest(name=name):
+                self.release("v0.9.0", title=TITLE, assets={name: self.other_build_asset()})
+                self.refused(self.publish(bundle), "v0.9.0", name, why)
+                self.assertNotIn("promoted-412", self.fx["releases"])
+                self.nothing_published()
 
     def test_the_fallback_is_named_in_the_summary_with_the_other_run(self):
         self.tag()
         bundle = self.planned()
-        self.release(
-            "v0.9.0", draft=True, title=TITLE, assets={OTHER_BUILD_ASSET: "0" * 64}
-        )
+        self.release("v0.9.0", draft=True, title=TITLE, assets={OTHER_BUILD_ASSET: self.other_build_asset()})
         r = self.publish(bundle)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertRegex(r.stdout, r"v0\.9\.0.*build run 411.*promoted-412")
@@ -526,7 +553,7 @@ class Publish(GithubRelease):
     def test_the_fallback_notes_name_the_promotion_tag(self):
         self.tag()
         bundle = self.planned()
-        self.release("v0.9.0", title=TITLE, assets={OTHER_BUILD_ASSET: "0" * 64})
+        self.release("v0.9.0", title=TITLE, assets={OTHER_BUILD_ASSET: self.other_build_asset()})
         r = self.publish(bundle)
         self.assertEqual(r.returncode, 0, r.stderr)
         body = self.fx["releases"]["promoted-412"]["body"]
@@ -649,6 +676,14 @@ class Publish(GithubRelease):
                 self.release("promoted-412", assets={name: self.blob(b"x")})
                 self.refused(self.publish(bundle), "promoted-412", name, f"gh release delete promoted-412 -R {REPO}")
                 self.nothing_published()
+
+    def test_an_earlier_bundle_under_another_promotion_run_name_is_refused(self):
+        self.first_promotion()
+        bundle = self.planned()
+        assets = self.fx["releases"]["promoted-412"]["assets"]
+        assets["evidence-412-8998.tar"] = assets.pop("evidence-412-8999.tar")
+        self.refused(self.publish(bundle), "promoted-412", "evidence-412-8998.tar", "runs/8999")
+        self.nothing_published()
 
     def test_only_a_strictly_named_asset_is_another_builds_evidence(self):
         self.tag()
