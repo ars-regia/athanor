@@ -184,6 +184,14 @@ at the end.
    adds its asset because its own approved notes are the same bytes (decision 5), not because
    an asset is there. *(Amended after the second security review.)*
 
+   Every asset besides this run's must still be genuine, or a fake one rides on a genuine
+   Release: named `evidence-<run>-<run>.tar`, regular files and directories only, passing
+   `evidence-bundle.sh verify-dir` (the identity and issuer pins, no token in its environment),
+   its `release.json` naming this tag (as `tag` or `fallback.tag`) and its `promotion.json` this
+   revision. Anything else stops the job, naming the asset and the recovery below. `publish` and
+   the read-back both check it; the `github-release` job puts the verify step's cosign on `PATH`
+   in a step without the token. *(Amended after the third security review.)*
+
    **Recovery from a stray Release** (destructive, the maintainer only; never for a draft that
    holds another run's `evidence-*` asset, which is a build's legitimate Release): `gh release delete <tag>
    -R ars-regia/athanor`, without `--cleanup-tag`, then re-run the `github-release` job with
