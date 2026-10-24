@@ -238,17 +238,20 @@ differs() {
         if .isPrerelease then "prerelease" else empty end] | join(", ")' <<< "$release")
     # The commit is bound through the tag, immutable under the rulesets: GitHub ignores and reports
     # the default branch as targetCommitish for a Release made on an existing tag. Only a draft
-    # whose tag does not exist yet gets its tag at targetCommitish when it is published.
+    # whose tag does not exist yet gets its tag at targetCommitish when it is published; a
+    # published Release always has its tag.
+    draft=$(jq -r '.isDraft' <<< "$release")
     at=$(tag_commit "$tag")
     if [[ -n $at && $at != "$revision" ]]; then
         fields+="${fields:+, }tag commit $at"
+    elif [[ -z $at && $draft != true ]]; then
+        fields+="${fields:+, }published with no tag"
     elif [[ -z $at ]]; then
         at=$(jq -r '.targetCommitish' <<< "$release")
         if [[ $at != "$revision" ]]; then fields+="${fields:+, }target $at, with no tag yet"; fi
     fi
     have=$(jq -j '.body // ""' <<< "$release" | body_sha)
     if [[ $have != "$want" ]]; then fields+="${fields:+, }body (SHA-256 $have, approved $want)"; fi
-    draft=$(jq -r '.isDraft' <<< "$release")
     if [[ $draft == false && $tag =~ $VERSION_TAG && $latest == true ]]; then
         current=$(gh_or_absent api "/repos/$repo/releases/latest")
         latest_tag=$(jq -r '.tag_name // empty' <<< "$current")

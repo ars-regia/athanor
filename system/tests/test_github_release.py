@@ -679,12 +679,14 @@ class Publish(GithubRelease):
         forged = self.bundle("forged")
         (forged / "bundle.sha256").write_text("0" * 64 + "  promotion.json\n")
         name = "evidence-412-8999.tar"
+        self.tag("promoted-412", annotated=False)
         self.release("promoted-412", assets={name: self.blob(self.tar_of(forged))})
         self.refused(self.publish(bundle), "promoted-412", name, "does not verify", f"gh release delete promoted-412 -R {REPO}")
         self.nothing_published()
 
     def test_an_approved_release_with_an_extra_asset_not_named_as_evidence_is_refused(self):
         bundle = self.planned()
+        self.tag("promoted-412", annotated=False)
         for name in ("evidence-412-oops.tar", "evidence-412-8999.tar.gz", "notes.txt"):
             with self.subTest(name=name):
                 self.release("promoted-412", assets={name: self.blob(b"x")})
@@ -747,6 +749,12 @@ class Publish(GithubRelease):
         bundle = self.planned()
         self.release("promoted-412", draft=True, target=OTHER)
         self.refused(self.publish(bundle), "promoted-412", "target")
+        self.nothing_published()
+
+    def test_a_published_release_without_its_tag_is_refused(self):
+        bundle = self.planned()
+        self.release("promoted-412", target=REVISION)
+        self.refused(self.publish(bundle), "promoted-412", "no tag")
         self.nothing_published()
 
     def test_a_version_release_created_on_its_tag_reads_back(self):
