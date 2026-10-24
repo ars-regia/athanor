@@ -168,15 +168,18 @@ at the end.
    | A `v*` Release, draft or published, holding an asset named `evidence-<run>-<run>.tar` of another build run, every asset at the tag passing the check of earlier assets below | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
    | Any other Release, draft or published, with or without earlier assets, that is not the approved Release exactly (a stray Release: anyone with `contents: write` can make one) | Stops, naming the Release, the fields that differ and the recovery below |
    | This asset with a different SHA-256 | Stops, naming the recovery below; it never uses `--clobber` |
-   | The tag already points at another commit | Stops |
+   | The tag already points at another commit, whatever the Release's `targetCommitish` | Stops |
 
-   The approved Release exactly: the approved title; the SHA-256 of its body, with carriage
-   returns removed and one final newline, equal to that of the approved notes; the approved
-   revision as its target commit; not a prerelease; and, for a published `v*` Release, the
-   `latest` flag as approved. The read-back after publishing checks the same, as well as the
-   asset. The release notes take no carriage return. *(Amended after the audit of the
+   The approved Release exactly: the approved tag and title; the SHA-256 of its body, with
+   carriage returns removed and one final newline, equal to that of the approved notes; its tag
+   peeling to the approved revision (for a draft whose tag does not exist yet, the revision as
+   its `targetCommitish`, where publishing creates the tag); not a prerelease; and, for a
+   published `v*` Release, the `latest` flag as approved. `targetCommitish` is not compared
+   otherwise: GitHub ignores it for a Release made on an existing tag and reports the default
+   branch name. The tags are immutable under the rulesets, and the read-back checks the same
+   again, `check_version_tag` for a `v*` tag included, as well as the asset. The release notes take no carriage return. *(Amended after the audit of the
    implementation, which published the signed asset on a pre-created Release with a forged
-   title or notes.)*
+   title or notes; the commit binding through the tag amended after the re-audit.)*
 
    An earlier promotion's asset vouches for nothing: anyone with `contents: write` can upload
    one, and even a bundle that verifies proves a planned promotion, not an approved one, since
