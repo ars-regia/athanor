@@ -28,8 +28,8 @@
       "result": "pass"
     },
     "dead-keys": {
-      "at": "2026-10-24T14:23:57+00:00",
-      "evidence": "2026-10-24 on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); the session gave the same on 2026-10-18",
+      "at": "2026-10-24T14:32:33+00:00",
+      "evidence": "2026-10-24 on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); in the session (gnome-text-editor) the same was typed on 43.20261017.393 on 2026-10-18; the maintainer confirms that \u00e0, \u00e9 and \u00e7 work in both",
       "how": "maintainer",
       "result": "pass"
     },
