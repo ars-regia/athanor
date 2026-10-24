@@ -40,5 +40,48 @@ class ProblemsTest(unittest.TestCase):
         self.assertIn("0 interactive", found[0])
 
 
+WINDOW = (0, 0, 400, 300)
+
+
+class ExtentsTest(unittest.TestCase):
+    def test_a_control_inside_its_window_passes(self):
+        nodes = NAMED[:1] + [("push button", "Edge", True, (350, 250, 50, 50))]
+        self.assertEqual(check.problems(nodes, 2, window=WINDOW), [])
+
+    def test_a_control_outside_its_window_is_a_problem(self):
+        found = check.problems([("push button", "Sign in", True, (390, 10, 50, 20))], 1, window=WINDOW)
+        self.assertEqual(len(found), 1)
+        self.assertIn("'Sign in'", found[0])
+        self.assertIn("outside", found[0])
+
+    def test_a_control_with_zero_extents_is_a_problem(self):
+        found = check.problems([("push button", "Sign in", True, (10, 10, 0, 20))], 1, window=WINDOW)
+        self.assertEqual(len(found), 1)
+        self.assertIn("no extents", found[0])
+
+    def test_extents_are_not_checked_without_a_window(self):
+        self.assertEqual(check.problems([("push button", "Sign in", True, (0, 0, 0, 0))], 1), [])
+
+    def test_a_hidden_control_has_no_extents_to_check(self):
+        self.assertEqual(check.problems([("push button", "Sign in", False, (0, 0, 0, 0))], 0, window=WINDOW), [])
+
+
+class PasswordTest(unittest.TestCase):
+    DOTS = "\u25cf\u25cf\u25cf\u25cf"
+
+    def test_only_the_invisible_character_passes(self):
+        nodes = [("password text", "Password for Ermete", [self.DOTS, "\u25cf"]), ("entry", "Search", ["anything"])]
+        self.assertEqual(check.password_problems(nodes), [])
+
+    def test_a_password_field_that_returns_its_text_is_a_problem(self):
+        found = check.password_problems([("password text", "Password for Ermete", ["hunter2", self.DOTS])])
+        self.assertEqual(len(found), 1)
+        self.assertIn("Password for Ermete", found[0])
+        self.assertNotIn("hunter2", found[0])
+
+    def test_an_empty_read_passes(self):
+        self.assertEqual(check.password_problems([("password text", "Password", [""])]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
