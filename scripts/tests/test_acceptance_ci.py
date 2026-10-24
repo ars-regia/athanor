@@ -31,7 +31,7 @@ GUEST = """g=@GUEST@
 case "$*" in
   *state.json*) cat "$g/state.json" ;;
   *journalctl*) cat "$g/journal" ;;
-  *"bootc status"*) printf '{"status":{"booted":{"image":{"imageDigest":"%s"}}}}' "$(cat "$g/booted")" ;;
+  *"bootc status"*) printf '{"status":{"booted":{"image":{"imageDigest":"%s","image":{"image":"ghcr.io/owner/athanor-system:stable","signature":"containerPolicy"}}}}}' "$(cat "$g/booted")" ;;
   *boot_id*) cat "$g/boot" ;;
   *"date +%s"*) date +%s ;;
   *ActiveState*) echo inactive ;;
@@ -143,6 +143,7 @@ class CiMode(unittest.TestCase):
             "update": update,
             "downloaded": {"digest": DIGEST},
             "last_error": "none",
+            "verified": {"reason": "signature"},
         }
         (g / "state.json").write_text(json.dumps(state))
         (g / "journal").write_text(journal + "\n")
@@ -233,6 +234,15 @@ class CiMode(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("the booted client could not be read: grep exited 2", result.stderr)
         self.assertNotIn("NOTE  UD18 3", result.stdout)
+
+    def test_check_requires_the_reader_in_the_candidates_client(self):
+        # The candidate is the :stable the next run upgrades from (#784).
+        for reader, expected in ((0, "PASS  UD18 5: the candidate's client reads release attestations"),
+                                 (1, "FAIL  UD18 5: the candidate's client has no attestation reader")):
+            with self.subTest(reader=reader):
+                self.guest("none", "", reader=reader)
+                result = self.run_sh("--ci", "check", env=self.ci)
+                self.assertIn(expected, result.stdout + result.stderr)
 
     def test_the_reader_is_found_by_the_media_type_of_the_client(self):
         marker = re.search(r"^ATTESTATION_READER=(\S+)$", RUN.read_text(), re.MULTILINE)
