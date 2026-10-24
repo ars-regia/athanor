@@ -66,8 +66,10 @@ class Rows(unittest.TestCase):
 
 
     def test_since_must_be_a_release(self):
-        bad = {**SMALL, "untested": [{**SMALL["untested"][0], "since": "next"}]}
-        self.assertIn("since", " ".join(matrix.validate(bad)))
+        for since in ("next", 0.1, 1):
+            with self.subTest(since=since):
+                bad = {**SMALL, "untested": [{**SMALL["untested"][0], "since": since}]}
+                self.assertIn("since", " ".join(matrix.validate(bad)))
 
     def test_an_entry_counts_from_its_since(self):
         later = {

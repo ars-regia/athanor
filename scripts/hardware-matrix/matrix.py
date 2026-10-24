@@ -329,7 +329,9 @@ def validate(matrix):
         if entry["id"] in seen:
             problems.append(f"{entry['id']}: duplicate id")
         seen.add(entry["id"])
-        if "since" in entry and not RELEASE.fullmatch(str(entry["since"])):
+        # An unquoted since = 0.10 is the float 0.1: only a string is a release.
+        since = entry.get("since", "0.0")
+        if not isinstance(since, str) or not RELEASE.fullmatch(since):
             problems.append(f"{entry['id']}: since must be a release such as 0.10")
     for row in matrix.get("row", []):
         if ("check" in row) == ("steps" in row):

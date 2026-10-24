@@ -101,7 +101,7 @@ area = "shell"
 title = "The session runs on the own compositor (athanor-compositor)"
 check = "compositor"
 machines = ["desktop", "laptop"]
-since = "0.10"
+since = "1.0"
 
 # --- by hand ---------------------------------------------------------------------------------
 
@@ -139,7 +139,7 @@ area = "graphics"
 title = "Frame times after one hour on the own compositor"
 steps = "After one hour of ordinary use, read the compositor's frame summary lines in its log and record the mean and the maximum frame time."
 machines = ["desktop", "laptop"]
-since = "0.10"
+since = "1.0"
 
 [[row]]
 id = "explicit-sync"
@@ -147,7 +147,7 @@ area = "graphics"
 title = "Explicit sync on the NVIDIA desktop"
 steps = "Read the compositor's log: record its `explicit sync:` line."
 machines = ["desktop"]
-since = "0.10"
+since = "1.0"
 
 [[row]]
 id = "audio"
