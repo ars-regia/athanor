@@ -3,11 +3,15 @@
 //! `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml`; the manager is a
 //! privileged global (OS4).
 
+use crate::handlers::shown;
 use crate::identity::Privilege;
 use crate::state::{granted, State};
 use protocol::athanor_toplevel_manager_v1::{self, AthanorToplevelManagerV1};
 use protocol::athanor_toplevel_state_v1::{self, AthanorToplevelStateV1};
+use smithay::desktop::Window;
+use smithay::input::Seat;
 use smithay::output::Output;
+use smithay::reexports::wayland_protocols::ext::foreign_toplevel_list::v1::server::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
@@ -118,15 +122,51 @@ impl Dispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
                     state.request_redraw();
                 }
             }
-            // ponytail: the actions arrive with the minimise and the manager's actions (plan
-            // tasks 2 and 3); until then they change nothing.
-            Request::Activate { .. }
-            | Request::SetMinimized { .. }
-            | Request::UnsetMinimized { .. }
-            | Request::Close { .. }
-            | Request::Destroy => {}
+            Request::Activate { toplevel, seat } => {
+                let Some(window) = acted_on(state, &toplevel) else {
+                    return;
+                };
+                if Seat::from_resource(&seat).as_ref() != Some(&state.seat) {
+                    return;
+                }
+                if state.is_minimised(&window) {
+                    state.unminimise(&window);
+                } else {
+                    state.focus(&window);
+                }
+            }
+            Request::SetMinimized { toplevel } => {
+                if let Some(window) = acted_on(state, &toplevel) {
+                    state.minimise(&window);
+                }
+            }
+            Request::UnsetMinimized { toplevel } => {
+                if let Some(window) = acted_on(state, &toplevel) {
+                    state.unminimise(&window);
+                }
+            }
+            Request::Close { toplevel } => {
+                if let Some(toplevel) = acted_on(state, &toplevel)
+                    .as_ref()
+                    .and_then(Window::toplevel)
+                {
+                    toplevel.send_close();
+                }
+            }
+            Request::Destroy => {}
         }
     }
+}
+
+/// The window `toplevel` names, when the shell may act on it: the session is not locked (L14),
+/// and the window is minimised or one the user can see. A closed handle names none.
+fn acted_on(state: &State, toplevel: &ExtForeignToplevelHandleV1) -> Option<Window> {
+    if state.lock.is_some() {
+        return None;
+    }
+    let handle = ForeignToplevelHandle::from_resource(toplevel).filter(|h| !h.is_closed())?;
+    let window = state.window_by_handle(&handle)?;
+    (state.is_minimised(&window) || shown(&window)).then_some(window)
 }
 
 impl Dispatch2<AthanorToplevelStateV1, State> for StateObject {
@@ -180,9 +220,8 @@ impl State {
         };
         let mut flags = Flags::empty();
         let activated = window.toplevel().is_some_and(|toplevel| {
-            toplevel.with_pending_state(|state| {
-                state.states.contains(xdg_toplevel::State::Activated)
-            })
+            toplevel
+                .with_pending_state(|state| state.states.contains(xdg_toplevel::State::Activated))
         });
         flags.set(Flags::Activated, activated);
         flags.set(Flags::Minimized, self.is_minimised(&window));
@@ -203,14 +242,25 @@ impl State {
             sent.flags = Some(flags);
             changed = true;
         }
-        for output in sent.outputs.iter().filter(|output| !outputs.contains(output)) {
+        for output in sent
+            .outputs
+            .iter()
+            .filter(|output| !outputs.contains(output))
+        {
             let bound: Vec<_> = output.client_outputs(&client).collect();
-            bound.iter().for_each(|wl_output| object.output_leave(wl_output));
+            bound
+                .iter()
+                .for_each(|wl_output| object.output_leave(wl_output));
             changed = true;
         }
-        for output in outputs.iter().filter(|output| !sent.outputs.contains(output)) {
+        for output in outputs
+            .iter()
+            .filter(|output| !sent.outputs.contains(output))
+        {
             let bound: Vec<_> = output.client_outputs(&client).collect();
-            bound.iter().for_each(|wl_output| object.output_enter(wl_output));
+            bound
+                .iter()
+                .for_each(|wl_output| object.output_enter(wl_output));
             changed = true;
         }
         sent.outputs = outputs;

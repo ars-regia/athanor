@@ -72,10 +72,10 @@ use wayland_protocols::ext::workspace::v1::client::{
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
 };
-use wayland_protocols::xdg::activation::v1::client::{xdg_activation_token_v1, xdg_activation_v1};
 use wayland_protocols::wp::security_context::v1::client::{
     wp_security_context_manager_v1, wp_security_context_v1,
 };
+use wayland_protocols::xdg::activation::v1::client::{xdg_activation_token_v1, xdg_activation_v1};
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -230,6 +230,8 @@ struct Client {
     toplevel_states: Vec<(ObjectId, StateEvent)>,
     /// The token of the last xdg_activation_v1 token done.
     activation_token: Option<String>,
+    /// The toplevels the compositor asked to close.
+    toplevel_closed: Vec<ObjectId>,
 }
 
 /// An event of an athanor_toplevel_state_v1 object.
@@ -352,25 +354,28 @@ impl Dispatch<wl_callback::WlCallback, ()> for Client {
 impl Dispatch<xdg_toplevel::XdgToplevel, ()> for Client {
     fn event(
         client: &mut Self,
-        _: &xdg_toplevel::XdgToplevel,
+        toplevel: &xdg_toplevel::XdgToplevel,
         event: xdg_toplevel::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let xdg_toplevel::Event::Configure {
-            width,
-            height,
-            states,
-        } = event
-        {
-            let states = states
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|state| u32::from_ne_bytes(*state))
-                .collect();
-            client.toplevel_configure = Some((width, height, states));
+        match event {
+            xdg_toplevel::Event::Configure {
+                width,
+                height,
+                states,
+            } => {
+                let states = states
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|state| u32::from_ne_bytes(*state))
+                    .collect();
+                client.toplevel_configure = Some((width, height, states));
+            }
+            xdg_toplevel::Event::Close => client.toplevel_closed.push(toplevel.id()),
+            _ => {}
         }
     }
 }
@@ -3865,11 +3870,7 @@ fn keyboard_focus(run: &Running) -> Option<WlSurface> {
 
 /// The toplevel surface of `window`.
 fn surface_of(window: &smithay::desktop::Window) -> WlSurface {
-    window
-        .toplevel()
-        .expect("a toplevel")
-        .wl_surface()
-        .clone()
+    window.toplevel().expect("a toplevel").wl_surface().clone()
 }
 
 /// A window minimised leaves the space and the keyboard to the window under it; it keeps
@@ -3885,7 +3886,11 @@ fn a_window_is_minimised_and_restored() {
     let first = local.server_window(&run, &first_surface);
     let second = local.another(&mut run, "second");
     let window = local.server_window(&run, &second.surface);
-    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "the second is focused");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "the second is focused"
+    );
     let at = run.state.space.element_location(&window).expect("mapped");
 
     second.toplevel.set_minimized();
@@ -3895,7 +3900,11 @@ fn a_window_is_minimised_and_restored() {
         "it leaves the space"
     );
     assert_eq!(run.state.minimised.len(), 1);
-    assert_eq!(keyboard_focus(&run), Some(surface_of(&first)), "the first has the keyboard");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&first)),
+        "the first has the keyboard"
+    );
 
     second.toplevel.set_title("second, renamed".into());
     second.surface.commit();
@@ -3912,9 +3921,17 @@ fn a_window_is_minimised_and_restored() {
     activation.activate(token, &second.surface);
     local.roundtrip(&mut run);
     assert!(run.state.minimised.is_empty(), "restored");
-    assert_eq!(run.state.space.element_location(&window), Some(at), "where it was");
+    assert_eq!(
+        run.state.space.element_location(&window),
+        Some(at),
+        "where it was"
+    );
     assert_eq!(run.state.space.elements().last(), Some(&window), "on top");
-    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "with the keyboard");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
+    );
     run.stop();
 }
 
@@ -3944,9 +3961,16 @@ fn a_window_minimised_before_its_first_commit_maps() {
     surface.commit();
     local.roundtrip(&mut run);
     let window = local.server_window(&run, &surface);
-    assert!(run.state.space.elements().any(|kept| *kept == window), "mapped");
+    assert!(
+        run.state.space.elements().any(|kept| *kept == window),
+        "mapped"
+    );
     assert!(!window.geometry().is_empty(), "with its size");
-    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)), "with the keyboard");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
+    );
     assert!(run.state.minimised.is_empty());
     run.stop();
 }
@@ -3957,8 +3981,7 @@ fn a_window_minimised_before_its_first_commit_maps() {
 fn a_minimised_window_can_be_destroyed() {
     let closed = |title: &'static str| {
         move |client: &Client, state: &State| {
-            state.minimised.is_empty()
-                && client.listed.iter().any(|l| l.title == title && l.closed)
+            state.minimised.is_empty() && client.listed.iter().any(|l| l.title == title && l.closed)
         }
     };
     let mut run = Running::start(None);
@@ -3972,7 +3995,11 @@ fn a_minimised_window_can_be_destroyed() {
     gone.toplevel.destroy();
     gone.xdg.destroy();
     gone.surface.destroy();
-    local.pump(&mut run, "the destroyed window is closed", closed("destroyed"));
+    local.pump(
+        &mut run,
+        "the destroyed window is closed",
+        closed("destroyed"),
+    );
 
     let mut other = Local::connect(&mut run, None);
     let dropped = other.another(&mut run, "disconnected");
@@ -3982,7 +4009,11 @@ fn a_minimised_window_can_be_destroyed() {
     assert_eq!(run.state.minimised.len(), 1);
     drop(dropped);
     drop(other);
-    local.pump(&mut run, "the gone client's window is closed", closed("disconnected"));
+    local.pump(
+        &mut run,
+        "the gone client's window is closed",
+        closed("disconnected"),
+    );
     run.stop();
 }
 
@@ -4267,13 +4298,18 @@ fn a_click_after_minimise_misses_the_hidden_window() {
     local.client.button = None;
     click(&mut run);
     local.roundtrip(&mut run);
-    assert!(local.client.button.is_none(), "the hidden window misses the click");
+    assert!(
+        local.client.button.is_none(),
+        "the hidden window misses the click"
+    );
 
     assert!(run.state.unminimise(&window), "restored");
     click(&mut run);
-    local.pump(&mut run, "the restored window has the click", |client, _| {
-        client.button.is_some()
-    });
+    local.pump(
+        &mut run,
+        "the restored window has the click",
+        |client, _| client.button.is_some(),
+    );
     run.stop();
 }
 
@@ -4312,6 +4348,200 @@ fn a_minimised_window_keeps_its_thumbnail() {
     assert_eq!(
         local.client.capture_size,
         Some((WIDTH as u32, HEIGHT as u32))
+    );
+    run.stop();
+}
+
+/// The dock, as the shell's units connect: the manager of athanor-toplevel-state-v1, the
+/// foreign toplevel list and the seat.
+struct Dock {
+    local: Local,
+    manager: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
+    seat: wl_seat::WlSeat,
+}
+
+impl Dock {
+    fn connect(run: &mut Running) -> Self {
+        let local = Local::connect(run, None);
+        let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+        let manager = local.bind(1);
+        let seat = local.bind(1);
+        Self {
+            local,
+            manager,
+            seat,
+        }
+    }
+}
+
+/// The windows in the space, bottom to top.
+fn stack(run: &Running) -> Vec<smithay::desktop::Window> {
+    run.state.space.elements().cloned().collect()
+}
+
+/// The dock raises a window with the keyboard, minimises it, restores it with the keyboard, and
+/// asks another window to close (doc_own_stack.md OS5).
+#[test]
+fn the_dock_raises_minimises_and_closes_a_window() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let first = app.another(&mut run, "first");
+    let second = app.another(&mut run, "second");
+    let window = app.server_window(&run, &first.surface);
+    let handle = dock.local.handle(&mut run, "first");
+    let other = dock.local.handle(&mut run, "second");
+
+    dock.manager.activate(&handle, &dock.seat);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
+    );
+
+    dock.manager.set_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window), "minimised");
+
+    dock.manager.unset_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(!run.state.is_minimised(&window), "restored");
+    assert_eq!(run.state.space.elements().last(), Some(&window), "on top");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
+    );
+
+    dock.manager.close(&other);
+    dock.local.roundtrip(&mut run);
+    let closed = second.toplevel.id();
+    app.pump(
+        &mut run,
+        "the second window is asked to close",
+        |client, _| client.toplevel_closed.contains(&closed),
+    );
+    run.stop();
+}
+
+/// While the session is locked the manager's requests change neither the stack nor the keyboard
+/// (L14); with a layer surface holding the keyboard exclusively, `activate` raises the window
+/// and the keyboard stays with the layer.
+#[test]
+fn activation_respects_the_lock_and_an_exclusive_layer() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let first = app.another(&mut run, "first");
+    let second = app.another(&mut run, "second");
+    let window = app.server_window(&run, &first.surface);
+    let shown_second = app.server_window(&run, &second.surface);
+    run.state.focus(&shown_second);
+    let handle = dock.local.handle(&mut run, "first");
+    let other = dock.local.handle(&mut run, "second");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    let (before, focus) = (stack(&run), keyboard_focus(&run));
+    dock.manager.activate(&handle, &dock.seat);
+    dock.manager.set_minimized(&other);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the stack is unchanged while locked");
+    assert_eq!(keyboard_focus(&run), focus, "and the keyboard");
+    assert!(run.state.minimised.is_empty(), "nothing is minimised");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+
+    let mut shell = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = shell.bind(4);
+    let shm: wl_shm::WlShm = shell.bind(1);
+    let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = shell.bind(4);
+    let qh = shell.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = layer_shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "launcher".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    assert!(
+        shell.answer(&mut run, &surface),
+        "the surface is configured"
+    );
+    let (serial, width, height) = shell.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let (buffer, _) = shell.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    shell.roundtrip(&mut run);
+    let exclusive = run.state.exclusive_layer().expect("an exclusive layer");
+    assert_eq!(keyboard_focus(&run), Some(exclusive.clone()));
+    dock.manager.activate(&handle, &dock.seat);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(exclusive),
+        "the layer keeps the keyboard"
+    );
+    run.stop();
+}
+
+/// The four requests on a destroyed window's handle, and `activate` on a placed window that
+/// committed a null buffer, change neither the stack nor the keyboard; `activate` on a live
+/// window still raises it with the keyboard.
+#[test]
+fn a_closed_or_undrawn_window_is_left_alone() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let live = app.another(&mut run, "live");
+    let hidden = app.another(&mut run, "hidden");
+    let gone = app.another(&mut run, "gone");
+    let window = app.server_window(&run, &live.surface);
+    let live_handle = dock.local.handle(&mut run, "live");
+    let hidden_handle = dock.local.handle(&mut run, "hidden");
+    let gone_handle = dock.local.handle(&mut run, "gone");
+
+    gone.toplevel.destroy();
+    gone.xdg.destroy();
+    gone.surface.destroy();
+    app.roundtrip(&mut run);
+    dock.local
+        .pump(&mut run, "the window is closed", |client, _| {
+            client.listed.iter().any(|l| l.title == "gone" && l.closed)
+        });
+    hidden.surface.attach(None, 0, 0);
+    hidden.surface.commit();
+    app.roundtrip(&mut run);
+
+    let (before, focus) = (stack(&run), keyboard_focus(&run));
+    dock.manager.activate(&gone_handle, &dock.seat);
+    dock.manager.set_minimized(&gone_handle);
+    dock.manager.unset_minimized(&gone_handle);
+    dock.manager.close(&gone_handle);
+    dock.manager.activate(&hidden_handle, &dock.seat);
+    dock.manager.set_minimized(&hidden_handle);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the stack is unchanged");
+    assert_eq!(keyboard_focus(&run), focus, "and the keyboard");
+    assert!(run.state.minimised.is_empty(), "nothing is minimised");
+    assert!(app.client.toplevel_closed.is_empty(), "nothing is closed");
+
+    dock.manager.activate(&live_handle, &dock.seat);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
     );
     run.stop();
 }
