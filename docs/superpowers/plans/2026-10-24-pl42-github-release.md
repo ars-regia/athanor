@@ -165,7 +165,7 @@ at the end.
    | No Release | Creates a draft with the asset, then publishes it with its `latest` flag |
    | A draft or a published Release, with or without earlier promotions' assets, that is the approved Release exactly (below), without this asset | Uploads the asset, then publishes a draft; on a published Release (a second promotion of the same build) edits nothing |
    | The same, holding this asset with the same SHA-256 | Publishes a draft; for a published Release (a re-run) does nothing and succeeds |
-   | A `v*` Release, draft or published, holding an asset named `evidence-<run>-<run>.tar` of another build run | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
+   | A `v*` Release, draft or published, holding an asset named `evidence-<run>-<run>.tar` of another build run, every asset at the tag passing the check of earlier assets below | Uses the pre-approved fallback and says so, naming that run; it never calls that draft stray |
    | Any other Release, draft or published, with or without earlier assets, that is not the approved Release exactly (a stray Release: anyone with `contents: write` can make one) | Stops, naming the Release, the fields that differ and the recovery below |
    | This asset with a different SHA-256 | Stops, naming the recovery below; it never uses `--clobber` |
    | The tag already points at another commit | Stops |
@@ -191,6 +191,11 @@ at the end.
    revision. Anything else stops the job, naming the asset and the recovery below. `publish` and
    the read-back both check it; the `github-release` job puts the verify step's cosign on `PATH`
    in a step without the token. *(Amended after the third security review.)*
+
+   The name is bound to the contents: the build run of the name is `promotion.json`'s `run_id`
+   and its promotion run is the run its `trigger` names. `publish` applies the same check to
+   every asset of a `v*` Release before it takes the fallback, so a fake asset name stops the
+   job instead of diverting the promotion. *(Amended after the fourth security review.)*
 
    **Recovery from a stray Release** (destructive, the maintainer only; never for a draft that
    holds another run's `evidence-*` asset, which is a build's legitimate Release): `gh release delete <tag>
