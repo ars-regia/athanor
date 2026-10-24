@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import struct
@@ -32,12 +33,14 @@ import zlib
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str):
+def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
     (out / "serial.log").write_bytes(b"console output\n")
+    for name, text in (files or {}).items():
+        (out / name).write_text(text)
     proc = subprocess.run(
         [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
@@ -539,6 +542,45 @@ def play_the_monitor(server: socket.socket, received: list[bytes]) -> None:
         return  # the server socket was closed: the test is over
 
 
+def play_first_boot(server: socket.socket) -> socket.socket:
+    """Play the guest from GRUB to the settings question: the installer finishes, the
+    installed system offers its serial login, and each question gets its answer. Returns
+    the connection with the settings question typed and not yet answered."""
+    conn, _ = server.accept()
+    conn.settimeout(2)
+    conn.sendall(b"GRUB version 2.12\r\n")
+    time.sleep(14)  # it types the boot commands
+    conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
+    time.sleep(0.5)
+
+    # The installed system offers its serial login; the console logs in and asks the
+    # guest whether the greeter is up. Play the guest: wait for the question, answer.
+    conn.sendall(b"athanor login: ")
+    typed = typed_until(conn, b"PROFILE_%s", 20)
+    conn.sendall(b"PROFILE_OK\r\n")
+    if b"KARG_%s" not in typed:
+        typed += typed_until(conn, b"KARG_%s", 20)
+    conn.sendall(b"KARG_OK btrfs\r\n")
+    if b"ORIGIN_%s" not in typed:
+        typed += typed_until(conn, b"ORIGIN_%s", 20)
+    conn.sendall(b"ORIGIN_OK ghcr.io/acme/athanor-system:stable containerPolicy\r\n")
+    if b"GREETER_%s" not in typed:
+        typed_until(conn, b"GREETER_%s", 20)
+    conn.sendall(b"GREETER_ALIVE c5\r\n")
+
+    # It types the password on the keyboard, one key at a time, then asks whether
+    # the session came up.
+    typed_until(conn, b"SESSION_%s", 60)
+    conn.sendall(b"SESSION_ALIVE c7\r\n")
+
+    # It starts Settings inside that session and asks whether it stayed up. The rest of
+    # the question's line is read too, so whatever comes next is typed after it.
+    typed = typed_until(conn, b"SETTINGS_%s", 60)
+    if b"\n" not in typed.rpartition(b"SETTINGS_%s")[2]:
+        typed_until(conn, b"\n", 20)
+    return conn
+
+
 def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     """A steady greeter gets the password typed on the machine's keyboard, a steady
     session gets Settings started inside it, and Settings still running ends the run at
@@ -574,35 +616,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
     )
     try:
-        conn, _ = server.accept()
-        conn.settimeout(2)
-        conn.sendall(b"GRUB version 2.12\r\n")
-        time.sleep(14)  # it types the boot commands
-        conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
-        time.sleep(0.5)
-
-        # The installed system offers its serial login; the console logs in and asks the
-        # guest whether the greeter is up. Play the guest: wait for the question, answer.
-        conn.sendall(b"athanor login: ")
-        typed = typed_until(conn, b"PROFILE_%s", 20)
-        conn.sendall(b"PROFILE_OK\r\n")
-        if b"KARG_%s" not in typed:
-            typed += typed_until(conn, b"KARG_%s", 20)
-        conn.sendall(b"KARG_OK btrfs\r\n")
-        if b"ORIGIN_%s" not in typed:
-            typed += typed_until(conn, b"ORIGIN_%s", 20)
-        conn.sendall(b"ORIGIN_OK ghcr.io/acme/athanor-system:stable containerPolicy\r\n")
-        if b"GREETER_%s" not in typed:
-            typed_until(conn, b"GREETER_%s", 20)
-        conn.sendall(b"GREETER_ALIVE c5\r\n")
-
-        # It types the password on the keyboard, one key at a time, then asks whether
-        # the session came up.
-        typed_until(conn, b"SESSION_%s", 60)
-        conn.sendall(b"SESSION_ALIVE c7\r\n")
-
-        # It starts Settings inside that session and asks whether it stayed up.
-        typed_until(conn, b"SETTINGS_%s", 60)
+        conn = play_first_boot(server)
         started = time.time()
         conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
         proc.wait(timeout=40)
@@ -637,6 +651,99 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     ):
         assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
     assert "idle-timeout" not in phases, "it should not have waited out the idle window"
+
+
+def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
+    """In the upgrade case (ATHANOR_CONSOLE_HOLD=1) a steady Settings ends the serial
+    login, since a tty login is a session that makes Apply() ask for an administrator
+    (UT6), and `ready` is written only once the getty offers its login again. From then on
+    the console types nothing, keeps noting markers, a shim refusal included, and ends
+    when the socket closes."""
+    if not hasattr(socket, "AF_UNIX"):
+        print("  skip test_console_logs_out_then_holds: no unix sockets")
+        return
+
+    run = tmp / "hold"
+    shutil.rmtree(run, ignore_errors=True)
+    run.mkdir(parents=True)
+    sock = str(run / "serial.sock")
+    server = socket.socket(socket.AF_UNIX)
+    server.bind(sock)
+    server.listen(1)
+    monitor = socket.socket(socket.AF_UNIX)
+    monitor.bind(str(run / "monitor.sock"))
+    monitor.listen(2)
+    threading.Thread(target=play_the_monitor, args=(monitor, []), daemon=True).start()
+    proc = subprocess.Popen(
+        [sys.executable, str(HERE / "console.py"), sock, str(run / "serial.log"),
+         str(run / "phases.txt"), str(run / "monitor.sock")],
+        stdout=subprocess.DEVNULL,
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_CONSOLE_HOLD": "1"},
+    )
+    try:
+        conn = play_first_boot(server)
+        conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
+        typed = typed_until(conn, b"exit", 20)
+        time.sleep(3)
+        assert not (run / "ready").exists(), "ready was written before the getty's login"
+        assert proc.poll() is None, "the console ended at Settings in the upgrade case"
+        conn.sendall(b"\r\nathanor login: ")
+        deadline = time.time() + 20
+        while not (run / "ready").exists() and time.time() < deadline:
+            time.sleep(0.1)
+        assert (run / "ready").exists(), "no ready after the getty's login"
+        # The reboots of the upgrade, seen on the serial line only: a shim that refuses the
+        # new kernel is a phase of its own.
+        conn.sendall(b"\x1b[0mbad shim signature\r\n")
+        time.sleep(3)
+        assert proc.poll() is None, "the console stopped holding"
+        conn.settimeout(0.5)
+        try:
+            typed += conn.recv(65536)
+        except socket.timeout:
+            pass
+        conn.close()
+        proc.wait(timeout=20)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        server.close()
+        monitor.close()
+
+    assert typed.split() == [b"exit"], f"typed after Settings answered: {typed!r}"
+    phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
+    for expected in ("settings-alive", "ready", "secure-boot-refused", "console-closed"):
+        assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
+    assert "idle-timeout" not in phases, sorted(phases)
+
+
+def test_classify_maps_probe_output(tmp: pathlib.Path) -> None:
+    """The answers of a probe run over SSH become phases through the console's own markers,
+    in the `name epoch` lines verdict.py reads, under the prefix of the boot they describe."""
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--classify", "upgraded-"],
+        input=b"GREETER_ALIVE 3\r\nSECUREBOOT_ENABLED\r\n", capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.decode().splitlines()
+    assert len(lines) == 2, lines
+    for line in lines:
+        assert re.fullmatch(r"upgraded-(greeter-alive|secureboot-enabled) \d+", line), lines
+
+
+def test_print_probe_is_the_typed_probe(tmp: pathlib.Path) -> None:
+    """The probe run over SSH is the one typed on the serial console, byte for byte."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "MOK"], capture_output=True
+    )
+    assert proc.returncode == 0 and proc.stdout == console.MOK_PROBE, proc
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "ORIGIN"], capture_output=True
+    )
+    assert proc.returncode == 2, "an unknown probe must be refused"
 
 
 def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
@@ -830,6 +937,161 @@ def test_secure_boot_case_requires_enforcement(tmp: pathlib.Path) -> None:
     assert proc.returncode == 2, "an unknown case must be refused, not ignored"
 
 
+# The upgrade case: the first boot passed on Secure Boot firmware, the console wrote `ready`,
+# and the stages of run.sh --ci recorded the probes of both later boots.
+FIRST_BOOT = COMPLETE + [("secureboot-enabled", 381), ("ready", 510)]
+BOOT_PROBES = ("mok-enrolled", "secureboot-enabled", "greeter-alive", "session-alive", "settings-alive")
+
+
+def upgrade_files(status="0", log="PASS  UD18 4: Apply() from the active session boots the candidate\n",
+                  replace: dict[str, str] | None = None) -> dict[str, str]:
+    lines = []
+    for prefix in ("upgraded-", "rolled-back-"):
+        for name in BOOT_PROBES:
+            name = (replace or {}).get(prefix + name, prefix + name)
+            lines.append(f"{name} 2000\n")
+    files = {"upgrade-phases.txt": "".join(lines), "upgrade.log": log}
+    if status is not None:
+        files["upgrade-status"] = f"{status}\n"
+    return files
+
+
+def test_upgrade_pass(tmp: pathlib.Path) -> None:
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files())
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and data["pass"] is True, report
+    for check in ("upgrade-stages", "upgraded-secure-boot", "rolled-back-secure-boot",
+                  "upgraded-settings", "rolled-back-session", "secure-boot"):
+        assert data["checks"][check] is True, (check, data)
+
+
+def test_upgrade_pass_reports_its_notes(tmp: pathlib.Path) -> None:
+    """A check the stages skipped on this :stable is named in the report of a pass."""
+    log = "NOTE  UD18 3: the booted client predates the release attestation (#784)\nPASS  UD18 4: Apply()\n"
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(log=log))
+    assert code == 0, report
+    assert "- upgrade stages: passed; NOTE  UD18 3: the booted client predates" in report, report
+
+
+def test_upgrade_missing_status_fails(tmp: pathlib.Path) -> None:
+    """No upgrade-status: the console never wrote `ready`, so the stages never ran."""
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status=None))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgrade-stages"] is False, data
+    assert "never ran" in report, report
+
+
+def test_upgrade_old_deployment_fails(tmp: pathlib.Path) -> None:
+    """A stage that failed is quoted from upgrade.log: the first FAIL line says which."""
+    log = ("PASS  UD18 2: seeded\n"
+           "FAIL  UD18 4: Apply() from the active session boots the candidate: booted sha256:old, expected sha256:new\n"
+           "FAIL  a later line\n")
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status="1", log=log))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgrade-stages"] is False, data
+    assert "booted sha256:old, expected sha256:new" in report and "a later line" not in report, report
+
+
+def test_upgrade_timeout_fails(tmp: pathlib.Path) -> None:
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status="124"))
+    assert code != 0 and "timed out" in report, report
+
+
+def test_upgrade_secure_boot_lost_fails(tmp: pathlib.Path) -> None:
+    """The candidate booted with shim validation off: Secure Boot reads enabled and is not."""
+    files = upgrade_files(replace={"upgraded-secureboot-enabled": "upgraded-secureboot-not-enforced"})
+    code, _ = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=files)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["upgraded-secure-boot"] is False, data
+    assert data["checks"]["rolled-back-secure-boot"] is True, data
+
+
+def test_upgrade_rollback_session_dead_fails(tmp: pathlib.Path) -> None:
+    files = upgrade_files(replace={"rolled-back-session-alive": "rolled-back-session-dead"})
+    code, _ = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=files)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["rolled-back-session"] is False, data
+
+
+def test_upgrade_shim_refusal_fails(tmp: pathlib.Path) -> None:
+    """shim refusing a kernel on a reboot of the stages is a guest failure, seen on the
+    held console even when the stages report nothing."""
+    code, _ = verdict(tmp, FIRST_BOOT + [("secure-boot-refused", 700)], 143, "secure-boot", "upgrade",
+                      files=upgrade_files())
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["no-guest-failure"] is False, data
+
+
+def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
+    """The upgrade case is a Secure Boot case: verdict.py refuses it alone, and
+    run_iso_test.sh refuses UPDATE_TO without SECURE_BOOT=1 before touching anything."""
+    out = tmp / "run"
+    out.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run([sys.executable, str(HERE / "verdict.py"), str(out), "900", "0", "upgrade"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 2, proc
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    env = {k: v for k, v in os.environ.items() if k != "SECURE_BOOT"}
+    env.update(UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
+    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 2 and "Secure Boot" in proc.stderr, proc
+    assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
+
+
+def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
+    """A second upgrade case in the same OUTPUT_DIR starts from none of the files the stages
+    leave: a stale `ready` would start the stages on the installer, a stale status would judge
+    them, the phases are appended to, and a known_hosts names the last guest's host key. They
+    are gone before anything on the host can fail; here the run fails after them, at the
+    firmware lookup on a host without OVMF or at ssh-keygen."""
+    out = tmp / "rerun"
+    stale = ["ready", "upgrade-status", "upgrade-phases.txt", "acceptance-state/known_hosts"]
+    for name in stale + ["kept.png"]:
+        (out / name).parent.mkdir(parents=True, exist_ok=True)
+        (out / name).write_text("last run\n")
+    stubs = tmp / "stubs"
+    stubs.mkdir(exist_ok=True)
+    (stubs / "ssh-keygen").write_text("#!/bin/sh\nexit 1\n")
+    (stubs / "ssh-keygen").chmod(0o755)
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    env = dict(os.environ, SECURE_BOOT="1", UPDATE_TO="sha256:" + "a" * 64,
+               UPDATE_REPOSITORY="ghcr.io/owner/athanor-system", PATH=f"{stubs}:{os.environ['PATH']}")
+    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(out)],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode != 0, proc
+    left = [name for name in stale if (out / name).exists()]
+    assert not left and not (out / "acceptance-state").exists(), (left, proc.stderr)
+    assert (out / "kept.png").exists(), "run_iso_test.sh removed a file it does not own"
+
+
+def test_upgrade_deadline_ends_inside_the_job(tmp: pathlib.Path) -> None:
+    """run_iso_test.sh's own deadline for the upgrade case (TIMEOUT, from the script's start)
+    ends inside the job's timeout-minutes, with room for the setup before the script and the
+    report after it: GitHub cancelling the job would leave no verdict at all. The room is an
+    estimate: about 10 minutes of setup and ISO fetch (the install job's comment), 5 of report
+    and uploads, and 5 of margin."""
+    job = (HERE.parents[2] / ".github/workflows/accept.yml").read_text().split("\n  upgrade-acceptance:\n", 1)[1]
+    minutes = int(re.search(r"^    timeout-minutes: (\d+)$", job, re.M).group(1))
+    step = re.search(r'^          TIMEOUT: "(\d+)"$', job, re.M)
+    script = (HERE / "run_iso_test.sh").read_text()
+    default = int(re.search(r"^if \[\[ -n \$\{UPDATE_TO:-\} \]\]; then timeout_default=(\d+); fi$", script, re.M).group(1))
+    deadline = int(step.group(1)) if step else default
+    assert deadline + (10 + 5 + 5) * 60 <= minutes * 60, (deadline, minutes)
+    assert default <= deadline, "run_iso_test.sh's own default outlives the job"
+
+
+def test_plain_case_unchanged(tmp: pathlib.Path) -> None:
+    """Without `upgrade` nothing of the upgrade is read, even if its files are there."""
+    code, _ = verdict(tmp, COMPLETE + [("secureboot-enabled", 381)], 0, "secure-boot",
+                      files=upgrade_files(status="1"))
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0, data
+    assert not any("upgrade" in name or name.startswith("rolled-back") for name in data["checks"]), data
+
+
 def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
     """The password the installer shows is acknowledged with Enter, and at the first boot
     each MokManager screen gets its keys, the password typed letter by letter, in order."""
@@ -986,6 +1248,21 @@ def main() -> int:
             test_console_boots_our_kickstart,
             test_installed_systems_own_grub_is_not_a_loop,
             test_console_logs_in_opens_settings_and_stops,
+            test_console_logs_out_then_holds,
+            test_classify_maps_probe_output,
+            test_print_probe_is_the_typed_probe,
+            test_upgrade_pass,
+            test_upgrade_pass_reports_its_notes,
+            test_upgrade_missing_status_fails,
+            test_upgrade_old_deployment_fails,
+            test_upgrade_timeout_fails,
+            test_upgrade_secure_boot_lost_fails,
+            test_upgrade_rollback_session_dead_fails,
+            test_upgrade_shim_refusal_fails,
+            test_upgrade_requires_secure_boot,
+            test_upgrade_clears_the_last_runs_files,
+            test_upgrade_deadline_ends_inside_the_job,
+            test_plain_case_unchanged,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,

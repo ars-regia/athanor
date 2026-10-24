@@ -1,0 +1,4 @@
+Lettore schermo attivo.
+Cerca testo.
+cc window.
+Lettore schermo disattivato.

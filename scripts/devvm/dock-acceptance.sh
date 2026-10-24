@@ -93,7 +93,6 @@ fresh_start() {
 }
 
 stage_deploy() {
-    mkdir -p "$SHOTS"
     "$HERE/deploy.sh" \
         "$BIN/athanor-dock:/usr/bin/athanor-dock" \
         "$DATA/athanor-dock.service:/usr/lib/systemd/user/athanor-dock.service" \
@@ -329,6 +328,7 @@ for STAGE in "${run[@]}"; do
 done
 STATE_BEFORE=$(unit show -p ActiveState --value)
 trap cleanup_on_exit EXIT
+mkdir -p "$SHOTS"
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
     echo "PASS $STAGE"

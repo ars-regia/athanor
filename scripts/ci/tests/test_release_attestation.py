@@ -1,11 +1,13 @@
 """scripts/ci/release_attestation.py: the unsigned release statements of PB4b
 (docs/architecture/doc_pipeline.md, ADR-0127) that sign-images attests with cosign."""
 
+import base64
 import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import release_attestation as ra  # noqa: E402
@@ -146,6 +148,64 @@ class Statement(unittest.TestCase):
                     path.write_text(json.dumps(s))
                     with self.assertRaises(ra.Refused):
                         ra.load_statement(path, f"{REG}/athanor-system", digest(1))
+
+
+def envelope(s, payload_type=ra.PAYLOAD_TYPE):
+    payload = base64.b64encode(json.dumps(s).encode()).decode()
+    return {"payloadType": payload_type, "payload": payload, "signatures": []}
+
+
+class ReleaseClass(unittest.TestCase):
+    """release_class: the class the upgrade acceptance expects the guest to settle on, read from
+    the attestations of the candidate that verify with a key of the checkout (ADR-0130)."""
+
+    REF = f"{REG}/athanor-system@{digest(1)}"
+
+    def of(self, *envelopes):
+        with mock.patch.object(
+            ra, "attestations", return_value=list(envelopes)
+        ) as called:
+            cls = ra.release_class(self.REF, pathlib.Path("keys"))
+        called.assert_called_once_with(self.REF, pathlib.Path("keys"))
+        return cls
+
+    def stmt(self, cls, n=1, advisories=()):
+        return ra.statement(
+            record("athanor-system", n, cls, advisories), BUILD_TIME, SHA, "412"
+        )
+
+    def test_the_verified_class_is_read(self):
+        self.assertEqual(self.of(envelope(self.stmt("feature"))), "feature")
+        security = self.stmt("security", advisories=["CVE-2026-0001"])
+        self.assertEqual(self.of(envelope(security), envelope(security)), "security")
+
+    def test_no_verified_attestation_is_refused(self):
+        with self.assertRaisesRegex(ra.Refused, "no attestation verifies"):
+            self.of()
+
+    def test_attestations_that_disagree_are_refused(self):
+        with self.assertRaisesRegex(ra.Refused, "disagree"):
+            self.of(envelope(self.stmt("feature")), envelope(self.stmt("security")))
+
+    def test_an_attestation_of_another_digest_or_shape_is_refused(self):
+        other = self.stmt("feature", n=2)
+        unknown = self.stmt("feature")
+        unknown["predicate"]["class"] = "urgent"
+        wrong_type = self.stmt("feature")
+        wrong_type["predicateType"] = "https://example.invalid/other"
+        for name, env in (
+            ("another digest", envelope(other)),
+            ("an unknown class", envelope(unknown)),
+            ("another predicate type", envelope(wrong_type)),
+            ("another payload type", envelope(self.stmt("feature"), "text/plain")),
+            ("no payload", {"payloadType": ra.PAYLOAD_TYPE}),
+        ):
+            with self.subTest(name), self.assertRaises(ra.Refused):
+                self.of(env)
+
+    def test_a_reference_by_tag_is_refused(self):
+        with self.assertRaisesRegex(ra.Refused, "by digest"):
+            ra.release_class(f"{REG}/athanor-system:stable", pathlib.Path("keys"))
 
 
 if __name__ == "__main__":

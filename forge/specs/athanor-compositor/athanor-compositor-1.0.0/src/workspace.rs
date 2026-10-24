@@ -4,7 +4,8 @@
 // ponytail: one fixed workspace per output; groups and workspaces follow the outputs and the
 // user's workspaces once the compositor has them (task 8 hot-plug, then the shell's switcher).
 
-use crate::state::{unconfined, State};
+use crate::identity::Privilege;
+use crate::state::{granted, State};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1, GroupCapabilities},
@@ -25,8 +26,8 @@ pub struct Group {
     output: Output,
 }
 
-/// Offers the global to the clients outside a security context.
-// ponytail: task 5 grants it by identity, to the bar (OS4).
+/// Offers the global to the clients the allow-list grants it: a client may switch workspaces
+/// through it (open question 7 of the OS9 plan).
 pub fn global(dh: &DisplayHandle) {
     dh.create_global::<State, ExtWorkspaceManagerV1, _>(1, Workspaces);
 }
@@ -56,7 +57,7 @@ impl GlobalDispatch2<ExtWorkspaceManagerV1, State> for Workspaces {
     }
 
     fn can_view(&self, client: &Client) -> bool {
-        unconfined(client)
+        granted(client, Privilege::Workspaces)
     }
 }
 

@@ -3,13 +3,32 @@
 # development VM, against the registry and keys of images.sh. Repeatable: `reset.sh` first.
 # Every bootc call is made by the units themselves (item 14): this script only starts units
 # and calls the bus. Usage: run.sh [START_AT]   (a stage name below; default: the first)
+#
+# run.sh --ci [START_AT] runs instead the upgrade and rollback of doc_update_delivery.md UD18
+# (ADR-0130) on the VM of forge/test/iso/run_iso_test.sh, which calls it in CI and passes the
+# candidate, its mirror, the forwarded SSH port and the key of the run in the environment.
 set -euo pipefail
+ACC_CI=''
+if [[ ${1:-} == --ci ]]; then
+  [[ ${CI:-} == true ]] || {
+    echo "run.sh --ci runs only in CI (CI=true), on the VM of forge/test/iso/run_iso_test.sh" >&2
+    exit 2
+  }
+  ACC_CI=1
+  shift
+fi
 # shellcheck source-path=SCRIPTDIR
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-guard_no_ci
-STAGES=(install migrate metered download sessions apply refuse older goback rotate recover console greenboot podman probes report)
-start=${1:-install}
+if [[ -n $ACC_CI ]]; then
+  # A hosted runner: the self-hosted runner's guard does not apply.
+  STAGES=(seed upgrade check goback check-back)
+  start=${1:-seed}
+else
+  guard_no_ci
+  STAGES=(install migrate metered download sessions apply refuse older goback rotate recover console greenboot podman probes report)
+  start=${1:-install}
+fi
 [[ " ${STAGES[*]} " == *" $start "* ]] || die "unknown stage '$start': one of ${STAGES[*]}"
 
 stage_install() { # the machine starts from v1, on a reference that verifies nothing
@@ -93,7 +112,7 @@ stage_download() { # item 1
 ACC_SSH_HELD=''
 ACC_OTHER_MADE=''
 sessions_cleanup() {
-  local failed=() unit state
+  local failed=() unit
   end_call || failed+=(end_call)
   tunnel || failed+=(tunnel)
   end_units || failed+=(end_units)
@@ -496,12 +515,191 @@ stage_report() {
   echo "acceptance complete"
 }
 
-# stage_install waits for the guest itself; a later start needs its SSH and the registry tunnel.
-[[ $start == install ]] || wait_ssh
+# --- The upgrade acceptance of doc_update_delivery.md UD18, in CI (run.sh --ci) ---
+# The file seeded in /etc is one the image ships with fixed content (ADR-0130): the candidate
+# shipping the same bytes is what makes the three-way merge of /etc the thing tested.
+ETC_PROBE=/etc/security/pwquality.conf.d/50-athanor.conf
+VAR_PROBE=/var/lib/athanor-upgrade-probe/seed
+MIRROR_DROPIN=/etc/containers/registries.conf.d/99-upgrade-acceptance.conf
+# containers/image reads the signatures of a pull from the registry it pulled from, and decides
+# whether to look for sigstore attachments there by that registry's registries.d scope, not by
+# the image's: without this entry the mirror's .sig is never read and the pull is refused.
+MIRROR_ATTACHMENTS=/etc/containers/registries.d/99-upgrade-acceptance.yaml
+# A message of check.rs candidate_class: in /usr/bin/athanor-update it marks the attestation
+# reader (#784). A message stays in a release binary; a constant only compared, such as the
+# DSSE media type, can be compiled into immediates and leave no string behind.
+ATTESTATION_READER="release attestation could not be fetched"
+PHASES=${ACC_CI_OUT:-}/upgrade-phases.txt
+
+# Records the runner's free space and stops under four gigabytes, before a stage fills it.
+disk_floor() {
+  local free
+  { echo "== $(date -u +%FT%TZ) before ${FUNCNAME[1]}"; df -h; } >> "$ACC_CI_OUT/df.txt"
+  free=$(df --output=avail -B1G "$ACC_CI_OUT" | tail -n 1)
+  ((free >= 4)) || die "FAIL  ${free// /} GB free on the runner, under the floor of 4 GB"
+}
+
+# The probes of forge/test/iso/console.py, run over SSH: the answers become phases under
+# PREFIX in upgrade-phases.txt, which verdict.py judges as it judges the first boot's. The
+# greeter's password is typed on the guest's keyboard, as the console types it.
+probe() { # probe NAME PREFIX
+  python3 "$ROOT/forge/test/iso/console.py" --print-probe "$1" | guest_ssh bash -s |
+    python3 "$ROOT/forge/test/iso/console.py" --classify "$2" >> "$PHASES"
+}
+session_probes() { # session_probes PREFIX
+  probe MOK "$1"
+  probe GREETER "$1"
+  type_keys "$GUEST_USER" @enter
+  probe SESSION "$1"
+  probe SETTINGS "$1"
+}
+
+# The seeds of ci_stage_seed, all still there.
+seeds_kept() { # seeds_kept DESCRIPTION
+  local nonce
+  nonce=$(< "$ACC_STATE/nonce")
+  [[ $(guest_ssh cat upgrade-probe) == "$nonce" ]] || die "FAIL  $1: the seed in /home is gone"
+  [[ $(guest_ssh sudo cat "$VAR_PROBE") == "$nonce" ]] || die "FAIL  $1: the seed in /var is gone"
+  [[ $(guest_ssh sudo tail -n 1 "$ETC_PROBE") == "# upgrade-acceptance $nonce" ]] || die "FAIL  $1: the edit of $ETC_PROBE is gone"
+  pass "$1: the seeds in /home, /var and $ETC_PROBE are kept"
+}
+
+ci_stage_seed() { # UD18 2
+  local from nonce
+  disk_floor
+  from=$(booted_digest)
+  [[ $from =~ ^sha256:[0-9a-f]{64}$ ]] || die "FAIL  UD18 2: the booted digest reads '$from'"
+  [[ $from != "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 2: the candidate is :stable already: there is nothing to upgrade from"
+  echo "$from" > "$ACC_STATE/from-digest"
+  guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1 > "$ACC_STATE/shipped-sum"
+  nonce=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+  echo "$nonce" > "$ACC_STATE/nonce"
+  guest_ssh "echo $nonce > upgrade-probe && sudo mkdir -p ${VAR_PROBE%/*} && echo $nonce | sudo tee $VAR_PROBE > /dev/null && echo '# upgrade-acceptance $nonce' | sudo tee -a $ETC_PROBE > /dev/null"
+  pass "UD18 2: $from seeded in /home, /var and $ETC_PROBE"
+}
+
+# What the check saw, for a failure of UD18 3: the guest and its journal are gone after the run.
+check_seen() { # check_seen JOURNAL
+  printf "update '%s', last_error '%s' from '%s'; the check's journal:\n%s" \
+    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "$1"
+}
+
+ci_stage_upgrade() { # UD18 3 and 4
+  local since journal class settled=downloaded ttys reader=0
+  disk_floor
+  printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
+    "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
+    guest_ssh sudo tee "$MIRROR_DROPIN" > /dev/null
+  printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ATHANOR_UPDATE_MIRROR" |
+    guest_ssh sudo tee "$MIRROR_ATTACHMENTS" > /dev/null
+  quiet_checks "UD18 4"
+  since=$(now_guest)
+  check_now
+  # Required since ADR-0130: without the attestation the client only warns and goes on.
+  journal=$(journal_since "$since" athanor-update-check.service)
+  # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
+  # every candidate downloaded for Apply(). The reader is required where the booted client
+  # has it: required everywhere, the job could not pass until a build with it was promoted
+  # (#784). It is found by ATTESTATION_READER, which test_acceptance_ci.py holds to a message
+  # of check.rs, and which UD18 5 requires in the candidate's client.
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" || reader=$?
+  ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
+  if ((reader == 1)); then
+    [[ $ATHANOR_UPDATE_CLASS == feature ]] ||
+      die "FAIL  UD18 3: the booted client predates the release attestation (#784), and the unlock of a $ATHANOR_UPDATE_CLASS candidate would go untested"
+    echo "NOTE  UD18 3: the booted client predates the release attestation (#784): the candidate's is verified on the runner, not read by the guest"
+    class=feature
+  else
+    [[ $journal != *"release attestation could not be fetched"* ]] ||
+      die "FAIL  UD18 3: the candidate's attestation was not read: $(check_seen "$journal")"
+    guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
+      die "FAIL  UD18 3: the candidate's attestation was not stored: $(check_seen "$journal")"
+    # A stored attestation is not a verified one: the client reads an attestation no key of its
+    # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
+    # verified on the runner, read from the lines of check.rs, as the state does not keep it.
+    if [[ $journal == *"the candidate is of the feature class"* ]]; then
+      class=feature
+    elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
+      class=security
+    else
+      die "FAIL  UD18 3: the check's journal names no class for the candidate: $(check_seen "$journal")"
+    fi
+    [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
+      die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
+    pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
+  fi
+  # UT13: with automatic updates on, the default, the check unlocks a security candidate for
+  # the next shutdown itself (check.rs settle_security); a feature candidate waits for Apply().
+  [[ $class == feature ]] || settled=will-apply-at-next-shutdown
+  [[ $(state .update) == "$settled" && $(state .downloaded.digest) == "$ATHANOR_UPDATE_TO" ]] ||
+    die "FAIL  UD18 4: the check did not settle the $class candidate as $settled: update '$(state .update)', digest '$(state .downloaded.digest)', last_error '$(state .last_error)' from '$(state .last_error_host)'"
+  pass "UD18 4: the client's own check downloads the $class candidate from the mirror and settles it as $settled"
+  if [[ $class == security ]]; then
+    # Apply() unlocks a download-only deployment, and refuses this one, unlocked already, as
+    # NothingDownloaded (requests.rs): the shutdown applies it.
+    reboot_into_digest guest_ssh "sudo systemd-run --quiet --on-active=2 systemctl reboot" "$ATHANOR_UPDATE_TO" \
+      "UD18 4: the security candidate boots at the next shutdown"
+    return
+  fi
+  # A login on the serial console is a second session of the user: Apply() would ask.
+  ttys=$(guest_ssh loginctl list-sessions --json=short | jq -r '[.[].tty // empty] | join(" ")')
+  [[ " $ttys " != *" ttyS0 "* ]] || die "FAIL  UD18 4: a session on ttyS0 is open, and Apply() would ask for an administrator"
+  reboot_into_digest call_active Apply "$ATHANOR_UPDATE_TO" "UD18 4: Apply() from the active session boots the candidate"
+}
+
+ci_stage_check() { # UD18 5
+  local status image signature sum
+  disk_floor
+  expect "UD18 5: the candidate is verified" .verified.reason signature
+  status=$(guest_ssh sudo bootc status --format json)
+  image=$(jq -r .status.booted.image.image.image <<< "$status")
+  signature=$(jq -r .status.booted.image.image.signature <<< "$status")
+  [[ $image == *:stable && $signature == containerPolicy ]] || die "FAIL  UD18 5: the machine follows $image ($signature), not :stable under the policy"
+  pass "UD18 5: the machine still follows :stable under the signature policy"
+  # The candidate is the :stable the next run upgrades from: a client without the reader would
+  # turn UD18 3 of that run into a NOTE (#784).
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" ||
+    die "FAIL  UD18 5: the candidate's client has no attestation reader: $ATTESTATION_READER is not in /usr/bin/athanor-update"
+  pass "UD18 5: the candidate's client reads release attestations"
+  sum=$(guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1)
+  [[ $sum == "$(< "$ACC_STATE/shipped-sum")" ]] || die "FAIL  UD18 5: the candidate changed the shipped probe file: the merge is not tested"
+  seeds_kept "UD18 5"
+  session_probes upgraded-
+}
+
+ci_stage_goback() { # UD18 6
+  disk_floor
+  reboot_into_digest call_root GoBack "$(< "$ACC_STATE/from-digest")" "UD18 6: GoBack() boots the from digest"
+}
+
+ci_stage_check_back() { # UD18 6
+  local stable
+  disk_floor
+  guest_ssh test -e "$MIRROR_DROPIN" -a -e "$MIRROR_ATTACHMENTS" ||
+    die "FAIL  UD18 6: the mirror drop-ins are gone after GoBack"
+  # The mirror still offers the candidate as :stable, so a check meets it again.
+  stable=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://127.0.0.1:${ATHANOR_UPDATE_MIRROR#*:}:stable")
+  [[ $stable == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the mirror's :stable is $stable, not the candidate"
+  quiet_checks "UD18 6"
+  check_now
+  expect "UD18 6: the client holds the candidate it went back from" .update held
+  [[ $(guest_ssh sudo cat /var/lib/athanor-update/held) == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the held digest is not the candidate"
+  seeds_kept "UD18 6"
+  session_probes rolled-back-
+}
+
+if [[ -n $ACC_CI ]]; then
+  wait_ssh
+  prefix=ci_stage_
+else
+  # stage_install waits for the guest itself; a later start needs its SSH and the registry tunnel.
+  [[ $start == install ]] || wait_ssh
+  prefix=stage_
+fi
 run=''
 for stage in "${STAGES[@]}"; do
   [[ $stage == "$start" ]] && run=1
   [[ -n $run ]] || continue
   echo "== $stage"
-  "stage_$stage"
+  "$prefix${stage//-/_}"
 done

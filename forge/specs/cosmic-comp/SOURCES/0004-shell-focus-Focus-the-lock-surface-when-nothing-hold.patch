@@ -1,0 +1,44 @@
+From ea90a2204f52a8f0b4c613bb909ed566b3024949 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Sat, 24 Oct 2026 01:10:56 +0200
+Subject: [PATCH] shell/focus: Focus the lock surface when nothing holds the
+ focus
+
+When the session locks while the keyboard has no focus target and the
+active workspace has no window, refresh_focus treats the empty focus as
+valid and skips the fixup, so update_focus_target, which picks the
+seat's lock surface, never runs. The locker's password field then
+receives no keys until a pointer click moves the focus to it.
+
+The skip already makes an exception for an exclusive layer surface;
+make the same exception while the session is locked, so the lock
+surface of the seat's output takes the keyboard focus as soon as it
+is mapped.
+
+See pop-os/cosmic-greeter#474.
+---
+ src/shell/focus/mod.rs | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/shell/focus/mod.rs b/src/shell/focus/mod.rs
+index 1bf41da..346a459 100644
+--- a/src/shell/focus/mod.rs
++++ b/src/shell/focus/mod.rs
+@@ -587,8 +587,12 @@ impl Common {
+                 let workspace = shell.active_space(&output).unwrap();
+                 let focus_stack = workspace.focus_stack.get(seat);
+ 
+-                // An exclusive layer surface takes the focus, even with no window to fall back to.
+-                if focus_stack.last().is_none() && exclusive_layer_surface_layer(&shell).is_none() {
++                // A lock surface or an exclusive layer surface takes the focus, even with no
++                // window to fall back to.
++                if focus_stack.last().is_none()
++                    && shell.session_lock.is_none()
++                    && exclusive_layer_surface_layer(&shell).is_none()
++                {
+                     continue; // Focus is valid
+                 } else {
+                     trace!("No previous window, focus fixup");
+-- 
+2.56.0
+

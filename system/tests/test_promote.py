@@ -29,6 +29,7 @@ BUNDLE = {
 }
 OLD = "2026-09-15T11:00:00Z"
 ISO = "sha256:" + "c" * 64
+REVISION = "0123456789abcdef0123456789abcdef01234567"
 
 
 def digest(n):
@@ -64,7 +65,9 @@ class Promote(Tool):
             new, old = digest(i + 1), digest(i + 4)
             fx["tags"][f"{REG}/{name}:412"] = new
             fx["configs"][f"{REG}/{name}@{new}"] = {
-                "org.opencontainers.image.created": run_created
+                "org.opencontainers.image.created": run_created,
+                "org.opencontainers.image.version": f"43.20260915.{i + 1}",
+                "org.opencontainers.image.revision": REVISION,
             }
             fx["raw"][f"{REG}/{name}:sha256-{new[7:]}.sig"] = signature
             fx["sigstore_keys"][f"{REG}/{name}@{new}"] = str(signer)
@@ -501,6 +504,29 @@ class Promote(Tool):
         self.assertIn("dwell", r.stderr)
         self.assertEqual(copies, [])
 
+    def test_a_shortened_dwell_promotes_a_fresh_run_and_is_recorded(self):
+        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self.published(finished=now)
+        self.env["PROMOTE_DWELL_HOURS"] = "0"
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual(copies, [])
+        self.assertEqual(self.record()["dwell_hours"], 0)
+
+    def test_a_dwell_outside_0_to_24_hours_is_refused(self):
+        marker = self.dir / "evaluated"
+        for dwell in ("25", "-1", "08", "1.5", f"a[$(touch {marker})]"):
+            with self.subTest(dwell=dwell):
+                self.published()
+                self.env["PROMOTE_DWELL_HOURS"] = dwell
+                r, copies = self.promote()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("0 to 24", r.stderr)
+                self.assertEqual(copies, [])
+                self.assertFalse(marker.exists())
+
     def test_the_dwell_counts_from_the_newest_evidence(self):
         now = datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
@@ -585,6 +611,43 @@ class Promote(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn("no org.opencontainers.image.created label", r.stderr)
         self.assertEqual(copies, [])
+
+    def test_the_record_names_the_version_and_commit_of_the_default_image(self):
+        self.published()
+        r, _ = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.record()["version"], "43.20260915.1")
+        self.assertEqual(self.record()["revision"], REVISION)
+
+    def test_a_default_image_without_a_version_or_revision_label_is_refused(self):
+        for label, value in (
+            ("org.opencontainers.image.version", None),
+            ("org.opencontainers.image.version", "20260915"),
+            ("org.opencontainers.image.revision", None),
+            ("org.opencontainers.image.revision", "iso-v0"),
+        ):
+            with self.subTest(label=label, value=value):
+                self.published()
+                fx = json.loads((self.dir / "registry.json").read_text())
+                labels = fx["configs"][f"{REG}/athanor-system@{digest(1)}"]
+                if value is None:
+                    del labels[label]
+                else:
+                    labels[label] = value
+                self.registry(fx)
+                r, copies = self.promote()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn(label, r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_the_version_is_the_default_images_even_when_it_is_already_stable(self):
+        self.published()
+        self.set_tag(f"{REG}/athanor-system:stable", digest(1))
+        r, _ = self.promote("--hardware-override", "athanor-system-nvidia")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([i["name"] for i in self.record()["images"]], ["athanor-system-nvidia"])
+        self.assertEqual(self.record()["version"], "43.20260915.1")
+        self.assertEqual(self.record()["revision"], REVISION)
 
     def test_the_record_names_the_registry(self):
         self.published()

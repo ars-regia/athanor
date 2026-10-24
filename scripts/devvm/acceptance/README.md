@@ -9,7 +9,7 @@ throwaway registry and throwaway keys. Nothing here touches the project registry
     scripts/devvm/acceptance/run.sh                      # about 70 minutes, a dozen reboots
     scripts/devvm/acceptance/run.sh goback               # resume at a stage
 
-The 31 GB host cannot hold the CI runner guest (16 GB) and this VM (8 GB) together: on a
+The 31 GB host does not run the CI runner guest (12 GB) and this VM (8 GB) together: on a
 host where `athanor-runner.service` is active, `run.sh` refuses to start while a job is busy
 on a self-hosted runner. Do not dispatch one meanwhile.
 

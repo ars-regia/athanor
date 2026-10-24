@@ -20,20 +20,43 @@ pub enum Privilege {
     TopLayers,
     ToplevelList,
     ToplevelCaptureSource,
+    /// `ext_output_image_capture_source_manager_v1`: a source of an output's pixels, by its
+    /// `wl_output`.
+    OutputCaptureSource,
     ImageCopyCapture,
     SessionLock,
+    /// `ext_workspace_manager_v1`: the workspaces, which a client may switch.
+    Workspaces,
+    /// `zwlr_output_manager_v1`: the outputs' configuration, the control center's.
+    OutputManagement,
+    /// `zwp_virtual_keyboard_manager_v1`: keys typed as if on the hardware keyboard.
+    VirtualKeyboard,
+    /// `zwlr_virtual_pointer_manager_v1`: a pointer moved and clicked as if by the hardware one.
+    VirtualPointer,
+    /// `zwp_input_method_manager_v2`: the seat's input method, which is told the focused text
+    /// field's text, commits text into it and may take the keyboard.
+    InputMethod,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 5] = [
+    const ALL: [(Self, &'static str); 11] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
             Self::ToplevelCaptureSource,
             "ext_foreign_toplevel_image_capture_source_manager_v1",
         ),
+        (
+            Self::OutputCaptureSource,
+            "ext_output_image_capture_source_manager_v1",
+        ),
         (Self::ImageCopyCapture, "ext_image_copy_capture_manager_v1"),
         (Self::SessionLock, "ext_session_lock_manager_v1"),
+        (Self::Workspaces, "ext_workspace_manager_v1"),
+        (Self::OutputManagement, "zwlr_output_manager_v1"),
+        (Self::VirtualKeyboard, "zwp_virtual_keyboard_manager_v1"),
+        (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
+        (Self::InputMethod, "zwp_input_method_manager_v2"),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -42,6 +65,12 @@ impl Privilege {
             .find(|(_, name)| *name == interface)
             .map(|(privilege, _)| *privilege)
     }
+}
+
+/// The interface of every privileged global, as the allow-list names it.
+#[cfg(test)]
+pub(crate) fn names() -> impl Iterator<Item = &'static str> {
+    Privilege::ALL.iter().map(|(_, name)| *name)
 }
 
 /// A process, as the compositor reads it at connect.

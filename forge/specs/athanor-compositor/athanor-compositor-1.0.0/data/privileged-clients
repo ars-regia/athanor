@@ -3,4 +3,7 @@
 #   <executable under /usr> <systemd unit> <interface>...
 # zwlr_layer_shell_v1 grants its top and overlay layers; the bottom and background layers are
 # every unconfined client's. A missing, unreadable or malformed file grants nothing.
-/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
+/usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1
+/usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 ext_workspace_manager_v1
+/usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1
+/usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1 ext_workspace_manager_v1 ext_foreign_toplevel_list_v1
