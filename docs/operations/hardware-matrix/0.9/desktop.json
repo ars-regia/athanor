@@ -23,7 +23,7 @@
     },
     "bluetooth-adapter": {
       "at": "2026-10-24T14:22:10+00:00",
-      "evidence": "Controller 5C:80:B6:BA:69:DA (public), powered yes",
+      "evidence": "Controller XX:XX:XX:XX:XX:XX (public), powered yes",
       "how": "automatic",
       "result": "pass"
     },
