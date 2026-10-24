@@ -159,8 +159,10 @@ plan() {
     on_branch "$revision"
 
     # The v0.x tags at the revision, lightweight ones included: they fail below, never pass as "no tag".
-    refs=$(gh_must api "/repos/$repo/git/matching-refs/tags/v")
-    lines=$(jq -r '.[] | "\(.ref | ltrimstr("refs/tags/")) \(.object.type) \(.object.sha)"' <<< "$refs")
+    # Every page: past the first, a tag at the revision would be missed and the build promoted as
+    # promoted-<run>. --slurp makes the pages one array of arrays.
+    refs=$(gh_must api --paginate --slurp "/repos/$repo/git/matching-refs/tags/v")
+    lines=$(jq -r '.[][] | "\(.ref | ltrimstr("refs/tags/")) \(.object.type) \(.object.sha)"' <<< "$refs")
     while read -r name type sha; do
         [[ $name =~ $VERSION_TAG ]] || continue
         if [[ $type == tag ]]; then sha=$(gh_must api "/repos/$repo/git/tags/$sha" | jq -r '.object.sha'); fi

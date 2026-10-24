@@ -281,6 +281,14 @@ class Plan(GithubRelease):
             },
         )
 
+    def test_plan_finds_the_version_tag_on_a_later_page_of_tags(self):
+        self.tag("v0.8.0", commit=OTHER)
+        self.tag()
+        self.fx["refs_per_page"] = 1
+        r = self.plan()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.choice()["tag"], "v0.9.0")
+
     def test_plan_names_a_maintainer_version_tag_with_its_notes_and_latest(self):
         self.tag()
         r = self.plan()

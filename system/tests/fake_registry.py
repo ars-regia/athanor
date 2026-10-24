@@ -335,6 +335,16 @@ def gh(args, fx):
                 print(json.dumps(body))
             return 0
         body = git_api(path, fx)
+        if isinstance(body, list):
+            size = fx.get("refs_per_page", 100)
+            pages = [body[i:i + size] for i in range(0, len(body), size)] or [[]]
+            if "--paginate" not in args:
+                pages = pages[:1]
+            if "--slurp" in args:
+                print(json.dumps(pages))
+            else:
+                print("".join(json.dumps(page) for page in pages))
+            return 0
         if body is False:
             print(json.dumps({"message": "Not Found", "status": "404"}))
             return fail("gh: Not Found (HTTP 404)")
