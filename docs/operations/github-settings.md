@@ -321,6 +321,14 @@ revision. The maintainer, from their own machine:
    again, then `diff`, which must print no drift for `rulesets`.
 5. Re-runs the `github-release` job of the promotion run.
 
+**Recovery from a promotion dispatched before its `v0.x` tag.** ADR-0131 decision 5 has the
+maintainer push the signed tag first; a promotion dispatched without it publishes the build
+as `promoted-<run>`. The maintainer pushes the signed `v0.x` tag on the build's revision, then
+dispatches the same promotion again, with the same inputs. Every image is already stable at the build's digests,
+so it moves no tag (`scripts/ci/promotion-record.sh`); it passes the same checks and the
+release approval, and publishes the `v0.x` Release with its own bundle (decision 6). The
+`promoted-<run>` Release stays, with the first bundle.
+
 A tag on the right commit with a forged Release at it is no recovery case: `github-release.sh`
 publishes only on a Release that is this promotion's approved one exactly (title, notes hash,
 target, no prerelease, `latest`) and whose every other asset is a signed evidence bundle that
