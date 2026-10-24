@@ -1,0 +1,141 @@
+{
+  "host": {
+    "digest": "sha256:fa2374f06aefa39a42050da00716d34bbaeb0c947a48e40256d4812b90367332",
+    "hostname": "athanor",
+    "image": "ostree-image-signed:docker://ghcr.io/ars-regia/athanor-system-nvidia:latest",
+    "kernel": "7.2.11-300.azoth.fc45.x86_64",
+    "version": "43.20261024.468"
+  },
+  "machine": "desktop",
+  "release": "0.9",
+  "rows": {
+    "audio": {
+      "at": "2026-10-24T14:29:41+00:00",
+      "evidence": "2026-10-24 on 43.20261024.468, Steinberg UR22mkII (USB): speaker-test -t wav -c 2 on the default sink, Front Left and Front Right heard on their own side, and the bar's output slider changed the loudness, by ear (maintainer; sink volume 1.10 before, 1.00 after); pw-record from Input 1, RMS in 0.5 s windows: -101 dBFS in silence, -48 to -61 dBFS while speaking; HDMI not tested, the monitor has no speakers",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "avc": {
+      "at": "2026-10-24T14:22:18+00:00",
+      "evidence": "2026-10-24 on 43.20261024.468: the only denials of the boot, three nnp_transition nosuid_transition unconfined_t -> install_t at 14:18:42 and 14:18:46 UTC, before the run, came from bootc status run inside the agent's bubblewrap sandbox, which sets no_new_privs; the policy refusing that transition is correct, and nothing else was denied",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "bluetooth-adapter": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "Controller 5C:80:B6:BA:69:DA (public), powered yes",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "dead-keys": {
+      "at": "2026-10-24T14:32:33+00:00",
+      "evidence": "2026-10-24 on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); in the session (gnome-text-editor) the same was typed on 43.20261017.393 on 2026-10-18; the maintainer confirms that \u00e0, \u00e9 and \u00e7 work in both",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "disk-unlock": {
+      "at": "2026-10-18T11:03:55+00:00",
+      "evidence": "on 43.20261017.393 (digest sha256:c4b5f57c6c65, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: LUKS passphrase typed at the initramfs prompt on 2026-10-18 (no TPM token enrolled)",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "failed-units": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "none",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "firmware-outside-image": {
+      "at": "2026-10-24T14:20:33+00:00",
+      "evidence": "2026-10-24 none on 43.20261024.468: journalctl -k names only iwlwifi cc-a0-77.ucode and intel/ibt-20-1-3.sfi, both under /usr/lib/firmware; firmware_class.path empty; no /etc/firmware or /var/lib/firmware",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "gtk-gpu": {
+      "at": "2026-10-24T14:20:33+00:00",
+      "evidence": "2026-10-24 GSK_DEBUG=renderer gnome-text-editor on 43.20261024.468: GskVulkanRenderer, and nvidia-smi lists the editor's process among the NVIDIA compute clients (driver 615.71.09)",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "kernel": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "7.2.11-300.azoth.fc45.x86_64",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "network": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "wifi:connected",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "nvidia-module": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "version 615.71.09, signer 'Athanor Kernel Module Signing Key', nvidia_drm True",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "output-scale": {
+      "at": "2026-10-18T10:28:40+00:00",
+      "evidence": "on 43.20261017.393 (digest sha256:c4b5f57c6c65, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: HDMI-A-1 at 150 % with cosmic-randr: bar sharp and unclipped in a grim capture; restored to 100 %; dock and launcher checked at 150 % on the laptop",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "outputs-hotplug": {
+      "at": "2026-10-18T12:29:48+00:00",
+      "evidence": "on 43.20261017.393 (digest sha256:c4b5f57c6c65, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Software disable/enable of HDMI-A-1: two bars (#600). Physical HDMI unplug: a burst of PCIe data-link errors and Xid 79, the GPU fell off the bus and the session froze (#604)",
+      "how": "maintainer",
+      "issue": 600,
+      "result": "fail"
+    },
+    "secure-boot": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "SecureBoot enabled",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "selinux": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "Enforcing",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "shell-units": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "athanor-bar.service active, athanor-dock.service active, athanor-shelld.service active",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "signed-origin": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "ostree-image-signed:docker://ghcr.io/ars-regia/athanor-system-nvidia:latest sha256:fa2374f06aefa39a42050da00716d34bbaeb0c947a48e40256d4812b90367332",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "suspend-resume": {
+      "at": "2026-10-18T11:40:13+00:00",
+      "evidence": "on 43.20261017.393 (digest sha256:c4b5f57c6c65, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: systemctl suspend entered S3 and never resumed; hard reset. Journal: Xid 79 GPU fell off the bus on resume, then an Oops in nvidia_modeset (FreeDeviceReference)",
+      "how": "maintainer",
+      "issue": 604,
+      "result": "fail"
+    },
+    "switch-verified": {
+      "at": "2026-10-24T14:22:18+00:00",
+      "evidence": "2026-10-24 sudo bash scripts/switch-verified.sh ghcr.io/ars-regia/athanor-system-nvidia:latest (script sha256 aae87040, origin/iso-v0 6267660b) on the 0.9 candidate: bootc reported the image specification unchanged and staged nothing. Booted 43.20261024.468, digest sha256:fa2374f06aefa39a42050da00716d34bbaeb0c947a48e40256d4812b90367332 (build 40078211020, ee2ac671, the digest :latest serves), origin ostree-image-signed:docker://ghcr.io/ars-regia/athanor-system-nvidia:latest; rpm-ostree status shows the same booted digest and no staged deployment",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "usb-internal": {
+      "at": "2026-10-24T14:22:10+00:00",
+      "evidence": "snapshot done; unit result success; 13 devices, blocked: none",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "usb-new-device": {
+      "at": "2026-10-18T11:46:07+00:00",
+      "evidence": "on 43.20261017.393 (digest sha256:c4b5f57c6c65, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Kingston DataTraveler 3.0 never seen before: blocked by USBGuard (InsertedDevicePolicy block), no notice shown (SD12 notice not built); usbguard allow-device (not permanent) brought it up as sda, 28.9G",
+      "how": "maintainer",
+      "result": "pass"
+    }
+  }
+}
