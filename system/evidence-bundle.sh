@@ -80,6 +80,7 @@ promotion_summary() { # promotion_summary ARTIFACTS_DIR
     "Installer ISO (athanor-iso:stable after the system images): `\(must("iso"))`, built from athanor-system `\(must("iso_system"))`", "",
     "Skipped: " + ([must("skipped")[] | "\(must("name")) (\(must("reason")))"] | if length == 0 then "none" else join("; ") end), "",
     "Hardware override: " + (must("overrides") | if length == 0 then "none" else join(", ") end), "",
+    "Dwell: \(must("dwell_hours")) h (UD5)", "",
     "Signatures verified in: athanor-builder:\(must("builder_content_hash"))", ""' "$1/promotion.json"
     jq -r -s 'def must(k): .[k] // error("an evidence file has no \(k)");
     "| Evidence | Image | Verdict | Finished |", "| --- | --- | --- | --- |",
