@@ -182,6 +182,8 @@ struct Client {
     frame_done: bool,
     /// Roundtrips answered (`Local::roundtrip`).
     synced: u32,
+    /// How many `toplevel_states` events had arrived when the last roundtrip was answered.
+    states_at_sync: usize,
     /// The windows of the foreign toplevel list.
     listed: Vec<Listed>,
     /// The buffer size of the last capture session, once its constraints are done.
@@ -537,6 +539,7 @@ impl Dispatch<wl_callback::WlCallback, Synced> for Client {
         _: &QueueHandle<Self>,
     ) {
         client.synced += 1;
+        client.states_at_sync = client.toplevel_states.len();
     }
 }
 
@@ -4561,8 +4564,9 @@ fn received(
         .collect()
 }
 
-/// `get_toplevel_state` sends the window's state and done at once: a roundtrip has them, with no
-/// frame drawn in between.
+/// `get_toplevel_state` sends the window's state and done at once: they arrive before the answer
+/// to the `sync` sent with it. The compositor reads the two requests together and handles them in
+/// turn, so no frame comes between them, and a frame's send could only follow the answer.
 #[test]
 fn the_first_state_needs_no_frame() {
     let mut run = Running::start(None);
@@ -4576,10 +4580,69 @@ fn the_first_state_needs_no_frame() {
         .manager
         .get_toplevel_state(&handle, &dock.local.queue.handle(), ());
     dock.local.roundtrip(&mut run);
-    assert_eq!(
-        received(&dock.local, &object),
-        [StateEvent::State(1), StateEvent::Done]
-    );
+    let id = object.id();
+    let answered = dock.local.client.states_at_sync;
+    let before: Vec<_> = dock.local.client.toplevel_states[..answered]
+        .iter()
+        .filter(|(of, _)| *of == id)
+        .map(|(_, event)| event.clone())
+        .collect();
+    assert_eq!(before, [StateEvent::State(1), StateEvent::Done]);
+    run.stop();
+}
+
+/// A state object destroyed frees its place: a new one of the same window, in the same flush,
+/// is sent its state and done, and the client is not disconnected.
+#[test]
+fn a_state_object_can_be_made_again_after_its_destroy() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    app.another(&mut run, "probe");
+    let handle = dock.local.handle(&mut run, "probe");
+    let qh = dock.local.queue.handle();
+    let first = dock.manager.get_toplevel_state(&handle, &qh, ());
+    dock.local.state_events(&mut run, &first);
+    first.destroy();
+    let second = dock.manager.get_toplevel_state(&handle, &qh, ());
+    let events = dock.local.state_events(&mut run, &second);
+    assert!(matches!(
+        events.as_slice(),
+        [StateEvent::State(_), StateEvent::Done]
+    ));
+    dock.local.roundtrip(&mut run);
+    assert!(dock.local.connection.protocol_error().is_none(), "no error");
+    assert_eq!(run.state.toplevel_states.len(), 1);
+    run.stop();
+}
+
+/// Two clients each hold a state object of the same window: both are sent its state, and
+/// neither is disconnected.
+#[test]
+fn two_clients_each_hold_a_state_object_of_a_window() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut bar = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    app.another(&mut run, "probe");
+    let docked = dock.local.handle(&mut run, "probe");
+    let barred = bar.local.handle(&mut run, "probe");
+    let first = dock
+        .manager
+        .get_toplevel_state(&docked, &dock.local.queue.handle(), ());
+    let second = bar
+        .manager
+        .get_toplevel_state(&barred, &bar.local.queue.handle(), ());
+    for (local, object) in [(&mut dock.local, &first), (&mut bar.local, &second)] {
+        let events = local.state_events(&mut run, object);
+        assert!(matches!(
+            events.as_slice(),
+            [StateEvent::State(_), StateEvent::Done]
+        ));
+        local.roundtrip(&mut run);
+        assert!(local.connection.protocol_error().is_none(), "no error");
+    }
+    assert_eq!(run.state.toplevel_states.len(), 2);
     run.stop();
 }
 
