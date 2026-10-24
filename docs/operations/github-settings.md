@@ -323,5 +323,5 @@ revision. The maintainer, from their own machine:
 
 A tag on the right commit with a forged Release at it is no recovery case: `github-release.sh`
 publishes only on a Release that is this promotion's approved one exactly (title, notes hash,
-target, no prerelease, `latest`), whatever assets it already holds, and refuses any other,
-naming the recovery.
+target, no prerelease, `latest`) and whose every other asset is a signed evidence bundle that
+verifies for that tag and commit, and refuses any other, naming the recovery.
