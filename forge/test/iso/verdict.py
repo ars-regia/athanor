@@ -127,17 +127,18 @@ def read_phases(path: pathlib.Path) -> dict[str, int]:
 
 
 def upgrade_stages(out: pathlib.Path) -> tuple[bool, str]:
-    """Whether run.sh --ci passed, and if not, the reason in a line."""
+    """Whether run.sh --ci passed, and if not, the reason in a line. A pass carries the NOTE
+    lines of upgrade.log: a check the stages could not run on this :stable (#784)."""
     status_file = out / "upgrade-status"
     if not status_file.exists():
         return False, "NO, the upgrade stages never ran (no ready)"
     status = status_file.read_text().strip()
-    if status == "0":
-        return True, "passed"
-    if status == "124":
-        return False, "NO, the upgrade stages timed out"
     log = out / "upgrade.log"
     lines = log.read_text(errors="replace").splitlines() if log.exists() else []
+    if status == "0":
+        return True, "; ".join(["passed", *(line for line in lines if line.startswith("NOTE  "))])
+    if status == "124":
+        return False, "NO, the upgrade stages timed out"
     first = next((line for line in lines if line.startswith("FAIL  ")), "no FAIL line in upgrade.log")
     return False, f"NO, exited {status}: {first}"
 

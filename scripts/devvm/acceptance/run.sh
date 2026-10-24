@@ -521,6 +521,14 @@ stage_report() {
 ETC_PROBE=/etc/security/pwquality.conf.d/50-athanor.conf
 VAR_PROBE=/var/lib/athanor-upgrade-probe/seed
 MIRROR_DROPIN=/etc/containers/registries.conf.d/99-upgrade-acceptance.conf
+# containers/image reads the signatures of a pull from the registry it pulled from, and decides
+# whether to look for sigstore attachments there by that registry's registries.d scope, not by
+# the image's: without this entry the mirror's .sig is never read and the pull is refused.
+MIRROR_ATTACHMENTS=/etc/containers/registries.d/99-upgrade-acceptance.yaml
+# A message of check.rs candidate_class: in /usr/bin/athanor-update it marks the attestation
+# reader (#784). A message stays in a release binary; a constant only compared, such as the
+# DSSE media type, can be compiled into immediates and leave no string behind.
+ATTESTATION_READER="release attestation could not be fetched"
 PHASES=${ACC_CI_OUT:-}/upgrade-phases.txt
 
 # Records the runner's free space and stops under four gigabytes, before a stage fills it.
@@ -570,33 +578,56 @@ ci_stage_seed() { # UD18 2
   pass "UD18 2: $from seeded in /home, /var and $ETC_PROBE"
 }
 
+# What the check saw, for a failure of UD18 3: the guest and its journal are gone after the run.
+check_seen() { # check_seen JOURNAL
+  printf "update '%s', last_error '%s' from '%s'; the check's journal:\n%s" \
+    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "$1"
+}
+
 ci_stage_upgrade() { # UD18 3 and 4
-  local since journal class settled=downloaded ttys
+  local since journal class settled=downloaded ttys reader=0
   disk_floor
   printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
     "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
     guest_ssh sudo tee "$MIRROR_DROPIN" > /dev/null
+  printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ATHANOR_UPDATE_MIRROR" |
+    guest_ssh sudo tee "$MIRROR_ATTACHMENTS" > /dev/null
   quiet_checks "UD18 4"
   since=$(now_guest)
   check_now
   # Required since ADR-0130: without the attestation the client only warns and goes on.
   journal=$(journal_since "$since" athanor-update-check.service)
-  [[ $journal != *"release attestation could not be fetched"* ]] || die "FAIL  UD18 3: the candidate's attestation was not read"
-  guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
-    die "FAIL  UD18 3: the candidate's attestation was not stored"
-  # A stored attestation is not a verified one: the client reads an attestation no key of its
-  # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
-  # verified on the runner, read from the lines of check.rs, as the state does not keep it.
-  if [[ $journal == *"the candidate is of the feature class"* ]]; then
+  # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
+  # every candidate downloaded for Apply(). The reader is required where the booted client
+  # has it: required everywhere, the job could not pass until a build with it was promoted
+  # (#784). It is found by ATTESTATION_READER, which test_acceptance_ci.py holds to a message
+  # of check.rs, and which UD18 5 requires in the candidate's client.
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" || reader=$?
+  ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
+  if ((reader == 1)); then
+    [[ $ATHANOR_UPDATE_CLASS == feature ]] ||
+      die "FAIL  UD18 3: the booted client predates the release attestation (#784), and the unlock of a $ATHANOR_UPDATE_CLASS candidate would go untested"
+    echo "NOTE  UD18 3: the booted client predates the release attestation (#784): the candidate's is verified on the runner, not read by the guest"
     class=feature
-  elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
-    class=security
   else
-    die "FAIL  UD18 3: the check's journal names no class for the candidate"
+    [[ $journal != *"release attestation could not be fetched"* ]] ||
+      die "FAIL  UD18 3: the candidate's attestation was not read: $(check_seen "$journal")"
+    guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
+      die "FAIL  UD18 3: the candidate's attestation was not stored: $(check_seen "$journal")"
+    # A stored attestation is not a verified one: the client reads an attestation no key of its
+    # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
+    # verified on the runner, read from the lines of check.rs, as the state does not keep it.
+    if [[ $journal == *"the candidate is of the feature class"* ]]; then
+      class=feature
+    elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
+      class=security
+    else
+      die "FAIL  UD18 3: the check's journal names no class for the candidate: $(check_seen "$journal")"
+    fi
+    [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
+      die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
+    pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
   fi
-  [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
-    die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
-  pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
   # UT13: with automatic updates on, the default, the check unlocks a security candidate for
   # the next shutdown itself (check.rs settle_security); a feature candidate waits for Apply().
   [[ $class == feature ]] || settled=will-apply-at-next-shutdown
@@ -625,6 +656,11 @@ ci_stage_check() { # UD18 5
   signature=$(jq -r .status.booted.image.image.signature <<< "$status")
   [[ $image == *:stable && $signature == containerPolicy ]] || die "FAIL  UD18 5: the machine follows $image ($signature), not :stable under the policy"
   pass "UD18 5: the machine still follows :stable under the signature policy"
+  # The candidate is the :stable the next run upgrades from: a client without the reader would
+  # turn UD18 3 of that run into a NOTE (#784).
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" ||
+    die "FAIL  UD18 5: the candidate's client has no attestation reader: $ATTESTATION_READER is not in /usr/bin/athanor-update"
+  pass "UD18 5: the candidate's client reads release attestations"
   sum=$(guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1)
   [[ $sum == "$(< "$ACC_STATE/shipped-sum")" ]] || die "FAIL  UD18 5: the candidate changed the shipped probe file: the merge is not tested"
   seeds_kept "UD18 5"
@@ -639,7 +675,8 @@ ci_stage_goback() { # UD18 6
 ci_stage_check_back() { # UD18 6
   local stable
   disk_floor
-  guest_ssh test -e "$MIRROR_DROPIN" || die "FAIL  UD18 6: the mirror drop-in is gone after GoBack"
+  guest_ssh test -e "$MIRROR_DROPIN" -a -e "$MIRROR_ATTACHMENTS" ||
+    die "FAIL  UD18 6: the mirror drop-ins are gone after GoBack"
   # The mirror still offers the candidate as :stable, so a check meets it again.
   stable=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://127.0.0.1:${ATHANOR_UPDATE_MIRROR#*:}:stable")
   [[ $stable == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the mirror's :stable is $stable, not the candidate"

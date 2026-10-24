@@ -965,6 +965,14 @@ def test_upgrade_pass(tmp: pathlib.Path) -> None:
         assert data["checks"][check] is True, (check, data)
 
 
+def test_upgrade_pass_reports_its_notes(tmp: pathlib.Path) -> None:
+    """A check the stages skipped on this :stable is named in the report of a pass."""
+    log = "NOTE  UD18 3: the booted client predates the release attestation (#784)\nPASS  UD18 4: Apply()\n"
+    code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(log=log))
+    assert code == 0, report
+    assert "- upgrade stages: passed; NOTE  UD18 3: the booted client predates" in report, report
+
+
 def test_upgrade_missing_status_fails(tmp: pathlib.Path) -> None:
     """No upgrade-status: the console never wrote `ready`, so the stages never ran."""
     code, report = verdict(tmp, FIRST_BOOT, 143, "secure-boot", "upgrade", files=upgrade_files(status=None))
@@ -1244,6 +1252,7 @@ def main() -> int:
             test_classify_maps_probe_output,
             test_print_probe_is_the_typed_probe,
             test_upgrade_pass,
+            test_upgrade_pass_reports_its_notes,
             test_upgrade_missing_status_fails,
             test_upgrade_old_deployment_fails,
             test_upgrade_timeout_fails,
