@@ -10,11 +10,16 @@ systemctl, gh, ssh and df are stubs on PATH; HOME is a temporary directory.
 import json
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
 
 RUN = pathlib.Path(__file__).resolve().parents[1] / "devvm" / "acceptance" / "run.sh"
+ATTESTATION_RS = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "forge/specs/athanor-update/athanor-update-1.0.0/src/attestation.rs"
+)
 DIGEST = "sha256:" + "a" * 64
 FROM = "sha256:" + "b" * 64
 # What athanor-update's check logs (forge/specs/athanor-update/.../src/check.rs).
@@ -33,6 +38,7 @@ case "$*" in
   *loginctl*) cat "$g/sessions" ;;
   *"systemctl reboot"*) echo 2 > "$g/boot"; cp "$g/staged" "$g/booted" ;;
   *tee*) cat > /dev/null ;;
+  *"grep -qaF"*) test -e "$g/reader" ;;
 esac
 """
 
@@ -126,9 +132,10 @@ class CiMode(unittest.TestCase):
         self.assertIn("== seed", result.stdout, result.stderr)
         self.assertNotEqual(result.returncode, 0)
 
-    def guest(self, update, journal, serial_session=True):
+    def guest(self, update, journal, serial_session=True, reader=True):
         """A guest whose check settled on UPDATE with the candidate downloaded and logged
-        JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply()."""
+        JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply(). Without
+        READER its client predates the release attestation (#784)."""
         g = self.dir / "guest"
         g.mkdir(exist_ok=True)
         state = {
@@ -143,6 +150,8 @@ class CiMode(unittest.TestCase):
         (g / "boot").write_text("1")
         sessions = [{"session": "3", "tty": "ttyS0"}] if serial_session else []
         (g / "sessions").write_text(json.dumps(sessions))
+        if reader:
+            (g / "reader").touch()
         self.stub("ssh", GUEST.replace("@GUEST@", str(g)))
 
     def test_upgrade_reads_the_class_the_runner_verified(self):
@@ -200,6 +209,31 @@ class CiMode(unittest.TestCase):
                 self.assertIn(
                     f"the check did not settle the {cls} candidate", result.stderr
                 )
+
+    def test_upgrade_goes_on_through_apply_with_a_client_that_predates_the_reader(self):
+        self.guest("downloaded", "", reader=False)
+        result = self.run_sh("--ci", "upgrade", env=self.ci)
+        self.assertIn("NOTE  UD18 3: the booted client predates", result.stdout, result.stderr)
+        self.assertNotIn("PASS  UD18 3", result.stdout)
+        self.assertIn("PASS  UD18 4", result.stdout, result.stderr)
+        # The stage reached Apply(), which the login on ttyS0 stops.
+        self.assertIn("ttyS0", result.stderr)
+
+    def test_upgrade_refuses_a_security_candidate_with_a_client_that_predates_the_reader(self):
+        self.guest("downloaded", "", reader=False)
+        security = {**self.ci, "ATHANOR_UPDATE_CLASS": "security"}
+        result = self.run_sh("--ci", "upgrade", env=security)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("would go untested", result.stderr)
+        self.assertNotIn("PASS  UD18 4", result.stdout)
+
+    def test_the_reader_is_found_by_the_media_type_of_the_client(self):
+        marker = re.search(r"grep -qaF '([^']+)' /usr/bin/athanor-update", RUN.read_text())
+        self.assertIsNotNone(marker, "run.sh no longer looks for the attestation reader")
+        self.assertIn(
+            f'pub const LAYER_MEDIA_TYPE: &str = "{marker.group(1)}";',
+            ATTESTATION_RS.read_text(),
+        )
 
     def test_ci_mode_rejects_an_unknown_class(self):
         result = self.run_sh("--ci", env={**self.ci, "ATHANOR_UPDATE_CLASS": "urgent"})

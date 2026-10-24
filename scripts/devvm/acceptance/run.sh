@@ -595,11 +595,15 @@ ci_stage_upgrade() { # UD18 3 and 4
   journal=$(journal_since "$since" athanor-update-check.service)
   # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
   # every candidate downloaded for Apply(). The reader is required where the booted client
-  # has it: required everywhere, the job could not pass until a build with it was promoted.
-  guest_ssh "grep -qaF 'release attestation could not be fetched' /usr/bin/athanor-update" || reader=$?
+  # has it: required everywhere, the job could not pass until a build with it was promoted
+  # (#784). It is found by its DSSE media type (attestation.rs LAYER_MEDIA_TYPE), a protocol
+  # constant that test_acceptance_ci.py holds equal to the one below.
+  guest_ssh "grep -qaF 'application/vnd.dsse.envelope.v1+json' /usr/bin/athanor-update" || reader=$?
   ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
   if ((reader == 1)); then
-    echo "NOTE  UD18 3: the booted client predates the release attestation (#659): the candidate's is served, not read"
+    [[ $ATHANOR_UPDATE_CLASS == feature ]] ||
+      die "FAIL  UD18 3: the booted client predates the release attestation (#784), and the unlock of a $ATHANOR_UPDATE_CLASS candidate would go untested"
+    echo "NOTE  UD18 3: the booted client predates the release attestation (#784): the candidate's is verified on the runner, not read by the guest"
     class=feature
   else
     [[ $journal != *"release attestation could not be fetched"* ]] ||
