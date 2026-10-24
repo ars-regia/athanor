@@ -114,6 +114,27 @@
     ],
     "target": "branch"
   },
+  "promotion-tags": {
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/tags/promoted-*"
+        ]
+      }
+    },
+    "enforcement": "active",
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "update"
+      }
+    ],
+    "target": "tag"
+  },
   "rebase-branches": {
     "bypass_actors": [],
     "conditions": {
@@ -184,5 +205,50 @@
       }
     ],
     "target": "branch"
+  },
+  "version-tags-create": {
+    "bypass_actors": [
+      {
+        "actor_id": 5,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always"
+      }
+    ],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/tags/v*"
+        ]
+      }
+    },
+    "enforcement": "active",
+    "rules": [
+      {
+        "type": "creation"
+      }
+    ],
+    "target": "tag"
+  },
+  "version-tags-immutable": {
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/tags/v*"
+        ]
+      }
+    },
+    "enforcement": "active",
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "update"
+      }
+    ],
+    "target": "tag"
   }
 }
