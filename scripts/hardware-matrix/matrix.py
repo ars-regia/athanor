@@ -22,6 +22,7 @@ import os
 import pathlib
 import re
 import socket
+import struct
 import subprocess
 import sys
 
@@ -242,6 +243,28 @@ def shell_units():
     return ("pass" if states == ["active"] * len(units) else "fail"), evidence
 
 
+def peer_pid(path):
+    """The pid of the process listening on the Unix socket `path`, from SO_PEERCRED."""
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(TIMEOUT)
+        s.connect(path)
+        creds = s.getsockopt(
+            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+        )
+    return struct.unpack("3i", creds)[0]
+
+
+def compositor():
+    """Which compositor serves the session: the executable behind the Wayland socket."""
+    runtime, name = os.environ.get("XDG_RUNTIME_DIR"), os.environ.get("WAYLAND_DISPLAY")
+    if not runtime or not name:
+        raise Failed(
+            "XDG_RUNTIME_DIR and WAYLAND_DISPLAY are not set: run matrix.py from inside the session"
+        )
+    exe = os.readlink(f"/proc/{peer_pid(str(pathlib.Path(runtime) / name))}/exe")
+    return ("pass" if exe == "/usr/bin/athanor-compositor" else "fail"), exe
+
+
 CHECKS = {
     f.__name__: f
     for f in (
@@ -257,6 +280,7 @@ CHECKS = {
         battery,
         failed_units,
         shell_units,
+        compositor,
     )
 }
 
@@ -279,14 +303,36 @@ def load(path=HERE / "rows.toml"):
         return tomllib.load(f)
 
 
+def version(release):
+    return tuple(int(part) for part in release.split("."))
+
+
+def scoped(matrix, release):
+    """The matrix of RELEASE: the entries without `since`, or whose `since` it has reached."""
+
+    def counts(entry):
+        return version(release) >= version(entry.get("since", "0.0"))
+
+    return {
+        **matrix,
+        "row": [r for r in matrix.get("row", []) if counts(r)],
+        "untested": [u for u in matrix.get("untested", []) if counts(u)],
+    }
+
+
 def validate(matrix):
     """Problems of rows.toml: duplicate ids, unknown checks or machines, a row both automatic
-    and by hand or neither, an untested entry without a reason."""
+    and by hand or neither, an untested entry without a reason, a `since` that is not a
+    release."""
     problems, seen = [], set()
     for entry in matrix.get("row", []) + matrix.get("untested", []):
         if entry["id"] in seen:
             problems.append(f"{entry['id']}: duplicate id")
         seen.add(entry["id"])
+        # An unquoted since = 0.10 is the float 0.1: only a string is a release.
+        since = entry.get("since", "0.0")
+        if not isinstance(since, str) or not RELEASE.fullmatch(since):
+            problems.append(f"{entry['id']}: since must be a release such as 0.10")
     for row in matrix.get("row", []):
         if ("check" in row) == ("steps" in row):
             problems.append(f"{row['id']}: needs exactly one of check and steps")
@@ -430,6 +476,7 @@ def main(argv):
         sys.exit("rows.toml: " + "; ".join(problems))
     if len(argv) < 2 or not RELEASE.fullmatch(argv[1]):
         sys.exit(__doc__)
+    matrix = scoped(matrix, argv[1])
     if len(argv) >= 3 and argv[2] not in matrix["machines"]:
         sys.exit(f"MACHINE must be one of {', '.join(matrix['machines'])}")
     if len(argv) == 3 and argv[0] == "run":
