@@ -581,7 +581,7 @@ check_seen() { # check_seen JOURNAL
 }
 
 ci_stage_upgrade() { # UD18 3 and 4
-  local since journal class settled=downloaded ttys
+  local since journal class settled=downloaded ttys reader=0
   disk_floor
   printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
     "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
@@ -593,23 +593,33 @@ ci_stage_upgrade() { # UD18 3 and 4
   check_now
   # Required since ADR-0130: without the attestation the client only warns and goes on.
   journal=$(journal_since "$since" athanor-update-check.service)
-  [[ $journal != *"release attestation could not be fetched"* ]] ||
-    die "FAIL  UD18 3: the candidate's attestation was not read: $(check_seen "$journal")"
-  guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
-    die "FAIL  UD18 3: the candidate's attestation was not stored: $(check_seen "$journal")"
-  # A stored attestation is not a verified one: the client reads an attestation no key of its
-  # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
-  # verified on the runner, read from the lines of check.rs, as the state does not keep it.
-  if [[ $journal == *"the candidate is of the feature class"* ]]; then
+  # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
+  # every candidate downloaded for Apply(). The reader is required where the booted client
+  # has it: required everywhere, the job could not pass until a build with it was promoted.
+  guest_ssh "grep -qaF 'release attestation could not be fetched' /usr/bin/athanor-update" || reader=$?
+  ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
+  if ((reader == 1)); then
+    echo "NOTE  UD18 3: the booted client predates the release attestation (#659): the candidate's is served, not read"
     class=feature
-  elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
-    class=security
   else
-    die "FAIL  UD18 3: the check's journal names no class for the candidate: $(check_seen "$journal")"
+    [[ $journal != *"release attestation could not be fetched"* ]] ||
+      die "FAIL  UD18 3: the candidate's attestation was not read: $(check_seen "$journal")"
+    guest_ssh sudo test -d "/var/lib/athanor-update/attestations/${ATHANOR_UPDATE_TO#sha256:}" ||
+      die "FAIL  UD18 3: the candidate's attestation was not stored: $(check_seen "$journal")"
+    # A stored attestation is not a verified one: the client reads an attestation no key of its
+    # policy verifies as the feature class. Its class is held to the one serve_candidate.sh
+    # verified on the runner, read from the lines of check.rs, as the state does not keep it.
+    if [[ $journal == *"the candidate is of the feature class"* ]]; then
+      class=feature
+    elif [[ $journal == *"security update unlocked for the next shutdown"* ]]; then
+      class=security
+    else
+      die "FAIL  UD18 3: the check's journal names no class for the candidate: $(check_seen "$journal")"
+    fi
+    [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
+      die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
+    pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
   fi
-  [[ $class == "$ATHANOR_UPDATE_CLASS" ]] ||
-    die "FAIL  UD18 3: the guest settled the candidate as the $class class; its attestation, verified on the runner, says $ATHANOR_UPDATE_CLASS"
-  pass "UD18 3: the guest reads the candidate as the $class class, as its attestation verified on the runner says"
   # UT13: with automatic updates on, the default, the check unlocks a security candidate for
   # the next shutdown itself (check.rs settle_security); a feature candidate waits for Apply().
   [[ $class == feature ]] || settled=will-apply-at-next-shutdown
