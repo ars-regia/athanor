@@ -281,6 +281,12 @@ class Plan(GithubRelease):
             },
         )
 
+    def test_plan_refuses_a_tag_subject_github_would_not_store_as_is(self):
+        for message in ("\nThe 0.9 release.\n", " Athanor 0.9\n", "Athanor 0.9 \n", "Athanor\t0.9\n", "Athanor 0.9\r\n"):
+            with self.subTest(message=message):
+                self.tag(message=message)
+                self.refused(self.plan(), "v0.9.0", "subject")
+
     def test_plan_finds_the_version_tag_on_a_later_page_of_tags(self):
         self.tag("v0.8.0", commit=OTHER)
         self.tag()

@@ -175,6 +175,9 @@ plan() {
     tag=promoted-$run title=$version latest=false
     if ((${#tags[@]} == 1)); then
         subject=$(check_version_tag "the v0.x tag" "${tags[0]}" "$revision")
+        # The subject becomes the Release title, compared after GitHub stores it: nothing it could trim.
+        [[ -n $subject && $subject != [[:space:]]* && $subject != *[[:space:]] && $subject != *[[:cntrl:]]* ]] ||
+            die "the subject of the v0.x tag ${tags[0]} is empty or has leading or trailing whitespace or control characters: '$subject'; see the recovery in docs/operations/github-settings.md section 9"
         # Published Releases only: the plan's token cannot be relied on to see drafts (decision 7 of the plan).
         release=$(release_view "${tags[0]}")
         other=''
