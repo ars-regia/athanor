@@ -16,7 +16,9 @@ no-default-features = false
 [advisories]
 # No blanket ignores. Every ignore added here needs a reason and a review date:
 #   { id = "RUSTSEC-YYYY-NNNN", reason = "why it cannot be fixed now" }  # review: YYYY-MM-DD
-ignore = []
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 through p256 0.13: athanor-update only verifies signatures, with public inputs; p256 0.14 in #773" },  # review: 2026-11-07
+]
 unmaintained = "workspace"
 yanked = "deny"
 
