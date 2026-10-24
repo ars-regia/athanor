@@ -637,7 +637,7 @@ class Publish(GithubRelease):
     def test_an_existing_release_must_match_the_approved_one_field_by_field(self):
         self.tag()
         bundle = self.planned()
-        for field, change in (("title", {"title": "Athanor 0.9"}), ("target", {"target": OTHER}),
+        for field, change in (("title", {"title": "Athanor 0.9"}),
                               ("prerelease", {"prerelease": True}), ("latest", {"latest": False}),
                               ("body", {"body": NOTES})):
             with self.subTest(field=field):
@@ -708,12 +708,46 @@ class Publish(GithubRelease):
         self.refused(self.publish(bundle), "promoted-412", "body")
         self.nothing_published()
 
-    def test_a_genuine_earlier_bundle_of_another_revision_is_refused(self):
+    def test_a_genuine_earlier_release_whose_tag_names_another_commit_is_refused(self):
         self.first_promotion()
         bundle = self.planned()
-        self.fx["releases"]["promoted-412"]["target"] = OTHER
+        self.fx["git_tags"]["promoted-412"].update(sha=OTHER, commit=OTHER)
+        self.refused(self.publish(bundle), "promoted-412", OTHER)
+        self.nothing_published()
+
+    def test_a_release_reporting_the_branch_as_its_target_is_bound_through_its_tag(self):
+        self.tag()
+        bundle = self.planned()
+        for tag, title, latest in (("v0.9.0", TITLE, True), ("promoted-412", VERSION, False)):
+            with self.subTest(tag=tag):
+                if tag != "v0.9.0":
+                    self.fx["releases"].pop("v0.9.0")
+                    self.fx["git_tags"].pop("v0.9.0")
+                    self.tag("promoted-412", annotated=False)
+                    bundle = self.planned()
+                self.release(tag, title=title, latest=latest, target="iso-v0")
+                r = self.publish(bundle)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(ASSET, self.fx["releases"][tag]["assets"])
+
+    def test_a_release_whose_tag_names_another_commit_is_refused_whatever_its_target(self):
+        bundle = self.planned()
+        self.tag("promoted-412", commit=OTHER, annotated=False)
+        self.release("promoted-412", target=REVISION)
+        self.refused(self.publish(bundle), "promoted-412", OTHER)
+        self.nothing_published()
+
+    def test_a_draft_without_its_tag_must_target_the_revision(self):
+        bundle = self.planned()
+        self.release("promoted-412", draft=True, target=OTHER)
         self.refused(self.publish(bundle), "promoted-412", "target")
         self.nothing_published()
+
+    def test_a_version_release_created_on_its_tag_reads_back(self):
+        self.tag()
+        r = self.publish(self.planned())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.fx["releases"]["v0.9.0"]["target"], "iso-v0")
 
     def test_a_draft_without_the_asset_is_completed(self):
         bundle = self.planned()

@@ -66,6 +66,8 @@ gh_or_absent() { # gh_or_absent ARGS... -> gh's output, nothing when it answers 
 }
 
 RELEASE_FIELDS=isDraft,isPrerelease,tagName,name,targetCommitish,body,assets,url
+# gh release view finds a draft by listing the Releases, since GitHub's release-by-tag endpoint
+# serves published Releases only; drafts are found through that fallback of gh.
 release_view() { # release_view TAG -> the Release at TAG, draft or not; nothing when there is none
     gh_or_absent release view "$1" -R "$repo" --json "$RELEASE_FIELDS"
 }
@@ -223,14 +225,24 @@ recovery() { # recovery TAG -> how the maintainer clears a Release at TAG that i
 }
 
 # differs RELEASE TAG TITLE LATEST NOTES_SHA REVISION -> what in the Release at TAG is not as
-# approved: TITLE, a body whose body_sha is NOTES_SHA, REVISION as its target, no prerelease, and
-# for a published v0.x Release LATEST. Nothing when all hold.
+# approved: TAG as its tag, TITLE, a body whose body_sha is NOTES_SHA, no prerelease, for a
+# published v0.x Release LATEST, and REVISION as its commit. Nothing when all hold.
 differs() {
-    local release=$1 tag=$2 title=$3 latest=$4 want=$5 revision=$6 fields have draft current latest_tag
-    fields=$(jq -r --arg title "$title" --arg revision "$revision" '[
+    local release=$1 tag=$2 title=$3 latest=$4 want=$5 revision=$6 fields have draft current latest_tag at
+    fields=$(jq -r --arg tag "$tag" --arg title "$title" '[
+        if .tagName != $tag then "tag \(.tagName)" else empty end,
         if .name != $title then "title \(.name | @json)" else empty end,
-        if .targetCommitish != $revision then "target \(.targetCommitish)" else empty end,
         if .isPrerelease then "prerelease" else empty end] | join(", ")' <<< "$release")
+    # The commit is bound through the tag, immutable under the rulesets: GitHub ignores and reports
+    # the default branch as targetCommitish for a Release made on an existing tag. Only a draft
+    # whose tag does not exist yet gets its tag at targetCommitish when it is published.
+    at=$(tag_commit "$tag")
+    if [[ -n $at && $at != "$revision" ]]; then
+        fields+="${fields:+, }tag commit $at"
+    elif [[ -z $at ]]; then
+        at=$(jq -r '.targetCommitish' <<< "$release")
+        if [[ $at != "$revision" ]]; then fields+="${fields:+, }target $at, with no tag yet"; fi
+    fi
     have=$(jq -j '.body // ""' <<< "$release" | body_sha)
     if [[ $have != "$want" ]]; then fields+="${fields:+, }body (SHA-256 $have, approved $want)"; fi
     draft=$(jq -r '.isDraft' <<< "$release")
@@ -330,6 +342,7 @@ read_back() {
     fields=$(differs "$release" "$1" "$5" "$6" "$want" "$4")
     [[ -z $fields ]] || die "the Release at $1, as published, is not the approved one ('$5' on $4): $fields"
     check_assets "$1" "$release" "$2" "$4"
+    if [[ $1 =~ $VERSION_TAG ]]; then check_version_tag "the v0.x tag" "$1" "$4" > /dev/null; fi
     jq -e --arg name "$2" 'any(.assets[]; .name == $name)' <<< "$release" > /dev/null || die "the Release at $1 does not hold $2"
     have=$(asset_sha "$1" "$2")
     [[ $have == "$3" ]] || die "the Release at $1 holds $2 with SHA-256 $have, not this bundle's $3"

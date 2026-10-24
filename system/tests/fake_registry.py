@@ -249,7 +249,8 @@ def release(args, fx):
         if tag in releases:
             return fail(f"a release with the same tag name already exists: {tag}")
         name, sha = store(args[3])
-        releases[tag] = {"draft": "--draft" in flags, "latest": False, "target": value("--target"),
+        target = "iso-v0" if tag in fx.get("git_tags", {}) else value("--target")
+        releases[tag] = {"draft": "--draft" in flags, "latest": False, "target": target,
                          "title": value("--title"),
                          "body": "" if fx.get("release_bodies_lost") else pathlib.Path(value("--notes-file")).read_text(),
                          "assets": {name: sha}}
