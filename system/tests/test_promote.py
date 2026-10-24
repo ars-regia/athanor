@@ -591,13 +591,29 @@ class Promote(Tool):
         reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
         self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
 
-    def test_a_run_already_promoted_has_nothing_to_promote(self):
+    def test_the_stable_build_promoted_again_moves_nothing(self):
+        # The v0.x tag pushed after the first promotion: the second publishes the Release.
+        for flags in ((), ("--hardware-override", "athanor-system-nvidia")):
+            with self.subTest(flags=flags):
+                self.published()
+                r, _ = self.promote(*flags)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                r, copies = self.promote(*flags)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(copies, [])
+                self.assertIn("stable unchanged", r.stdout)
+                self.assertEqual(self.record()["images"], [])
+                self.assertEqual(self.record()["packages"], {})
+                reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
+                self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
+
+    def test_the_stable_build_promoted_again_still_needs_its_evidence(self):
         self.published()
         r, _ = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)
+        (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").unlink()
         r, copies = self.promote()
         self.assertEqual(r.returncode, 1)
-        self.assertIn("nothing to promote", r.stderr)
         self.assertEqual(copies, [])
 
     def test_a_stable_without_a_build_time_is_refused(self):
