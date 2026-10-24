@@ -521,6 +521,10 @@ stage_report() {
 ETC_PROBE=/etc/security/pwquality.conf.d/50-athanor.conf
 VAR_PROBE=/var/lib/athanor-upgrade-probe/seed
 MIRROR_DROPIN=/etc/containers/registries.conf.d/99-upgrade-acceptance.conf
+# containers/image reads the signatures of a pull from the registry it pulled from, and decides
+# whether to look for sigstore attachments there by that registry's registries.d scope, not by
+# the image's: without this entry the mirror's .sig is never read and the pull is refused.
+MIRROR_ATTACHMENTS=/etc/containers/registries.d/99-upgrade-acceptance.yaml
 PHASES=${ACC_CI_OUT:-}/upgrade-phases.txt
 
 # Records the runner's free space and stops under four gigabytes, before a stage fills it.
@@ -582,6 +586,8 @@ ci_stage_upgrade() { # UD18 3 and 4
   printf '[[registry]]\nprefix = "%s"\nlocation = "%s"\n\n[[registry.mirror]]\nlocation = "%s"\ninsecure = true\n' \
     "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_REPOSITORY" "$ATHANOR_UPDATE_MIRROR" |
     guest_ssh sudo tee "$MIRROR_DROPIN" > /dev/null
+  printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$ATHANOR_UPDATE_MIRROR" |
+    guest_ssh sudo tee "$MIRROR_ATTACHMENTS" > /dev/null
   quiet_checks "UD18 4"
   since=$(now_guest)
   check_now
@@ -646,7 +652,8 @@ ci_stage_goback() { # UD18 6
 ci_stage_check_back() { # UD18 6
   local stable
   disk_floor
-  guest_ssh test -e "$MIRROR_DROPIN" || die "FAIL  UD18 6: the mirror drop-in is gone after GoBack"
+  guest_ssh test -e "$MIRROR_DROPIN" -a -e "$MIRROR_ATTACHMENTS" ||
+    die "FAIL  UD18 6: the mirror drop-ins are gone after GoBack"
   # The mirror still offers the candidate as :stable, so a check meets it again.
   stable=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://127.0.0.1:${ATHANOR_UPDATE_MIRROR#*:}:stable")
   [[ $stable == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the mirror's :stable is $stable, not the candidate"
