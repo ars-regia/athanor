@@ -10,9 +10,10 @@ jobs:
   lint:
     name: 🔎 Lint workflows (actionlint + scripts/verify.py)
     runs-on: ubuntu-24.04
-    # The ISO acceptance suite drives a fake guest over a socket in real time and takes
-    # about a minute on its own, which left no room under the previous five.
-    timeout-minutes: 10
+    # The ISO acceptance suite drives a fake guest over a socket in real time (about 2.5
+    # minutes), and the build-ordering tests take about 3.5. On 2026-10-24 the job grew
+    # from 7 to 10 minutes, and a promotion lost it at 10 minutes 1 second.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install actionlint 1.7.9 (checksum-verified, kept off PATH)
