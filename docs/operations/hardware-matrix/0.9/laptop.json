@@ -35,7 +35,7 @@
     },
     "bluetooth-pair": {
       "at": "2026-10-18T11:17:00+00:00",
-      "evidence": "Ermete 9a paired from the bar popover with the PIN confirmed on both screens: paired, bonded, trusted, connected",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Ermete 9a paired from the bar popover with the PIN confirmed on both screens: paired, bonded, trusted, connected",
       "how": "maintainer",
       "result": "pass"
     },
@@ -47,13 +47,13 @@
     },
     "dead-keys": {
       "at": "2026-10-24T13:50:57+00:00",
-      "evidence": "on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); the session gave the same on 2026-10-18",
+      "evidence": "on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); in the session (gnome-text-editor) the same was typed on 43.20261018.394 on 2026-10-18",
       "how": "maintainer",
       "result": "pass"
     },
     "disk-unlock": {
       "at": "2026-10-18T11:19:46+00:00",
-      "evidence": "TPM2 plus PIN (athanor-uki-enroll, PCR 7) unlocks on 2026-10-18; an empty PIN does not reach the passphrase, as doc_platform_experience.md says (only the TPM lockout does); recovery key enrolled; the passphrase path is covered on the desktop",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: TPM2 plus PIN (athanor-uki-enroll, PCR 7) unlocks on 2026-10-18; an empty PIN does not reach the passphrase, as doc_platform_experience.md says (only the TPM lockout does); recovery key enrolled; the passphrase path is covered on the desktop",
       "how": "maintainer",
       "result": "pass"
     },
@@ -83,7 +83,7 @@
     },
     "laptop-keys": {
       "at": "2026-10-18T11:07:13+00:00",
-      "evidence": "brightness and volume keys with the indicator (backlight 7500 to 1 and back, volume 0.20 to 1.25 and back); lid closed: deep suspend, lid opened: resumed, session and shell back",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: brightness and volume keys with the indicator (backlight 7500 to 1 and back, volume 0.20 to 1.25 and back); lid closed: deep suspend, lid opened: resumed, session and shell back",
       "how": "maintainer",
       "result": "pass"
     },
@@ -95,7 +95,7 @@
     },
     "output-scale": {
       "at": "2026-10-18T10:23:47+00:00",
-      "evidence": "eDP-1 at 150 % with cosmic-randr: bar, dock and launcher sharp and unclipped in a grim capture; restored to 100 %",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: eDP-1 at 150 % with cosmic-randr: bar, dock and launcher sharp and unclipped in a grim capture; restored to 100 %",
       "how": "maintainer",
       "result": "pass"
     },
@@ -149,7 +149,7 @@
     },
     "usb-new-device": {
       "at": "2026-10-18T11:10:34+00:00",
-      "evidence": "Kingston DataTraveler 3.0 never seen: blocked by InsertedDevicePolicy (policy apply-policy, session unlocked); internal devices still allowed; no on-screen notice, SD12 not built yet",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Kingston DataTraveler 3.0 never seen: blocked by InsertedDevicePolicy (policy apply-policy, session unlocked); internal devices still allowed; no on-screen notice, SD12 not built yet",
       "how": "maintainer",
       "result": "pass"
     },
