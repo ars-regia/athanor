@@ -38,7 +38,7 @@ case "$*" in
   *loginctl*) cat "$g/sessions" ;;
   *"systemctl reboot"*) echo 2 > "$g/boot"; cp "$g/staged" "$g/booted" ;;
   *tee*) cat > /dev/null ;;
-  *"grep -qaF"*) test -e "$g/reader" ;;
+  *"grep -qaF"*) exit "$(cat "$g/reader")" ;;
 esac
 """
 
@@ -132,10 +132,11 @@ class CiMode(unittest.TestCase):
         self.assertIn("== seed", result.stdout, result.stderr)
         self.assertNotEqual(result.returncode, 0)
 
-    def guest(self, update, journal, serial_session=True, reader=True):
+    def guest(self, update, journal, serial_session=True, reader=0):
         """A guest whose check settled on UPDATE with the candidate downloaded and logged
-        JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply(). Without
-        READER its client predates the release attestation (#784)."""
+        JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply(). READER is
+        the exit status of the grep for the attestation reader: 1 for a client that predates
+        it (#784), 2 for a client that cannot be read."""
         g = self.dir / "guest"
         g.mkdir(exist_ok=True)
         state = {
@@ -150,8 +151,7 @@ class CiMode(unittest.TestCase):
         (g / "boot").write_text("1")
         sessions = [{"session": "3", "tty": "ttyS0"}] if serial_session else []
         (g / "sessions").write_text(json.dumps(sessions))
-        if reader:
-            (g / "reader").touch()
+        (g / "reader").write_text(f"{reader}\n")
         self.stub("ssh", GUEST.replace("@GUEST@", str(g)))
 
     def test_upgrade_reads_the_class_the_runner_verified(self):
@@ -211,7 +211,7 @@ class CiMode(unittest.TestCase):
                 )
 
     def test_upgrade_goes_on_through_apply_with_a_client_that_predates_the_reader(self):
-        self.guest("downloaded", "", reader=False)
+        self.guest("downloaded", "", reader=1)
         result = self.run_sh("--ci", "upgrade", env=self.ci)
         self.assertIn("NOTE  UD18 3: the booted client predates", result.stdout, result.stderr)
         self.assertNotIn("PASS  UD18 3", result.stdout)
@@ -220,15 +220,22 @@ class CiMode(unittest.TestCase):
         self.assertIn("ttyS0", result.stderr)
 
     def test_upgrade_refuses_a_security_candidate_with_a_client_that_predates_the_reader(self):
-        self.guest("downloaded", "", reader=False)
+        self.guest("downloaded", "", reader=1)
         security = {**self.ci, "ATHANOR_UPDATE_CLASS": "security"}
         result = self.run_sh("--ci", "upgrade", env=security)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("would go untested", result.stderr)
         self.assertNotIn("PASS  UD18 4", result.stdout)
 
+    def test_upgrade_fails_when_the_booted_client_cannot_be_read(self):
+        self.guest("downloaded", FEATURE_LINE, reader=2)
+        result = self.run_sh("--ci", "upgrade", env=self.ci)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("the booted client could not be read: grep exited 2", result.stderr)
+        self.assertNotIn("NOTE  UD18 3", result.stdout)
+
     def test_the_reader_is_found_by_the_media_type_of_the_client(self):
-        marker = re.search(r"grep -qaF '([^']+)' /usr/bin/athanor-update", RUN.read_text())
+        marker = re.search(r"^ATTESTATION_READER=(\S+)$", RUN.read_text(), re.MULTILINE)
         self.assertIsNotNone(marker, "run.sh no longer looks for the attestation reader")
         self.assertIn(
             f'pub const LAYER_MEDIA_TYPE: &str = "{marker.group(1)}";',

@@ -525,6 +525,9 @@ MIRROR_DROPIN=/etc/containers/registries.conf.d/99-upgrade-acceptance.conf
 # whether to look for sigstore attachments there by that registry's registries.d scope, not by
 # the image's: without this entry the mirror's .sig is never read and the pull is refused.
 MIRROR_ATTACHMENTS=/etc/containers/registries.d/99-upgrade-acceptance.yaml
+# The DSSE media type of a release attestation layer (attestation.rs LAYER_MEDIA_TYPE): in
+# /usr/bin/athanor-update it marks the attestation reader (#784).
+ATTESTATION_READER=application/vnd.dsse.envelope.v1+json
 PHASES=${ACC_CI_OUT:-}/upgrade-phases.txt
 
 # Records the runner's free space and stops under four gigabytes, before a stage fills it.
@@ -596,9 +599,9 @@ ci_stage_upgrade() { # UD18 3 and 4
   # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
   # every candidate downloaded for Apply(). The reader is required where the booted client
   # has it: required everywhere, the job could not pass until a build with it was promoted
-  # (#784). It is found by its DSSE media type (attestation.rs LAYER_MEDIA_TYPE), a protocol
-  # constant that test_acceptance_ci.py holds equal to the one below.
-  guest_ssh "grep -qaF 'application/vnd.dsse.envelope.v1+json' /usr/bin/athanor-update" || reader=$?
+  # (#784). It is found by ATTESTATION_READER, which test_acceptance_ci.py holds equal to the
+  # client's constant, and which UD18 5 requires in the candidate's client.
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" || reader=$?
   ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
   if ((reader == 1)); then
     [[ $ATHANOR_UPDATE_CLASS == feature ]] ||
@@ -652,6 +655,11 @@ ci_stage_check() { # UD18 5
   signature=$(jq -r .status.booted.image.image.signature <<< "$status")
   [[ $image == *:stable && $signature == containerPolicy ]] || die "FAIL  UD18 5: the machine follows $image ($signature), not :stable under the policy"
   pass "UD18 5: the machine still follows :stable under the signature policy"
+  # The candidate is the :stable the next run upgrades from: a client without the reader would
+  # turn UD18 3 of that run into a NOTE (#784).
+  guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" ||
+    die "FAIL  UD18 5: the candidate's client has no attestation reader: $ATTESTATION_READER is not in /usr/bin/athanor-update"
+  pass "UD18 5: the candidate's client reads release attestations"
   sum=$(guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1)
   [[ $sum == "$(< "$ACC_STATE/shipped-sum")" ]] || die "FAIL  UD18 5: the candidate changed the shipped probe file: the merge is not tested"
   seeds_kept "UD18 5"
