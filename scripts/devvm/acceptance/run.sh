@@ -525,9 +525,10 @@ MIRROR_DROPIN=/etc/containers/registries.conf.d/99-upgrade-acceptance.conf
 # whether to look for sigstore attachments there by that registry's registries.d scope, not by
 # the image's: without this entry the mirror's .sig is never read and the pull is refused.
 MIRROR_ATTACHMENTS=/etc/containers/registries.d/99-upgrade-acceptance.yaml
-# The DSSE media type of a release attestation layer (attestation.rs LAYER_MEDIA_TYPE): in
-# /usr/bin/athanor-update it marks the attestation reader (#784).
-ATTESTATION_READER=application/vnd.dsse.envelope.v1+json
+# A message of check.rs candidate_class: in /usr/bin/athanor-update it marks the attestation
+# reader (#784). A message stays in a release binary; a constant only compared, such as the
+# DSSE media type, can be compiled into immediates and leave no string behind.
+ATTESTATION_READER="release attestation could not be fetched"
 PHASES=${ACC_CI_OUT:-}/upgrade-phases.txt
 
 # Records the runner's free space and stops under four gigabytes, before a stage fills it.
@@ -599,8 +600,8 @@ ci_stage_upgrade() { # UD18 3 and 4
   # The client of a :stable built before UT13 task 4 (#659) reads no attestation and leaves
   # every candidate downloaded for Apply(). The reader is required where the booted client
   # has it: required everywhere, the job could not pass until a build with it was promoted
-  # (#784). It is found by ATTESTATION_READER, which test_acceptance_ci.py holds equal to the
-  # client's constant, and which UD18 5 requires in the candidate's client.
+  # (#784). It is found by ATTESTATION_READER, which test_acceptance_ci.py holds to a message
+  # of check.rs, and which UD18 5 requires in the candidate's client.
   guest_ssh "grep -qaF '$ATTESTATION_READER' /usr/bin/athanor-update" || reader=$?
   ((reader <= 1)) || die "FAIL  UD18 3: the booted client could not be read: grep exited $reader"
   if ((reader == 1)); then

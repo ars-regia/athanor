@@ -16,9 +16,9 @@ import tempfile
 import unittest
 
 RUN = pathlib.Path(__file__).resolve().parents[1] / "devvm" / "acceptance" / "run.sh"
-ATTESTATION_RS = (
+CHECK_RS = (
     pathlib.Path(__file__).resolve().parents[2]
-    / "forge/specs/athanor-update/athanor-update-1.0.0/src/attestation.rs"
+    / "forge/specs/athanor-update/athanor-update-1.0.0/src/check.rs"
 )
 DIGEST = "sha256:" + "a" * 64
 FROM = "sha256:" + "b" * 64
@@ -244,12 +244,13 @@ class CiMode(unittest.TestCase):
                 result = self.run_sh("--ci", "check", env=self.ci)
                 self.assertIn(expected, result.stdout + result.stderr)
 
-    def test_the_reader_is_found_by_the_media_type_of_the_client(self):
-        marker = re.search(r"^ATTESTATION_READER=(\S+)$", RUN.read_text(), re.MULTILINE)
+    def test_the_reader_is_found_by_a_message_of_the_client(self):
+        marker = re.search(r'^ATTESTATION_READER="([^"]+)"$', RUN.read_text(), re.MULTILINE)
         self.assertIsNotNone(marker, "run.sh no longer looks for the attestation reader")
-        self.assertIn(
-            f'pub const LAYER_MEDIA_TYPE: &str = "{marker.group(1)}";',
-            ATTESTATION_RS.read_text(),
+        # A tracing message of candidate_class: rewording it must reword the marker too.
+        self.assertRegex(
+            CHECK_RS.read_text(),
+            r"tracing::warn!\([^;]*\"[^\"]*" + re.escape(marker.group(1)),
         )
 
     def test_ci_mode_rejects_an_unknown_class(self):
