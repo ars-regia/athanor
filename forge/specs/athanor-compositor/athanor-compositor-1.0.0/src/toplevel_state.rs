@@ -99,7 +99,7 @@ impl Dispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
         &self,
         state: &mut State,
         _client: &Client,
-        _manager: &AthanorToplevelManagerV1,
+        manager: &AthanorToplevelManagerV1,
         request: athanor_toplevel_manager_v1::Request,
         _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, State>,
@@ -110,16 +110,32 @@ impl Dispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
                 // On a closed handle the object is inert, and never sent anything.
                 let handle = ForeignToplevelHandle::from_resource(&toplevel)
                     .filter(|handle| !handle.is_closed());
+                // One object per window and client bounds what each frame walks.
+                let made = handle.as_ref().is_some_and(|handle| {
+                    state.toplevel_states.iter().any(|kept| {
+                        kept.id().same_client_as(&manager.id())
+                            && kept
+                                .data::<StateObject>()
+                                .and_then(|data| data.handle.as_ref())
+                                .and_then(ForeignToplevelWeakHandle::upgrade)
+                                .is_some_and(|own| own.matches(handle))
+                    })
+                });
                 let data = StateObject {
-                    handle: handle.as_ref().map(ForeignToplevelHandle::downgrade),
+                    handle: handle
+                        .as_ref()
+                        .filter(|_| !made)
+                        .map(ForeignToplevelHandle::downgrade),
                     sent: Mutex::default(),
                 };
                 let object = data_init.init(id, data);
-                if handle.is_some() {
+                if made {
+                    manager.post_error(
+                        athanor_toplevel_manager_v1::Error::AlreadyMade,
+                        "a second state object of the same window",
+                    );
+                } else if handle.is_some() && state.send_toplevel_state(&object) {
                     state.toplevel_states.push(object);
-                    // Its first state, outputs and done go after the next frame's refresh of
-                    // the space, which knows the outputs of a window mapped since the last.
-                    state.request_redraw();
                 }
             }
             Request::Activate { toplevel, seat } => {
@@ -158,10 +174,12 @@ impl Dispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
     }
 }
 
-/// The window `toplevel` names, when the shell may act on it: the session is not locked (L14),
-/// and the window is minimised or one the user can see. A closed handle names none.
+/// The window `toplevel` names, when the shell may act on it: the session is neither locked
+/// (L14) nor paused on another virtual terminal, where the user cannot see what it would do, as
+/// for virtual input; and the window is minimised or one the user can see. A closed handle names
+/// none.
 fn acted_on(state: &State, toplevel: &ExtForeignToplevelHandleV1) -> Option<Window> {
-    if state.lock.is_some() {
+    if state.drops_virtual_input() {
         return None;
     }
     let handle = ForeignToplevelHandle::from_resource(toplevel).filter(|h| !h.is_closed())?;
@@ -191,8 +209,8 @@ impl Dispatch2<AthanorToplevelStateV1, State> for StateObject {
 
 impl State {
     /// Sends each live state object what changed of its window since its last `done`: the
-    /// state, the outputs it left and entered, then `done`. Run after each frame's refresh of
-    /// the space, which places the windows on the outputs, and when a client binds an output.
+    /// state, the outputs it left and entered, then `done`. Run after each frame, which catches
+    /// what moved, and when a client binds an output.
     /// Objects destroyed, or whose window is gone, are dropped.
     pub fn send_toplevel_states(&mut self) {
         let objects = std::mem::take(&mut self.toplevel_states);
@@ -225,12 +243,21 @@ impl State {
         });
         flags.set(Flags::Activated, activated);
         flags.set(Flags::Minimized, self.is_minimised(&window));
-        // Only an output the client has bound counts as sent, so that a later bind sends it.
+        // The outputs the window overlaps now, as `Space::refresh` finds them: its cache lags a
+        // window mapped since the last frame. Only an output the client has bound counts as
+        // sent, so that a later bind sends it.
+        let bbox = self.space.element_bbox(&window);
         let outputs: Vec<Output> = self
             .space
-            .outputs_for_element(&window)
-            .into_iter()
+            .outputs()
+            .filter(|output| {
+                let geometry = self.space.output_geometry(output);
+                geometry
+                    .zip(bbox)
+                    .is_some_and(|(geometry, bbox)| geometry.intersection(bbox).is_some())
+            })
             .filter(|output| output.client_outputs(&client).next().is_some())
+            .cloned()
             .collect();
         let Ok(mut sent) = data.sent.lock() else {
             tracing::warn!("a toplevel state object's record is poisoned: dropped");

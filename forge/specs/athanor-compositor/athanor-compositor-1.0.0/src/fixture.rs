@@ -235,7 +235,7 @@ struct Client {
 }
 
 /// An event of an athanor_toplevel_state_v1 object.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum StateEvent {
     State(u32),
     Enter(ObjectId),
@@ -4543,6 +4543,174 @@ fn a_closed_or_undrawn_window_is_left_alone() {
         Some(surface_of(&window)),
         "with the keyboard"
     );
+    run.stop();
+}
+
+/// The events `local` has received for `object` so far, without running the compositor.
+fn received(
+    local: &Local,
+    object: &athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1,
+) -> Vec<StateEvent> {
+    let id = object.id();
+    local
+        .client
+        .toplevel_states
+        .iter()
+        .filter(|(of, _)| *of == id)
+        .map(|(_, event)| event.clone())
+        .collect()
+}
+
+/// `get_toplevel_state` sends the window's state and done at once: a roundtrip has them, with no
+/// frame drawn in between.
+#[test]
+fn the_first_state_needs_no_frame() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let probe = app.another(&mut run, "probe");
+    let window = app.server_window(&run, &probe.surface);
+    run.state.focus(&window);
+    let handle = dock.local.handle(&mut run, "probe");
+    let object = dock
+        .manager
+        .get_toplevel_state(&handle, &dock.local.queue.handle(), ());
+    dock.local.roundtrip(&mut run);
+    assert_eq!(
+        received(&dock.local, &object),
+        [StateEvent::State(1), StateEvent::Done]
+    );
+    run.stop();
+}
+
+/// A second state object of the same window from the same client is the `already_made` error,
+/// which bounds the objects each frame walks.
+#[test]
+fn a_second_state_object_of_a_window_is_an_error() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    app.another(&mut run, "probe");
+    let handle = dock.local.handle(&mut run, "probe");
+    let qh = dock.local.queue.handle();
+    let first = dock.manager.get_toplevel_state(&handle, &qh, ());
+    dock.local.state_events(&mut run, &first);
+    assert_eq!(run.state.toplevel_states.len(), 1);
+    let _second = dock.manager.get_toplevel_state(&handle, &qh, ());
+    dock.local.connection.flush().expect("flush");
+    run.until("the client is disconnected", |state| {
+        state.toplevel_states.is_empty()
+    });
+    let started = Instant::now();
+    let error = loop {
+        if let Some(error) = dock.local.connection.protocol_error() {
+            break error;
+        }
+        assert!(started.elapsed() < TIMEOUT, "the error: not in time");
+        if let Some(guard) = dock.local.queue.prepare_read() {
+            drop(guard.read());
+        }
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    };
+    assert_eq!(error.object_interface, "athanor_toplevel_manager_v1");
+    assert_eq!(
+        error.code,
+        athanor_toplevel::athanor_toplevel_manager_v1::Error::AlreadyMade as u32
+    );
+    run.stop();
+}
+
+/// While the session is locked `unset_minimized` leaves a minimised window minimised and `close`
+/// sends no close (L14); once unlocked, the next request acts.
+#[test]
+fn a_locked_session_restores_and_closes_nothing() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let first = app.another(&mut run, "first");
+    let second = app.another(&mut run, "second");
+    let window = app.server_window(&run, &first.surface);
+    let handle = dock.local.handle(&mut run, "first");
+    let other = dock.local.handle(&mut run, "second");
+    dock.manager.set_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window), "minimised");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    dock.manager.unset_minimized(&handle);
+    dock.manager.close(&other);
+    dock.local.roundtrip(&mut run);
+    app.roundtrip(&mut run);
+    assert!(
+        run.state.is_minimised(&window),
+        "still minimised while locked"
+    );
+    assert!(app.client.toplevel_closed.is_empty(), "nothing is closed");
+
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    dock.manager.close(&other);
+    dock.local.roundtrip(&mut run);
+    let closed = second.toplevel.id();
+    app.pump(
+        &mut run,
+        "the second window is asked to close",
+        |client, _| client.toplevel_closed.contains(&closed),
+    );
+    dock.manager.unset_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(!run.state.is_minimised(&window), "restored once unlocked");
+    run.stop();
+}
+
+/// A state object made on a closed handle is inert: it is never sent an event, and the
+/// compositor does not keep it.
+#[test]
+fn a_state_object_of_a_closed_window_is_inert() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let gone = app.another(&mut run, "gone");
+    let handle = dock.local.handle(&mut run, "gone");
+    gone.toplevel.destroy();
+    gone.xdg.destroy();
+    gone.surface.destroy();
+    app.roundtrip(&mut run);
+    dock.local
+        .pump(&mut run, "the window is closed", |client, _| {
+            client.listed.iter().any(|l| l.title == "gone" && l.closed)
+        });
+
+    let object = dock
+        .manager
+        .get_toplevel_state(&handle, &dock.local.queue.handle(), ());
+    dock.local.roundtrip(&mut run);
+    dock.local.frames(&mut run, 3);
+    assert_eq!(received(&dock.local, &object), []);
+    assert!(run.state.toplevel_states.is_empty(), "not kept");
+    run.stop();
+}
+
+/// A state object its client destroys leaves the compositor's list.
+#[test]
+fn a_destroyed_state_object_is_forgotten() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    app.another(&mut run, "probe");
+    let handle = dock.local.handle(&mut run, "probe");
+    let object = dock
+        .manager
+        .get_toplevel_state(&handle, &dock.local.queue.handle(), ());
+    dock.local.state_events(&mut run, &object);
+    assert_eq!(run.state.toplevel_states.len(), 1);
+    object.destroy();
+    dock.local.roundtrip(&mut run);
+    assert!(run.state.toplevel_states.is_empty(), "forgotten");
     run.stop();
 }
 

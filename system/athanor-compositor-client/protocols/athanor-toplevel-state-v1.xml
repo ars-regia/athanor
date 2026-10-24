@@ -38,8 +38,14 @@
       Makes the state object of a window, and acts on windows.
 
       An action on a closed or unknown handle, on a window that is not mapped or has not
-      drawn, or while the session is locked, does nothing.
+      drawn, while the session is locked, or while it is paused on another virtual terminal,
+      does nothing.
     </description>
+
+    <enum name="error">
+      <entry name="already_made" value="0"
+        summary="the client already has a state object of this window"/>
+    </enum>
 
     <request name="destroy" type="destructor">
       <description summary="destroy the manager">
@@ -49,9 +55,12 @@
 
     <request name="get_toplevel_state">
       <description summary="the state of a window">
-        Makes the state object of a window. Its current state, every output it is on and a
-        done event are sent at once, then each change followed by done. On a closed handle
-        the object is inert: it sends nothing.
+        Makes the state object of a window. Its current state, the outputs it is on that
+        the client has bound, and a done event are sent at once, then each change followed by
+        done. An output the client binds later is sent with output_enter then.
+
+        On a closed handle the object is inert: it sends nothing. A second state object of the
+        same window, while the client holds the first, is the already_made error.
       </description>
       <arg name="id" type="new_id" interface="athanor_toplevel_state_v1"/>
       <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
@@ -98,7 +107,8 @@
     </request>
 
     <enum name="state" bitfield="true">
-      <entry name="activated" value="1" summary="the window has the keyboard focus"/>
+      <entry name="activated" value="1"
+        summary="the window is the active one; while a layer surface or the lock holds the keyboard it keeps this state"/>
       <entry name="minimized" value="2" summary="the window is minimised"/>
     </enum>
 
