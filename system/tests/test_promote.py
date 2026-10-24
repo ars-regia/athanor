@@ -504,6 +504,29 @@ class Promote(Tool):
         self.assertIn("dwell", r.stderr)
         self.assertEqual(copies, [])
 
+    def test_a_shortened_dwell_promotes_a_fresh_run_and_is_recorded(self):
+        now = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        self.published(finished=now)
+        self.env["PROMOTE_DWELL_HOURS"] = "0"
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotEqual(copies, [])
+        self.assertEqual(self.record()["dwell_hours"], 0)
+
+    def test_a_dwell_outside_0_to_24_hours_is_refused(self):
+        marker = self.dir / "evaluated"
+        for dwell in ("25", "-1", "08", "1.5", f"a[$(touch {marker})]"):
+            with self.subTest(dwell=dwell):
+                self.published()
+                self.env["PROMOTE_DWELL_HOURS"] = dwell
+                r, copies = self.promote()
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("0 to 24", r.stderr)
+                self.assertEqual(copies, [])
+                self.assertFalse(marker.exists())
+
     def test_the_dwell_counts_from_the_newest_evidence(self):
         now = datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"

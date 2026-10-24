@@ -72,6 +72,10 @@ promotion_args() {
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 keys_dir=${PROMOTE_KEYS_DIR:-$root/system/keys}
 artifacts=${PROMOTE_ARTIFACTS:-artifacts}
+# Checked before the arithmetic, which would evaluate an expression the input carried. The
+# digits are listed: a range such as [0-9] also matches other digits in some locales.
+[[ ${PROMOTE_DWELL_HOURS:-24} =~ ^([0123456789]|1[0123456789]|2[01234])$ ]] ||
+    die "PROMOTE_DWELL_HOURS is '${PROMOTE_DWELL_HOURS}', not a whole number of hours from 0 to 24 (UD5)"
 dwell=$((${PROMOTE_DWELL_HOURS:-24} * 3600))
 SIMPLE_SIGNING=application/vnd.dev.cosign.simplesigning.v1+json
 work=$(mktemp -d)
