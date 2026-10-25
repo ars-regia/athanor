@@ -46,6 +46,9 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock|launcher> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <bar|bar-modules|dock|launcher> --matrix   AX17: the walk in light, dark and both high-contrast
+#                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
+#                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
@@ -239,6 +242,30 @@ seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp
     else
         echo "org.gnome.desktop.interface color-scheme default"
     fi > "$1.gsettings"
+}
+
+variant_env=()
+atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text scale of RIG_ATSPI_VARIANT
+    # (<light|dark|hc-light|hc-dark>@<scale>), set on a seed after seed_bar, as the user's
+    # choice would be; the keys the shell reads (athanor-style appearance.rs) and GTK's scale
+    if [ -z "${RIG_ATSPI_VARIANT:-}" ]; then return 0; fi
+    local appearance=${RIG_ATSPI_VARIANT%@*} scale=${RIG_ATSPI_VARIANT#*@} mode=light contrast=false
+    case $appearance in
+    light) ;;
+    dark) mode=dark ;;
+    hc-light) contrast=true ;;
+    hc-dark) mode=dark contrast=true ;;
+    *) echo "RIG_ATSPI_VARIANT: unknown appearance '$appearance'" >&2; exit 2 ;;
+    esac
+    seed_scheme "$1" "$mode"
+    {
+        echo "org.gnome.desktop.a11y.interface high-contrast $contrast"
+        echo "org.gnome.desktop.interface text-scaling-factor $scale"
+    } >> "$1.gsettings"
+    # The ring is asked for only where the scene gives a control the focus (AX8)
+    variant_env=()
+    if [ "${2:-}" = ring ]; then variant_env=(ATSPI_RING=1); fi
+    if [ "$contrast" = true ]; then variant_env+=(ATSPI_HIGH_CONTRAST=1); fi
 }
 
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
@@ -1031,6 +1058,21 @@ EOF
     echo "look at $out/bar-preview-*.png"
     ;;
 atspi)
+    if [ "${3:-}" = --matrix ]; then
+        case ${2:-} in
+        bar | bar-modules | dock | launcher) ;;
+        *) echo "rig.sh atspi: --matrix runs on bar, bar-modules, dock or launcher, not '${2:-}'" >&2; exit 2 ;;
+        esac
+        for appearance in light dark hc-light hc-dark; do
+            for scale in 1.0 1.25 1.5; do
+                if ! RIG_ATSPI_VARIANT=$appearance@$scale "${BASH_SOURCE[0]}" atspi "$2"; then
+                    echo "rig.sh atspi $2 --matrix: FAIL in the variant $appearance@$scale" >&2
+                    exit 1
+                fi
+            done
+        done
+        exit 0
+    fi
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
     # its reference is recorded under cosmic-comp only.
     if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
@@ -1134,7 +1176,8 @@ atspi)
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
+        atspi_variant "$out/seed-atspi-bar"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
             ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
@@ -1154,7 +1197,8 @@ atspi)
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
+        atspi_variant "$out/seed-atspi-bar-modules"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
             RIG_DATA_OVERLAY="$bar_overlay" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
@@ -1168,7 +1212,8 @@ atspi)
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
         transcript=atspi-dock${3:+-$3}.json
         seed_bar "$out/seed-atspi-dock" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
+        atspi_variant "$out/seed-atspi-dock"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
@@ -1183,7 +1228,14 @@ atspi)
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
         # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
+        # The entry takes the focus on show under athanor-compositor; cosmic-comp leaves it
+        # unfocused (the recorded reference holds no "focused" on it), so no ring is asked for.
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            atspi_variant "$out/seed-atspi-launcher" ring
+        else
+            atspi_variant "$out/seed-atspi-launcher"
+        fi
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
