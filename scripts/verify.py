@@ -2079,6 +2079,116 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7-bis. shell-failures — a test script does not hide a failure
+# --------------------------------------------------------------------------- #
+
+# A line of a script under forge/test/ that discards stderr, or the whole output, or swallows a
+# failure with `|| true`: AGENTS.md "No hidden failures". Measured on the repo on 2026-10-25;
+# like BUDGET it only goes down. A probe whose failure is the answer (`kill -0 "$pid" 2> /dev/null`)
+# counts too, until it is written so that the check can tell it from a hidden crash.
+SHELL_BUDGET = 15
+SHELL_TEST_DIR = "forge/test"
+DEV_NULL = r"""["']?/dev/null["']?"""
+# Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
+# a quote that spans lines; text run through `eval` or `$(...)`.
+HIDDEN_FAILURE = re.compile(
+    rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
+    r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
+    r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
+    r"|2>&1\s*\|\|\s*(?:break|continue)\b")
+HEREDOC_START = re.compile(r"(?<!<)<<(?!<)(-?)")
+HEREDOC_WORD = re.compile(r"""\s*\\?(['"]?)(\w+)\1""")
+ARITHMETIC = re.compile(r"\(\([^\n]*?\)\)")
+
+
+def shell_code(line):
+    """`(code, bare)` of `line`. `code` is the line without its comment: a `#` starts one only
+    outside quotes and after a space or at the start, so `${#x}`, `$#` and "a #b" stay. `bare`
+    is `code` with the text of every quoted string and every arithmetic expression blanked,
+    where a here-document can be looked for."""
+    quote, i, bare = "", 0, []
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\" and quote != "'":
+                bare.append("  ")
+                i += 2
+                continue
+            if c == quote[-1]:
+                quote = ""
+                bare.append(c)
+            else:
+                bare.append(" ")
+        elif line.startswith("$'", i):
+            # $'...': a backslash escapes the quote, unlike in a single-quoted string.
+            quote = "$'"
+            bare.append("$'")
+            i += 1
+        elif c == "\\":
+            bare.append("  ")
+            i += 2
+            continue
+        elif c in "'\"":
+            quote = c
+            bare.append(c)
+        elif c == "#" and (i == 0 or line[i - 1] in " \t"):
+            line = line[:i]
+            break
+        else:
+            bare.append(c)
+        i += 1
+    return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
+
+
+def scan_shell(text):
+    """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
+    hides a failure, and the line of a here-document still open at the end, whose rest no one
+    checked (0 when none is). Neither a comment nor the body of a here-document counts."""
+    found, pending = [], []
+    for i, line in enumerate(text.split("\n"), 1):
+        if pending:
+            word, tabs, _ = pending[0]
+            if (line.lstrip("\t") if tabs else line) == word:
+                pending.pop(0)
+            continue
+        code, bare = shell_code(line)
+        if HIDDEN_FAILURE.search(code):
+            found.append(i)
+        for m in HEREDOC_START.finditer(bare):
+            w = HEREDOC_WORD.match(code, m.end())
+            if w:
+                pending.append((w.group(2), m.group(1) == "-", i))
+    return found, pending[0][2] if pending else 0
+
+
+def hidden_failures(text):
+    return scan_shell(text)[0]
+
+
+@check("shell-failures", "Il budget di fallimenti nascosti negli script di forge/test non cresce")
+def check_shell_failures():
+    r = Result()
+    found = []
+    for p in sorted(walk(ROOT / SHELL_TEST_DIR, ".sh")):
+        lines, opened = scan_shell(read(p))
+        found += [f"{rel(p)}:{i}" for i in lines]
+        if opened:
+            # Fail closed: the scanner skips a here-document body, so one it cannot close
+            # leaves the rest of the file unchecked.
+            r.fail(f"{rel(p)}:{opened}: unterminated here-document from line {opened}: "
+                   "the scanner cannot check the rest")
+    if len(found) > SHELL_BUDGET:
+        # One finding per line, as for panics, so that known-red.txt can list each.
+        for at in found:
+            r.fail(f"{at}: hides a failure, over the budget of {SHELL_BUDGET}; "
+                   "send the output to a log or report it on stderr")
+        r.note(f"shell-failures: {len(found)} occorrenze, budget {SHELL_BUDGET}")
+    elif len(found) < SHELL_BUDGET:
+        r.note(f"shell-failures: {len(found)} (budget {SHELL_BUDGET}) — abbassa SHELL_BUDGET in scripts/verify.py")
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7a. allow-list — a shell client that needs a privileged global has its line
 # --------------------------------------------------------------------------- #
 
