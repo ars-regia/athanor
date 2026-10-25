@@ -2198,8 +2198,9 @@ GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/glo
 LAYER_SHELL = "zwlr_layer_shell_v1"
 # Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
 # step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
-# A line for it, or no spec installing it, ends the exemption with a failure.
-OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# A line for it, or no spec installing it, ends the exemption with a failure. The compositor is
+# the server of those globals, not a client of them.
+OUTSIDE_THE_LIST = {"/usr/bin/athanor-compositor", "/usr/bin/athanor-greeter-ui"}
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")

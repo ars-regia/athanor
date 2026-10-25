@@ -646,19 +646,10 @@ mod tests {
             &[
                 "zwlr_layer_shell_v1",
                 "ext_foreign_toplevel_list_v1",
-                "ext_foreign_toplevel_image_capture_source_manager_v1",
-                "ext_image_copy_capture_manager_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
             ],
-        ),
-        (
-            "athanor-dock",
-            "athanor-dock.service",
-            &["zwlr_layer_shell_v1", "ext_foreign_toplevel_list_v1"],
-        ),
-        (
-            "athanor-control-center",
-            "athanor-control-center.service",
-            &["zwlr_layer_shell_v1"],
         ),
         (
             "athanor-launcher",
@@ -668,6 +659,31 @@ mod tests {
                 "ext_foreign_toplevel_list_v1",
                 "ext_foreign_toplevel_image_capture_source_manager_v1",
                 "ext_image_copy_capture_manager_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
+            ],
+        ),
+        (
+            "athanor-dock",
+            "athanor-dock.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
+            ],
+        ),
+        (
+            "athanor-control-center",
+            "athanor-control-center.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "zwlr_output_manager_v1",
+                "ext_workspace_manager_v1",
+                "ext_foreign_toplevel_list_v1",
+                "athanor_toplevel_manager_v1",
             ],
         ),
     ];
