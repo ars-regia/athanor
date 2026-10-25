@@ -28,6 +28,23 @@ class HiddenFailuresTest(unittest.TestCase):
         ])
         self.assertEqual(verify.hidden_failures(text), [1, 2, 3, 4, 5, 6])
 
+    def test_each_further_construct_is_found(self):
+        for line in ("run >&/dev/null", "run &>>/dev/null", "run 2>&-", "run || :",
+                     "run || exit 0", "run || return 0", "run 2>&1 || continue"):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [1])
+        for line in ("run || exit 1", "run || true_value", "echo ${#x}"):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [])
+
+    def test_a_hash_in_quotes_is_not_a_comment(self):
+        self.assertEqual(verify.hidden_failures('printf "%s #%d\\n" a 1 2>/dev/null'), [1])
+        self.assertEqual(verify.hidden_failures("echo '#' 2>/dev/null"), [1])
+
+    def test_a_heredoc_body_is_not_code(self):
+        text = "cat <<'EOF'\nrun 2>/dev/null\nEOF\nrun || true\ncat <<-EOT\nx || true\n\tEOT\n"
+        self.assertEqual(verify.hidden_failures(text), [4])
+
     def test_comments_are_ignored(self):
         text = "# run a 2>/dev/null || true\nrun b # not 2> /dev/null\n    # || true\n"
         self.assertEqual(verify.hidden_failures(text), [])

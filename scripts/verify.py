@@ -2089,15 +2089,45 @@ def check_panics():
 SHELL_BUDGET = 15
 SHELL_TEST_DIR = "forge/test"
 HIDDEN_FAILURE = re.compile(
-    r"2>\s*/dev/null|&>\s*/dev/null|>\s*/dev/null\s+2>&1|\|\|\s*true\b|2>&1\s*\|\|\s*(?:break|continue|:)")
-SHELL_COMMENT = re.compile(r"(?:^|\s)#.*")
+    r"2>\s*/dev/null|&>>?\s*/dev/null|>&\s*/dev/null|>\s*/dev/null\s+2>&1|2>&-"
+    r"|\|\|\s*(?:true|:|exit\s+0|return\s+0)(?![\w-])|2>&1\s*\|\|\s*(?:break|continue)\b")
+SHELL_HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
+
+def shell_code(line):
+    """`line` without its comment: a `#` starts one only outside quotes and after a space or
+    at the start, so `${#x}`, `$#` and "a #b" stay."""
+    quote, i = "", 0
+    while i < len(line):
+        c = line[i]
+        if c == "\\" and quote != "'":
+            i += 1
+        elif quote:
+            quote = "" if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+        i += 1
+    return line
 
 
 def hidden_failures(text):
-    """The numbers of the lines of shell `text` with a construct that hides a failure; the
-    text of a comment does not count."""
-    return [i for i, line in enumerate(text.split("\n"), 1)
-            if HIDDEN_FAILURE.search(SHELL_COMMENT.sub("", line))]
+    """The numbers of the lines of shell `text` with a construct that hides a failure; neither
+    a comment nor the body of a here-document counts."""
+    found, ends = [], None
+    for i, line in enumerate(text.split("\n"), 1):
+        if ends is not None:
+            if line.strip() == ends:
+                ends = None
+            continue
+        code = shell_code(line)
+        if HIDDEN_FAILURE.search(code):
+            found.append(i)
+        m = SHELL_HEREDOC.search(code)
+        if m:
+            ends = m.group(2)
+    return found
 
 
 @check("shell-failures", "Il budget di fallimenti nascosti negli script di forge/test non cresce")
