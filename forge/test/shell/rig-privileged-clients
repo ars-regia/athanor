@@ -8,3 +8,5 @@
 /usr/bin/athanor-toolkit-input-method rig-input-method.service zwp_input_method_manager_v2
 # wtype's virtual keyboard presses the keys of the Orca walks (orca_walk.py), run as rig-wtype.service.
 /usr/bin/wtype rig-wtype.service zwp_virtual_keyboard_manager_v1
+# cc-probe reads and acts on the windows of compositor_e2e.py, run by in-unit.sh as rig-cc-probe.service.
+/usr/bin/cc-probe rig-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1

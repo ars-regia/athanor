@@ -26,6 +26,7 @@ fn window(window: &Window) -> Value {
         "minimized": window.state.minimized,
         "maximized": window.state.maximized,
         "fullscreen": window.state.fullscreen,
+        "outputs": window.outputs,
     })
 }
 

@@ -5,7 +5,11 @@ cosmic-comp of a scene, through its cc-probe example. Two windows of our own
 none of the COSMIC globals, must fail each request with an error and never crash. The
 client built without GTK (cc-launch: a plain Wayland connection, GLib's main context in a
 calloop loop) reads the output from wl_output and launches a desktop entry behind a
-security context, through fake_systemd.py. Runs as the scene's RIG_HOLD; checks every expectation and exits 1 if any does not hold.
+security context, through fake_systemd.py. Under RIG_COMPOSITOR=athanor the probe runs
+against athanor-compositor instead, as its rig unit (rig-cc-probe.service, which
+rig-privileged-clients grants the toplevel list and athanor_toplevel_manager_v1), and
+outside that unit sees no window. Runs as the scene's RIG_HOLD; checks every expectation and
+exits 1 if any does not hold.
 """
 
 import json
@@ -18,6 +22,7 @@ import time
 from pathlib import Path
 
 PROBE = "/out/bin/cc-probe"
+IN_UNIT = Path(__file__).resolve().parent / "in-unit.sh"
 LAUNCH = "/out/bin/cc-launch"
 WINDOW = Path(__file__).resolve().parent / "cc_window.py"
 FAKE_SYSTEMD = Path(__file__).resolve().parent / "fake_systemd.py"
@@ -32,12 +37,14 @@ FIRST, SECOND = "org.athanor.CcWindow1", "org.athanor.CcWindow2"
 failures = []
 
 
-def probe(*steps, display=None):
-    """Runs cc-probe; returns its exit code and its JSON lines."""
+def probe(*steps, display=None, unit=False):
+    """Runs cc-probe, with `unit` as rig-cc-probe.service; returns its exit code and its JSON
+    lines."""
     env = dict(os.environ)
     if display:
         env["WAYLAND_DISPLAY"] = display
-    run = subprocess.run([PROBE, *steps], env=env, capture_output=True, text=True, timeout=60)
+    command = [str(IN_UNIT), "rig-cc-probe.service", PROBE] if unit else [PROBE]
+    run = subprocess.run([*command, *steps], env=env, capture_output=True, text=True, timeout=60)
     lines = [json.loads(line) for line in run.stdout.splitlines() if line.startswith("{")]
     if run.stderr.strip():
         print(run.stderr.strip(), file=sys.stderr)
@@ -176,6 +183,37 @@ def cosmic_comp():
     second.wait(timeout=10)
 
 
+def athanor():
+    second = subprocess.Popen(["python3", str(WINDOW), "2"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+    code, lines = probe("watch", "2", "snapshot", unit=True)
+    windows = snapshot(lines).get("windows", [])
+    expect("athanor: both windows are listed, each on headless-0",
+           code == 0 and {w["app_id"] for w in windows} == {FIRST, SECOND}
+           and all(w["outputs"] == ["headless-0"] for w in windows), lines)
+
+    # The state goes out per frame as a diff: each action has a frame of its own.
+    code, lines = probe("minimize", FIRST, "watch", "1", "unminimize", FIRST, "watch", "1",
+                        "activate", SECOND, "watch", "1", "activate", FIRST, "watch", "1", unit=True)
+    first = [w for w in events(lines, "window_changed") if w["app_id"] == FIRST]
+    second_changes = [w for w in events(lines, "window_changed") if w["app_id"] == SECOND]
+    expect("athanor: minimize, unminimize and activate arrive as window changes",
+           code == 0 and any(w["minimized"] for w in first)
+           and any(not w["minimized"] and w["activated"] for w in first)
+           and any(w["activated"] for w in second_changes), lines)
+
+    code, lines = probe("close", SECOND, "watch", "2", "snapshot", unit=True)
+    apps = {window["app_id"] for window in snapshot(lines).get("windows", [])}
+    expect("athanor: close removes the window", code == 0 and events(lines, "window_removed")
+           and SECOND not in apps and FIRST in apps, lines)
+    second.wait(timeout=10)
+
+    # The manager's own refusal of an ungranted client is compositor-globals'.
+    code, lines = probe("snapshot")
+    expect("athanor: outside its unit the probe sees no window",
+           code == 0 and snapshot(lines).get("windows") == [], lines)
+
+
 def sway():
     display = sway_display()
     code, lines = probe("snapshot", display=display)
@@ -199,7 +237,11 @@ def sway():
                code == 1 and len(errors) == 1 and reason in errors[0], lines)
 
 
-cosmic_comp()
-launch()
-sway()
+# athanor-compositor runs without a parent sway.
+if os.environ.get("RIG_COMPOSITOR") == "athanor":
+    athanor()
+else:
+    cosmic_comp()
+    launch()
+    sway()
 sys.exit(1 if failures else 0)
