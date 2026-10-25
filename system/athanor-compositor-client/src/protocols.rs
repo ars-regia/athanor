@@ -1,6 +1,6 @@
-//! Client bindings for the COSMIC protocols, generated at build time by `wayland-scanner`
-//! from the descriptions vendored under `protocols/`. The descriptions carry permissive
-//! licences; `protocols/README.md` names the pinned upstream commit and each licence.
+//! Client bindings for the COSMIC protocols and Athanor's own, generated at build time by
+//! `wayland-scanner` from the descriptions under `protocols/`. The descriptions carry
+//! permissive licences; `protocols/README.md` names the pinned upstream commit and each licence.
 
 /// The module layout of `wayland-protocols`: `client` holds the generated types, and
 /// `$deps` are the modules whose interfaces the description references.
@@ -75,4 +75,12 @@ pub mod keyboard_layout {
 
 pub mod a11y {
     generated!("protocols/cosmic-a11y-unstable-v1.xml", []);
+}
+
+/// Athanor's own, served by athanor-compositor (doc_own_stack.md OS5, decision 19).
+pub mod toplevel_state {
+    generated!(
+        "protocols/athanor-toplevel-state-v1.xml",
+        [wayland_protocols::ext::foreign_toplevel_list::v1]
+    );
 }

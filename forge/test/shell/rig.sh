@@ -40,6 +40,7 @@
 #   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
+#                           RIG_COMPOSITOR=athanor runs it against athanor-compositor, the probe as its unit (run build-compositor first)
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
@@ -926,6 +927,9 @@ tray-e2e)
                  && exec python3 /repo/forge/test/shell/bar_session.py --tray --respawn"
     ;;
 compositor-e2e)
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+    fi
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
     seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
     mkdir -p "$seed"

@@ -355,10 +355,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     const TOPLEVEL_LIST: &str = "ext_foreign_toplevel_list_v1";
-    const OFFERED: [&str; 3] = [
+    const OFFERED: [&str; 4] = [
         TOPLEVEL_LIST,
         "ext_foreign_toplevel_image_capture_source_manager_v1",
         "ext_image_copy_capture_manager_v1",
+        "athanor_toplevel_actions_v1",
     ];
 
     fn message(object: u32, opcode: u32, args: &[u8]) -> Vec<u8> {
@@ -425,10 +426,11 @@ mod tests {
         }
     }
 
-    /// Least privilege: a client that never captures never binds the capture globals, even
-    /// where the compositor offers them; only `Client::capture` binds them.
+    /// Least privilege: a client that never captures or acts never binds the capture globals
+    /// or the window actions, even where the compositor offers them; only `Client::capture`
+    /// and `Client::window_actions` bind them.
     #[test]
-    fn connecting_binds_no_capture_global() {
+    fn connecting_binds_no_capture_global_and_no_window_action() {
         let _context = crate::MAIN_CONTEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -445,9 +447,10 @@ mod tests {
     }
 
     /// A caller that captures binds both capture globals the compositor offers, once across
-    /// its captures. Without `wl_shm` each capture then stops before it asks for a frame.
+    /// its captures, and one that acts binds the window actions once across its actions.
+    /// Without `wl_shm` each capture then stops before it asks for a frame.
     #[test]
-    fn capturing_binds_each_capture_global_once() {
+    fn capturing_and_acting_bind_each_global_once() {
         let _context = crate::MAIN_CONTEXT
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -464,11 +467,14 @@ mod tests {
             let answer = std::future::Future::poll(capture.as_mut(), &mut context);
             assert!(matches!(answer, Poll::Ready(Err(Error::Unavailable("wl_shm")))), "{answer:?}");
         }
+        for _ in 0..2 {
+            client.window_actions().minimize(window).expect("minimize");
+        }
         client.flush().expect("flush");
         connection.roundtrip().expect("roundtrip");
         let bound = bound.lock().expect("lock").clone();
-        for capture in &OFFERED[1..] {
-            assert_eq!(bound.iter().filter(|i| i == capture).count(), 1, "{bound:?}");
+        for global in &OFFERED[1..] {
+            assert_eq!(bound.iter().filter(|i| i == global).count(), 1, "{bound:?}");
         }
         drop(client);
     }
