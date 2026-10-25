@@ -68,6 +68,10 @@ class ContrastTest(unittest.TestCase):
         rows = [[(0, 0, 0, 255)] * 4 for _ in range(4)]
         self.assertEqual(ring.read_png(png(rows, 4, 4, 6)), (4, 4, [[(0, 0, 0)] * 4 for _ in range(4)]))
 
+    def test_a_png_without_a_header_is_an_error_not_a_type_error(self):
+        with self.assertRaisesRegex(ValueError, "IHDR"):
+            ring.read_png(b"\x89PNG\r\n\x1a\n")
+
     def test_a_box_without_room_for_the_ring_is_an_error(self):
         with self.assertRaises(ValueError):
             ring.contrast(with_ring((0, 0, 0), 2), (0, 0, 60, 50))

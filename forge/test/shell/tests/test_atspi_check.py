@@ -83,5 +83,14 @@ class PasswordTest(unittest.TestCase):
         self.assertEqual(check.password_problems([("password text", "Password", [""])]), [])
 
 
+class RingTest(unittest.TestCase):
+    def test_a_ring_asked_for_with_no_focused_control_fails(self):
+        def never_captured():
+            raise AssertionError("nothing to capture")
+
+        found = check.ring_problems(None, never_captured)
+        self.assertEqual(found, ["the scene has no focused control, so the ring is unchecked"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -244,7 +244,7 @@ seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp
 }
 
 variant_env=()
-atspi_variant() { # atspi_variant <seed dir>: the appearance and text scale of RIG_ATSPI_VARIANT
+atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text scale of RIG_ATSPI_VARIANT
     # (<light|dark|hc-light|hc-dark>@<scale>), set on a seed after seed_bar, as the user's
     # choice would be; the keys the shell reads (athanor-style appearance.rs) and GTK's scale
     [ -n "${RIG_ATSPI_VARIANT:-}" ] || return 0
@@ -261,7 +261,9 @@ atspi_variant() { # atspi_variant <seed dir>: the appearance and text scale of R
         echo "org.gnome.desktop.a11y.interface high-contrast $contrast"
         echo "org.gnome.desktop.interface text-scaling-factor $scale"
     } >> "$1.gsettings"
-    variant_env=(ATSPI_RING=1)
+    # The ring is asked for only where the scene gives a control the focus (AX8)
+    variant_env=()
+    if [ "${2:-}" = ring ]; then variant_env=(ATSPI_RING=1); fi
     if [ "$contrast" = true ]; then variant_env+=(ATSPI_HIGH_CONTRAST=1); fi
 }
 
@@ -1064,6 +1066,13 @@ atspi)
                 fi
             done
         done
+        # Only the launcher's scene focuses a control: its entry takes the focus on show. The bar
+        # and the dock ask for keyboard focus on demand and hold none at start.
+        if [ "$2" = launcher ]; then
+            echo "ring: checked on $2 in every variant (the entry holds the focus)"
+        else
+            echo "ring: not checked (no focused control in the scene)"
+        fi
         exit 0
     fi
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
@@ -1221,7 +1230,7 @@ atspi)
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
         # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        atspi_variant "$out/seed-atspi-launcher"
+        atspi_variant "$out/seed-atspi-launcher" ring
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \

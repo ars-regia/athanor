@@ -34,6 +34,8 @@ def read_png(data):
         elif kind == b"IDAT":
             idat.append(body)
         position += 12 + length
+    if header is None:
+        raise ValueError("the PNG has no IHDR chunk")
     width, height, depth, colour_type, _, _, interlace = header
     if depth != 8 or colour_type not in (2, 6) or interlace:
         raise ValueError("only non-interlaced 8-bit RGB and RGBA PNGs are read")

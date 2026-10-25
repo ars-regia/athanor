@@ -173,18 +173,21 @@ def find_application(Atspi, name, seconds=20):
     return None
 
 
-def ring_problems(app, Atspi):
-    """AX8: capture the output and check the ring around the focused control. A scene with no
-    focused control has no ring to check; it says so, and the walk of a surface that takes focus
-    on a key (the launcher's entry) is where this runs."""
+def ring_problems(box, capture_png, high_contrast=False):
+    """AX8: the ring around the focused control at `box`. Asked for in a scene where no control
+    holds the focus, the ring is unchecked, and that is a failure, not a pass."""
     import ring_check
+
+    if box is None:
+        return ["the scene has no focused control, so the ring is unchecked"]
+    return ring_check.problems(capture_png(), box, high_contrast)
+
+
+def ring_of(app, Atspi):
     from input_method_check import capture
 
-    box = focused_extents(app, Atspi)
-    if box is None:
-        print("ring: no control holds the focus, nothing to measure")
-        return []
-    return ring_check.problems(capture("atspi-ring"), box, os.environ.get("ATSPI_HIGH_CONTRAST") == "1")
+    return ring_problems(focused_extents(app, Atspi), lambda: capture("atspi-ring"),
+                         os.environ.get("ATSPI_HIGH_CONTRAST") == "1")
 
 
 def main(argv):
@@ -213,7 +216,7 @@ def main(argv):
     # Last: the password check sets a probe in the field, which the transcript must not hold.
     found += password_problems(password_texts(app, Atspi))
     if os.environ.get("ATSPI_RING"):
-        found += ring_problems(app, Atspi)
+        found += ring_of(app, Atspi)
     for line in found:
         print(f"FAIL {line}", file=sys.stderr)
     return 1 if found else 0
