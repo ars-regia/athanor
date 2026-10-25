@@ -96,6 +96,7 @@ class Parallel(unittest.TestCase):
         deadline = time.monotonic() + wait
         while not path.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
+        self.assertTrue(path.exists(), f"{name} never appeared")
         return int(path.read_text())
 
     def kill_helper(self):
@@ -144,14 +145,18 @@ class Parallel(unittest.TestCase):
         self.assertIn("TIMEOUT: test_b.Hung was killed after 6s", r.stdout)
         self.assertLess(took, 6 + 5, f"the runner stalled for {took:.1f}s with a helper holding its output")
 
-    def interrupted(self, sig):
+    def interrupted(self, sig, burst=1):
         self.hung_suite()
-        self.addCleanup(self.kill_helper)
         runner = subprocess.Popen([sys.executable, "-B", str(SCRIPT), str(self.dir), "2", "300"],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Cleanups run last in, first out: these run before the runner is killed, so a failure
+        # leaves nothing alive.
         self.addCleanup(runner.kill)
+        self.addCleanup(self.kill_helper)
+        self.addCleanup(self.kill_test)
         helper, test = self.pid("helper.pid"), self.pid("test.pid")
-        runner.send_signal(sig)
+        for _ in range(burst):
+            runner.send_signal(sig)
         try:
             runner.communicate(timeout=10)
         except subprocess.TimeoutExpired:
@@ -159,6 +164,14 @@ class Parallel(unittest.TestCase):
         self.assertNotEqual(runner.returncode, 0)
         self.assert_gone(test, "the hung test process")
         self.assert_gone(helper, "the helper it spawned")
+
+    def kill_test(self):
+        try:
+            pid = int((self.dir / "test.pid").read_text())
+        except (FileNotFoundError, ValueError):
+            return
+        if not self.is_dead(pid):
+            os.kill(pid, 9)
 
     def test_an_interrupt_kills_the_running_classes_and_ends_the_runner_promptly(self):
         self.interrupted(signal.SIGINT)
@@ -168,6 +181,26 @@ class Parallel(unittest.TestCase):
 
     def test_sighup_cleans_up_too(self):
         self.interrupted(signal.SIGHUP)
+
+    def test_a_burst_of_signals_cannot_cut_the_cleanup_short(self):
+        self.interrupted(signal.SIGHUP, burst=50)
+
+    def test_a_class_that_exits_by_itself_leaves_no_descendant_behind(self):
+        self.suite(
+            a=textwrap.dedent(f"""
+                import os, subprocess, sys, unittest
+                class Leaves(unittest.TestCase):
+                    def test_x(self):
+                        helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(37.25)"])
+                        tmp = {str(self.dir)!r} + "/helper.tmp"
+                        open(tmp, "w").write(str(helper.pid))
+                        os.replace(tmp, {str(self.dir)!r} + "/helper.pid")
+            """),
+        )
+        self.addCleanup(self.kill_helper)
+        r = self.run_dir()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assert_gone(self.pid("helper.pid"), "the descendant of a class that exited 0")
 
 if __name__ == "__main__":
     unittest.main()

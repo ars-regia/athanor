@@ -8,6 +8,8 @@ was started in; each class prints its report in one piece when it ends. The exit
 non-zero when a class fails, when a module cannot be imported, or when nothing is found.
 
 A class that runs past TIMEOUT seconds (default 600) is killed and fails on its own, by name.
+When a class ends, by itself or not, every process left in its group is killed, and SIGINT, SIGTERM
+and SIGHUP kill the groups of the classes running before the runner exits.
 A module that raises SkipTest when imported is reported as skipped, as `discover` does.
 
 Usage: unittest_parallel.py DIR [JOBS [TIMEOUT]]    (JOBS defaults to the number of CPUs)
@@ -53,6 +55,8 @@ def classes(directory: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
 
 LIVE: set[subprocess.Popen] = set()  # the children running now, for kill_all
 STOPPING = threading.Event()  # set by an interrupt: no child may outlive it
+SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+received = [0]  # the signal that stopped the run
 
 
 def kill_group(child: subprocess.Popen) -> None:
@@ -86,11 +90,11 @@ def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, 
             try:
                 child.wait(timeout)
             except subprocess.TimeoutExpired:
-                timed_out = True
+                timed_out = child.poll() is None
         finally:
-            if child.poll() is None:
-                kill_group(child)
-                child.wait()
+            # Always: a class that exits by itself can leave a descendant in its group.
+            kill_group(child)
+            child.wait()
             LIVE.discard(child)
         out.seek(0)
         text = out.read().decode(errors="replace")
@@ -99,14 +103,24 @@ def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, 
     return name, child.returncode, text, time.monotonic() - started
 
 
+def stop(signum: int) -> None:
+    """Ignore further signals, so that a burst cannot cut the cleanup short, and kill the groups."""
+    for sig in SIGNALS:
+        signal.signal(sig, signal.SIG_IGN)
+    received[0] = received[0] or signum
+    STOPPING.set()
+    kill_all()
+
+
 def stop_on(signum: int, _frame: object) -> None:
+    stop(signum)
     raise SystemExit(128 + signum)
 
 
 def main(argv: list[str]) -> int:
     # A cancelled CI job sends SIGTERM: end through the cleanup below, not without it.
-    signal.signal(signal.SIGTERM, stop_on)
-    signal.signal(signal.SIGHUP, stop_on)
+    for sig in SIGNALS:
+        signal.signal(sig, stop_on)
     if len(argv) not in (1, 2, 3):
         print(__doc__, file=sys.stderr)
         return 2
@@ -114,6 +128,8 @@ def main(argv: list[str]) -> int:
     jobs = int(argv[1]) if len(argv) >= 2 else os.cpu_count() or 1
     timeout = float(argv[2]) if len(argv) == 3 else 600.0
     names, broken, skipped = classes(directory)
+    if STOPPING.is_set():  # the loader swallows what is raised inside it
+        raise SystemExit(128 + received[0])
     for line in skipped:
         print(f"skipped module {line}")
     for name in broken:
@@ -132,9 +148,8 @@ def main(argv: list[str]) -> int:
                 failed.append(name)
     except BaseException:
         # An interrupt must not wait for the other workers: kill the live groups, drop the queue.
-        STOPPING.set()
+        stop(signal.SIGINT)
         pool.shutdown(wait=False, cancel_futures=True)
-        kill_all()
         raise
     finally:
         pool.shutdown(wait=True)
