@@ -248,7 +248,7 @@ variant_env=()
 atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text scale of RIG_ATSPI_VARIANT
     # (<light|dark|hc-light|hc-dark>@<scale>), set on a seed after seed_bar, as the user's
     # choice would be; the keys the shell reads (athanor-style appearance.rs) and GTK's scale
-    [ -n "${RIG_ATSPI_VARIANT:-}" ] || return 0
+    if [ -z "${RIG_ATSPI_VARIANT:-}" ]; then return 0; fi
     local appearance=${RIG_ATSPI_VARIANT%@*} scale=${RIG_ATSPI_VARIANT#*@} mode=light contrast=false
     case $appearance in
     light) ;;
@@ -1071,14 +1071,6 @@ atspi)
                 fi
             done
         done
-        # Only the launcher's scene under athanor-compositor focuses a control: its entry takes
-        # the focus on show. The bar and the dock ask for keyboard focus on demand and hold none
-        # at start, and cosmic-comp leaves the launcher's entry unfocused.
-        if [ "$2" = launcher ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-            echo "ring: checked on $2 in every variant (the entry holds the focus)"
-        else
-            echo "ring: not checked (no focused control in the scene)"
-        fi
         exit 0
     fi
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):

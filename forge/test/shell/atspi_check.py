@@ -183,6 +183,16 @@ def ring_problems(box, capture_png, high_contrast=False):
     return ring_check.problems(capture_png(), box, high_contrast)
 
 
+def ring_note(box, asked):
+    """What the walk says about the ring when none was asked for: derived from the tree, so a
+    scene that focuses a control is not reported as one that does not."""
+    if asked:
+        return None
+    if box is None:
+        return "ring: not checked, no focused control"
+    return "ring: not checked, not asked for in this scene"
+
+
 def ring_of(app, Atspi):
     from input_method_check import capture
 
@@ -217,6 +227,8 @@ def main(argv):
     found += password_problems(password_texts(app, Atspi))
     if os.environ.get("ATSPI_RING"):
         found += ring_of(app, Atspi)
+    else:
+        print(ring_note(focused_extents(app, Atspi), False))
     for line in found:
         print(f"FAIL {line}", file=sys.stderr)
     return 1 if found else 0

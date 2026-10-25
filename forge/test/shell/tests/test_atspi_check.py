@@ -91,6 +91,13 @@ class RingTest(unittest.TestCase):
         found = check.ring_problems(None, never_captured)
         self.assertEqual(found, ["the scene has no focused control, so the ring is unchecked"])
 
+    def test_a_walk_without_a_ring_request_says_whether_a_control_held_the_focus(self):
+        self.assertEqual(check.ring_note(None, False), "ring: not checked, no focused control")
+        self.assertEqual(
+            check.ring_note((0, 0, 10, 10), False), "ring: not checked, not asked for in this scene"
+        )
+        self.assertIsNone(check.ring_note(None, True))
+
 
 if __name__ == "__main__":
     unittest.main()
