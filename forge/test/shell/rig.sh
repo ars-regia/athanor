@@ -1071,9 +1071,10 @@ atspi)
                 fi
             done
         done
-        # Only the launcher's scene focuses a control: its entry takes the focus on show. The bar
-        # and the dock ask for keyboard focus on demand and hold none at start.
-        if [ "$2" = launcher ]; then
+        # Only the launcher's scene under athanor-compositor focuses a control: its entry takes
+        # the focus on show. The bar and the dock ask for keyboard focus on demand and hold none
+        # at start, and cosmic-comp leaves the launcher's entry unfocused.
+        if [ "$2" = launcher ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             echo "ring: checked on $2 in every variant (the entry holds the focus)"
         else
             echo "ring: not checked (no focused control in the scene)"
@@ -1235,7 +1236,13 @@ atspi)
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
         # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        atspi_variant "$out/seed-atspi-launcher" ring
+        # The entry takes the focus on show under athanor-compositor; cosmic-comp leaves it
+        # unfocused (the recorded reference holds no "focused" on it), so no ring is asked for.
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            atspi_variant "$out/seed-atspi-launcher" ring
+        else
+            atspi_variant "$out/seed-atspi-launcher"
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
