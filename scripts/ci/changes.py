@@ -47,6 +47,10 @@ AREAS = {
         "forge/scripts/fetch_sources.sh",
         "forge/scripts/select_check_specs.py",
         "forge/scripts/builder_image.sh",
+        # The select job's lookup of the checkout's builder by content hash.
+        "forge/scripts/check_idempotency.sh",
+        "forge/scripts/retry.sh",
+        "forge/scripts/registry_probe.sh",
         ".github/workflows/spec-build-check.yml",
     ),
     # The crates the shell rig draws, the rig itself, and what changes every crate's build.
