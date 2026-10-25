@@ -65,7 +65,6 @@ use crate::protocols::toplevel_info::client::{
 };
 use crate::protocols::toplevel_management::client::zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1;
 use crate::protocols::toplevel_state::client::{
-    athanor_toplevel_actions_v1::AthanorToplevelActionsV1,
     athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
     athanor_toplevel_state_v1::{self, AthanorToplevelStateV1},
 };
@@ -128,8 +127,7 @@ pub(crate) struct Inner {
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
     /// The compositor's globals, for those bound only when a call needs them: the capture
-    /// globals, which a client that never captures never binds.
-    #[cfg(feature = "gtk")]
+    /// globals and the window actions, which a client that never captures or acts never binds.
     pub(crate) registry: GlobalList,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
@@ -219,7 +217,6 @@ impl Client {
             gdk: RefCell::new(None),
             connection,
             qh,
-            #[cfg(feature = "gtk")]
             registry: globals,
             queue: RefCell::new(queue),
             state: RefCell::new(state),
@@ -289,22 +286,6 @@ impl Client {
     pub fn accessibility(&self) -> Option<Accessibility> {
         let state = self.inner.state.borrow();
         state.globals.a11y.as_ref().map(|_| state.accessibility)
-    }
-
-    pub fn activate(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_action(window, Action::Activate)
-    }
-
-    pub fn minimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_action(window, Action::Minimize)
-    }
-
-    pub fn unminimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_action(window, Action::Unminimize)
-    }
-
-    pub fn close(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_action(window, Action::Close)
     }
 
     pub fn set_tiling(&self, workspace: WorkspaceId, tiling: Tiling) -> Result<(), Error> {
@@ -454,36 +435,6 @@ impl Client {
             .ok_or_else(|| Error::Connection("the connection has no socket path".into()))
     }
 
-    /// Through cosmic-comp's manager, else athanor-compositor's actions: no compositor offers
-    /// both, so the order never chooses, and the COSMIC path stays as it was (plan D3).
-    fn toplevel_action(&self, window: WindowId, action: Action) -> Result<(), Error> {
-        let state = self.inner.live_state()?;
-        if let Some(manager) = &state.globals.toplevel_manager {
-            let toplevel = state.cosmic_toplevel(window)?;
-            match action {
-                Action::Activate => manager.activate(toplevel, state.seat()?),
-                Action::Minimize => manager.set_minimized(toplevel),
-                Action::Unminimize => manager.unset_minimized(toplevel),
-                Action::Close => manager.close(toplevel),
-            }
-        } else {
-            let actions = state
-                .globals
-                .athanor_actions
-                .as_ref()
-                .ok_or(Error::Unavailable("athanor_toplevel_actions_v1"))?;
-            let toplevel = &state.toplevels.get(&window).ok_or(Error::NoWindow)?.ext;
-            match action {
-                Action::Activate => actions.activate(toplevel, state.seat()?),
-                Action::Minimize => actions.set_minimized(toplevel),
-                Action::Unminimize => actions.unset_minimized(toplevel),
-                Action::Close => actions.close(toplevel),
-            }
-        }
-        drop(state);
-        self.flush()
-    }
-
     pub(crate) fn flush(&self) -> Result<(), Error> {
         self.inner.flush()
     }
@@ -492,14 +443,6 @@ impl Client {
 /// A full socket is not a failure: what could not be written stays in the shared
 /// `wl_display` buffer, which GDK flushes on every main-loop iteration and our source before
 /// every poll; a read with nothing to read is not one either.
-#[derive(Clone, Copy)]
-enum Action {
-    Activate,
-    Minimize,
-    Unminimize,
-    Close,
-}
-
 fn tolerate_would_block(result: Result<(), WaylandError>) -> Result<(), WaylandError> {
     match result {
         Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => Ok(()),
@@ -807,10 +750,10 @@ fn active_state(enabled: bool) -> ActiveState {
 #[derive(Default)]
 pub(crate) struct Globals {
     toplevel_info: Option<ZcosmicToplevelInfoV1>,
-    toplevel_manager: Option<ZcosmicToplevelManagerV1>,
+    pub(crate) toplevel_manager: Option<ZcosmicToplevelManagerV1>,
     athanor_toplevel: Option<AthanorToplevelManagerV1>,
-    /// Offered apart from the manager, to the clients that act on windows (plan D2).
-    athanor_actions: Option<AthanorToplevelActionsV1>,
+    /// athanor-compositor's window actions, bound at the first action (plan D2).
+    pub(crate) actions: crate::actions::Globals,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
@@ -893,7 +836,7 @@ impl State {
             toplevel_info: bind(globals, qh, 2..=3),
             toplevel_manager: bind(globals, qh, 1..=4),
             athanor_toplevel: bind(globals, qh, 1..=1),
-            athanor_actions: bind(globals, qh, 1..=1),
+            actions: crate::actions::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
             // Version 3 deprecates the screen filter events of version 2.
@@ -944,14 +887,17 @@ impl State {
             .collect()
     }
 
-    fn seat(&self) -> Result<&wl_seat::WlSeat, Error> {
+    pub(crate) fn seat(&self) -> Result<&wl_seat::WlSeat, Error> {
         self.globals
             .seat
             .as_ref()
             .ok_or(Error::Unavailable("wl_seat"))
     }
 
-    fn cosmic_toplevel(&self, window: WindowId) -> Result<&ZcosmicToplevelHandleV1, Error> {
+    pub(crate) fn cosmic_toplevel(
+        &self,
+        window: WindowId,
+    ) -> Result<&ZcosmicToplevelHandleV1, Error> {
         self.toplevels
             .get(&window)
             .ok_or(Error::NoWindow)?
@@ -1579,7 +1525,6 @@ macro_rules! ignore_events {
 ignore_events!(
     ZcosmicToplevelManagerV1,
     AthanorToplevelManagerV1,
-    AthanorToplevelActionsV1,
     ZcosmicWorkspaceManagerV2,
     ZcosmicKeyboardLayoutManagerV1,
     WpSecurityContextManagerV1,

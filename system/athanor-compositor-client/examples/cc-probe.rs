@@ -100,16 +100,17 @@ async fn step(
             .ok_or(format!("no window with app id {app_id}"))
     };
     let error = |err: &dyn std::fmt::Display| err.to_string();
+    let actions = client.window_actions();
     match verb {
         "snapshot" => println!("{}", snapshot(client, display)),
         "watch" => {
             let seconds: u64 = arg()?.parse().map_err(|err| error(&err))?;
             glib::timeout_future(Duration::from_secs(seconds)).await;
         }
-        "activate" => client.activate(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "minimize" => client.minimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "unminimize" => client.unminimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "close" => client.close(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "activate" => actions.activate(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "minimize" => actions.minimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "unminimize" => actions.unminimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "close" => actions.close(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
         "react" => {
             // A handler that reads and acts from inside the callback (re-entrancy).
             let app_id = arg()?;
@@ -118,7 +119,7 @@ async fn step(
                 if let Event::WindowChanged(w) = e {
                     if w.app_id == app_id && w.state.minimized {
                         let listed = client.windows().iter().any(|other| other.id == w.id);
-                        let unminimized = client.unminimize(w.id).is_ok();
+                        let unminimized = client.window_actions().unminimize(w.id).is_ok();
                         println!("{}", json!({"reacted": listed && unminimized}));
                     }
                 }

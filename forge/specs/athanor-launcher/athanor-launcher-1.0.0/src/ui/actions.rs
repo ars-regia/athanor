@@ -66,7 +66,7 @@ impl Launcher {
             }
             (Choice::Open, Action::Window { index }) => {
                 let id = self.windows.borrow().get(*index).copied().ok_or("the window is gone")?;
-                client()?.activate(id).map_err(|err| err.to_string())
+                client()?.window_actions().activate(id).map_err(|err| err.to_string())
             }
             (Choice::Open, Action::Open { uri } | Action::Web { url: uri }) => {
                 client()?.open_uri(uri).await.map(drop).map_err(|err| err.to_string())
