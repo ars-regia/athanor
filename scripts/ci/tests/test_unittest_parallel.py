@@ -2,6 +2,7 @@
 
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -69,29 +70,86 @@ class Parallel(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("skipped module test_b: no unix sockets here", r.stdout)
 
-    def test_a_hung_class_is_killed_and_fails_by_name_while_the_others_finish(self):
+    def hung_suite(self, escape=False):
+        """A suite with a class that hangs after starting a helper. The helper's pid and the
+        test process's are written atomically to files beside the suite."""
         self.suite(
             a="import unittest\nclass Fine(unittest.TestCase):\n    def test_x(self): pass\n",
-            b="import subprocess, sys, time, unittest\nclass Hung(unittest.TestCase):\n    def test_y(self):\n"
-              "        helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-              f"        open({str(self.dir / 'helper.pid')!r}, 'w').write(str(helper.pid))\n"
-              "        time.sleep(60)\n",
+            b=textwrap.dedent(f"""
+                import os, subprocess, sys, time, unittest
+                def put(name, pid):
+                    tmp = {str(self.dir)!r} + "/" + name + ".tmp"
+                    open(tmp, "w").write(str(pid))
+                    os.replace(tmp, {str(self.dir)!r} + "/" + name)
+                class Hung(unittest.TestCase):
+                    def test_y(self):
+                        helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(61.5)  # lint-speed-helper"],
+                                                  start_new_session={escape!r})
+                        put("helper.pid", helper.pid)
+                        put("test.pid", os.getpid())
+                        time.sleep(60)
+            """),
         )
-        r = self.run_dir("2", "3")
-        self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("TIMEOUT: test_b.Hung was killed after 3s", r.stdout)
-        self.assertIn("failed: test_b.Hung", r.stdout)
-        pid = int((self.dir / "helper.pid").read_text())
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
+
+    def pid(self, name, wait=10):
+        path = self.dir / name
+        deadline = time.monotonic() + wait
+        while not path.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
-        else:
+        return int(path.read_text())
+
+    @staticmethod
+    def is_dead(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        try:
+            return pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z"
+        except FileNotFoundError:
+            return True
+
+    def assert_gone(self, pid, what):
+        deadline = time.monotonic() + 5
+        while not self.is_dead(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not self.is_dead(pid):
             os.kill(pid, 9)
-            self.fail("the helper a hung class spawned outlived the runner")
+            self.fail(f"{what} outlived the runner")
+
+    def test_a_hung_class_is_killed_and_fails_by_name_while_the_others_finish(self):
+        self.hung_suite()
+        r = self.run_dir("2", "6")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("TIMEOUT: test_b.Hung was killed after 6s", r.stdout)
+        self.assertIn("failed: test_b.Hung", r.stdout)
+        self.assert_gone(self.pid("helper.pid"), "the helper a hung class spawned")
+
+    def test_a_helper_that_left_the_group_and_holds_the_pipe_does_not_stall_the_report(self):
+        self.hung_suite(escape=True)
+        started = time.monotonic()
+        r = self.run_dir("2", "6")
+        took = time.monotonic() - started
+        helper = self.pid("helper.pid")
+        self.addCleanup(lambda: None if self.is_dead(helper) else os.kill(helper, 9))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("TIMEOUT: test_b.Hung was killed after 6s", r.stdout)
+        self.assertLess(took, 6 + 2 + 5, f"the runner stalled for {took:.1f}s on a pipe held open")
+
+    def test_an_interrupt_kills_the_running_classes_and_ends_the_runner_promptly(self):
+        self.hung_suite()
+        runner = subprocess.Popen([sys.executable, "-B", str(SCRIPT), str(self.dir), "2", "300"],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(runner.kill)
+        helper, test = self.pid("helper.pid"), self.pid("test.pid")
+        runner.send_signal(signal.SIGINT)
+        try:
+            runner.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.fail("the runner did not end on SIGINT")
+        self.assertNotEqual(runner.returncode, 0)
+        self.assert_gone(test, "the hung test process")
+        self.assert_gone(helper, "the helper it spawned")
 
 
 if __name__ == "__main__":
