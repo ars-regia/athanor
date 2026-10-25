@@ -484,7 +484,8 @@ def test_the_ring_width_is_three_in_high_contrast(self): ...
 
 - [x] **Step 3: Implement** the checks; `ring_check.py` reads the focused control's extents from the walk, samples the 2 px ring (3 px in high contrast) and the surface beside it, and computes the WCAG ratio.
 
-- [x] **Step 4: Run on the laptop**, both compositors: `forge/test/shell/rig.sh atspi bar --matrix` and `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar --matrix`, then the dock and the launcher; the greeter on cosmic-comp, which carries the AX4 password case. Expected: pass, or each problem as a finding with its surface and variant. The greeter runs under the own compositor as its unit, with the line of task 4.
+- [ ] **Step 4: Run on the laptop**, both compositors: `forge/test/shell/rig.sh atspi bar --matrix` and `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar --matrix`, then the dock and the launcher; the greeter on cosmic-comp, which carries the AX4 password case. Expected: pass, or each problem as a finding with its surface and variant. The greeter runs under the own compositor as its unit, with the line of task 4.
+  Partial (2026-10-25): cosmic-comp ran every matrix and the greeter; under athanor-compositor the bar and launcher matrices stopped at light@1.0 (#739, #803), so 11 variants of each were never walked, and the greeter was not run (SN12). The ring is never checked on the bar or the dock, nor on the launcher under cosmic-comp. Left to #805.
 
 - [x] **Step 5: Commit**
 
