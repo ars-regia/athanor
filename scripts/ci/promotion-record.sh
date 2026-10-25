@@ -22,7 +22,9 @@
 #     forge/scripts/clean_ghcr.sh keeps its two newest versions, so a run whose builder inputs
 #     changed twice since cannot be promoted, and its plan stops on the pull;
 #   - its build time is newer than the current stable's: a machine never follows a tag
-#     backwards (UT5);
+#     backwards (UT5). An image already stable at the digest is skipped; when that leaves
+#     nothing to move, the promotion is of the stable build again, and it only publishes
+#     the build's GitHub Release (ADR-0131 decisions 5 and 6);
 #   - the build the record names (doc_update_trust.md UT9, doc_pipeline.md PL42): the
 #     org.opencontainers.image.version and org.opencontainers.image.revision labels of the
 #     recorded athanor-system digest, read by digest, so the plan and the apply agree;
@@ -129,6 +131,11 @@ check_promoted() { # check_promoted REPOSITORY DIGEST
 sums() { # sums DIR PATH... (relative to DIR) -> {"PATH": "<sha256>", ...}
     local dir=$1
     shift
+    # No paths, as for a promotion that moves nothing: sha256sum would hash its stdin.
+    if (($# == 0)); then
+        echo '{}'
+        return
+    fi
     (cd "$dir" && sha256sum -- "$@") |
         jq -R -s '[splits("\n") | select(length > 0) | capture("^(?<sha>[0-9a-f]{64})  (?<path>.+)$") | {(.path): .sha}] | add'
 }
@@ -219,7 +226,10 @@ promotion_record() { # promotion_record DAY OUT
     printf '%s\n' "${verify[@]}" > "$work/verify.txt"
     VERIFY_KEYS_DIR=$keys_dir bash "$root/system/verify-images.sh" --registry "$REGISTRY" --builder "$builder" "$work/verify.txt" >&2 ||
         die "$(awk '{ printf "%s@%s ", $1, $3 }' "$work/verify.txt")- one of them does not verify with the keys under system/keys: machines would refuse it"
-    ((${#promote[@]} > 0)) || die "nothing to promote from run $run:$(for name in "${!skipped[@]}"; do printf ' %s %s;' "$name" "${skipped[$name]}"; done)"
+    # Nothing to move means athanor-system, which always has gates, was skipped as already
+    # stable: every other outcome promotes it or stops above. The record then moves no tag,
+    # and the promotion publishes the build's Release, the v0.x one when its tag was pushed
+    # after the first promotion (ADR-0131 decisions 5 and 6).
 
     age=$(($(date -u +%s) - newest))
     ((age >= dwell)) ||
