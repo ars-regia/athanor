@@ -39,6 +39,15 @@ class BuilderTest(unittest.TestCase):
         )
         self.assertIn("athanor-builder:${BUILDER_HASH}", run)
 
+    def test_the_builder_is_built_only_for_selected_specs(self):
+        condition = self.jobs["builder"]["if"]
+        self.assertIn("needs.select.outputs.builder == 'true'", condition)
+        self.assertIn("needs.select.outputs.specs != '[]'", condition)
+
+    def test_the_registry_lookup_is_retried(self):
+        lookup = next(s for s in self.jobs["select"]["steps"] if s.get("id") == "builder")
+        self.assertIn("scripts/retry.sh bash scripts/check_idempotency.sh", lookup["run"])
+
 
 if __name__ == "__main__":
     unittest.main()

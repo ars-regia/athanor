@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Point REPOSITORY:latest at REPOSITORY:CONTENT_HASH, the builder image the current run uses.
 #
-# The pull request spec check (spec-build-check.yml) runs every spec in athanor-builder:latest
-# unless the change touches the builder's inputs. :latest therefore has to name the builder
-# of the default branch: it moves on a cache hit as well as after a build, and a run on any
-# other branch leaves it alone. Before this, :latest moved only when a run rebuilt the image,
+# :latest names the builder of the default branch, for what pulls the builder without a content
+# hash (BUILDER_STABLE_TAG unset in rust-security-audit.yml and forge-ghcr-cleanup.yml): it
+# moves on a cache hit as well as after a build, and a run on any other branch leaves it alone.
+# The pull request spec check (spec-build-check.yml) no longer reads it: it pulls the builder of
+# the checkout by its content hash (#789). Before this, :latest moved only when a run rebuilt the image,
 # from whichever branch did so, and a pull request built specs in a builder older than the
 # default branch's flake (PR #198: "meson: command not found").
 #
