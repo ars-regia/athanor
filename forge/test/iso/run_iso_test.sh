@@ -221,6 +221,10 @@ console_pid=$!
             break
         fi
         echo "$shot" >> "${output}/screenshots.log"
+        # QEMU answers a screendump it could not write with `Error: ...` and a zero status.
+        if [[ $shot == *$'\n'Error* ]]; then
+            echo "screenshot ${name}: the monitor answered: ${shot#*$'\n'}" >&2
+        fi
     done
 ) &
 shots_pid=$!
