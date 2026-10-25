@@ -194,6 +194,8 @@ rm -f "$serial" "$monitor"
 # It is given the monitor too: the password is typed at the greeter through it.
 # In the upgrade case it holds the console past Settings (ATHANOR_CONSOLE_HOLD), so the
 # reboots of the stages are on the serial log and their markers in phases.txt.
+# The pace is for the tests' fake guest: a real run must never inherit it from the caller.
+unset ATHANOR_CONSOLE_PACE
 hold=0
 if [[ -n ${UPDATE_TO:-} ]]; then hold=1; fi
 ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
