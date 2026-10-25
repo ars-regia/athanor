@@ -451,10 +451,10 @@ mod tests {
         assert!(!shipped.grants(&bar(), BAR_PID, &Files).is_empty());
     }
 
-    /// The shipped allow-list lets the bar and the control center read every window's state, and
-    /// only the dock and the launcher act on windows.
+    /// The shipped allow-list lets the bar, the dock, the launcher and the control center read
+    /// every window's state, and all but the control center act on windows.
     #[test]
-    fn only_the_dock_and_the_launcher_act_on_windows() {
+    fn only_the_bar_the_dock_and_the_launcher_act_on_windows() {
         /// Every path is the file of every process.
         struct Any;
         impl Process for Any {
@@ -474,7 +474,7 @@ mod tests {
         let shipped =
             AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
         for (name, acts) in [
-            ("athanor-bar", false),
+            ("athanor-bar", true),
             ("athanor-control-center", false),
             ("athanor-dock", true),
             ("athanor-launcher", true),
