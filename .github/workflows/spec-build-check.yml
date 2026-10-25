@@ -55,15 +55,19 @@ jobs:
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
         run: |
           set -euo pipefail
-          bash scripts/check_idempotency.sh --package builder --registry "$REGISTRY_HOST" \
-            --owner "$GITHUB_REPOSITORY_OWNER" --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
+          # retry.sh: a transient registry error is asked again; one that outlasts the attempts
+          # fails the check. A failed attempt prints nothing on stdout.
+          bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+            --registry "$REGISTRY_HOST" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
           source "$RUNNER_TEMP/idemp.out"
           echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
           if [[ $CACHE_HIT == true ]]; then echo "build=false"; else echo "build=true"; fi >> "$GITHUB_OUTPUT"
 
   builder:
     needs: select
-    if: needs.select.outputs.builder == 'true'
+    # Only when a spec is selected: with nothing to compile, the builder is not built.
+    if: needs.select.outputs.builder == 'true' && needs.select.outputs.specs != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
