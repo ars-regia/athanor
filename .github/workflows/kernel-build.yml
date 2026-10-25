@@ -80,6 +80,7 @@ jobs:
       nvr: ${{ steps.key.outputs.nvr }}
       promoted: ${{ steps.promotion.outputs.promoted }}
       reuse: ${{ steps.key.outputs.reuse }}
+      unchanged: ${{ steps.base.outputs.unchanged }}
       kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
       devel_digest: ${{ steps.artifacts.outputs.devel_digest }}
       registry: ${{ steps.artifacts.outputs.registry }}
@@ -119,6 +120,21 @@ jobs:
           echo "kernel ${nvr}: $([[ $reuse == true ]] && echo "image published from identical inputs, no build" || echo "build required")" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "nvr=${nvr}" >> "$GITHUB_OUTPUT"
           echo "reuse=${reuse}" >> "$GITHUB_OUTPUT"
+
+      - name: Kernel inputs against the base's (scripts/ci/kernel_unchanged.py)
+        # Only on a pull request whose kernel is not published: when the kernel inputs and what
+        # boot and kmod read equal those of the pull request's base, the push build of the base
+        # builds and publishes that kernel, and build, boot and kmod are skipped. Any failure
+        # means build required.
+        id: base
+        if: ${{ github.event_name == 'pull_request' && (inputs.stage || 'build') == 'build' && steps.key.outputs.reuse != 'true' }}
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 -B scripts/ci/kernel_unchanged.py --base "$BASE" --out base-inputs
+          cat base-inputs/summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "unchanged=$(jq -r .unchanged base-inputs/decision.json)" >> "$GITHUB_OUTPUT"
 
       - name: Digest of the reused kernel and kernel-devel (system/kernel-artifacts.sh)
         # The kmod gate builds against the published azoth-devel by digest, never by tag;
@@ -184,7 +200,7 @@ jobs:
     needs: inputs
     # The self-hosted runner executes only code of this repository: a pull request from a
     # fork never reaches it, so its gate stays red until the branch is pushed here.
-    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((inputs.stage || 'build') == 'prep' || (needs.inputs.outputs.reuse != 'true' && needs.inputs.outputs.promoted != 'true')) }}
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((inputs.stage || 'build') == 'prep' || (needs.inputs.outputs.reuse != 'true' && needs.inputs.outputs.promoted != 'true' && needs.inputs.outputs.unchanged != 'true')) }}
     runs-on: self-hosted
     # A full kernel with kCFI: about an hour on 16 cores.
     timeout-minutes: 360
@@ -238,7 +254,8 @@ jobs:
 
   boot:
     needs: [inputs, build]
-    # Also when build is skipped for reuse: the matrix always runs.
+    # Also when build is skipped for reuse or promotion; skipped with build when a pull
+    # request's kernel inputs equal its base's (inputs.unchanged).
     if: ${{ !cancelled() && (inputs.stage || 'build') == 'build' && needs.inputs.result == 'success' && (needs.build.result == 'success' || needs.inputs.outputs.reuse == 'true' || needs.inputs.outputs.promoted == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -327,7 +344,8 @@ jobs:
 
   gate:
     # The single check required by the branch protection: green only when the lint and every gate are
-    # green, or skipped because the kernel is reused (build). One name to wait for, for
+    # green, or skipped because the kernel is reused (build), or build, boot and kmod skipped
+    # because a pull request's kernel inputs equal its base's. One name to wait for, for
     # the auto-merge of the bump bot.
     name: Kernel gate
     needs: [lint, inputs, build, boot, kmod]
@@ -338,12 +356,19 @@ jobs:
       RESULTS: ${{ toJSON(needs) }}
       REUSE: ${{ needs.inputs.outputs.reuse }}
       PROMOTED: ${{ needs.inputs.outputs.promoted }}
+      UNCHANGED: ${{ needs.inputs.outputs.unchanged }}
     steps:
       - run: |
           set -euo pipefail
           jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<< "$RESULTS" | tee -a "$GITHUB_STEP_SUMMARY"
           result() { jq -r --arg job "$1" '.[$job].result' <<< "$RESULTS"; }
-          [[ $(result lint) == success && $(result inputs) == success && $(result boot) == success && $(result kmod) == success ]]
+          [[ $(result lint) == success && $(result inputs) == success ]]
+          if [[ $UNCHANGED == true ]]; then
+            [[ $(result build) == skipped && $(result boot) == skipped && $(result kmod) == skipped ]]
+            echo "Kernel inputs identical to the base's: the push build of the base builds and publishes them." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          [[ $(result boot) == success && $(result kmod) == success ]]
           [[ $(result build) == success || ( $(result build) == skipped && ( $REUSE == true || $PROMOTED == true ) ) ]]
 
   publish:

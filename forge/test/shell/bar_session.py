@@ -52,7 +52,8 @@ appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program
 
 --unit runs the client as its unit would for athanor-compositor's allow-list (doc_own_stack.md
 OS4): from /usr/bin/<client>, a copy of /out/bin/<client>, inside the cgroup <client>.service,
-which it joins before it runs, so that the compositor reads that unit when it connects. It needs
+which it joins before it runs, so that the compositor reads that unit when it connects; each
+--beside program does the same as its own unit. It needs
 a writable cgroup tree: rig.sh's in_rig runs the container in systemd mode for
 RIG_COMPOSITOR=athanor.
 
@@ -263,8 +264,16 @@ def start_shelld():
         f"/out/{os.environ.get('RIG_TAG', 'bar')}-shelld.log", "a", encoding="utf-8"
     )
     shelld = subprocess.Popen([SHELLD], env=env, stderr=log)
-    SHELLD_PID_FILE.write_text(f"{shelld.pid}\n", encoding="utf-8")
+    write_pid(SHELLD_PID_FILE, shelld.pid)
     return shelld
+
+
+def write_pid(path, pid):
+    """Writes `pid` to `path` under a temporary name and renames it over the old one: the e2e
+    scripts poll the file while the bar restarts, and an in-place write lets them read it empty."""
+    staged = path.with_name(f".{path.name}.new")
+    staged.write_text(f"{pid}\n", encoding="utf-8")
+    staged.replace(path)
 
 
 def rig_log(name):
@@ -296,7 +305,7 @@ def start_bar(client, env, log, unit):
     binary = BIN / client
     command = as_unit(binary) if unit else [binary]
     bar = subprocess.Popen(command, env=env, stderr=rig_log(binary.name) if log else None)
-    PID_FILE.write_text(f"{bar.pid}\n", encoding="utf-8")
+    write_pid(PID_FILE, bar.pid)
     return bar
 
 
@@ -426,8 +435,9 @@ def main():
                 beside_env = {k: v for k, v in env.items() if k != "NOTIFY_SOCKET"}
                 for program in args.beside:
                     path = program if "/" in program else str(BIN / program)
+                    command = as_unit(Path(path)) if args.unit else [path]
                     stderr = rig_log(Path(program).name) if args.log else None
-                    helpers.append(subprocess.Popen([path], env=beside_env, stderr=stderr))
+                    helpers.append(subprocess.Popen(command, env=beside_env, stderr=stderr))
         return True
 
     GLib.io_add_watch(

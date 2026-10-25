@@ -2,7 +2,9 @@
 //! under it, a click focuses the window it lands on, or the layer surface that asks for the
 //! keyboard on demand. The compositor keeps two kinds of key for itself, which no client sees:
 //! Super+Escape locks the session (C1 task 8, doc_lock_and_prompts.md LP5), and Ctrl+Alt+F1 to
-//! F12 switch to another virtual terminal on a console.
+//! F12 switch to another virtual terminal on a console. A virtual keyboard's keys and a virtual
+//! pointer's motion and buttons, of the clients the allow-list grants them, take the same path
+//! (OS4, OS9 task 6).
 
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
@@ -10,10 +12,18 @@ use smithay::backend::input::{
     InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent,
 };
-use smithay::input::keyboard::{FilterResult, Keycode, Keysym, ModifiersState};
+use smithay::input::keyboard::{
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb, XkbConfig,
+};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
+use smithay::wayland::virtual_keyboard::{
+    VirtualKeyboardBackend, VirtualKeyboardDevice, VirtualKeyboardHandler,
+    VirtualKeyboardSpecialEvent,
+};
+use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHandler};
+use std::sync::{Arc, Mutex, PoisonError};
 
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
@@ -36,8 +46,38 @@ impl State {
         }
     }
 
-    /// A key pressed or released: to the focused surface, unless the compositor keeps it.
-    pub fn key_input(&mut self, code: Keycode, key_state: KeyState, time: InputTime) {
+    /// A key pressed or released, from the hardware keyboard or a virtual one (`source`): to
+    /// the focused surface, unless the compositor keeps it or drops it (`drops_key`).
+    pub fn key_input(
+        &mut self,
+        code: Keycode,
+        key_state: KeyState,
+        time: InputTime,
+        source: KeyboardSource,
+    ) {
+        self.typed(code, key_state, time, source, false);
+    }
+
+    /// As `key_input`, and a key `past_grab` goes to the focused surface past the keyboard's
+    /// grab: the input method's, which forwards it through its own virtual keyboard.
+    fn typed(
+        &mut self,
+        code: Keycode,
+        key_state: KeyState,
+        time: InputTime,
+        source: KeyboardSource,
+        past_grab: bool,
+    ) {
+        // A dropped press never reaches the seat: it changes neither the keys held nor the
+        // modifiers a hardware key is read with. A release is never dropped: a key held when the
+        // session locked is let go, or a window would see it held after unlock.
+        if key_state == KeyState::Pressed && self.drops_key(source) {
+            return;
+        }
+        // A hardware key is read under the seat's keymap, which its clients are sent first.
+        if source == KeyboardSource::Physical {
+            self.restore_seat_keymap();
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -45,12 +85,11 @@ impl State {
         let to = keyboard
             .current_focus()
             .and_then(|surface| surface.client());
-        let filtered = keyboard.input(
+        let filtered = keyboard.input_intercept(
+            source,
             self,
             code,
             key_state,
-            serial,
-            time,
             |state, modifiers, handle| match key_state {
                 KeyState::Pressed => {
                     match kept(modifiers, handle.modified_sym(), state.lock.is_some()) {
@@ -71,6 +110,27 @@ impl State {
                 },
             },
         );
+        let filtered = match filtered {
+            Some((FilterResult::Intercept(kept), _)) => Some(kept),
+            Some((FilterResult::Forward, mods_changed)) => {
+                if past_grab {
+                    // The focus is sent no modifiers while a grab holds the keyboard: they are
+                    // sent with the key, whether it changed them or not.
+                    keyboard.input_forward_bypassing_grab(
+                        self, code, key_state, serial, time, true,
+                    );
+                    // The grab was not sent the key: it is sent what the key changed.
+                    if mods_changed {
+                        self.input_method_modifiers();
+                    }
+                } else {
+                    keyboard.input_forward(self, code, key_state, serial, time, mods_changed);
+                }
+                None
+            }
+            // A key another source holds already: there is nothing to send.
+            None => None,
+        };
         match filtered {
             // Sent to the client: a popup's grab may name its serial.
             None => {
@@ -105,13 +165,46 @@ impl State {
         pointer.frame(self);
     }
 
+    /// A button pressed or released: a press first focuses what is under the pointer.
+    pub fn button_input(&mut self, button: u32, button_state: ButtonState, time: InputTime) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
+            self.click_focus(pointer.current_location());
+        }
+        // After the focus: the button's serial is then newer than the keyboard's enter, so a
+        // token made from the click that focused a window is in range.
+        let serial = SERIAL_COUNTER.next_serial();
+        self.last_input_serial = Some(serial);
+        if button_state == ButtonState::Pressed {
+            let to = pointer.current_focus().and_then(|surface| surface.client());
+            self.grab_serials.button = to.map(|client| (serial, client.id()));
+        }
+        pointer.button(
+            self,
+            &ButtonEvent {
+                button,
+                state: button_state,
+                serial,
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
     /// Input from the backend; it may change what is on screen, the pointer or the stacking.
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         self.activity();
         self.request_redraw();
         match event {
             InputEvent::Keyboard { event, .. } => {
-                self.key_input(event.key_code(), event.state(), Event::time(&event));
+                self.key_input(
+                    event.key_code(),
+                    event.state(),
+                    Event::time(&event),
+                    KeyboardSource::Physical,
+                );
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let Some(area) = self.output_area() else {
@@ -125,41 +218,14 @@ impl State {
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
-                let outputs: Vec<Rectangle<i32, Logical>> = self
-                    .space
-                    .outputs()
-                    .filter_map(|output| self.space.output_geometry(output))
-                    .collect();
+                let outputs = self.output_areas();
                 let from = pointer.current_location();
                 if let Some(location) = confine(&outputs, from, from + event.delta()) {
                     self.pointer_to(location, event.time());
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                let Some(pointer) = self.seat.get_pointer() else {
-                    return;
-                };
-                if event.state() == ButtonState::Pressed && !pointer.is_grabbed() {
-                    self.click_focus(pointer.current_location());
-                }
-                // After the focus: the button's serial is then newer than the keyboard's enter,
-                // so a token made from the click that focused a window is in range.
-                let serial = SERIAL_COUNTER.next_serial();
-                self.last_input_serial = Some(serial);
-                if event.state() == ButtonState::Pressed {
-                    let to = pointer.current_focus().and_then(|surface| surface.client());
-                    self.grab_serials.button = to.map(|client| (serial, client.id()));
-                }
-                pointer.button(
-                    self,
-                    &ButtonEvent {
-                        button: event.button_code(),
-                        state: event.state(),
-                        serial,
-                        time: event.time(),
-                    },
-                );
-                pointer.frame(self);
+                self.button_input(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => {
                 let Some(pointer) = self.seat.get_pointer() else {
@@ -189,6 +255,325 @@ impl State {
         }
     }
 }
+
+impl State {
+    /// Where the outputs are in the space.
+    fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
+        self.space
+            .outputs()
+            .filter_map(|output| self.space.output_geometry(output))
+            .collect()
+    }
+
+    /// Runs `input` under `device`'s keymap and modifiers. The keymap follows the keyboard that
+    /// sent the last key, as wlroots has it: a virtual keyboard's own keymap is loaded, and sent
+    /// to the clients, at its first key after another keyboard's, and stays until a key of
+    /// another keyboard, so that a client repeating a held key reads it under the keymap it was
+    /// pressed with; what a virtual keyboard uploads never reads a hardware key. A virtual
+    /// keyboard with no keymap of its own types under the seat's, and its modifiers apply to its
+    /// own keys only, the seat's coming back after each.
+    fn with_keymap_of(&mut self, device: &VirtualKeyboardDevice, input: impl FnOnce(&mut Self)) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if !self.load_keymap_of(device, &keyboard) {
+            return;
+        }
+        let modifiers = self.virtual_modifiers.get(device).copied();
+        let seat_modifiers = (self.virtual_keymap.is_none() && modifiers.is_some())
+            .then(|| keyboard.modifier_state().serialized);
+        if let Some(modifiers) = modifiers {
+            self.set_modifiers(&keyboard, modifiers);
+        }
+        input(self);
+        if let Some(saved) = seat_modifiers {
+            let mask = [
+                saved.depressed,
+                saved.latched,
+                saved.locked,
+                saved.layout_effective,
+            ];
+            self.set_modifiers(&keyboard, mask);
+        }
+    }
+
+    /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
+    /// with no key: the focused surface is sent them when they change, and so is the input
+    /// method's grab, which a key would otherwise have carried them to.
+    fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
+        let [depressed, latched, locked, group] = mask;
+        let before = keyboard.modifier_state().serialized;
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group)
+        });
+        if keyboard.modifier_state().serialized != before {
+            self.input_method_modifiers();
+        }
+    }
+
+    /// Gives the seat `device`'s keymap unless it has it already, or the seat's own when
+    /// `device` has none of its own; false when `device`'s keymap does not load, and its key is
+    /// dropped.
+    fn load_keymap_of(
+        &mut self,
+        device: &VirtualKeyboardDevice,
+        keyboard: &KeyboardHandle<Self>,
+    ) -> bool {
+        let Some(keymap) = device.keymap() else {
+            self.restore_seat_keymap();
+            return true;
+        };
+        let current = self.virtual_keymap.as_ref();
+        if current.is_some_and(|current| current.device == *device && current.keymap == keymap) {
+            return true;
+        }
+        let (seat_keymap, seat_modifiers) = match current {
+            Some(current) => (current.seat_keymap.clone(), current.seat_modifiers),
+            None => {
+                let saved = keyboard.modifier_state().serialized;
+                (
+                    keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                    [
+                        saved.depressed,
+                        saved.latched,
+                        saved.locked,
+                        saved.layout_effective,
+                    ],
+                )
+            }
+        };
+        if *keymap == *seat_keymap {
+            self.restore_seat_keymap();
+            return true;
+        }
+        if let Err(error) = keyboard.set_keymap_from_string(self, keymap.to_string()) {
+            tracing::warn!(
+                ?error,
+                "a virtual keyboard's keymap did not load: its key is dropped"
+            );
+            return false;
+        }
+        self.virtual_keymap = Some(VirtualKeymap {
+            device: device.clone(),
+            keymap,
+            seat_keymap,
+            seat_modifiers,
+        });
+        self.input_method_keymap_changed();
+        true
+    }
+
+    /// Gives the seat its own keymap and modifiers back when a virtual keyboard's is current:
+    /// before a hardware key, before a key of a virtual keyboard with no keymap of its own, and
+    /// when that virtual keyboard goes.
+    fn restore_seat_keymap(&mut self) {
+        let (Some(current), Some(keyboard)) =
+            (self.virtual_keymap.take(), self.seat.get_keyboard())
+        else {
+            return;
+        };
+        if let Err(error) = keyboard.set_keymap_from_string(self, current.seat_keymap) {
+            // The seat's configuration, as `State::new` gives it, so that the seat never stays
+            // on a client's keymap.
+            tracing::error!(
+                ?error,
+                "the seat's keymap did not load again: back to the default"
+            );
+            if let Err(error) = keyboard.set_xkb_config(self, XkbConfig::default()) {
+                tracing::error!(?error, "the default keymap did not load");
+            }
+        }
+        // A new keymap starts with no modifier locked: the seat's Caps Lock and layout return.
+        let [depressed, latched, locked, layout] = current.seat_modifiers;
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, layout)
+        });
+        self.input_method_keymap_changed();
+    }
+}
+
+/// A virtual keyboard's keymap the seat has in place of its own (`State::with_keymap_of`).
+pub struct VirtualKeymap {
+    device: VirtualKeyboardDevice,
+    keymap: Arc<str>,
+    /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
+    /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
+    seat_keymap: String,
+    seat_modifiers: [u32; 4],
+}
+
+/// The keymap of `xkb`, as the clients are sent it.
+pub(crate) fn keymap_text(xkb: &Mutex<Xkb>) -> String {
+    xkb.lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .keymap_as_string()
+}
+
+impl VirtualKeyboardHandler for State {
+    /// A virtual keyboard's key enters `key_input`, as a hardware key does, under the keymap and
+    /// the modifiers the keyboard set; the modifiers alone are kept for its next keys.
+    fn process_virtual_keyboard_event(&mut self, event: InputEvent<VirtualKeyboardBackend>) {
+        match event {
+            InputEvent::Keyboard { event } => {
+                let device = event.device();
+                let (code, key_state, time) =
+                    (event.key_code(), event.state(), Event::time(&event));
+                // The release of a key forwarded past the input method's grab goes past it too,
+                // to the surface that saw the press, even once the grab or its client is gone:
+                // smithay lets go of a gone keyboard's keys when its client may be gone too.
+                let forwarded = key_state == KeyState::Released
+                    && self
+                        .past_grab_keys
+                        .get_mut(&device)
+                        .is_some_and(|held| held.remove(&code));
+                // While locked a press is dropped before anything, and a release lets go of a
+                // key the seat holds under the keymap the seat has: no client is sent this
+                // client's keymap, and the idle timers keep running.
+                if self.drops_virtual_input() {
+                    if key_state == KeyState::Released {
+                        self.key_input(code, key_state, time, device.source());
+                    }
+                    return;
+                }
+                self.activity();
+                self.request_redraw();
+                let past_grab = forwarded || self.holds_keyboard_grab(device.client());
+                self.with_keymap_of(&device, |state| {
+                    state.typed(code, key_state, time, device.source(), past_grab)
+                });
+                // A code outside evdev's keys is not kept: its release takes the grab's way.
+                if past_grab && key_state == KeyState::Pressed && KEYS.contains(&code.raw()) {
+                    self.past_grab_keys.entry(device).or_default().insert(code);
+                }
+            }
+            InputEvent::Special(VirtualKeyboardSpecialEvent::Modifiers {
+                device,
+                mods_depressed,
+                mods_latched,
+                mods_locked,
+                group,
+            }) => {
+                // While this keyboard's keymap is current the seat reads its modifiers, and a
+                // change with no key after it, a Shift let go, reaches the focused client at
+                // once; otherwise its next key applies it.
+                let current = self
+                    .virtual_keymap
+                    .as_ref()
+                    .is_some_and(|current| current.device == device);
+                if current && !self.drops_virtual_input() {
+                    if let Some(keyboard) = self.seat.get_keyboard() {
+                        let mask = [mods_depressed, mods_latched, mods_locked, group];
+                        self.set_modifiers(&keyboard, mask);
+                    }
+                }
+                self.virtual_modifiers
+                    .insert(device, [mods_depressed, mods_latched, mods_locked, group]);
+            }
+            InputEvent::DeviceRemoved { device } => {
+                self.virtual_modifiers.remove(&device);
+                self.past_grab_keys.remove(&device);
+                if self
+                    .virtual_keymap
+                    .as_ref()
+                    .is_some_and(|current| current.device == device)
+                {
+                    self.restore_seat_keymap();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl VirtualPointerHandler for State {
+    /// A virtual pointer's motion, buttons and scrolling take the hardware's path, unless the
+    /// session is locked (`drops_virtual_input`); its absolute motion spans the output it names,
+    /// or all of them, and stays on the outputs.
+    fn process_virtual_pointer_event(&mut self, event: InputEvent<VirtualPointerBackend>) {
+        // While locked only the release of a button the same virtual pointer holds goes on, or a
+        // click on the lock surface would keep its grab after unlock. Smithay keeps the seat's
+        // held buttons to its grabs, so the compositor counts each virtual pointer's itself.
+        let locked = self.drops_virtual_input();
+        match &event {
+            // A pointer coming or going is no input: no activity, so a client that makes and
+            // drops pointers in a loop does not keep the session awake.
+            InputEvent::DeviceAdded { .. } => return,
+            InputEvent::DeviceRemoved { device } => {
+                self.virtual_buttons.remove(device);
+                return;
+            }
+            InputEvent::PointerButton { event } => {
+                let (device, button) = (event.device(), event.button_code());
+                // A code outside evdev's buttons is no button: neither the seat nor the count
+                // takes it, so a pointer holds at most every button.
+                if !BUTTONS.contains(&button) {
+                    return;
+                }
+                let holds = self
+                    .virtual_buttons
+                    .get(&device)
+                    .is_some_and(|held| held.contains(&button));
+                match event.state() {
+                    ButtonState::Pressed if locked => return,
+                    ButtonState::Pressed => {
+                        if !holds {
+                            self.virtual_buttons.entry(device).or_default().push(button);
+                        }
+                    }
+                    ButtonState::Released if holds => {
+                        if let Some(held) = self.virtual_buttons.get_mut(&device) {
+                            held.retain(|b| *b != button);
+                        }
+                        // Not through `process_input_event`: letting go is no activity, and the
+                        // locked session keeps going idle.
+                        if locked {
+                            return self.button_input(button, ButtonState::Released, event.time());
+                        }
+                    }
+                    ButtonState::Released if locked => return,
+                    ButtonState::Released => {}
+                }
+            }
+            InputEvent::PointerMotion { .. }
+            | InputEvent::PointerMotionAbsolute { .. }
+            | InputEvent::PointerAxis { .. } => {
+                if locked {
+                    return;
+                }
+            }
+            // Smithay's virtual pointer sends nothing else; anything it may add is no input here.
+            _ => return,
+        }
+        let InputEvent::PointerMotionAbsolute { event } = event else {
+            return self.process_input_event(event);
+        };
+        self.activity();
+        self.request_redraw();
+        let outputs = self.output_areas();
+        let area = match event.device().output() {
+            Some(output) => self.space.output_geometry(&output),
+            None => outputs.iter().copied().reduce(|all, area| all.merge(area)),
+        };
+        let (Some(area), Some(pointer)) = (area, self.seat.get_pointer()) else {
+            return;
+        };
+        // Clamped first: the far edge, x == x_extent, maps to the first column past the area,
+        // which a neighbouring output holds.
+        let to = clamp_into(
+            area,
+            event.position_transformed(area.size) + area.loc.to_f64(),
+        );
+        if let Some(location) = confine(&outputs, pointer.current_location(), to) {
+            self.pointer_to(location, event.time());
+        }
+    }
+}
+
+/// The evdev codes of buttons, BTN_MISC to KEY_MAX.
+const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
+
+/// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
+const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
 
 /// A key the compositor keeps for itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -229,11 +614,16 @@ pub(crate) fn confine(
         .iter()
         .find(|area| area.to_f64().contains(from))
         .or_else(|| outputs.first())?;
+    Some(clamp_into(*area, to))
+}
+
+/// The point of `area` nearest `to`: from its first pixel to its last, never its far edge.
+fn clamp_into(area: Rectangle<i32, Logical>, to: Point<f64, Logical>) -> Point<f64, Logical> {
     let (min, max) = (area.loc.to_f64(), (area.loc + area.size).to_f64());
-    Some(Point::from((
+    Point::from((
         to.x.clamp(min.x, max.x - 1.0),
         to.y.clamp(min.y, max.y - 1.0),
-    )))
+    ))
 }
 
 #[cfg(test)]

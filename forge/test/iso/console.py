@@ -106,6 +106,11 @@ MARKERS = (
     (b"SECUREBOOT_ENABLED", "secureboot-enabled"),
     (b"SECUREBOOT_NOT_ENFORCED", "secureboot-not-enforced"),
     (b"SECUREBOOT_DISABLED", "secureboot-disabled"),
+    # shim refusing what it is asked to load: the kernel or GRUB of an upgrade signed by a
+    # key the machine does not trust (doc_update_delivery.md UD18). Seen in the upgrade
+    # case, where the console holds through the reboots that SSH cannot watch.
+    (b"bad shim signature", "secure-boot-refused"),
+    (b"Security Violation", "secure-boot-refused"),
 )
 ANSI = re.compile(rb"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -484,10 +489,46 @@ MOK_PROBE_WAIT = 5.0
 # The tests drive a fake guest that answers at once and scale every wait in the login
 # path down through this; the run itself leaves it at one.
 PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
+# The upgrade case (run_iso_test.sh with UPDATE_TO): a steady Settings does not end the
+# run. The serial login is ended, since a tty session makes Apply() ask for an
+# administrator (UT6), `ready` is written beside the log once the getty offers its login
+# again, and from then on the console types nothing and only keeps the log and the
+# markers, through the reboots of the upgrade, until QEMU closes the socket.
+HOLD = os.environ.get("ATHANOR_CONSOLE_HOLD") == "1"
+# The probes the upgrade stages run over SSH, the same bytes as on the serial console.
+PROBES = {
+    "MOK": MOK_PROBE,
+    "GREETER": GREETER_PROBE,
+    "SESSION": SESSION_PROBE,
+    "SETTINGS": SETTINGS_PROBE,
+}
+
+
+def phases_in(text: bytes) -> list[str]:
+    """The phases whose markers appear in the text, colour escapes stripped."""
+    clean = ANSI.sub(b"", text)
+    return [name for needle, name in MARKERS if needle in clean]
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["--print-probe"]:
+        if len(sys.argv) != 3 or sys.argv[2] not in PROBES:
+            print(f"usage: console.py --print-probe {{{','.join(PROBES)}}}", file=sys.stderr)
+            return 2
+        sys.stdout.buffer.write(PROBES[sys.argv[2]])
+        return 0
+    if sys.argv[1:2] == ["--classify"]:
+        if len(sys.argv) != 3:
+            print("usage: console.py --classify PREFIX < answers", file=sys.stderr)
+            return 2
+        for name in dict.fromkeys(phases_in(sys.stdin.buffer.read())):
+            print(f"{sys.argv[2]}{name} {int(time.time())}")
+        return 0
+    if len(sys.argv) != 5:
+        print("usage: console.py SOCKET LOG PHASES MONITOR", file=sys.stderr)
+        return 2
     sock_path, log_path, phase_path, monitor_path = sys.argv[1:5]
+    decided = DECIDED - {"settings-alive"} if HOLD else DECIDED
 
     for _ in range(180):
         if os.path.exists(sock_path):
@@ -609,10 +650,8 @@ def main() -> int:
             # that can produce megabytes of console output.
             tail = (tail + chunk)[-8000:]
             last_data = time.time()
-            clean = ANSI.sub(b"", tail)
-            for needle, name in MARKERS:
-                if needle in clean:
-                    note(name)
+            for name in phases_in(tail):
+                note(name)
 
         # The menu is answered once, on the way in. After the install the machine restarts
         # into GRUB again, and that second menu must be left alone: the entry it offers is
@@ -666,7 +705,7 @@ def main() -> int:
             "installed" in seen
             and "login-prompt" in seen
             and "greeter-asked" not in seen
-            and not (seen & DECIDED)
+            and not (seen & decided)
         ):
             ask_about_the_greeter()
             tail = b""
@@ -689,6 +728,16 @@ def main() -> int:
             )
             note("settings-shot")
 
+        # The upgrade case: end the serial login once Settings is steady, then wait for
+        # the getty to offer its login again before saying the guest is ready.
+        if HOLD and "settings-alive" in seen and "logged-out" not in seen:
+            s.sendall(b"   exit\n")
+            note("logged-out")
+            tail = b""
+        if "logged-out" in seen and "ready" not in seen and b"login:" in ANSI.sub(b"", tail):
+            pathlib.Path(log_path).with_name("ready").write_text(f"{time.time():.0f}\n")
+            note("ready")
+
         # Whichever of the three died is the one worth interrogating.
         if "diagnostics-sent" not in seen:
             if "greeter-dead" in seen:
@@ -704,7 +753,7 @@ def main() -> int:
         # The run is over the moment there is an answer. Waiting past a session, a panic
         # or an emergency shell only spends the budget on a question already settled, and
         # this watcher ending is what shuts the machine down.
-        if seen & DECIDED:
+        if seen & decided:
             # The rest of the answer's line may still be on its way -- run 34588077759 kept
             # "SETTINGS_ALIVE " and lost the timing after it -- so give it a moment to land
             # in the log before the machine is shut down.
@@ -720,8 +769,10 @@ def main() -> int:
         # window is generous enough to cover a first boot that relabels the filesystem.
         # Once the guest has answered the diagnostics there is nothing further to wait
         # for, so the generous window that covers a slow first boot no longer applies.
+        # Once ready, the upgrade stages drive the guest over SSH and the serial line can
+        # stay silent for as long as they take: the socket closing ends the hold.
         window = 120.0 if "diagnostics-sent" in seen else IDLE_GIVE_UP
-        if time.time() - last_data > window:
+        if "ready" not in seen and time.time() - last_data > window:
             note("idle-timeout")
             break
 

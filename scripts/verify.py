@@ -2101,6 +2101,416 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7a. allow-list — a shell client that needs a privileged global has its line
+# --------------------------------------------------------------------------- #
+
+# The compositor's allow-list (doc_own_stack.md OS4) and the class of every global it offers.
+ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
+GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
+LAYER_SHELL = "zwlr_layer_shell_v1"
+# Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
+# step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
+# A line for it, or no spec installing it, ends the exemption with a failure.
+OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
+# surface on its top or overlay layer, however the variant is reached, is refused without a grant.
+LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
+# What a spec puts under these directories is an executable a line can name.
+EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_sbindir}": "/usr/sbin", "%{_libexecdir}": "/usr/libexec",
+             "%{_prefix}": "/usr"}
+EXEC_ROOTS = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/")
+INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
+COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
+# A file of a path dependency that one public call alone enters counts for a target only when
+# code outside that crate makes the call, written as a method or as a path: athanor-compositor-
+# client binds the capture globals at the first `Client::capture`, and capture.rs holds every
+# name of them in the crate.
+ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
+             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)"))}
+CLIENT_CRATE = "system/athanor-compositor-client"
+# Where athanor-compositor-client names the privileged globals it binds at connect and at the
+# first capture. Each names at least one, or the check no longer sees what the client binds.
+CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
+                "system/athanor-compositor-client/src/capture.rs": "at the first capture"}
+# The classes of data/globals, as the compositor's fixture reads them (`classified`).
+CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
+
+
+def top_layer(files):
+    """Where the first of `files` reaches the top or overlay variant of the layer enum, by its
+    name or an alias, a variant import or a glob import of it; None when none does."""
+    names = {"Layer"} | {a for text in files.values() for m in LAYER_ALIAS.finditer(text) for a in m.groups() if a}
+    variant = re.compile(rf"\b(?:{'|'.join(sorted(names))})\s*::\s*"
+                         r"(?:\*|\{[^}]*\b(?:Top|Overlay)\b|(?:Top|Overlay)\b)")
+    for where, text in sorted(files.items()):
+        found = variant.search(text)
+        if found:
+            return f"{where}:{text.count(chr(10), 0, found.start()) + 1}"
+    return None
+
+
+def spec_installs(spec):
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
+    /usr/sbin or /usr/libexec: continued lines joined, a command after `do`, `then` or `else`,
+    quoted words, a target directory given by -t or as the last argument, a destination
+    directory given with or without its trailing slash."""
+    for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
+        words = [w.strip("\"'") for w in command.split()]
+        if words[:1] in (["do"], ["then"], ["else"]):
+            words = words[1:]
+        if not words or words[0] not in INSTALL | COPY:
+            continue
+        args, directory, i = [], None, 1
+        while i < len(words):
+            w = words[i]
+            if w in ("--target-directory", "--mode", "--owner", "--group", "--suffix"):
+                directory, i = (words[i + 1] if w == "--target-directory" and i + 1 < len(words) else directory), i + 1
+            elif w.startswith("--target-directory="):
+                directory = w.split("=", 1)[1]
+            elif w == "--directory" and words[0] in INSTALL:
+                break
+            elif w.startswith("-") and len(w) > 1 and not w.startswith("--"):
+                for k, c in enumerate(w[1:], 1):
+                    if c == "d" and words[0] in INSTALL:
+                        args = None
+                        break
+                    if c in "mogSt":
+                        value = w[k + 1:]
+                        if not value and i + 1 < len(words):
+                            i, value = i + 1, words[i + 1]
+                        directory = value if c == "t" else directory
+                        break
+                if args is None:
+                    break
+            elif not w.startswith("--"):
+                args.append(w)
+            i += 1
+        if not args:
+            continue  # install -d makes directories
+        if directory is None:
+            if len(args) < 2:
+                continue
+            *sources, directory = args
+            if len(sources) == 1 and not directory.endswith("/") and \
+                    executable_path(directory) not in EXEC_DIRS.values():
+                if executable_path(directory).startswith(EXEC_ROOTS):
+                    yield sources[0], executable_path(directory)
+                continue
+        else:
+            sources = args
+        for source in sources:
+            executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
+            if executable.startswith(EXEC_ROOTS):
+                yield source, executable
+
+
+def executable_path(destination):
+    """`destination` of a spec's %install as the path it has on the installed system."""
+    for root in ("%{buildroot}", "%buildroot", "${RPM_BUILD_ROOT}", "$RPM_BUILD_ROOT"):
+        destination = destination.replace(root, "")
+    destination = re.sub(r"%(_\w+)", r"%{\1}", destination)  # %_bindir is %{_bindir}
+    for macro, value in EXEC_DIRS.items():
+        destination = destination.replace(macro, value)
+    return re.sub(r"/+", "/", destination.strip("\"'")).rstrip("/") or "/"
+
+
+def binaries(crate, manifest):
+    """{name: entry file} of each bin target of `crate`, Cargo's auto-discovered ones (src/main.rs,
+    src/bin/*.rs, src/bin/*/main.rs) and those of `[[bin]]`."""
+    package = manifest.get("package", {})
+    found = {}
+    if package.get("autobins", True):
+        if package.get("name") and (crate / "src/main.rs").is_file():
+            found[package["name"]] = crate / "src/main.rs"
+        found.update((p.stem, p) for p in sorted((crate / "src/bin").glob("*.rs")))
+        found.update((p.parent.name, p) for p in sorted((crate / "src/bin").glob("*/main.rs")))
+    for b in manifest.get("bin", []):
+        entry = crate / b["path"] if "path" in b else found.get(b["name"], crate / "src/main.rs")
+        found = {n: p for n, p in found.items() if p != entry}
+        found[b["name"]] = entry
+    return found
+
+
+def without_comments(txt):
+    """`txt` with each comment blanked, newlines kept; strings stay, a global can be bound
+    by its name."""
+    out, at, i = [], 0, 0
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j == i:
+            i += 1
+            continue
+        if txt.startswith(("//", "/*"), i):
+            out.append(txt[at:i])
+            out.append(re.sub(r"[^\n]", " ", txt[i:j]))
+            at = j
+        i = j
+    out.append(txt[at:])
+    return "".join(out)
+
+
+def crate_sources(crate, start, entry=None):
+    """The production files of the target whose entry point, `entry` (the library when None),
+    lies in `start`: minus the crate's other bin targets inside it, each with its modules'
+    directory, tests, and the modules and items under `#[cfg(test)]`. Each as (path, text
+    without test items and comments)."""
+    manifest = tomllib.loads(read(crate / "Cargo.toml"))
+    others = [p for p in binaries(crate, manifest).values() if p != entry]
+    dirs = [p.parent if p.name == "main.rs" else p.with_suffix("") for p in others]
+    dirs = [d for d in dirs if d != start and d.is_relative_to(start)]
+    files = [p for p in walk(start, ".rs") if p not in others and not any(p.is_relative_to(d) for d in dirs)]
+    test_modules = test_module_files(files)
+    return [(p, without_comments(without_test_items(read(p))))
+            for p in files if not is_test_file(p) and p not in test_modules]
+
+
+def enabled_dependencies(manifest, features, defaults):
+    """The optional dependencies `features` turn on (and `default` with `defaults`), and the
+    features each enables on a dependency, as Cargo reads `[features]`."""
+    table = manifest.get("features", {})
+    todo = list(features) + (["default"] if defaults else [])
+    seen, on, sub, weak = set(), set(), collections.defaultdict(set), []
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        if f.startswith("dep:"):
+            on.add(f[4:])
+        elif "/" in f:
+            dep, feature = f.split("/", 1)
+            if dep.endswith("?"):
+                weak.append((dep[:-1], feature))
+            else:
+                on.add(dep)
+                sub[dep].add(feature)
+        elif f not in table:
+            on.add(f)  # the implicit feature of an optional dependency
+        else:
+            todo.extend(table[f])
+    for dep, feature in weak:
+        if dep in on:
+            sub[dep].add(feature)
+    return on, sub
+
+
+def path_dependencies(crate, manifest, root):
+    """(name in code, crate directory, entry) of each path dependency of `[dependencies]` and
+    of `[target.*.dependencies]`, through `workspace = true` too."""
+    workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {}) \
+        if (root / "Cargo.toml").is_file() else {}
+    tables = [manifest.get("dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in manifest.get("target", {}).values()]
+    for table in tables:
+        for name, entry in table.items():
+            if not isinstance(entry, dict):
+                continue
+            base, path = crate, entry.get("path")
+            if entry.get("workspace") and isinstance(workspace.get(name), dict):
+                base, path = root, workspace[name].get("path")
+            if path:
+                yield name, entry, (base / path).resolve()
+
+
+def target_files(crate, entry, features, defaults, root):
+    """The production files a binary target is built from: its own, and those of the path
+    dependencies its code names, followed transitively with the features the build enables
+    (an optional dependency counts only when they turn it on)."""
+    files, done = {}, {}
+    todo = [(crate.resolve(), entry.parent.resolve(), entry.resolve(), set(features), defaults)]
+    while todo:
+        crate, start, entry, features, defaults = todo.pop()
+        before = done.get((crate, start))
+        if before and features <= before[0] and (before[1] or not defaults):
+            continue
+        features = features | (before[0] if before else set())
+        defaults = defaults or bool(before and before[1])
+        done[(crate, start)] = (features, defaults)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        sources = crate_sources(crate, start, entry)
+        files.update(sources)
+        # A bin target outside the library's directory (src/bin/*.rs) is built with the
+        # package's own library, which its code reaches by the package's name.
+        lib = crate / manifest.get("lib", {}).get("path", "src/lib.rs")
+        if entry is not None and lib.is_file() and lib not in dict(sources):
+            todo.append((crate, lib.parent, None, features, defaults))
+        code = "\n".join(text for _, text in sources)
+        on, sub = enabled_dependencies(manifest, features, defaults)
+        for name, entry, dep in path_dependencies(crate, manifest, root):
+            if entry.get("optional") and name not in on:
+                continue
+            ident = name if "package" in entry else \
+                tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("name", name)
+            # A dependency the code never names adds nothing that runs.
+            if not re.search(rf"\b{ident.replace('-', '_')}\b", code):
+                continue
+            lib = tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("path", "src/lib.rs")
+            wanted = set(entry.get("features", [])) | sub[name]
+            todo.append((dep, (dep / lib).parent, None, wanted, entry.get("default-features", True)))
+    return files
+
+
+def build_flags(spec, package):
+    """(features, defaults, all features) of the spec's `cargo build` of `package`."""
+    for line in spec.splitlines():
+        words = line.split()
+        if words[:2] != ["cargo", "build"]:
+            continue
+        named = [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-p"]
+        if named and package not in named:
+            continue
+        features = set()
+        for i, w in enumerate(words):
+            if w in ("--features", "-F") and i + 1 < len(words):
+                features.update(re.split(r"[ ,]+", words[i + 1].strip("\"'")))
+            elif w.startswith("--features="):
+                features.update(re.split(r"[ ,]+", w.split("=", 1)[1].strip("\"'")))
+        return features, "--no-default-features" not in words, "--all-features" in words
+    return set(), True, False
+
+
+def allow_list_problems(root=None, notes=None, outside=None):
+    """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
+    a crate of the tree, that asks for the top or overlay layer or names a privileged global
+    of data/globals has a line in data/privileged-clients, and each of its lines grants
+    zwlr_layer_shell_v1 when it asks for those layers and every privileged global its code
+    names; each line names an executable a spec installs, and only interfaces of the
+    privileged and layer-gated rows. A grant beyond those is the maintainer's, never
+    derived here. An executable of `outside` (OUTSIDE_THE_LIST by default) is appended to
+    `notes` in place of its problem."""
+    root = Path(root or ROOT)
+    notes = [] if notes is None else notes
+    outside = OUTSIDE_THE_LIST if outside is None else outside
+    problems = []
+    classes = {}
+    for number, line in enumerate(read(root / GLOBALS_FILE).splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        words = line.split()
+        if len(words) != 2 or words[1] not in CLASSES:
+            problems.append(f"{GLOBALS_FILE}:{number}: not `<interface> <class>` with a class of "
+                            f"{', '.join(CLASSES)}, which the compositor's fixture refuses: {line}")
+            continue
+        classes[words[0]] = words[1]
+    privileged = {i for i, c in classes.items() if c == "privileged"}
+    grantable = {i for i, c in classes.items() if c in ("privileged", "layer-gated")}
+    if not privileged:
+        problems.append(f"{GLOBALS_FILE} has no privileged row: no client would need a line")
+    if (root / CLIENT_CRATE / "Cargo.toml").is_file():
+        for where, when in CLIENT_BINDS.items():
+            text = without_comments(without_test_items(read(root / where))) if (root / where).is_file() else ""
+            if not any(re.search(rf"\b{i}\b", text) for i in privileged):
+                problems.append(f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
+                                f"longer sees what athanor-compositor-client binds {when}")
+    lines = collections.defaultdict(list)
+    for line in read(root / ALLOW_LIST).splitlines():
+        words = line.split()
+        if len(words) in (1, 2) and not words[0].startswith("#"):
+            problems.append(f"{ALLOW_LIST}: not `<executable> <unit> <interface>...`, which makes the "
+                            f"compositor grant nothing at all: {line.strip()}")
+        elif words and not words[0].startswith("#"):
+            lines[words[0]].append(words[1:])
+            problems += [f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
+                         f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
+                         for name in words[2:] if name not in grantable]
+
+    bins = {}
+    for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
+        manifest = tomllib.loads(read(manifest_path))
+        name = manifest.get("package", {}).get("name")
+        for b, entry in binaries(manifest_path.parent, manifest).items():
+            bins[b] = (manifest_path.parent, name, entry)
+
+    installed, targets = set(), []
+    for spec_path in sorted((root / "forge/specs").glob("*/*.spec")):
+        spec = read(spec_path)
+        name = re.search(r"^Name:\s*(\S+)", spec, re.M)
+        if name:
+            spec = spec.replace("%{name}", name.group(1))
+        in_tree = any(walk(spec_path.parent, "Cargo.toml"))
+        for source, executable in spec_installs(spec):
+            installed.add(executable)
+            built = re.search(r"(?:^|/)release/([^/\s]+)$", source)
+            if built:
+                targets.append((built.group(1), executable, spec, spec_path, in_tree))
+
+    checked = 0
+    for built, executable, spec, spec_path, in_tree in targets:
+        if built not in bins:
+            # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
+            # carries a crate: then no bin target of the tree has the name it installs, or
+            # the name is a shell variable, a glob or a macro this check cannot expand.
+            if in_tree and re.search(r"[$*?\[{%`]", built):
+                problems.append(f"{spec_path.relative_to(root)}: an install of target/release/{built} "
+                                "names its binary through a shell variable, a glob or a macro the check "
+                                "cannot expand: name each binary in the spec")
+            elif in_tree:
+                problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
+                                f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
+            continue
+        checked += 1
+        crate, package, entry = bins[built]
+        features, defaults, every = build_flags(spec, package)
+        if every:
+            features = set(tomllib.loads(read(crate / "Cargo.toml")).get("features", {}))
+        layer, names = None, {}
+        files = {path.relative_to(root.resolve()): text for path, text in
+                 target_files(crate, entry, features, defaults, root).items()}
+        for where in [w for w in files if w.as_posix() in ON_DEMAND]:
+            owner, call = ON_DEMAND[where.as_posix()]
+            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
+                del files[where]
+        layer = top_layer(files)
+        for where, text in sorted(files.items()):
+            for i, line in enumerate(text.split("\n"), 1):
+                for interface in privileged:
+                    if interface not in names and re.search(rf"\b{interface}\b", line):
+                        names[interface] = f"{where}:{i}"
+        if layer is None and not names:
+            continue
+        asks = ([f"the top or overlay layer ({layer})"] if layer else []) + \
+            [f"{n} ({at})" for n, at in sorted(names.items())]
+        if executable in outside and executable not in lines:
+            notes.append(f"{executable}: asks for {', '.join(asks)}, outside the list until it moves "
+                         "(doc_session.md SN12)")
+        elif executable not in lines:
+            problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
+        else:
+            for line in lines[executable]:
+                if layer and LAYER_SHELL not in line[1:]:
+                    problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
+                                    f"for {line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)")
+                problems += [f"{executable}: binds {n} ({at}) and its line for {line[0]} does not grant it"
+                             for n, at in sorted(names.items()) if n not in line[1:]]
+
+    if not checked:
+        problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
+                        "builds: the check found no target")
+    for executable in lines:
+        if executable not in installed:
+            problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    for executable in sorted(outside):
+        if executable in lines:
+            problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
+                            "remove it from OUTSIDE_THE_LIST (doc_session.md SN12)")
+        if executable not in installed:
+            problems.append(f"{executable} is outside the list and installed by no spec under forge/specs: "
+                            "remove it from OUTSIDE_THE_LIST")
+    return problems
+
+
+@check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
+def check_allow_list():
+    r, notes = Result(), []
+    for problem in allow_list_problems(notes=notes):
+        r.fail(problem)
+    for note in notes:
+        r.note(note)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7b. riga di comando del kernel — le decisioni di doc_kernel_profile.md
 # --------------------------------------------------------------------------- #
 

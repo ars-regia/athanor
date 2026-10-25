@@ -1,9 +1,12 @@
 //! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
-//! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
+//! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
+//! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
+//! output has been drawn locked.
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
+use smithay::input::keyboard::KeyboardSource;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
@@ -74,6 +77,7 @@ impl SessionLockHandler for State {
             locker: Some(locker),
             surfaces: Vec::new(),
         });
+        self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
         self.lock_taken();
@@ -110,6 +114,23 @@ impl SessionLockHandler for State {
 }
 
 impl State {
+    /// Whether a virtual keyboard's key presses and a virtual pointer's motion, button presses
+    /// and scrolling reach no client: while the session is locked (open question 12 of the OS9
+    /// plan, and the maintainer's decision of 2026-10-23 for the pointer), so that no script
+    /// types into the lock surface, probes its password or clicks on it; and while the session
+    /// is paused on another virtual terminal, where the user cannot see what it would do, nor a
+    /// virtual Ctrl+Alt+F`n` switch the terminal (OS9 task 6 audit). A release of what the seat
+    /// holds still goes on, and the hardware's input is unaffected.
+    pub fn drops_virtual_input(&self) -> bool {
+        self.lock.is_some() || self.session_paused()
+    }
+
+    /// Whether a key pressed on `source` reaches no client: a virtual keyboard's while
+    /// `drops_virtual_input`.
+    pub fn drops_key(&self, source: KeyboardSource) -> bool {
+        source != KeyboardSource::Physical && self.drops_virtual_input()
+    }
+
     /// Gives the keyboard to `surface`; while the session is locked, to the first lock surface
     /// whatever `surface` is. Every change of the keyboard focus but a popup grab's goes
     /// through here, and `grab` refuses grabs while locked.

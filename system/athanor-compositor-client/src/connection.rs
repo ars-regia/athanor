@@ -37,10 +37,6 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
-#[cfg(feature = "gtk")]
-use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
-#[cfg(feature = "gtk")]
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
@@ -124,6 +120,10 @@ pub(crate) struct Inner {
     gdk: RefCell<Option<Gdk>>,
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
+    /// The compositor's globals, for those bound only when a call needs them: the capture
+    /// globals, which a client that never captures never binds.
+    #[cfg(feature = "gtk")]
+    pub(crate) registry: GlobalList,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
     handler: RefCell<Option<Handler>>,
@@ -151,9 +151,10 @@ impl Drop for Inner {
 }
 
 impl Client {
-    /// Binds what the compositor offers and reads the initial state. A global the
-    /// compositor does not offer is not an error: its part of the API stays empty, and its
-    /// actions return [`Error::Unavailable`].
+    /// Binds what the compositor offers and reads the initial state; the capture globals
+    /// wait for the first [`Client::capture`]. A global the compositor does not offer is not
+    /// an error: its part of the API stays empty, and its actions return
+    /// [`Error::Unavailable`].
     #[cfg(feature = "gtk")]
     pub fn connect(display: &gdk::Display) -> Result<Client, Error> {
         let wayland = display
@@ -211,6 +212,8 @@ impl Client {
             gdk: RefCell::new(None),
             connection,
             qh,
+            #[cfg(feature = "gtk")]
+            registry: globals,
             queue: RefCell::new(queue),
             state: RefCell::new(state),
             handler: RefCell::new(None),
@@ -786,13 +789,12 @@ pub(crate) struct Globals {
     keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     a11y: Option<CosmicA11yManagerV1>,
     security_context: Option<WpSecurityContextManagerV1>,
-    /// The window pictures, GDK textures: bound only with the `gtk` feature.
+    /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
+    /// globals at the first capture.
     #[cfg(feature = "gtk")]
     pub(crate) shm: Option<wl_shm::WlShm>,
     #[cfg(feature = "gtk")]
-    pub(crate) capture_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
-    #[cfg(feature = "gtk")]
-    pub(crate) image_copy: Option<ExtImageCopyCaptureManagerV1>,
+    pub(crate) capture: crate::capture::Globals,
 }
 
 pub(crate) struct Toplevel {
@@ -830,7 +832,7 @@ pub(crate) struct State {
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
 }
 
-fn bind<I>(
+pub(crate) fn bind<I>(
     globals: &GlobalList,
     qh: &QueueHandle<State>,
     versions: RangeInclusive<u32>,
@@ -869,9 +871,7 @@ impl State {
             #[cfg(feature = "gtk")]
             shm: bind(globals, qh, 1..=1),
             #[cfg(feature = "gtk")]
-            capture_sources: bind(globals, qh, 1..=1),
-            #[cfg(feature = "gtk")]
-            image_copy: bind(globals, qh, 1..=1),
+            capture: crate::capture::Globals::default(),
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
         };

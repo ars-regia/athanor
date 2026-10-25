@@ -253,7 +253,7 @@ area = "shell"
 status = "specified"
 spec = "doc_own_stack.md"
 item = "OS3"
-purpose = "Athanor's own Wayland compositor on Smithay; a workspace spike until revision 2 of doc_own_stack.md"
+purpose = "Athanor's own Wayland compositor on Smithay; cosmic-comp stays the default session until it passes OS19 of doc_own_stack.md"
 
 [[component]]
 path = "forge/specs/athanor-layout-chooser"

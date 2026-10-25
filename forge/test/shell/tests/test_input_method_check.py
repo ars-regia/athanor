@@ -58,6 +58,29 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CompositorTest(unittest.TestCase):
+    def test_the_capture_output_follows_the_compositor(self):
+        with mock.patch.dict(check.os.environ, {}, clear=True):
+            self.assertEqual(
+                check.capture_command("shot"), ["grim", "-o", "WINIT-0", "/out/shot.png"]
+            )
+        environ = {"RIG_COMPOSITOR": "athanor", "RIG_CAPTURE_OUTPUT": "headless-0"}
+        with mock.patch.dict(check.os.environ, environ, clear=True):
+            self.assertEqual(
+                check.capture_command("shot"),
+                [check.IN_UNIT, "rig-grim.service", "/usr/bin/grim", "-o", "headless-0", "/out/shot.png"],
+            )
+
+    def test_the_input_method_starts_in_its_rig_unit(self):
+        with mock.patch.dict(check.os.environ, {}, clear=True):
+            self.assertEqual(check.method_command(), [check.METHOD, check.PREEDIT, check.COMMIT])
+        with mock.patch.dict(check.os.environ, {"RIG_COMPOSITOR": "athanor"}, clear=True):
+            self.assertEqual(
+                check.method_command(),
+                [check.IN_UNIT, "rig-input-method.service", check.METHOD, check.PREEDIT, check.COMMIT],
+            )
+
+
 class CaptureAfterTest(unittest.TestCase):
     def capture_after(self, shots, timeout=1):
         frames = iter(shots)

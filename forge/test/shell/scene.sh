@@ -10,8 +10,12 @@ width=$1 height=$2 scale=$3 tag=$4
 shift 4
 [ "${1:-}" = "--" ] && shift
 settle=${RIG_SETTLE:-4}
-# RIG_COMPOSITOR=athanor nests athanor-compositor in place of cosmic-comp (session.sh), at this
-# scale from its start: it has no cosmic-randr protocol.
+# RIG_COMPOSITOR=athanor runs athanor-compositor in place of cosmic-comp, on its headless
+# backend with RIG_HEADLESS_OUTPUTS (default 1) virtual outputs of this size, at this scale
+# from its start (session.sh): headless-0, headless-1 and so on, left to right. The capture
+# goes through the compositor itself, with grim run as its rig unit (in-unit.sh,
+# rig-privileged-clients); RIG_CAPTURE_OUTPUT names the first output for the clients that
+# capture on their own.
 export RIG_TAG=$tag RIG_SCALE=$scale
 
 export XDG_RUNTIME_DIR=/run/user/1000
@@ -82,11 +86,12 @@ frozen="@2026-09-18 10:00:00"
 export FAKETIME_DONT_FAKE_MONOTONIC=1
 
 wait_for() { # wait_for <seconds> <command...>: poll four times a second
-    local tries=$(($1 * 4))
+    # A deadline on the shell's clock, not a count of tries: a try that itself takes seconds
+    # (timeout 5 wayland-info) does not stretch the bound.
+    local deadline=$((SECONDS + $1))
     shift
     until "$@"; do
-        tries=$((tries - 1))
-        if [ "$tries" -le 0 ]; then
+        if ((SECONDS >= deadline)); then
             echo "scene.sh: timed out waiting for: $*" >&2
             return 1
         fi
@@ -107,9 +112,12 @@ kms_outputs() { # the connected connectors, e.g. Virtual-1
     done
 }
 
+any_display() { ls "$XDG_RUNTIME_DIR"/wayland-[0-9] > /dev/null 2>&1; }
+
+# The outputs the capture reads, left to right, and the grim that reads them.
+grim=(grim)
 if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
     COSMIC_BACKEND=kms LIBSEAT_BACKEND=noop cosmic-comp --no-xwayland &> "/out/$tag-cosmic-comp.log" &
-    any_display() { ls "$XDG_RUNTIME_DIR"/wayland-[0-9] > /dev/null 2>&1; }
     wait_for 30 any_display
     shopt -s nullglob
     wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
@@ -126,7 +134,40 @@ if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
         cosmic-randr mode --scale "$scale" "$output" "$width" "$height" &>> "/out/$tag-randr.txt"
     done
     sleep 1
+elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
+    count=${RIG_HEADLESS_OUTPUTS:-1}
+    if ! [[ $count =~ ^[1-9][0-9]*$ ]]; then
+        echo "scene.sh: RIG_HEADLESS_OUTPUTS must be a positive number, not '$count'" >&2
+        exit 2
+    fi
+    outputs=() arguments=()
+    for ((index = 0; index < count; index++)); do
+        outputs+=("headless-$index")
+        arguments+=(--output "${width}x${height}@$scale")
+    done
+    export RIG_CAPTURE_OUTPUT=${outputs[0]}
+    grim=(/repo/forge/test/shell/in-unit.sh rig-grim.service /usr/bin/grim)
+    /repo/forge/test/shell/session.sh "${arguments[@]}" &
+    session=$!
+    compositor_alive() { # fails the scene at once if the compositor exited
+        if ! kill -0 "$session" 2> /dev/null; then
+            echo "scene.sh: athanor-compositor exited during its start; see /out/$tag-compositor.log" >&2
+            exit 1
+        fi
+    }
+    compositor_display() { compositor_alive && any_display; }
+    # timeout: a compositor that accepts the connection and never answers fails the wait.
+    compositor_answers() { compositor_alive && timeout 5 wayland-info > /dev/null; }
+    wait_for 30 compositor_display
+    shopt -s nullglob
+    wayland_displays=("$XDG_RUNTIME_DIR"/wayland-[0-9])
+    shopt -u nullglob
+    WAYLAND_DISPLAY=$(basename "${wayland_displays[0]}")
+    export WAYLAND_DISPLAY
+    wait_for 20 compositor_answers
+    sleep 1
 else
+    outputs=(WINIT-0)
     # 1. The parent: wlroots headless on pixman, one output of the requested size.
     sway -c /repo/forge/test/shell/sway.conf &> "/out/$tag-sway.log" &
     sway_socket() { ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock > /dev/null 2>&1; }
@@ -156,14 +197,10 @@ else
     wait_for 30 cosmic_display > /dev/null
     WAYLAND_DISPLAY=$(cosmic_display)
     export WAYLAND_DISPLAY
-    if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
-        wait_for 20 wayland-info > /dev/null
-    else
-        wait_for 20 cosmic-randr list > /dev/null
+    wait_for 20 cosmic-randr list > /dev/null
 
-        # 3. Size and fractional scale of the nested output.
-        cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
-    fi
+    # 3. Size and fractional scale of the nested output.
+    cosmic-randr mode --scale "$scale" WINIT-0 "$width" "$height" &> "/out/$tag-randr.txt"
     sleep 1
 fi
 
@@ -182,44 +219,52 @@ if [ -n "${RIG_HOLD:-}" ]; then
     set +f
 fi
 
-# 5. One PNG, from inside the compositor; two outputs side by side, left to right.
-if [ "${RIG_OUTPUTS:-1}" = 2 ]; then
-    parts=()
+# 5. One PNG, from inside the compositor; two or more outputs side by side, left to right.
+grab() { # grab <output> <png>: grim, bounded, so a capture that never completes fails the scene
+    local rc=0
+    timeout 10 "${grim[@]}" -o "$1" "$2" || rc=$?
+    if [ "$rc" = 124 ]; then
+        echo "scene.sh: grim -o $1 did not finish in 10 seconds" >&2
+    fi
+    return "$rc"
+}
+capture() { # capture <png>
+    if [ "${#outputs[@]}" = 1 ]; then
+        grab "${outputs[0]}" "$1"
+        return
+    fi
+    local output parts=()
     for output in "${outputs[@]}"; do
-        grim -o "$output" "$scratch/$output.png"
+        grab "$output" "$scratch/$output.png"
         parts+=("$scratch/$output.png")
     done
-    magick "${parts[@]}" +append "/out/$tag.png"
-elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
-    # athanor-compositor offers no screen copy yet: sway's output holds its window, edge to edge.
-    WAYLAND_DISPLAY=$sway_display grim -o HEADLESS-1 "/out/$tag.png"
-else
-    grim -o WINIT-0 "/out/$tag.png"
-    # RIG_STABLE=<n>: a popover can still be resizing at the capture. Capture again each
-    # second until two successive PNGs are identical, at most n times; the count goes to
-    # /out/<tag>-stable.txt, so a scene that settles late is visible, and a scene that never
-    # settles fails rather than leave a capture the timing chose.
-    if [ -n "${RIG_STABLE:-}" ]; then
-        for ((attempt = 1; attempt <= RIG_STABLE; attempt++)); do
-            sleep 1
-            grim -o WINIT-0 "$scratch/again.png"
-            # compare exits 0 when the pixels agree, 1 when they differ and 2 on an error.
-            rc=0
-            magick compare -metric AE "/out/$tag.png" "$scratch/again.png" null: \
-                2> "$scratch/compare.txt" || rc=$?
-            case $rc in
-                0) break ;;
-                1) mv "$scratch/again.png" "/out/$tag.png" ;;
-                *)
-                    cat "$scratch/compare.txt" >&2
-                    exit 1
-                    ;;
-            esac
-        done
-        echo "captures that differed from their successor: $((attempt - 1)) of at most $RIG_STABLE" > "/out/$tag-stable.txt"
-        if ((attempt > RIG_STABLE)); then
-            echo "scene.sh: $tag did not settle in $RIG_STABLE captures a second apart" >&2
+    magick "${parts[@]}" +append "$1"
+}
+capture "/out/$tag.png"
+# RIG_STABLE=<n>: a popover can still be resizing at the capture. Capture again each
+# second until two successive PNGs are identical, at most n times; the count goes to
+# /out/<tag>-stable.txt, so a scene that settles late is visible, and a scene that never
+# settles fails rather than leave a capture the timing chose.
+if [ -n "${RIG_STABLE:-}" ]; then
+    for ((attempt = 1; attempt <= RIG_STABLE; attempt++)); do
+        sleep 1
+        capture "$scratch/again.png"
+        # compare exits 0 when the pixels agree, 1 when they differ and 2 on an error.
+        rc=0
+        magick compare -metric AE "/out/$tag.png" "$scratch/again.png" null: \
+            2> "$scratch/compare.txt" || rc=$?
+        case $rc in
+        0) break ;;
+        1) mv "$scratch/again.png" "/out/$tag.png" ;;
+        *)
+            cat "$scratch/compare.txt" >&2
             exit 1
-        fi
+            ;;
+        esac
+    done
+    echo "captures that differed from their successor: $((attempt - 1)) of at most $RIG_STABLE" > "/out/$tag-stable.txt"
+    if ((attempt > RIG_STABLE)); then
+        echo "scene.sh: $tag did not settle in $RIG_STABLE captures a second apart" >&2
+        exit 1
     fi
 fi

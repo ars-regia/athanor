@@ -5,8 +5,8 @@
 mod surface;
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
-use std::rc::Rc;
+use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use athanor_apps::favorites::Store;
@@ -34,7 +34,7 @@ pub struct Dock {
     layout: Cell<Layout>,
     outputs: RefCell<Vec<Output>>,
     surfaces: RefCell<Vec<Surface>>,
-    watches: RefCell<Vec<gio::FileMonitor>>,
+    _watches: Vec<gio::FileMonitor>,
     debounce: RefCell<Option<glib::SourceId>>,
     open_popover: RefCell<Option<gtk4::Popover>>,
     ready: Cell<bool>,
@@ -49,8 +49,6 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
     appearance::load(&display, &Appearance::read());
-    let layout = source.layout();
-    tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
         Ok(client) => Some(client),
         Err(err) => {
@@ -59,20 +57,26 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             None
         }
     };
-    let dock = Rc::new(Dock {
-        app: app.clone(),
-        _hold: app.hold(),
-        outputs: RefCell::new(outputs::current(&display)),
-        display,
-        client,
-        layout: Cell::new(layout),
-        source,
-        favorites: Store::load(favorites_file),
-        surfaces: RefCell::new(Vec::new()),
-        watches: RefCell::new(Vec::new()),
-        debounce: RefCell::new(None),
-        open_popover: RefCell::new(None),
-        ready: Cell::new(false),
+    let dock = Rc::new_cyclic(|weak: &Weak<Dock>| {
+        // Armed before the layout and the favourites are read, so that a write while the
+        // dock starts (the bar's first-session pick) is read or reported, never lost.
+        let (layout, watches) = source.watch(|dir| monitor(dir, weak.clone()));
+        tracing::info!(layout = ?layout, "layout applied");
+        Dock {
+            app: app.clone(),
+            _hold: app.hold(),
+            outputs: RefCell::new(outputs::current(&display)),
+            display,
+            client,
+            layout: Cell::new(layout),
+            source,
+            favorites: Store::load(favorites_file),
+            surfaces: RefCell::new(Vec::new()),
+            _watches: watches,
+            debounce: RefCell::new(None),
+            open_popover: RefCell::new(None),
+            ready: Cell::new(false),
+        }
     });
     dock.rebuild();
     if !dock.surfaces.borrow().iter().any(Surface::placed) {
@@ -82,6 +86,28 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     }
     dock.watch();
     dock
+}
+
+/// A watch on `dir`, one of the directories the layout's layers and the favourites file
+/// share, that schedules a reload. A directory that does not exist yet is watched all the
+/// same.
+fn monitor(dir: &Path, dock: Weak<Dock>) -> Option<gio::FileMonitor> {
+    match gio::File::for_path(dir)
+        .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+    {
+        Ok(monitor) => {
+            monitor.connect_changed(move |_, _, _, _| {
+                if let Some(dock) = dock.upgrade() {
+                    dock.schedule();
+                }
+            });
+            Some(monitor)
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot watch; changes there apply at the next start");
+            None
+        }
+    }
 }
 
 impl Dock {
@@ -166,26 +192,6 @@ impl Dock {
                 dock.schedule();
             }
         });
-        // The layout's layers and the favourites file share these directories.
-        for dir in self.source.watched() {
-            // A directory that does not exist yet is watched all the same.
-            match gio::File::for_path(&dir)
-                .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
-            {
-                Ok(monitor) => {
-                    let weak = Rc::downgrade(self);
-                    monitor.connect_changed(move |_, _, _, _| {
-                        if let Some(dock) = weak.upgrade() {
-                            dock.schedule();
-                        }
-                    });
-                    self.watches.borrow_mut().push(monitor);
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, dir = %dir.display(), "cannot watch; changes there apply at the next start");
-                }
-            }
-        }
         let display = self.display.clone();
         appearance::watch(move |current| appearance::load(&display, &current));
     }

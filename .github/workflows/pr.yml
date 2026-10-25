@@ -5,9 +5,11 @@ name: Pull Request
 #
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
 #   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs.
-# check:   `just check`, the gate a contributor runs locally (lint, every verify.py check with
-#   scripts/ci/known-red.txt, the Python test directories, `cargo test` over the root workspace
-#   in the shell rig's build stage), with tools pinned by digest.
+# check-*: the parts of `just check`, the gate a contributor runs locally, one job and one recipe
+#   each so they run in parallel: check-static (lint, every verify.py check with
+#   scripts/ci/known-red.txt, kernel profile, Calmo), check-system and check-other (the Python
+#   test directories), check-rust (`cargo test` over the root workspace in the shell rig's build
+#   stage, and cargo-deny); tools pinned by digest.
 # kernel:  the kernel check (call-kernel.yml) when changes.json selects the kernel.
 # specs:   Spec Build Check (spec-build-check.yml) when changes.json selects the specs.
 # shell:   the visual tests of the shell rig (shell-surfaces.yml) when changes.json selects shell.
@@ -59,11 +61,72 @@ jobs:
           path: ${{ runner.temp }}/out/changes.json
           if-no-files-found: error
 
-  check:
+  check-static:
     runs-on: ubuntu-24.04
-    # Most of it is the Rust half (just check-rust): the rig image pull, its build stage and a
-    # cold workspace build, with no cache on the pull request path. An estimate until PL47 sizes
-    # it from runs: the Rust half took 3.5 minutes locally with four jobs and a warm registry.
+    # Measured at about 2 minutes: lint, verify.py, kernel profile, Calmo, forge/test/iso.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: just check-static
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE"
+          just check-static "$BASE"
+
+  check-system:
+    runs-on: ubuntu-24.04
+    # Measured at about 3 minutes (system/tests, 157 s).
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: just check-unit system
+        run: |
+          set -euo pipefail
+          just check-unit system
+
+  check-other:
+    runs-on: ubuntu-24.04
+    # Measured at about 4 minutes: every other Python test directory.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: just check-unit other
+        run: |
+          set -euo pipefail
+          just check-unit other
+
+  check-rust:
+    runs-on: ubuntu-24.04
+    # The longest part, about 11 minutes: the rig image pull and its build stage (267 s), a cold
+    # workspace build and test (about 290 s), preview-render, the toolkit rustdoc and the gallery
+    # (about 120 s) and cargo-deny, with no cache on the pull request path.
     timeout-minutes: 60
     permissions:
       contents: read
@@ -76,11 +139,11 @@ jobs:
           bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
           echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
 
-      - name: just check
+      - name: just check-rust and check-deny
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE"
-          just check "$BASE"
+          just check-rust
+          just check-deny
 
   kernel:
     needs: changes
@@ -113,7 +176,7 @@ jobs:
     uses: ./.github/workflows/shell-surfaces.yml
 
   gate:
-    needs: [changes, check, kernel, specs, shell]
+    needs: [changes, check-static, check-system, check-other, check-rust, kernel, specs, shell]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

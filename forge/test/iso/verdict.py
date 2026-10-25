@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turns what the run recorded into a pass or a fail, and into something readable.
 
-Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]
+Usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot [upgrade]]
 
 Reads phases.txt, written by console.py, and the console log beside it. Prints a report
 on stdout, writes the same report to OUTPUT_DIR/verdict.md for the job summary, and
@@ -40,6 +40,15 @@ firmware, a last one:
 
   secure-boot      the installed system reports Secure Boot enabled and enforced, so shim
                    accepted the Azoth kernel against the certificate just enrolled
+
+and with `upgrade` after it, the upgrade case of doc_update_delivery.md UD18 that
+run_iso_test.sh runs with UPDATE_TO, the stages of scripts/devvm/acceptance/run.sh --ci and
+the two boots they lead to, judged from upgrade-status, upgrade.log and upgrade-phases.txt:
+
+  upgrade-stages   every stage passed: seed, upgrade, check, goback, check-back
+  upgraded-*       on the candidate: greeter, session, settings, mok and secure-boot, as
+                   above, from the same probes run over SSH
+  rolled-back-*    the same five after GoBack(), on the deployment the machine came from
 
 The greeter is recognised from the console rather than from a screenshot, because a
 screenshot cannot tell a drawn greeter from a wallpaper. The screenshots are still kept
@@ -86,7 +95,8 @@ ORIGIN_SIGNALS = ("origin-stable-signed",)
 # "reinstall-loop" is not a crash but it is a failure, and a distinctive one: the machine
 # booted the installer again instead of the system it had just written, so the run says
 # nothing about first boot no matter how long it is left going.
-FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
+# secure-boot-refused: shim refused a kernel or GRUB it was asked to load (console.py).
+FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop", "secure-boot-refused")
 # MOK_ENROLLED in console.py: the certificate is in MokList. MOK_NOT_APPLICABLE: firmware
 # without Secure Boot, not accepted in the Secure Boot case. MOK_MISSING and
 # MOK_CERT_ABSENT (an image without the certificate, which an ISO built from this tree
@@ -94,24 +104,56 @@ FAILURE_SIGNALS = ("panic", "emergency", "reinstall-loop")
 MOK_SIGNALS = ("mok-enrolled", "mok-not-applicable")
 # The guest's Secure Boot state, required to be enabled only in the Secure Boot case.
 SECUREBOOT_SIGNALS = ("secureboot-enabled", "secureboot-not-enforced", "secureboot-disabled")
+# What each boot of the upgrade case must report, under its prefix in upgrade-phases.txt.
+BOOT_CHECKS = (
+    ("greeter", "greeter-alive"),
+    ("session", "session-alive"),
+    ("settings", "settings-alive"),
+    ("mok", "mok-enrolled"),
+    ("secure-boot", "secureboot-enabled"),
+)
+BOOTS = (("upgraded-", "on the candidate"), ("rolled-back-", "after GoBack()"))
+
+
+def read_phases(path: pathlib.Path) -> dict[str, int]:
+    """`name epoch` lines, the first epoch of each name kept."""
+    phases: dict[str, int] = {}
+    if path.exists():
+        for line in path.read_text().splitlines():
+            name, _, epoch = line.partition(" ")
+            if name and epoch.isdigit():
+                phases.setdefault(name, int(epoch))
+    return phases
+
+
+def upgrade_stages(out: pathlib.Path) -> tuple[bool, str]:
+    """Whether run.sh --ci passed, and if not, the reason in a line. A pass carries the NOTE
+    lines of upgrade.log: a check the stages could not run on this :stable (#784)."""
+    status_file = out / "upgrade-status"
+    if not status_file.exists():
+        return False, "NO, the upgrade stages never ran (no ready)"
+    status = status_file.read_text().strip()
+    log = out / "upgrade.log"
+    lines = log.read_text(errors="replace").splitlines() if log.exists() else []
+    if status == "0":
+        return True, "; ".join(["passed", *(line for line in lines if line.startswith("NOTE  "))])
+    if status == "124":
+        return False, "NO, the upgrade stages timed out"
+    first = next((line for line in lines if line.startswith("FAIL  ")), "no FAIL line in upgrade.log")
+    return False, f"NO, exited {status}: {first}"
 
 
 def main() -> int:
     out = pathlib.Path(sys.argv[1])
     greeter_wait = int(sys.argv[2])
     qemu_status = int(sys.argv[3])
-    if sys.argv[4:] not in ([], ["secure-boot"]):
-        print("usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot]", file=sys.stderr)
+    if sys.argv[4:] not in ([], ["secure-boot"], ["secure-boot", "upgrade"]):
+        print("usage: verdict.py OUTPUT_DIR GREETER_WAIT QEMU_STATUS [secure-boot [upgrade]]", file=sys.stderr)
         return 2
-    secure_boot_required = sys.argv[4:] == ["secure-boot"]
+    secure_boot_required = sys.argv[4:5] == ["secure-boot"]
+    upgrade = sys.argv[5:] == ["upgrade"]
 
-    phase_file = out / "phases.txt"
-    phases: dict[str, int] = {}
-    if phase_file.exists():
-        for line in phase_file.read_text().splitlines():
-            name, _, epoch = line.partition(" ")
-            if name and epoch.isdigit():
-                phases.setdefault(name, int(epoch))
+    phases = read_phases(out / "phases.txt")
 
     log = out / "serial.log"
     log_bytes = log.stat().st_size if log.exists() else 0
@@ -187,6 +229,15 @@ def main() -> int:
     if secure_boot_required:
         checks["mok"] = mok == "mok-enrolled"
         checks["secure-boot"] = secure_boot == "secureboot-enabled"
+    if upgrade:
+        checks["upgrade-stages"], stages = upgrade_stages(out)
+        lines.append(f"- upgrade stages: {stages}")
+        boots = read_phases(out / "upgrade-phases.txt")
+        for prefix, label in BOOTS:
+            for name, signal in BOOT_CHECKS:
+                checks[prefix + name] = prefix + signal in boots
+            missing = [name for name, _ in BOOT_CHECKS if not checks[prefix + name]]
+            lines.append(f"- {label}: {'all five hold' if not missing else 'NO ' + ', '.join(missing)}")
     ok = all(checks.values())
     lines.insert(1, f"**{'PASS' if ok else 'FAIL'}**")
     report = "\n".join(lines) + "\n"

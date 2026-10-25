@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        The Athanor dock
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-dock
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-dock.mo
 
 %changelog
+* Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- The layout's directory watches are armed before the first read, so a layout written
+  while the dock starts (the bar's first-session pick) is applied, never lost.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
   surface, and a red accent's fill carries white text at 4.5:1 (#571).

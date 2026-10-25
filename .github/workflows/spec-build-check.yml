@@ -4,9 +4,12 @@ name: Spec Build Check
 # the way the DAG does, without publishing. forge/scripts/select_check_specs.py picks them: the
 # changed spec directories, or every spec of the DAG when the change touches the builder image's
 # inputs (flake.nix, flake.lock, forge/builder), forge/config/rpmmacros, build_spec.sh,
-# run_spec_build.sh or fetch_sources.sh. A change to the builder's inputs is built in a builder
-# image made from the pull request (forge/scripts/builder_image.sh, handed to the build jobs as
-# a one-day workflow artifact, never pushed); any other in the published athanor-builder:latest.
+# run_spec_build.sh or fetch_sources.sh. The specs build in the builder of the checkout, named by
+# its content hash (forge/scripts/check_idempotency.sh, the tag the DAG pulls): the published
+# athanor-builder:<hash> when the registry has it, else a builder image made from the pull request
+# (forge/scripts/builder_image.sh, handed to the build jobs as a one-day workflow artifact, never
+# pushed). Never athanor-builder:latest: that is the default branch's builder, and a pull request
+# into another branch (rebase/fedora-45) would build against the default branch's libraries.
 # Each spec builds in its own job with forge/scripts/run_spec_build.sh, the script of
 # call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
 # pull request, bot-merge.yml runs forge/scripts/bot_merge.py, which merges it when every bump keeps its leading non-zero version component (semver-compatible).
@@ -28,7 +31,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      builder: ${{ steps.select.outputs.builder }}
+      builder: ${{ steps.builder.outputs.build }}
+      builder_hash: ${{ steps.builder.outputs.hash }}
       specs: ${{ steps.select.outputs.specs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -41,12 +45,28 @@ jobs:
         run: |
           set -euo pipefail
           python3 forge/scripts/select_check_specs.py HEAD^1 "$RUNNER_TEMP/spec-check"
-          echo "builder=$(< "$RUNNER_TEMP/spec-check/builder")" >> "$GITHUB_OUTPUT"
           echo "specs=$(< "$RUNNER_TEMP/spec-check/specs.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Look the builder of the checkout up by its content hash (forge/scripts/check_idempotency.sh)
+        id: builder
+        working-directory: forge
+        env:
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+        run: |
+          set -euo pipefail
+          # retry.sh: a transient registry error is asked again; one that outlasts the attempts
+          # fails the check. A failed attempt prints nothing on stdout.
+          bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+            --registry "$REGISTRY_HOST" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
+          source "$RUNNER_TEMP/idemp.out"
+          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
+          if [[ $CACHE_HIT == true ]]; then echo "build=false"; else echo "build=true"; fi >> "$GITHUB_OUTPUT"
 
   builder:
     needs: select
-    if: needs.select.outputs.builder == 'true'
+    # Only when a spec is selected: with nothing to compile, the builder is not built.
+    if: needs.select.outputs.builder == 'true' && needs.select.outputs.specs != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -71,7 +91,7 @@ jobs:
 
   build:
     needs: [select, builder]
-    # The builder job is skipped when the change leaves the builder's inputs alone.
+    # The builder job is skipped when the registry has the checkout's builder.
     if: >-
       ${{ !cancelled() && needs.select.result == 'success' && needs.select.outputs.specs != '[]'
       && (needs.builder.result == 'success' || needs.builder.result == 'skipped') }}
@@ -85,6 +105,7 @@ jobs:
         spec: ${{ fromJSON(needs.select.outputs.specs) }}
     env:
       REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+      BUILDER_HASH: ${{ needs.select.outputs.builder_hash }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -99,7 +120,7 @@ jobs:
           SPEC: ${{ matrix.spec }}
         run: |
           set -euo pipefail
-          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:latest")
+          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:${BUILDER_HASH}")
           bash forge/scripts/run_spec_build.sh "$image" "$SPEC"
 
   gate:
