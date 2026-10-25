@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        45.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -78,6 +78,11 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/share/plymouth/themes/spinner/watermark.png
 
 %changelog
+* Sun Oct 25 2026 Athanor Forge <forge@athanor.os> - 45.0.0-2
+- rpmfusion.repo: Fedora 45 pre-release layout. The updates repos are disabled and the updates-testing
+  repos enabled, because the *-updates-released metalinks answer 404 until GA; the switch back at GA
+  is tracked in #802
+
 * Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 45.0.0-1
 - Fedora 45 base: os-release names release 45 (VERSION, VERSION_ID, PRETTY_NAME, CPE_NAME,
   PLATFORM_ID), and the fedora-release, system-release and logos provides follow it
