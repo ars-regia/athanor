@@ -970,6 +970,7 @@ impl State {
         }
         self.serve_captures();
         self.space.refresh();
+        self.send_toplevel_states();
         self.popups.cleanup();
         self.flush();
     }

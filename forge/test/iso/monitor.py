@@ -12,20 +12,26 @@ import socket
 import sys
 import time
 
+import pace
+
+# The pauses wait on a real QEMU and guest. The tests' fake monitor answers at once and
+# scales them down with the same variable as console.py; a run leaves it at one.
+PACE = pace.from_environment()
+
 
 def main() -> int:
     sock_path, commands = sys.argv[1], sys.argv[2:]
     s = socket.socket(socket.AF_UNIX)
     s.settimeout(30)
     s.connect(sock_path)
-    time.sleep(0.5)
+    time.sleep(0.5 * PACE)
     try:
         s.recv(65536)  # the banner
     except socket.timeout:
         pass
     for cmd in commands:
         s.sendall((cmd + "\n").encode())
-        time.sleep(1.5)
+        time.sleep(1.5 * PACE)
         try:
             reply = s.recv(65536).decode(errors="replace")
         except socket.timeout:

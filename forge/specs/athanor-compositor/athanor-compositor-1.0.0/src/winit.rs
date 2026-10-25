@@ -146,6 +146,7 @@ impl State {
             self.locked_drawn();
         }
         self.space.refresh();
+        self.send_toplevel_states();
         self.popups.cleanup();
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");

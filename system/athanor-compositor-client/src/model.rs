@@ -37,6 +37,16 @@ impl WindowState {
         }
         state
     }
+
+    /// Decodes the `state` bitfield of `athanor_toplevel_state_v1`. Bits this crate does not
+    /// know are ignored; version 1 carries neither `maximized` nor `fullscreen`.
+    pub(crate) fn from_athanor(flags: u32) -> Self {
+        Self {
+            activated: flags & 1 != 0,
+            minimized: flags & 2 != 0,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +56,8 @@ pub struct Window {
     pub title: String,
     pub state: WindowState,
     /// The connectors of the outputs the window is on, as GDK names them, in the order it
-    /// entered them. Empty on compositors without COSMIC's toplevel extension.
+    /// entered them, from COSMIC's toplevel extension or Athanor's toplevel state. Empty on
+    /// compositors with neither.
     pub outputs: Vec<String>,
 }
 
@@ -201,6 +212,30 @@ mod tests {
             }
         );
         assert_eq!(WindowState::from_cosmic(&[]), WindowState::default());
+    }
+
+    #[test]
+    fn window_state_from_athanor_flags() {
+        assert_eq!(WindowState::from_athanor(0), WindowState::default());
+        let activated = WindowState {
+            activated: true,
+            ..WindowState::default()
+        };
+        let minimized = WindowState {
+            minimized: true,
+            ..WindowState::default()
+        };
+        assert_eq!(WindowState::from_athanor(1), activated);
+        assert_eq!(WindowState::from_athanor(2), minimized);
+        assert_eq!(
+            WindowState::from_athanor(3),
+            WindowState {
+                activated: true,
+                minimized: true,
+                ..WindowState::default()
+            }
+        );
+        assert_eq!(WindowState::from_athanor(8), WindowState::default());
     }
 
     #[test]

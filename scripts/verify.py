@@ -2101,15 +2101,21 @@ INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
 # code outside that crate makes the call, written as a method or as a path: athanor-compositor-
-# client binds the capture globals at the first `Client::capture`, and capture.rs holds every
-# name of them in the crate.
+# client binds the capture globals at the first `Client::capture`, and the window actions at the
+# first action of `Client::window_actions`; capture.rs and actions.rs hold every name of them in
+# the crate.
 ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
-             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)"))}
+             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/actions.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)"))}
 CLIENT_CRATE = "system/athanor-compositor-client"
-# Where athanor-compositor-client names the privileged globals it binds at connect and at the
-# first capture. Each names at least one, or the check no longer sees what the client binds.
+# Where athanor-compositor-client names the privileged globals it binds at connect, at the
+# first capture and at the first window action. Each names at least one, or the check no longer
+# sees what the client binds.
 CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
-                "system/athanor-compositor-client/src/capture.rs": "at the first capture"}
+                "system/athanor-compositor-client/src/capture.rs": "at the first capture",
+                "system/athanor-compositor-client/src/actions.rs": "at the first window action"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 

@@ -18,6 +18,7 @@ zwlr_layer_shell_v1 layer-gated
 ext_foreign_toplevel_list_v1 privileged
 ext_session_lock_manager_v1 privileged
 ext_image_copy_capture_manager_v1 privileged
+athanor_toplevel_actions_v1 privileged
 """
 
 SPEC = """\
@@ -68,14 +69,15 @@ class AllowList(unittest.TestCase):
         self.write(f"forge/specs/{name}/{name}.spec", text)
 
     def client(self):
-        """A path dependency that binds the toplevel list at connect and the image copy
-        capture at the first `capture`, as athanor-compositor-client does."""
+        """A path dependency that binds the toplevel list at connect, the image copy
+        capture at the first `capture` and the window actions at the first action of
+        `window_actions`, as athanor-compositor-client does."""
         self.write(
             f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
         )
         self.write(
             f"{CLIENT}/src/lib.rs",
-            "mod capture;\nmod connection;\npub fn connect() {}\n",
+            "mod actions;\nmod capture;\nmod connection;\npub fn connect() {}\n",
         )
         self.write(
             f"{CLIENT}/src/connection.rs",
@@ -85,6 +87,10 @@ class AllowList(unittest.TestCase):
         self.write(
             f"{CLIENT}/src/capture.rs",
             'fn capture() { Unavailable("ext_image_copy_capture_manager_v1") }\n',
+        )
+        self.write(
+            f"{CLIENT}/src/actions.rs",
+            'fn act() { Unavailable("athanor_toplevel_actions_v1") }\n',
         )
 
     def problems(self):
@@ -250,6 +256,43 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-launcher", out[0])
         self.assertIn("ext_image_copy_capture_manager_v1", out[0])
 
+    def test_the_window_actions_count_only_for_a_target_that_acts(self):
+        # The client binds the window actions at the first action of `Client::window_actions`
+        # only: the control center, which never acts, needs no grant of them.
+        self.client()
+        dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
+        self.package(
+            "athanor-control-center",
+            dependency,
+            {"src/main.rs": "use athanor_compositor_client::connect;\nfn f() { panel.close(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n")
+        self.assertEqual(self.problems(), [])
+        for call in (
+            "client.window_actions().close(id)",
+            "Client::window_actions(&client).activate(id)",
+            "client.window_actions ().minimize(id)",
+        ):
+            with self.subTest(call):
+                self.package(
+                    "athanor-bar",
+                    dependency,
+                    {"src/main.rs": f"use athanor_compositor_client::Client;\nfn f() {{ {call}; }}\n"},
+                )
+                self.lines(
+                    "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1\n"
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-bar", out[0])
+                self.assertIn("athanor_toplevel_actions_v1", out[0])
+                self.lines(
+                    "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1 athanor_toplevel_actions_v1\n"
+                )
+                self.assertEqual(self.problems(), [])
+
     def test_a_top_layer_target_whose_line_omits_layer_shell_fails(self):
         self.package(
             "athanor-dock",
@@ -343,6 +386,9 @@ class AllowList(unittest.TestCase):
             ),
             "a client whose capture moved": (
                 f"{CLIENT}/src/capture.rs", "\n", "binds at the first capture",
+            ),
+            "a client whose window actions moved": (
+                f"{CLIENT}/src/actions.rs", "\n", "binds at the first window action",
             ),
             "no target": ("forge/specs/athanor-dock/athanor-dock.spec", "Name: athanor-dock\n", "no target"),
         }

@@ -164,13 +164,15 @@ fn constraints(width: i32, height: i32) -> BufferConstraints {
 }
 
 impl State {
-    /// The window or the output `source` names, if it is still mapped and of a size that can be
-    /// captured, with that size.
+    /// The window or the output `source` names, if it is still mapped, or minimised, and of a
+    /// size that can be captured, with that size.
     fn captured(&self, source: &ImageCaptureSource) -> Option<(Target, (i32, i32))> {
         let target = match source.user_data().get::<Captured>()? {
+            // A minimised window keeps its thumbnail, drawn from its last buffer.
             Captured::Window(id) => self
                 .space
                 .elements()
+                .chain(self.minimised.iter().map(|(window, _)| window))
                 .find(|window| {
                     window
                         .user_data()

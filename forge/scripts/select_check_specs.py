@@ -6,8 +6,9 @@ Usage: select_check_specs.py BASE OUT_DIR
 Reads the files changed since BASE (git diff BASE...HEAD) and writes:
 
   OUT_DIR/builder     "true" when the change touches the inputs of the builder image (the
-                      flake and forge/builder): the check then builds that image from the
-                      checkout instead of pulling the published one.
+                      flake and forge/builder): build_changed_specs.sh then builds that image
+                      from the checkout instead of running BUILDER_IMAGE. Spec Build Check
+                      does not read it: it looks the checkout's builder up by content hash.
   OUT_DIR/specs.json  the spec directories to build, relative to forge/ (specs/<name>, as
                       run_spec_build.sh takes them), sorted.
 

@@ -392,6 +392,7 @@ def test_console_boots_our_kickstart(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
     )
     try:
         conn, _ = server.accept()
@@ -467,6 +468,7 @@ def test_installed_systems_own_grub_is_not_a_loop(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
     )
     try:
         conn, _ = server.accept()
@@ -475,7 +477,7 @@ def test_installed_systems_own_grub_is_not_a_loop(tmp: pathlib.Path) -> None:
         # Let it type the boot commands, then play back the shape of a good run: the
         # install finishes, the machine restarts, and the system it wrote shows its own
         # GRUB before starting. None of that is a reinstall.
-        time.sleep(14)
+        wait_for_phase(run, "grub-booted")
         conn.sendall(b"Install finished\r\n")
         time.sleep(0.5)
         conn.sendall(b"Athanor kickstart finished\r\n")
@@ -542,14 +544,27 @@ def play_the_monitor(server: socket.socket, received: list[bytes]) -> None:
         return  # the server socket was closed: the test is over
 
 
-def play_first_boot(server: socket.socket) -> socket.socket:
+def wait_for_phase(run: pathlib.Path, name: str, timeout: float = 30) -> None:
+    """Block until the console under test has noted `name` in its phases file. The console
+    notes a phase only after it has acted on it, so this replaces a fixed sleep with the
+    event the sleep stood for."""
+    deadline = time.time() + timeout
+    path = run / "phases.txt"
+    while time.time() < deadline:
+        if path.exists() and name in (l.split()[0] for l in path.read_text().splitlines() if l.strip()):
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"the console never noted {name}")
+
+
+def play_first_boot(server: socket.socket, run: pathlib.Path) -> socket.socket:
     """Play the guest from GRUB to the settings question: the installer finishes, the
     installed system offers its serial login, and each question gets its answer. Returns
     the connection with the settings question typed and not yet answered."""
     conn, _ = server.accept()
     conn.settimeout(2)
     conn.sendall(b"GRUB version 2.12\r\n")
-    time.sleep(14)  # it types the boot commands
+    wait_for_phase(run, "grub-booted")  # it types the boot commands
     conn.sendall(b"Install finished\r\nAthanor kickstart finished\r\n")
     time.sleep(0.5)
 
@@ -616,7 +631,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
     )
     try:
-        conn = play_first_boot(server)
+        conn = play_first_boot(server, run)
         started = time.time()
         conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
         proc.wait(timeout=40)
@@ -681,10 +696,13 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_CONSOLE_HOLD": "1"},
     )
     try:
-        conn = play_first_boot(server)
+        conn = play_first_boot(server, run)
         conn.sendall(b"SETTINGS_ALIVE name-after:3s\r\n")
         typed = typed_until(conn, b"exit", 20)
-        time.sleep(3)
+        # The console notes logged-out in the pass that types exit and clears its tail, so ready
+        # cannot be written until the getty offers a login again.
+        wait_for_phase(run, "logged-out")
+        time.sleep(0.5)  # a settle, as after the shim refusal below
         assert not (run / "ready").exists(), "ready was written before the getty's login"
         assert proc.poll() is None, "the console ended at Settings in the upgrade case"
         conn.sendall(b"\r\nathanor login: ")
@@ -695,7 +713,8 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         # The reboots of the upgrade, seen on the serial line only: a shim that refuses the
         # new kernel is a phase of its own.
         conn.sendall(b"\x1b[0mbad shim signature\r\n")
-        time.sleep(3)
+        wait_for_phase(run, "secure-boot-refused")
+        time.sleep(0.5)  # the pass that noted it would end the run here if it ended it at all
         assert proc.poll() is None, "the console stopped holding"
         conn.settimeout(0.5)
         try:
@@ -1123,7 +1142,7 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
         return [w for w in b"".join(pressed).decode().split() if w != "sendkey"]
 
     def wait_for_keys(count: int) -> None:
-        # monitor.py spends 1.5 s on each key.
+        # monitor.py pauses 1.5 s on each key, scaled by the console's pace.
         deadline = time.time() + 60
         while len(keys()) < count and time.time() < deadline:
             time.sleep(0.1)
@@ -1162,6 +1181,20 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
     phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
     for name in ("mok-password-shown", "mokmanager-shown", "mok-confirmed"):
         assert name in phases, f"{name} not recorded: {sorted(phases)}"
+
+
+def test_pace_accepts_only_a_finite_number_above_zero(tmp: pathlib.Path) -> None:
+    sys.path.insert(0, str(HERE))
+    import pace
+
+    assert pace.parse("1") == 1.0 and pace.parse("0.01") == 0.01
+    for bad in ("0", "-1", "nan", "inf", "-inf", "", "fast"):
+        try:
+            pace.parse(bad)
+        except ValueError as error:
+            assert "ATHANOR_CONSOLE_PACE" in str(error), error
+        else:
+            raise AssertionError(f"pace {bad!r} was accepted")
 
 
 def test_mok_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
@@ -1267,6 +1300,7 @@ def main() -> int:
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,
             test_mok_probe_answers_from_the_guest,
+            test_pace_accepts_only_a_finite_number_above_zero,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")
