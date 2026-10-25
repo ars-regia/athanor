@@ -105,8 +105,7 @@ on an offered global without a row (`os9_every_global_is_classified`). `ext_work
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
 plan): the bar's line carries the workspaces, and the output manager is the control center's.
 `athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
-on windows: the bar and the control center are granted the first, the dock and the launcher
-both.
+on windows: the control center is granted the first, the bar, the dock and the launcher both.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
 takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
 keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
