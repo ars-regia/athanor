@@ -152,7 +152,7 @@ impl State {
     /// Gives the pointer to what is under it now. Locking and unlocking change that without a
     /// motion, and a button goes to the pointer's focus: without this, a click on the lock would
     /// reach the window under it.
-    fn refresh_pointer(&mut self) {
+    pub(crate) fn refresh_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };

@@ -18,6 +18,7 @@ mod layer;
 mod lock;
 mod output_management;
 mod state;
+mod toplevel_state;
 mod udev;
 mod winit;
 mod workspace;

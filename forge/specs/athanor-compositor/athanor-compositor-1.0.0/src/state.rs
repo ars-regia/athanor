@@ -1,12 +1,13 @@
 //! The compositor's state: the protocol globals, the space of windows and its outputs, the seat
 //! and the backend that draws them.
 
-use crate::handlers::HeldCommit;
+use crate::handlers::{shown, HeldCommit};
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
+use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::Group;
@@ -56,7 +57,7 @@ use smithay::wayland::compositor::{
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
-use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
+use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::{
@@ -186,6 +187,10 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
+    /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
+    pub toplevel_states: Vec<AthanorToplevelStateV1>,
+    /// The minimised windows, out of the space, each with the location it is restored at.
+    pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
     pub output_management: OutputManagement,
 
@@ -268,6 +273,7 @@ impl State {
         let lock_state =
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
         crate::workspace::global(&dh);
+        crate::toplevel_state::global(&dh);
         crate::output_management::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
         VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
@@ -333,6 +339,8 @@ impl State {
             lock: None,
             idle_notifier_state,
             workspace_groups: Vec::new(),
+            toplevel_states: Vec::new(),
+            minimised: Vec::new(),
             output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
@@ -540,6 +548,68 @@ impl State {
             relocate(window, kept.loc, serial);
         }
         Some(kept)
+    }
+
+    /// Minimises `window`: it leaves the space, keeping its location, and the keyboard and the
+    /// pointer go to what is under it; it keeps committing until `unminimise`. A window the user
+    /// cannot see, one that has not drawn yet included, is refused: false.
+    pub fn minimise(&mut self, window: &Window) -> bool {
+        let Some(at) = self
+            .space
+            .element_location(window)
+            .filter(|_| shown(window))
+        else {
+            return false;
+        };
+        self.end_window_grab(window);
+        window.set_activated(false);
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.send_pending_configure();
+        }
+        self.space.unmap_elem(window);
+        self.minimised.push((window.clone(), at));
+        if let Some(toplevel) = window.toplevel() {
+            self.refocus(toplevel.wl_surface());
+        }
+        // A button goes to the pointer's focus: a click without a motion must miss the window.
+        self.refresh_pointer();
+        self.request_redraw();
+        true
+    }
+
+    /// Restores a minimised `window` where it was, or centred in `window_area` when no output
+    /// shows that place any more, on top and with the keyboard. False when it is not minimised,
+    /// or draws nothing (it committed a null buffer, as an app hiding into the tray does): it
+    /// stays minimised.
+    pub fn unminimise(&mut self, window: &Window) -> bool {
+        let Some(index) = self.minimised.iter().position(|(kept, _)| kept == window) else {
+            return false;
+        };
+        if !shown(window) {
+            return false;
+        }
+        let (window, mut at) = self.minimised.remove(index);
+        let geometry = window.geometry();
+        let kept = Rectangle::new(at + geometry.loc, geometry.size);
+        let reachable = self
+            .space
+            .outputs()
+            .filter_map(|output| self.space.output_geometry(output))
+            .any(|output| output.overlaps(kept));
+        if !reachable {
+            if let Some(area) = self.window_area() {
+                at = centred(area, geometry);
+            }
+        }
+        self.space.map_element(window.clone(), at, true);
+        // A move answered while it was minimised applies now, and a maximised window takes the
+        // area of now.
+        self.relocated(&window);
+        self.fit_maximised();
+        self.focus(&window);
+        self.refresh_pointer();
+        self.request_redraw();
+        true
     }
 
     /// Fits the maximised windows to `window_area` again, after the layer surfaces' exclusive
@@ -796,6 +866,36 @@ impl State {
             .elements()
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
+    }
+
+    /// The window whose toplevel is `surface`, mapped or minimised.
+    pub fn window_or_minimised(&self, surface: &WlSurface) -> Option<Window> {
+        self.windows()
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .cloned()
+    }
+
+    /// The window the foreign toplevel list names by `handle`, mapped or minimised.
+    pub fn window_by_handle(&self, handle: &ForeignToplevelHandle) -> Option<Window> {
+        self.windows()
+            .find(|w| {
+                w.user_data()
+                    .get::<ForeignToplevelHandle>()
+                    .is_some_and(|own| own.matches(handle))
+            })
+            .cloned()
+    }
+
+    /// Whether `window` is minimised.
+    pub fn is_minimised(&self, window: &Window) -> bool {
+        self.minimised.iter().any(|(kept, _)| kept == window)
+    }
+
+    /// The mapped windows, then the minimised ones.
+    fn windows(&self) -> impl Iterator<Item = &Window> {
+        self.space
+            .elements()
+            .chain(self.minimised.iter().map(|(window, _)| window))
     }
 }
 

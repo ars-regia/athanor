@@ -79,6 +79,13 @@ pub struct HeldCommit {
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
 
+/// Whether the user can see `window` in the space: placed, and still drawing something, since a
+/// client can unmap a placed window by committing a null buffer.
+pub(crate) fn shown(window: &Window) -> bool {
+    let size = window.geometry().size;
+    window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
+}
+
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
@@ -110,17 +117,24 @@ impl CompositorHandler for State {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(window) = self.window_for(&root) {
+            if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
-                self.place(&window);
-                self.relocated(&window);
-                self.anchor_resized(&window);
+                // A minimised window is placed and moved when it is restored (`unminimise`).
+                if !self.is_minimised(&window) {
+                    self.place(&window);
+                    self.relocated(&window);
+                    self.anchor_resized(&window);
+                }
             }
         }
         self.layer_commit(surface);
 
         // The first commit of a toplevel or a popup gets its initial configure.
-        if let Some(toplevel) = self.window_for(surface).as_ref().and_then(Window::toplevel) {
+        if let Some(toplevel) = self
+            .window_or_minimised(surface)
+            .as_ref()
+            .and_then(Window::toplevel)
+        {
             if !toplevel.is_initial_configure_sent() {
                 toplevel.send_configure();
             }
@@ -354,10 +368,7 @@ impl State {
             .space
             .elements()
             .rev()
-            .find(|window| {
-                let size = window.geometry().size;
-                window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
-            })
+            .find(|window| shown(window))
             .cloned();
         match top {
             Some(window) => self.focus(&window),
@@ -426,11 +437,12 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.window_for(surface.wl_surface()) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
                 self.foreign_toplevel_state.remove_toplevel(handle);
             }
             self.space.unmap_elem(&window);
+            self.minimised.retain(|(kept, _)| *kept != window);
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
@@ -497,6 +509,13 @@ impl XdgShellHandler for State {
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
             self.restore(&window);
+        }
+    }
+
+    /// Refused for a window the user cannot see, one that has not drawn yet included.
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.minimise(&window);
         }
     }
 
@@ -661,6 +680,8 @@ impl TabletSeatHandler for State {
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
         self.workspace_output_bound(&output, &wl_output);
+        // A state object made before its client bound the output is sent it now.
+        self.send_toplevel_states();
     }
 }
 
@@ -777,6 +798,12 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
+            // While the session is locked a token restores nothing (L14).
+            if self.lock.is_none() {
+                if let Some(window) = self.window_or_minimised(&surface) {
+                    self.unminimise(&window);
+                }
+            }
             if let Some(window) = self.window_for(&surface) {
                 self.focus(&window);
             }
@@ -804,7 +831,7 @@ fn names(toplevel: &ToplevelSurface) -> (String, String) {
 impl State {
     /// Sends the foreign toplevel list `toplevel`'s new title and app id.
     fn rename(&mut self, toplevel: &ToplevelSurface) {
-        let Some(window) = self.window_for(toplevel.wl_surface()) else {
+        let Some(window) = self.window_or_minimised(toplevel.wl_surface()) else {
             return;
         };
         if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {

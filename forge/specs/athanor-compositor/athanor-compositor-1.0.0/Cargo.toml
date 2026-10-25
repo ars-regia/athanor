@@ -7,6 +7,10 @@ license = "GPL-3.0-or-later"
 description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone C1)"
 
 [dependencies]
+# The generated code of Athanor's own protocols (`toplevel_state.rs`), and the fixture's
+# client bindings of them: the bitfield enums need bitflags.
+bitflags = { workspace = true }
+wayland-scanner = { workspace = true }
 # The revision and its date are in README.md; deny.toml admits this URL and no other git source.
 smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
 # The DRM backend's connector scan, from the same repository and revision; without

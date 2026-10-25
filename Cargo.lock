@@ -436,6 +436,7 @@ dependencies = [
 name = "athanor-compositor"
 version = "1.0.0"
 dependencies = [
+ "bitflags 2.13.1",
  "libc",
  "smithay",
  "smithay-drm-extras",
@@ -444,6 +445,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+ "wayland-scanner",
  "xcursor",
  "zbus",
 ]
