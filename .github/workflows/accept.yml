@@ -143,11 +143,13 @@ jobs:
             iso-test/*.png
             iso-test/serial.log
             iso-test/phases.txt
+            iso-test/screenshots.log
             iso-test/verdict.md
             iso-test/memory.json
             iso-test-sb/*.png
             iso-test-sb/serial.log
             iso-test-sb/phases.txt
+            iso-test-sb/screenshots.log
             iso-test-sb/verdict.md
             iso-test-sb/memory.json
           # A job that failed before the VM started has nothing to upload, and the empty
@@ -260,6 +262,7 @@ jobs:
             iso-test-upgrade/*.png
             iso-test-upgrade/serial.log
             iso-test-upgrade/phases.txt
+            iso-test-upgrade/screenshots.log
             iso-test-upgrade/upgrade-phases.txt
             iso-test-upgrade/upgrade.log
             iso-test-upgrade/upgrade-status
