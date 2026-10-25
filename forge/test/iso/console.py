@@ -560,12 +560,12 @@ def main() -> int:
         print(f"  console: {name} at {time.strftime('%H:%M:%S')}", flush=True)
 
     def boot_with_our_kickstart() -> None:
-        time.sleep(GRUB_SETTLE)
+        time.sleep(GRUB_SETTLE * PACE)
         s.sendall(b"c")  # leave the menu for GRUB's command line
-        time.sleep(BETWEEN_COMMANDS)
+        time.sleep(BETWEEN_COMMANDS * PACE)
         for command in BOOT_COMMANDS:
             s.sendall(command + b"\n")
-            time.sleep(BETWEEN_COMMANDS)
+            time.sleep(BETWEEN_COMMANDS * PACE)
         note("grub-booted")
 
     def ask(command: bytes, wait: float) -> None:
