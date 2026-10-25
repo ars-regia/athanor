@@ -190,7 +190,7 @@ def sway():
     }
     windows = state.get("windows", [])
     if windows:
-        refusals[("activate", windows[0]["app_id"])] = "does not offer zcosmic_toplevel_manager_v1"
+        refusals[("activate", windows[0]["app_id"])] = "does not offer athanor_toplevel_manager_v1"
     expect("sway: the nested compositor's window is listed", bool(windows), lines)
     for steps, reason in refusals.items():
         code, lines = probe(*steps, display=display)
