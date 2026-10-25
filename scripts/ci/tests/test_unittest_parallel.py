@@ -1,10 +1,12 @@
 """scripts/ci/unittest_parallel.py: the parallel runner of a test directory (python3 -B -m unittest discover -s scripts/ci/tests)."""
 
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "unittest_parallel.py"
@@ -70,12 +72,26 @@ class Parallel(unittest.TestCase):
     def test_a_hung_class_is_killed_and_fails_by_name_while_the_others_finish(self):
         self.suite(
             a="import unittest\nclass Fine(unittest.TestCase):\n    def test_x(self): pass\n",
-            b="import time, unittest\nclass Hung(unittest.TestCase):\n    def test_y(self): time.sleep(60)\n",
+            b="import subprocess, sys, time, unittest\nclass Hung(unittest.TestCase):\n    def test_y(self):\n"
+              "        helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+              f"        open({str(self.dir / 'helper.pid')!r}, 'w').write(str(helper.pid))\n"
+              "        time.sleep(60)\n",
         )
-        r = self.run_dir("2", "1")
+        r = self.run_dir("2", "3")
         self.assertEqual(r.returncode, 1, r.stdout)
-        self.assertIn("TIMEOUT: test_b.Hung was killed after 1s", r.stdout)
+        self.assertIn("TIMEOUT: test_b.Hung was killed after 3s", r.stdout)
         self.assertIn("failed: test_b.Hung", r.stdout)
+        pid = int((self.dir / "helper.pid").read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(pid, 9)
+            self.fail("the helper a hung class spawned outlived the runner")
 
 
 if __name__ == "__main__":

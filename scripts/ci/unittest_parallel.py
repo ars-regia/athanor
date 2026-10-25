@@ -16,6 +16,7 @@ Usage: unittest_parallel.py DIR [JOBS [TIMEOUT]]    (JOBS defaults to the number
 import concurrent.futures
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import time
@@ -51,16 +52,18 @@ def classes(directory: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
 def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, int, str, float]:
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(directory), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
     started = time.monotonic()
+    # Its own session, so a timeout kills the helpers the tests spawned as well as the child.
+    child = subprocess.Popen(
+        [sys.executable, "-B", "-m", "unittest", "-v", name],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, start_new_session=True,
+    )
     try:
-        done = subprocess.run(
-            [sys.executable, "-B", "-m", "unittest", "-v", name],
-            capture_output=True, text=True, env=env, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as expired:
-        partial = (expired.stdout or b"") + (expired.stderr or b"")
-        partial = partial.decode(errors="replace") if isinstance(partial, bytes) else partial
-        return name, 124, f"{partial}\nTIMEOUT: {name} was killed after {timeout:g}s\n", time.monotonic() - started
-    return name, done.returncode, done.stdout + done.stderr, time.monotonic() - started
+        output, _ = child.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(child.pid, signal.SIGKILL)
+        output, _ = child.communicate()
+        return name, 124, f"{output}\nTIMEOUT: {name} was killed after {timeout:g}s\n", time.monotonic() - started
+    return name, child.returncode, output, time.monotonic() - started
 
 
 def main(argv: list[str]) -> int:
