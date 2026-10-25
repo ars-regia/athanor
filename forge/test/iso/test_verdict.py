@@ -702,6 +702,7 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         # The console notes logged-out in the pass that types exit and clears its tail, so ready
         # cannot be written until the getty offers a login again.
         wait_for_phase(run, "logged-out")
+        time.sleep(0.5)  # a settle, as after the shim refusal below
         assert not (run / "ready").exists(), "ready was written before the getty's login"
         assert proc.poll() is None, "the console ended at Settings in the upgrade case"
         conn.sendall(b"\r\nathanor login: ")
@@ -1182,6 +1183,20 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
         assert name in phases, f"{name} not recorded: {sorted(phases)}"
 
 
+def test_pace_accepts_only_a_finite_number_above_zero(tmp: pathlib.Path) -> None:
+    sys.path.insert(0, str(HERE))
+    import pace
+
+    assert pace.parse("1") == 1.0 and pace.parse("0.01") == 0.01
+    for bad in ("0", "-1", "nan", "inf", "-inf", "", "fast"):
+        try:
+            pace.parse(bad)
+        except ValueError as error:
+            assert "ATHANOR_CONSOLE_PACE" in str(error), error
+        else:
+            raise AssertionError(f"pace {bad!r} was accepted")
+
+
 def test_mok_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     """The question the guest is asked, run as a shell command against a mokutil stub:
     the SHA-256 of an exported key decides MOK_*, whatever its subject says, an image
@@ -1285,6 +1300,7 @@ def main() -> int:
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,
             test_mok_probe_answers_from_the_guest,
+            test_pace_accepts_only_a_finite_number_above_zero,
         ):
             test(tmp)
             print(f"  ok  {test.__name__}")

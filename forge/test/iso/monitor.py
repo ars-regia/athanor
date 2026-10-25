@@ -8,14 +8,15 @@ or "sendkey ret". The reply is printed, which matters for screendump: the monito
 answers with an error rather than a failure status when it cannot write the file.
 """
 
-import os
 import socket
 import sys
 import time
 
+import pace
+
 # The pauses wait on a real QEMU and guest. The tests' fake monitor answers at once and
 # scales them down with the same variable as console.py; a run leaves it at one.
-PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
+PACE = pace.from_environment()
 
 
 def main() -> int:

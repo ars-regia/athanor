@@ -20,8 +20,8 @@ class Parallel(unittest.TestCase):
         for name, body in modules.items():
             (self.dir / f"test_{name}.py").write_text(textwrap.dedent(body))
 
-    def run_dir(self, jobs="2"):
-        return subprocess.run([sys.executable, "-B", str(SCRIPT), str(self.dir), jobs], capture_output=True, text=True)
+    def run_dir(self, jobs="2", *rest):
+        return subprocess.run([sys.executable, "-B", str(SCRIPT), str(self.dir), jobs, *rest], capture_output=True, text=True)
 
     def test_every_class_of_every_module_runs_and_a_green_suite_passes(self):
         self.suite(
@@ -57,6 +57,25 @@ class Parallel(unittest.TestCase):
         self.suite(a="import unittest\nimport helper\nclass A(unittest.TestCase):\n    def test_x(self): self.assertEqual(helper.VALUE, 3)\n")
         r = self.run_dir()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_module_that_skips_itself_at_import_is_a_skip_with_its_reason(self):
+        self.suite(
+            a="import unittest\nclass A(unittest.TestCase):\n    def test_x(self): pass\n",
+            b="import unittest\nraise unittest.SkipTest('no unix sockets here')\n",
+        )
+        r = self.run_dir()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("skipped module test_b: no unix sockets here", r.stdout)
+
+    def test_a_hung_class_is_killed_and_fails_by_name_while_the_others_finish(self):
+        self.suite(
+            a="import unittest\nclass Fine(unittest.TestCase):\n    def test_x(self): pass\n",
+            b="import time, unittest\nclass Hung(unittest.TestCase):\n    def test_y(self): time.sleep(60)\n",
+        )
+        r = self.run_dir("2", "1")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("TIMEOUT: test_b.Hung was killed after 1s", r.stdout)
+        self.assertIn("failed: test_b.Hung", r.stdout)
 
 
 if __name__ == "__main__":

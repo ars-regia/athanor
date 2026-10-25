@@ -47,6 +47,7 @@ import sys
 import threading
 import time
 
+import pace
 from memory_case import MEMORY_PROBE, MEMORY_PROBE_WAIT
 
 # Marker -> phase name. Order matters only for reporting; each is written once. Colour
@@ -488,7 +489,7 @@ MOK_PROBE = (
 MOK_PROBE_WAIT = 5.0
 # The tests drive a fake guest that answers at once and scale every wait in the login
 # path down through this; the run itself leaves it at one.
-PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
+PACE = pace.from_environment()
 # The upgrade case (run_iso_test.sh with UPDATE_TO): a steady Settings does not end the
 # run. The serial login is ended, since a tty session makes Apply() ask for an
 # administrator (UT6), `ready` is written beside the log once the getty offers its login
