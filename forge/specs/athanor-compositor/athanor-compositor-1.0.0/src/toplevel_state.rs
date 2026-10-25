@@ -1,11 +1,13 @@
 //! athanor-toplevel-state-v1 (doc_own_stack.md OS5, decision 19): the state of each window the
 //! foreign toplevel list names, and the shell's actions on it. The description is Athanor's own,
-//! `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml`; the manager is a
-//! privileged global (OS4).
+//! `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml`. The manager, which
+//! reads, and the actions are two privileged globals (OS4), so a client may read every window's
+//! state without acting on any.
 
 use crate::handlers::shown;
 use crate::identity::Privilege;
 use crate::state::{granted, State};
+use protocol::athanor_toplevel_actions_v1::{self, AthanorToplevelActionsV1};
 use protocol::athanor_toplevel_manager_v1::{self, AthanorToplevelManagerV1};
 use protocol::athanor_toplevel_state_v1::{self, AthanorToplevelStateV1};
 use smithay::desktop::Window;
@@ -51,8 +53,11 @@ pub mod protocol {
     );
 }
 
-/// The user data of the global and of every manager.
+/// The user data of the manager's global and of every manager.
 pub struct ToplevelStates;
+
+/// The user data of the actions' global and of every actions object.
+pub struct ToplevelActions;
 
 /// The bits of the `state` event.
 type Flags = athanor_toplevel_state_v1::State;
@@ -72,9 +77,10 @@ struct Sent {
     outputs: Vec<Output>,
 }
 
-/// Offers the manager to the clients the allow-list grants it.
+/// Offers the manager and the actions, each to the clients the allow-list grants it.
 pub fn global(dh: &DisplayHandle) {
     dh.create_global::<State, AthanorToplevelManagerV1, _>(1, ToplevelStates);
+    dh.create_global::<State, AthanorToplevelActionsV1, _>(1, ToplevelActions);
 }
 
 impl GlobalDispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
@@ -138,6 +144,40 @@ impl Dispatch2<AthanorToplevelManagerV1, State> for ToplevelStates {
                     state.toplevel_states.push(object);
                 }
             }
+            Request::Destroy => {}
+        }
+    }
+}
+
+impl GlobalDispatch2<AthanorToplevelActionsV1, State> for ToplevelActions {
+    fn bind(
+        &self,
+        _state: &mut State,
+        _dh: &DisplayHandle,
+        _client: &Client,
+        resource: New<AthanorToplevelActionsV1>,
+        data_init: &mut DataInit<'_, State>,
+    ) {
+        data_init.init(resource, ToplevelActions);
+    }
+
+    fn can_view(&self, client: &Client) -> bool {
+        granted(client, Privilege::ToplevelActions)
+    }
+}
+
+impl Dispatch2<AthanorToplevelActionsV1, State> for ToplevelActions {
+    fn request(
+        &self,
+        state: &mut State,
+        _client: &Client,
+        _actions: &AthanorToplevelActionsV1,
+        request: athanor_toplevel_actions_v1::Request,
+        _dh: &DisplayHandle,
+        _data_init: &mut DataInit<'_, State>,
+    ) {
+        use athanor_toplevel_actions_v1::Request;
+        match request {
             Request::Activate { toplevel, seat } => {
                 let Some(window) = acted_on(state, &toplevel) else {
                     return;

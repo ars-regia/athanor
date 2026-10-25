@@ -36,12 +36,14 @@ pub enum Privilege {
     /// `zwp_input_method_manager_v2`: the seat's input method, which is told the focused text
     /// field's text, commits text into it and may take the keyboard.
     InputMethod,
-    /// `athanor_toplevel_manager_v1`: every window's state, and the shell's actions on it.
+    /// `athanor_toplevel_manager_v1`: every window's state, read only.
     ToplevelState,
+    /// `athanor_toplevel_actions_v1`: every window activated, minimised, restored or closed.
+    ToplevelActions,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 12] = [
+    const ALL: [(Self, &'static str); 13] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -60,6 +62,7 @@ impl Privilege {
         (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
         (Self::InputMethod, "zwp_input_method_manager_v2"),
         (Self::ToplevelState, "athanor_toplevel_manager_v1"),
+        (Self::ToplevelActions, "athanor_toplevel_actions_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -446,6 +449,48 @@ mod tests {
         let shipped =
             AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
         assert!(!shipped.grants(&bar(), BAR_PID, &Files).is_empty());
+    }
+
+    /// The shipped allow-list lets the bar and the control center read every window's state, and
+    /// only the dock and the launcher act on windows.
+    #[test]
+    fn only_the_dock_and_the_launcher_act_on_windows() {
+        /// Every path is the file of every process.
+        struct Any;
+        impl Process for Any {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn executable_file(&self, _: i32) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+            fn file(&self, _: &Path) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+        }
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (name, acts) in [
+            ("athanor-bar", false),
+            ("athanor-control-center", false),
+            ("athanor-dock", true),
+            ("athanor-launcher", true),
+        ] {
+            let client = Identity {
+                executable: format!("/usr/bin/{name}").into(),
+                unit: Some(format!("{name}.service")),
+            };
+            let granted = shipped.grants(&client, BAR_PID, &Any);
+            assert!(granted.contains(&Privilege::ToplevelState), "{name} reads");
+            assert_eq!(
+                granted.contains(&Privilege::ToplevelActions),
+                acts,
+                "{name} acts"
+            );
+        }
     }
 
     /// A process whose pid cannot be read has no identity.
