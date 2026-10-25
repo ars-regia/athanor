@@ -65,6 +65,7 @@ use crate::protocols::toplevel_info::client::{
 };
 use crate::protocols::toplevel_management::client::zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1;
 use crate::protocols::toplevel_state::client::{
+    athanor_toplevel_actions_v1::AthanorToplevelActionsV1,
     athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
     athanor_toplevel_state_v1::{self, AthanorToplevelStateV1},
 };
@@ -453,8 +454,8 @@ impl Client {
             .ok_or_else(|| Error::Connection("the connection has no socket path".into()))
     }
 
-    /// Through cosmic-comp's manager, else athanor-compositor's: no compositor offers both,
-    /// so the order never chooses, and the COSMIC path stays as it was (plan D3).
+    /// Through cosmic-comp's manager, else athanor-compositor's actions: no compositor offers
+    /// both, so the order never chooses, and the COSMIC path stays as it was (plan D3).
     fn toplevel_action(&self, window: WindowId, action: Action) -> Result<(), Error> {
         let state = self.inner.live_state()?;
         if let Some(manager) = &state.globals.toplevel_manager {
@@ -466,17 +467,17 @@ impl Client {
                 Action::Close => manager.close(toplevel),
             }
         } else {
-            let manager = state
+            let actions = state
                 .globals
-                .athanor_toplevel
+                .athanor_actions
                 .as_ref()
-                .ok_or(Error::Unavailable("athanor_toplevel_manager_v1"))?;
+                .ok_or(Error::Unavailable("athanor_toplevel_actions_v1"))?;
             let toplevel = &state.toplevels.get(&window).ok_or(Error::NoWindow)?.ext;
             match action {
-                Action::Activate => manager.activate(toplevel, state.seat()?),
-                Action::Minimize => manager.set_minimized(toplevel),
-                Action::Unminimize => manager.unset_minimized(toplevel),
-                Action::Close => manager.close(toplevel),
+                Action::Activate => actions.activate(toplevel, state.seat()?),
+                Action::Minimize => actions.set_minimized(toplevel),
+                Action::Unminimize => actions.unset_minimized(toplevel),
+                Action::Close => actions.close(toplevel),
             }
         }
         drop(state);
@@ -808,6 +809,8 @@ pub(crate) struct Globals {
     toplevel_info: Option<ZcosmicToplevelInfoV1>,
     toplevel_manager: Option<ZcosmicToplevelManagerV1>,
     athanor_toplevel: Option<AthanorToplevelManagerV1>,
+    /// Offered apart from the manager, to the clients that act on windows (plan D2).
+    athanor_actions: Option<AthanorToplevelActionsV1>,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
@@ -890,6 +893,7 @@ impl State {
             toplevel_info: bind(globals, qh, 2..=3),
             toplevel_manager: bind(globals, qh, 1..=4),
             athanor_toplevel: bind(globals, qh, 1..=1),
+            athanor_actions: bind(globals, qh, 1..=1),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
             // Version 3 deprecates the screen filter events of version 2.
@@ -1575,6 +1579,7 @@ macro_rules! ignore_events {
 ignore_events!(
     ZcosmicToplevelManagerV1,
     AthanorToplevelManagerV1,
+    AthanorToplevelActionsV1,
     ZcosmicWorkspaceManagerV2,
     ZcosmicKeyboardLayoutManagerV1,
     WpSecurityContextManagerV1,

@@ -7,7 +7,8 @@ client built without GTK (cc-launch: a plain Wayland connection, GLib's main con
 calloop loop) reads the output from wl_output and launches a desktop entry behind a
 security context, through fake_systemd.py. Under RIG_COMPOSITOR=athanor the probe runs
 against athanor-compositor instead, as its rig unit (rig-cc-probe.service, which
-rig-privileged-clients grants the toplevel list and athanor_toplevel_manager_v1), and
+rig-privileged-clients grants the toplevel list, athanor_toplevel_manager_v1 and
+athanor_toplevel_actions_v1), and
 outside that unit sees no window. Runs as the scene's RIG_HOLD; checks every expectation and
 exits 1 if any does not hold.
 """
@@ -228,7 +229,7 @@ def sway():
     }
     windows = state.get("windows", [])
     if windows:
-        refusals[("activate", windows[0]["app_id"])] = "does not offer athanor_toplevel_manager_v1"
+        refusals[("activate", windows[0]["app_id"])] = "does not offer athanor_toplevel_actions_v1"
     expect("sway: the nested compositor's window is listed", bool(windows), lines)
     for steps, reason in refusals.items():
         code, lines = probe(*steps, display=display)

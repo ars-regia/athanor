@@ -156,7 +156,7 @@ git commit -m "feat(compositor): serve the shell's activate, minimise, restore a
 Run: `forge/test/shell/rig.sh cargo test -p athanor-compositor-client window_state_from_athanor` (the crate links GTK)
 Expected: compile error, no associated function `from_athanor` on `WindowState`.
 
-- [ ] **Step 3: Implement** as the Interfaces block says; the sway refusal in `compositor_e2e.py` becomes `"does not offer athanor_toplevel_manager_v1"`.
+- [ ] **Step 3: Implement** as the Interfaces block says; the sway refusal in `compositor_e2e.py` becomes `"does not offer athanor_toplevel_actions_v1"`.
 - [ ] **Step 4: Run it to see it pass**, then `forge/test/shell/rig.sh build-compositor-client` and `forge/test/shell/rig.sh compositor-e2e`: every line `ok`, exit 0 (cosmic-comp answers through its own manager; sway refuses with the new text). Commit:
 
 ```bash
@@ -167,7 +167,7 @@ git commit -m "feat(compositor-client): act on windows through athanor_toplevel_
 ### Task 5: The client against athanor-compositor in the rig
 
 **Files:**
-- Modify: `forge/test/shell/compositor_e2e.py`; `forge/test/shell/rig.sh` (`compositor-e2e`: under `RIG_COMPOSITOR=athanor`, `require athanor-compositor build-compositor`); `forge/test/shell/rig-privileged-clients` (`/usr/bin/cc-probe rig-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1`); `system/athanor-compositor-client/examples/cc-probe.rs` (`window()` prints `"outputs": window.outputs`)
+- Modify: `forge/test/shell/compositor_e2e.py`; `forge/test/shell/rig.sh` (`compositor-e2e`: under `RIG_COMPOSITOR=athanor`, `require athanor-compositor build-compositor`); `forge/test/shell/rig-privileged-clients` (`/usr/bin/cc-probe rig-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1`); `system/athanor-compositor-client/examples/cc-probe.rs` (`window()` prints `"outputs": window.outputs`)
 
 **Interfaces:**
 - `probe(*steps, display=None, unit=False)`: with `unit`, runs `/repo/forge/test/shell/in-unit.sh rig-cc-probe.service /out/bin/cc-probe ...`, which execs the probe from `/usr/bin` in its unit so the allow-list grants it. The bottom of the script dispatches: `RIG_COMPOSITOR=athanor` runs `athanor()` only (no parent sway there); otherwise `cosmic_comp()`, `launch()`, `sway()` as today.
