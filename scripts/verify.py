@@ -2079,6 +2079,44 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7-bis. shell-failures — a test script does not hide a failure
+# --------------------------------------------------------------------------- #
+
+# A line of a script under forge/test/ that discards stderr, or the whole output, or swallows a
+# failure with `|| true`: AGENTS.md "No hidden failures". Measured on the repo on 2026-10-25;
+# like BUDGET it only goes down. A probe whose failure is the answer (`kill -0 "$pid" 2> /dev/null`)
+# counts too, until it is written so that the check can tell it from a hidden crash.
+SHELL_BUDGET = 15
+SHELL_TEST_DIR = "forge/test"
+HIDDEN_FAILURE = re.compile(
+    r"2>\s*/dev/null|&>\s*/dev/null|>\s*/dev/null\s+2>&1|\|\|\s*true\b|2>&1\s*\|\|\s*(?:break|continue|:)")
+SHELL_COMMENT = re.compile(r"(?:^|\s)#.*")
+
+
+def hidden_failures(text):
+    """The numbers of the lines of shell `text` with a construct that hides a failure; the
+    text of a comment does not count."""
+    return [i for i, line in enumerate(text.split("\n"), 1)
+            if HIDDEN_FAILURE.search(SHELL_COMMENT.sub("", line))]
+
+
+@check("shell-failures", "Il budget di fallimenti nascosti negli script di forge/test non cresce")
+def check_shell_failures():
+    r = Result()
+    found = [f"{rel(p)}:{i}" for p in sorted(walk(ROOT / SHELL_TEST_DIR, ".sh"))
+             for i in hidden_failures(read(p))]
+    if len(found) > SHELL_BUDGET:
+        # One finding per line, as for panics, so that known-red.txt can list each.
+        for at in found:
+            r.fail(f"{at}: hides a failure, over the budget of {SHELL_BUDGET}; "
+                   "send the output to a log or report it on stderr")
+        r.note(f"shell-failures: {len(found)} occorrenze, budget {SHELL_BUDGET}")
+    elif len(found) < SHELL_BUDGET:
+        r.note(f"shell-failures: {len(found)} (budget {SHELL_BUDGET}) — abbassa SHELL_BUDGET in scripts/verify.py")
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7a. allow-list — a shell client that needs a privileged global has its line
 # --------------------------------------------------------------------------- #
 
