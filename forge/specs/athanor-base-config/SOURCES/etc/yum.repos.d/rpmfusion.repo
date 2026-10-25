@@ -1,8 +1,8 @@
 # Fedora 45 pre-release layout, the one of RPM Fusion's own rpmfusion-free-release 45-0.2: until
 # Fedora 45 GA the *-updates-released metalinks answer 404, so the updates repos are disabled and
 # the updates-testing repos are enabled, as Fedora's own updates-testing is. At GA, set enabled=1
-# on the updates repos and enabled=0 on the updates-testing repos; system/nvidia/gate.sh fails the
-# image build until then.
+# on the updates repos and enabled=0 on the updates-testing repos. The switch is tracked in #802;
+# no image check enforces it.
 
 [rpmfusion-free]
 name=RPM Fusion for Fedora $releasever - Free

@@ -80,8 +80,8 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 %changelog
 * Sun Oct 25 2026 Athanor Forge <forge@athanor.os> - 45.0.0-2
 - rpmfusion.repo: Fedora 45 pre-release layout. The updates repos are disabled and the updates-testing
-  repos enabled, because the *-updates-released metalinks answer 404 until GA; the image gate fails
-  until the layout is switched back at GA
+  repos enabled, because the *-updates-released metalinks answer 404 until GA; the switch back at GA
+  is tracked in #802
 
 * Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 45.0.0-1
 - Fedora 45 base: os-release names release 45 (VERSION, VERSION_ID, PRETTY_NAME, CPE_NAME,
