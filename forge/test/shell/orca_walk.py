@@ -3,7 +3,8 @@
 
 doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface. Run as
 RIG_HOLD beside the surface. Starts Orca with a debug file, waits until it has presented the
-focused window, presses each <key> through wtype's virtual keyboard, quits Orca through its
+focused window, presses each <key> through wtype's virtual keyboard (under RIG_COMPOSITOR=athanor run by
+in-unit.sh as rig-wtype.service, the unit that holds that grant), quits Orca through its
 D-Bus service (Orca writes its debug file out when it exits), and writes every utterance, one
 per line, to <transcript>. The debug file stays beside it as <transcript>.log.
 
@@ -11,6 +12,7 @@ A key is an XKB key name, with modifiers before it joined by "+" ("shift+F10"), 
 after it presses it N times ("Tab*11").
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -21,6 +23,12 @@ SERVICE = "org.gnome.Orca.Service"
 # Orca logs each utterance quoted, then the voice it speaks with: SPEECH OUTPUT: 'text' {voice}.
 SPEECH = re.compile(r"SPEECH OUTPUT: '(.*?)'(?: \{|$)", re.MULTILINE)
 STARTUP, PAUSE = 30, 1.5
+# Under athanor-compositor only an allow-listed unit holds the virtual keyboard (rig-privileged-clients).
+IN_UNIT = ["/repo/forge/test/shell/in-unit.sh", "rig-wtype.service", "/usr/bin/wtype"]
+
+
+def wtype():
+    return IN_UNIT if os.environ.get("RIG_COMPOSITOR") == "athanor" else ["wtype"]
 
 
 def owned():
@@ -66,7 +74,7 @@ def walk(orca, keys):
         time.sleep(0.5)
     time.sleep(3 * PAUSE)
     for key, press in presses(keys):
-        if error := run(["wtype", *press]):
+        if error := run([*wtype(), *press]):
             return f"wtype did not press {key}: {error}"
         time.sleep(PAUSE)
     quit_orca = [

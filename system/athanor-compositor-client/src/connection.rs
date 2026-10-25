@@ -37,10 +37,6 @@ use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
     ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
-#[cfg(feature = "gtk")]
-use wayland_protocols::ext::image_capture_source::v1::client::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1;
-#[cfg(feature = "gtk")]
-use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1;
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
@@ -68,6 +64,10 @@ use crate::protocols::toplevel_info::client::{
     zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
 };
 use crate::protocols::toplevel_management::client::zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1;
+use crate::protocols::toplevel_state::client::{
+    athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
+    athanor_toplevel_state_v1::{self, AthanorToplevelStateV1},
+};
 use crate::protocols::workspace_v2::client::{
     zcosmic_workspace_handle_v2::{self, TilingState, ZcosmicWorkspaceHandleV2},
     zcosmic_workspace_manager_v2::ZcosmicWorkspaceManagerV2,
@@ -105,6 +105,8 @@ pub(crate) fn fresh() -> u64 {
 
 /// The shell's view of the compositor. Every call happens on the thread that runs GLib's
 /// default main context: GTK's main thread, or the thread of a calloop loop that runs it.
+/// One per Wayland connection: athanor-compositor allows a connection one state object of
+/// each window, and ends a connection that makes a second (`already_made`).
 pub struct Client {
     pub(crate) inner: Rc<Inner>,
 }
@@ -124,6 +126,9 @@ pub(crate) struct Inner {
     gdk: RefCell<Option<Gdk>>,
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
+    /// The compositor's globals, for those bound only when a call needs them: the capture
+    /// globals and the window actions, which a client that never captures or acts never binds.
+    pub(crate) registry: GlobalList,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
     handler: RefCell<Option<Handler>>,
@@ -151,9 +156,10 @@ impl Drop for Inner {
 }
 
 impl Client {
-    /// Binds what the compositor offers and reads the initial state. A global the
-    /// compositor does not offer is not an error: its part of the API stays empty, and its
-    /// actions return [`Error::Unavailable`].
+    /// Binds what the compositor offers and reads the initial state; the capture globals
+    /// wait for the first [`Client::capture`]. A global the compositor does not offer is not
+    /// an error: its part of the API stays empty, and its actions return
+    /// [`Error::Unavailable`].
     #[cfg(feature = "gtk")]
     pub fn connect(display: &gdk::Display) -> Result<Client, Error> {
         let wayland = display
@@ -211,6 +217,7 @@ impl Client {
             gdk: RefCell::new(None),
             connection,
             qh,
+            registry: globals,
             queue: RefCell::new(queue),
             state: RefCell::new(state),
             handler: RefCell::new(None),
@@ -279,31 +286,6 @@ impl Client {
     pub fn accessibility(&self) -> Option<Accessibility> {
         let state = self.inner.state.borrow();
         state.globals.a11y.as_ref().map(|_| state.accessibility)
-    }
-
-    pub fn activate(&self, window: WindowId) -> Result<(), Error> {
-        let state = self.inner.live_state()?;
-        let manager = state.toplevel_manager()?;
-        let seat = state
-            .globals
-            .seat
-            .as_ref()
-            .ok_or(Error::Unavailable("wl_seat"))?;
-        manager.activate(state.cosmic_toplevel(window)?, seat);
-        drop(state);
-        self.flush()
-    }
-
-    pub fn minimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::set_minimized)
-    }
-
-    pub fn unminimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::unset_minimized)
-    }
-
-    pub fn close(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::close)
     }
 
     pub fn set_tiling(&self, workspace: WorkspaceId, tiling: Tiling) -> Result<(), Error> {
@@ -451,17 +433,6 @@ impl Client {
             .map(str::to_owned)
             .or_else(|| self.inner.display_name())
             .ok_or_else(|| Error::Connection("the connection has no socket path".into()))
-    }
-
-    fn toplevel_request(
-        &self,
-        window: WindowId,
-        request: impl FnOnce(&ZcosmicToplevelManagerV1, &ZcosmicToplevelHandleV1),
-    ) -> Result<(), Error> {
-        let state = self.inner.live_state()?;
-        request(state.toplevel_manager()?, state.cosmic_toplevel(window)?);
-        drop(state);
-        self.flush()
     }
 
     pub(crate) fn flush(&self) -> Result<(), Error> {
@@ -779,25 +750,28 @@ fn active_state(enabled: bool) -> ActiveState {
 #[derive(Default)]
 pub(crate) struct Globals {
     toplevel_info: Option<ZcosmicToplevelInfoV1>,
-    toplevel_manager: Option<ZcosmicToplevelManagerV1>,
+    pub(crate) toplevel_manager: Option<ZcosmicToplevelManagerV1>,
+    athanor_toplevel: Option<AthanorToplevelManagerV1>,
+    /// athanor-compositor's window actions, bound at the first action (plan D2).
+    pub(crate) actions: crate::actions::Globals,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
     keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     a11y: Option<CosmicA11yManagerV1>,
     security_context: Option<WpSecurityContextManagerV1>,
-    /// The window pictures, GDK textures: bound only with the `gtk` feature.
+    /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
+    /// globals at the first capture.
     #[cfg(feature = "gtk")]
     pub(crate) shm: Option<wl_shm::WlShm>,
     #[cfg(feature = "gtk")]
-    pub(crate) capture_sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
-    #[cfg(feature = "gtk")]
-    pub(crate) image_copy: Option<ExtImageCopyCaptureManagerV1>,
+    pub(crate) capture: crate::capture::Globals,
 }
 
 pub(crate) struct Toplevel {
     pub(crate) ext: ExtForeignToplevelHandleV1,
     cosmic: Option<ZcosmicToplevelHandleV1>,
+    athanor: Option<AthanorToplevelStateV1>,
 }
 
 struct WorkspaceHandles {
@@ -830,7 +804,7 @@ pub(crate) struct State {
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
 }
 
-fn bind<I>(
+pub(crate) fn bind<I>(
     globals: &GlobalList,
     qh: &QueueHandle<State>,
     versions: RangeInclusive<u32>,
@@ -861,6 +835,8 @@ impl State {
         state.globals = Globals {
             toplevel_info: bind(globals, qh, 2..=3),
             toplevel_manager: bind(globals, qh, 1..=4),
+            athanor_toplevel: bind(globals, qh, 1..=1),
+            actions: crate::actions::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
             // Version 3 deprecates the screen filter events of version 2.
@@ -869,9 +845,7 @@ impl State {
             #[cfg(feature = "gtk")]
             shm: bind(globals, qh, 1..=1),
             #[cfg(feature = "gtk")]
-            capture_sources: bind(globals, qh, 1..=1),
-            #[cfg(feature = "gtk")]
-            image_copy: bind(globals, qh, 1..=1),
+            capture: crate::capture::Globals::default(),
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
         };
@@ -913,14 +887,17 @@ impl State {
             .collect()
     }
 
-    fn toplevel_manager(&self) -> Result<&ZcosmicToplevelManagerV1, Error> {
+    pub(crate) fn seat(&self) -> Result<&wl_seat::WlSeat, Error> {
         self.globals
-            .toplevel_manager
+            .seat
             .as_ref()
-            .ok_or(Error::Unavailable("zcosmic_toplevel_manager_v1"))
+            .ok_or(Error::Unavailable("wl_seat"))
     }
 
-    fn cosmic_toplevel(&self, window: WindowId) -> Result<&ZcosmicToplevelHandleV1, Error> {
+    pub(crate) fn cosmic_toplevel(
+        &self,
+        window: WindowId,
+    ) -> Result<&ZcosmicToplevelHandleV1, Error> {
         self.toplevels
             .get(&window)
             .ok_or(Error::NoWindow)?
@@ -934,6 +911,24 @@ impl State {
             .a11y
             .as_ref()
             .ok_or(Error::Unavailable("cosmic_a11y_manager_v1"))
+    }
+
+    // The compositor names an output in reply to its bind, before it can report a toplevel
+    // on it.
+    fn output_enter(&mut self, id: &WindowId, output: &wl_output::WlOutput) {
+        let name = self.output_names.get(&output.id());
+        if let (Some(window), Some(name)) = (self.windows.pending(id), name) {
+            if !window.outputs.contains(name) {
+                window.outputs.push(name.clone());
+            }
+        }
+    }
+
+    fn output_leave(&mut self, id: &WindowId, output: &wl_output::WlOutput) {
+        let name = self.output_names.get(&output.id());
+        if let (Some(window), Some(name)) = (self.windows.pending(id), name) {
+            window.outputs.retain(|entered| entered != name);
+        }
     }
 
     fn push_window(&mut self, change: Change<Window>) {
@@ -1193,6 +1188,12 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
             .toplevel_info
             .as_ref()
             .map(|info| info.get_cosmic_toplevel(&toplevel, qh, id));
+        // COSMIC's extension first (plan D3). One state object per window: the compositor
+        // ends the connection on a second.
+        let athanor = match (&cosmic, &state.globals.athanor_toplevel) {
+            (None, Some(manager)) => Some(manager.get_toplevel_state(&toplevel, qh, id)),
+            _ => None,
+        };
         state.windows.insert(
             id,
             Window {
@@ -1208,6 +1209,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
             Toplevel {
                 ext: toplevel,
                 cosmic,
+                athanor,
             },
         );
     }
@@ -1255,6 +1257,9 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
                 if let Some(toplevel) = state.toplevels.remove(id) {
                     if let Some(cosmic) = toplevel.cosmic {
                         cosmic.destroy();
+                    }
+                    if let Some(athanor) = toplevel.athanor {
+                        athanor.destroy();
                     }
                     toplevel.ext.destroy();
                 }
@@ -1304,23 +1309,47 @@ impl Dispatch<ZcosmicToplevelHandleV1, WindowId> for State {
                     window.state = WindowState::from_cosmic(&array);
                 }
             }
-            // The compositor names an output in reply to its bind, before it can report a
-            // toplevel on it.
             zcosmic_toplevel_handle_v1::Event::OutputEnter { output } => {
-                let name = state.output_names.get(&output.id());
-                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
-                    if !window.outputs.contains(name) {
-                        window.outputs.push(name.clone());
-                    }
-                }
+                state.output_enter(id, &output);
             }
             zcosmic_toplevel_handle_v1::Event::OutputLeave { output } => {
-                let name = state.output_names.get(&output.id());
-                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
-                    window.outputs.retain(|entered| entered != name);
-                }
+                state.output_leave(id, &output);
             }
             _ => {}
+        }
+    }
+}
+
+impl Dispatch<AthanorToplevelStateV1, WindowId> for State {
+    fn event(
+        state: &mut Self,
+        _: &AthanorToplevelStateV1,
+        event: athanor_toplevel_state_v1::Event,
+        id: &WindowId,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            athanor_toplevel_state_v1::Event::State { state: flags } => {
+                let flags = match flags {
+                    WEnum::Value(flags) => flags.bits(),
+                    WEnum::Unknown(flags) => flags,
+                };
+                if let Some(window) = state.windows.pending(id) {
+                    window.state = WindowState::from_athanor(flags);
+                }
+            }
+            athanor_toplevel_state_v1::Event::OutputEnter { output } => {
+                state.output_enter(id, &output);
+            }
+            athanor_toplevel_state_v1::Event::OutputLeave { output } => {
+                state.output_leave(id, &output);
+            }
+            athanor_toplevel_state_v1::Event::Done => {
+                if let Some(change) = state.windows.commit(id) {
+                    state.push_window(change);
+                }
+            }
         }
     }
 }
@@ -1495,6 +1524,7 @@ macro_rules! ignore_events {
 
 ignore_events!(
     ZcosmicToplevelManagerV1,
+    AthanorToplevelManagerV1,
     ZcosmicWorkspaceManagerV2,
     ZcosmicKeyboardLayoutManagerV1,
     WpSecurityContextManagerV1,

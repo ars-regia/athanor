@@ -251,8 +251,6 @@ pub struct Dock {
 impl Dock {
     pub fn new(source: Source, favorites_file: Option<PathBuf>, client: Option<Client>) -> Dock {
         let queue: Queue = Rc::default();
-        let layout = source.layout();
-        tracing::info!(layout = ?layout, "layout applied");
         let client = client.map(Rc::new);
         if let Some(client) = &client {
             let queue = queue.clone();
@@ -267,24 +265,27 @@ impl Dock {
                 }
             });
         }
-        // The layout's layers and the favourites file share these directories.
-        let mut watches = Vec::new();
-        for dir in source.watched() {
+        // The layout's layers and the favourites file share these directories. Armed
+        // before the layout and the favourites are read, so that a write while the dock
+        // starts (the bar's first-session pick) is read or reported, never lost.
+        let (layout, watches) = source.watch(|dir| {
             // A directory that does not exist yet is watched all the same.
-            match gio::File::for_path(&dir)
+            match gio::File::for_path(dir)
                 .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
             {
                 Ok(monitor) => {
                     let queue = queue.clone();
                     monitor
                         .connect_changed(move |_, _, _, _| queue.borrow_mut().push(Change::Files));
-                    watches.push(monitor);
+                    Some(monitor)
                 }
                 Err(err) => {
                     tracing::warn!(error = %err, dir = %dir.display(), "cannot watch; changes there apply at the next start");
+                    None
                 }
             }
-        }
+        });
+        tracing::info!(layout = ?layout, "layout applied");
         let watched = queue.clone();
         appearance::watch(move |current| watched.borrow_mut().push(Change::Appearance(current)));
         let apps_monitor = gio::AppInfoMonitor::get();

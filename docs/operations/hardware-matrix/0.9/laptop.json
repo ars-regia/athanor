@@ -1,0 +1,163 @@
+{
+  "host": {
+    "digest": "sha256:e04fba2ad715e92807e98de8667c262a6f01a21729d57068fa7c03ea31ecf5c9",
+    "hostname": "athanor",
+    "image": "ostree-image-signed:docker://ghcr.io/ars-regia/athanor-system:latest",
+    "kernel": "7.2.11-300.azoth.fc45.x86_64",
+    "version": "43.20261024.468"
+  },
+  "machine": "laptop",
+  "release": "0.9",
+  "rows": {
+    "audio": {
+      "at": "2026-10-24T13:24:32+00:00",
+      "evidence": "speaker to microphone loopback on 43.20261024.468, 1 kHz tone, Goertzel amplitude: 0.4 in silence, 67 at sink volume 0.25, 970 at 0.6 (source volume 0.2); volumes restored to 1.0",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "avc": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "no denial",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "battery": {
+      "at": "2026-10-24T13:21:07+00:00",
+      "evidence": "BAT0 100 %",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "bluetooth-adapter": {
+      "at": "2026-10-24T13:21:07+00:00",
+      "evidence": "Controller XX:XX:XX:XX:XX:XX (public), powered yes",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "bluetooth-pair": {
+      "at": "2026-10-18T11:17:00+00:00",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Ermete 9a paired from the bar popover with the PIN confirmed on both screens: paired, bonded, trusted, connected",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "camera": {
+      "at": "2026-10-24T13:24:32+00:00",
+      "evidence": "/dev/video0: frame captured with gst-launch v4l2src on 43.20261024.468 shows the room; frames deleted after the check",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "dead-keys": {
+      "at": "2026-10-24T13:50:57+00:00",
+      "evidence": "on 43.20261024.468, with the fix of #602 (#603) in the image: at the greeter, us(intl), grave+a gives \u00e0 and acute+e gives \u00e9 (maintainer); in the session (gnome-text-editor) the same was typed on 43.20261018.394 on 2026-10-18",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "disk-unlock": {
+      "at": "2026-10-18T11:19:46+00:00",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: TPM2 plus PIN (athanor-uki-enroll, PCR 7) unlocks on 2026-10-18; an empty PIN does not reach the passphrase, as doc_platform_experience.md says (only the TPM lockout does); recovery key enrolled; the passphrase path is covered on the desktop",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "failed-units": {
+      "at": "2026-10-24T13:21:07+00:00",
+      "evidence": "none",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "firmware-outside-image": {
+      "at": "2026-10-24T13:24:32+00:00",
+      "evidence": "none on 43.20261024.468: iwlwifi 8265-36, ibt-12-16, i915 kbl_dmc v1.4 from the image; firmware_class.path empty; no /etc/firmware or /var/lib/firmware",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "gtk-gpu": {
+      "at": "2026-10-24T13:24:32+00:00",
+      "evidence": "GSK_DEBUG=renderer gnome-text-editor on 43.20261024.468: GskVulkanRenderer (i915)",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "kernel": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "7.2.11-300.azoth.fc45.x86_64",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "laptop-keys": {
+      "at": "2026-10-18T11:07:13+00:00",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: brightness and volume keys with the indicator (backlight 7500 to 1 and back, volume 0.20 to 1.25 and back); lid closed: deep suspend, lid opened: resumed, session and shell back",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "network": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "wifi:connected",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "output-scale": {
+      "at": "2026-10-18T10:23:47+00:00",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: eDP-1 at 150 % with cosmic-randr: bar, dock and launcher sharp and unclipped in a grim capture; restored to 100 %",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "outputs-hotplug": {
+      "at": "2026-10-24T13:50:57+00:00",
+      "evidence": "on 43.20261024.468: Dell AW2523HF plugged on HDMI-A-1 and pulled again; the compositor enabled HDMI-A-1 at 0,0 beside eDP-1 and dropped it after the pull; one bar and one dock on each output by eye (maintainer); bar, dock and shelld never restarted, no compositor error. i915 again logged an HPD interrupt storm on HDMI-A-1 and switched to polling, which delays the pull by a few seconds",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "secure-boot": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "SecureBoot enabled",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "selinux": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "Enforcing",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "shell-units": {
+      "at": "2026-10-24T13:21:07+00:00",
+      "evidence": "athanor-bar.service active, athanor-dock.service active, athanor-shelld.service active",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "signed-origin": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "ostree-image-signed:docker://ghcr.io/ars-regia/athanor-system:latest sha256:e04fba2ad715e92807e98de8667c262a6f01a21729d57068fa7c03ea31ecf5c9",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "suspend-resume": {
+      "at": "2026-10-24T13:46:33+00:00",
+      "evidence": "on 43.20261024.468: rtcwake -m no -s 40, then systemctl suspend through logind (deep, S3): cosmic-greeter locked the session before sleep, woke by the RTC alarm, lock screen shown and unlocked with the password (maintainer), bar/dock/shelld active, no failed unit; the only kernel errors after resume (iwlwifi debugfs, hci0 features -16) also appear at boot",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "switch-verified": {
+      "at": "2026-10-24T13:24:57+00:00",
+      "evidence": "sudo scripts/switch-verified.sh ghcr.io/ars-regia/athanor-system:latest (script sha256 aae87040, origin/iso-v0 52975be2), run under systemd-run on 2026-10-24 on the 0.9 candidate: exit 0, bootc reported the image specification unchanged and staged nothing. bootc status: booted 43.20261024.468, digest sha256:e04fba2ad715e92807e98de8667c262a6f01a21729d57068fa7c03ea31ecf5c9 (build 40078211020, ee2ac671, the digest :latest serves), origin registry:ghcr.io/ars-regia/athanor-system:latest with signature policy containerPolicy",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "usb-internal": {
+      "at": "2026-10-24T13:21:06+00:00",
+      "evidence": "snapshot done; unit result success; 6 devices, blocked: none",
+      "how": "automatic",
+      "result": "pass"
+    },
+    "usb-new-device": {
+      "at": "2026-10-18T11:10:34+00:00",
+      "evidence": "on 43.20261018.394 (digest sha256:659ec98031f8, kernel 7.2.9-100), kept from 2026-10-18 and not run again on the candidate by the maintainer's decision: Kingston DataTraveler 3.0 never seen: blocked by InsertedDevicePolicy (policy apply-policy, session unlocked); internal devices still allowed; no on-screen notice, SD12 not built yet",
+      "how": "maintainer",
+      "result": "pass"
+    },
+    "wifi-join": {
+      "at": "2026-10-24T13:24:32+00:00",
+      "evidence": "WPA2-PSK network Ermete 9a activated automatically at the first boot of 43.20261024.468, before login",
+      "how": "maintainer",
+      "result": "pass"
+    }
+  }
+}

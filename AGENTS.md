@@ -16,10 +16,10 @@ as RPMs; the Rust crates of the shell and of the platform services form one Carg
 ## Checks
 
 `just check` is the gate every pull request passes (`Justfile`). It requires `actionlint`,
-`shellcheck` and `cargo-deny`; install `ksvalidator` (pykickstart) too, or `verify.py kickstart`
-passes with only a note. It runs `just check-syntax`, every `verify.py` check, the kernel profile,
-the Calmo palette, every `test_*.py` directory, the Rust workspace and `just check-deny`
-(`deny.toml`). Before a push, run what you changed:
+`shellcheck`, `cargo-deny`, `skopeo`, `cosign` and `registry` from `scripts/ci/install-tools.sh`;
+without `ksvalidator` (pykickstart) `verify.py kickstart` notes it. It runs `just check-syntax`,
+every `verify.py` check, the kernel profile, the Calmo palette, every `test_*.py` directory, the
+Rust workspace and `just check-deny` (`deny.toml`). Before a push, run what you changed:
 
 | Check | Command |
 | --- | --- |

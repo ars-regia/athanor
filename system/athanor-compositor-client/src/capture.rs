@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use gtk4::{gdk, glib};
 use wayland_client::protocol::{wl_buffer, wl_shm, wl_shm_pool};
-use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle, WEnum};
+use wayland_client::globals::GlobalList;
+use wayland_client::{delegate_noop, Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols::ext::image_capture_source::v1::client::{
     ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1,
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
@@ -21,7 +22,7 @@ use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
 
-use crate::connection::{fresh, Client, Error, State};
+use crate::connection::{bind, fresh, Client, Error, State};
 use crate::model::WindowId;
 use crate::unit;
 
@@ -141,6 +142,27 @@ fn shm_file(len: u32) -> std::io::Result<File> {
     Ok(file)
 }
 
+/// The capture globals, bound at the first capture (`Client::capture`): a client that never
+/// captures never binds them. Every name of them in this crate is in this file.
+#[derive(Default)]
+pub(crate) struct Globals {
+    sources: Option<ExtForeignToplevelImageCaptureSourceManagerV1>,
+    image_copy: Option<ExtImageCopyCaptureManagerV1>,
+}
+
+/// A capture global, bound at the first capture that needs it. One the compositor does not
+/// offer is looked for again at the next capture.
+fn bound<I>(slot: &mut Option<I>, globals: &GlobalList, qh: &QueueHandle<State>) -> Option<I>
+where
+    I: Proxy + Clone + 'static,
+    State: Dispatch<I, ()>,
+{
+    if slot.is_none() {
+        *slot = bind(globals, qh, 1..=1);
+    }
+    slot.clone()
+}
+
 /// Ends a capture, whichever way its call ends.
 struct Forget<'a> {
     client: &'a Client,
@@ -165,16 +187,12 @@ impl Client {
         let id = fresh();
         {
             let mut state = self.inner.state.borrow_mut();
+            let state = &mut *state;
             let toplevel = state.toplevels.get(&window).ok_or(Error::NoWindow)?;
-            let sources = state
-                .globals
-                .capture_sources
-                .as_ref()
+            let (registry, qh) = (&self.inner.registry, &self.inner.qh);
+            let sources = bound(&mut state.globals.capture.sources, registry, qh)
                 .ok_or(Error::Unavailable("ext_foreign_toplevel_image_capture_source_manager_v1"))?;
-            let manager = state
-                .globals
-                .image_copy
-                .as_ref()
+            let manager = bound(&mut state.globals.capture.image_copy, registry, qh)
                 .ok_or(Error::Unavailable("ext_image_copy_capture_manager_v1"))?;
             if state.globals.shm.is_none() {
                 return Err(Error::Unavailable("wl_shm"));
@@ -332,6 +350,134 @@ delegate_noop!(State: ignore wl_buffer::WlBuffer);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::sync::{Arc, Mutex};
+
+    const TOPLEVEL_LIST: &str = "ext_foreign_toplevel_list_v1";
+    const OFFERED: [&str; 4] = [
+        TOPLEVEL_LIST,
+        "ext_foreign_toplevel_image_capture_source_manager_v1",
+        "ext_image_copy_capture_manager_v1",
+        "athanor_toplevel_actions_v1",
+    ];
+
+    fn message(object: u32, opcode: u32, args: &[u8]) -> Vec<u8> {
+        let size = u32::try_from(8 + args.len()).expect("size");
+        let mut out = object.to_ne_bytes().to_vec();
+        out.extend((size << 16 | opcode).to_ne_bytes());
+        out.extend(args);
+        out
+    }
+
+    fn string(text: &str) -> Vec<u8> {
+        let mut out = u32::try_from(text.len() + 1).expect("length").to_ne_bytes().to_vec();
+        out.extend(text.as_bytes());
+        out.push(0);
+        out.resize(out.len().next_multiple_of(4), 0);
+        out
+    }
+
+    /// A compositor speaking the wire protocol: it offers `OFFERED`, answers each sync, records
+    /// the interface of every bind, and announces one window on the toplevel list, until the
+    /// client hangs up.
+    fn serve(mut stream: UnixStream, bound: &Mutex<Vec<String>>) {
+        let word = |bytes: &[u8], at: usize| {
+            u32::from_ne_bytes(bytes[at..at + 4].try_into().expect("word"))
+        };
+        let mut registry = None;
+        let mut header = [0; 8];
+        while stream.read_exact(&mut header).is_ok() {
+            let (object, size_opcode) = (word(&header, 0), word(&header, 4));
+            let mut body = vec![0; (size_opcode >> 16) as usize - 8];
+            stream.read_exact(&mut body).expect("body");
+            let mut reply = Vec::new();
+            match (object, size_opcode & 0xffff) {
+                // wl_display.get_registry: the globals.
+                (1, 1) => {
+                    let id = word(&body, 0);
+                    registry = Some(id);
+                    for (name, interface) in (1u32..).zip(OFFERED) {
+                        let version = 1u32.to_ne_bytes();
+                        let args = [&name.to_ne_bytes()[..], &string(interface), &version].concat();
+                        reply.extend(message(id, 0, &args));
+                    }
+                }
+                // wl_display.sync: wl_callback.done, then wl_display.delete_id.
+                (1, 0) => {
+                    let callback = word(&body, 0);
+                    reply.extend(message(callback, 0, &0u32.to_ne_bytes()));
+                    reply.extend(message(1, 1, &callback.to_ne_bytes()));
+                }
+                // wl_registry.bind: name, then the interface as a string.
+                (id, 0) if Some(id) == registry => {
+                    let length = word(&body, 4) as usize;
+                    let interface = String::from_utf8_lossy(&body[8..8 + length - 1]);
+                    if interface == TOPLEVEL_LIST {
+                        // ext_foreign_toplevel_list_v1.toplevel, a server-allocated handle.
+                        let list = word(&body, 8 + length.next_multiple_of(4) + 4);
+                        reply.extend(message(list, 0, &0xff00_0000u32.to_ne_bytes()));
+                    }
+                    bound.lock().expect("lock").push(interface.into_owned());
+                }
+                _ => {}
+            }
+            stream.write_all(&reply).expect("reply");
+        }
+    }
+
+    /// Least privilege: a client that never captures or acts never binds the capture globals
+    /// or the window actions, even where the compositor offers them; only `Client::capture`
+    /// and `Client::window_actions` bind them.
+    #[test]
+    fn connecting_binds_no_capture_global_and_no_window_action() {
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (ours, theirs) = UnixStream::pair().expect("socket pair");
+        let bound = Arc::new(Mutex::new(Vec::new()));
+        let record = bound.clone();
+        std::thread::spawn(move || serve(theirs, &record));
+        let connection = Connection::from_socket(ours).expect("connection");
+        let client = Client::connect_wayland(&connection).expect("client");
+        let bound = bound.lock().expect("lock").clone();
+        assert!(bound.iter().any(|i| i == TOPLEVEL_LIST), "{bound:?}");
+        assert!(!OFFERED[1..].iter().any(|c| bound.iter().any(|i| i == c)), "{bound:?}");
+        drop(client);
+    }
+
+    /// A caller that captures binds both capture globals the compositor offers, once across
+    /// its captures, and one that acts binds the window actions once across its actions.
+    /// Without `wl_shm` each capture then stops before it asks for a frame.
+    #[test]
+    fn capturing_and_acting_bind_each_global_once() {
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (ours, theirs) = UnixStream::pair().expect("socket pair");
+        let bound = Arc::new(Mutex::new(Vec::new()));
+        let record = bound.clone();
+        std::thread::spawn(move || serve(theirs, &record));
+        let connection = Connection::from_socket(ours).expect("connection");
+        let client = Client::connect_wayland(&connection).expect("client");
+        let window = *client.inner.state.borrow().toplevels.keys().next().expect("a window");
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for _ in 0..2 {
+            let mut capture = std::pin::pin!(client.capture(window));
+            let answer = std::future::Future::poll(capture.as_mut(), &mut context);
+            assert!(matches!(answer, Poll::Ready(Err(Error::Unavailable("wl_shm")))), "{answer:?}");
+        }
+        for _ in 0..2 {
+            client.window_actions().minimize(window).expect("minimize");
+        }
+        client.flush().expect("flush");
+        connection.roundtrip().expect("roundtrip");
+        let bound = bound.lock().expect("lock").clone();
+        for global in &OFFERED[1..] {
+            assert_eq!(bound.iter().filter(|i| i == global).count(), 1, "{bound:?}");
+        }
+        drop(client);
+    }
 
     #[test]
     fn alpha_formats_come_first_and_unknown_ones_are_ignored() {

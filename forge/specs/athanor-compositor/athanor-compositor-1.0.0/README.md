@@ -64,7 +64,7 @@ Since task 5 the top and overlay layers are a privileged client's.
 
 Task 4 adds the standard protocols of a desktop. `ext-foreign-toplevel-list-v1` lists the
 windows with their title and app id, and `ext-image-copy-capture-v1` copies one of them, named
-through the toplevel capture source, into a client's `wl_shm` buffer (`src/capture.rs`).
+through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
@@ -96,38 +96,76 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
-| `ext_workspace_manager_v1`, `wp_security_context_manager_v1` | every client outside a security context |
+| `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
+
+`data/globals` gives the class of every global the compositor can offer, and the fixture fails
+on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
+and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
+plan): the bar's line carries the workspaces, and the output manager is the control center's.
+`athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
+on windows: the control center is granted the first, the bar, the dock and the launcher both.
+The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
+takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
+keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
+keymap is sent to the clients at its first key after another keyboard's, so a held virtual key
+repeats under it, and a hardware key gives the seat its own keymap back first. A virtual
+keyboard's modifiers apply to its own keys; a virtual pointer stays on the outputs, its absolute
+motion spanning the output it names or all of them. While the session is locked, or paused on another
+virtual terminal, a virtual key press reaches no client (open question 12), and neither does a virtual pointer's motion, button press
+or scrolling, nor a virtual keyboard's keymap; the release of a key or button held from before
+the lock still goes on, so that nothing stays held after unlock. The hardware keyboard and
+pointer still reach the lock surface.
+The input method of OS9 item 3 is granted to no shipped client; the rig grants its test input
+method (`forge/test/shell/rig-privileged-clients`). Text input is offered outside a security
+context only (open question 13). The compositor serves both protocols itself
+(`src/input_method.rs`), one input method per seat; a second is told `unavailable`. Locking
+ends the input method's keyboard grab. A grab it asks for while locked is never installed and
+is sent nothing, neither the keymap, the repeat rate nor the modifiers held on the lock, and it
+stays so after unlock: only a grab asked for while unlocked is sent the keymap, the repeat rate
+and the current modifiers, then the keys. While locked the text inputs follow no surface, so
+the input method is neither activated for the lock surface nor told its text, and what it
+commits or pre-edits reaches no client. Releasing its grab ends that grab only, never one that
+replaced it; an exclusive layer surface taking the keyboard ends any grab, the input method's
+included.
+`src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
+heads with their modes, position, transform and scale, and a configuration succeeds when it
+changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
+position, transform or adaptive sync fails.
+`ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
+and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
+client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
+binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
+client.
 
 `data/privileged-clients` grants the bar, the dock, the control center and the launcher the
 interfaces each uses (`doc_session.md`, SN12); the test
 `every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line` fails when
 a crate under `forge/specs` draws on the top or overlay layer, or connects to the compositor's
-globals, without a line. The greeter is outside the list while it runs on cosmic-comp. The fixture grants its clients every privileged global as the
-bar (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+globals, without a line. The greeter is outside the list while it runs on cosmic-comp. The
+fixture grants its clients every privileged global but the output manager as the bar, and the
+output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
 can lock the session until one is added.
 
-What the check does not cover, for revision 2 of `doc_own_stack.md`:
+What the check does not cover, and what revision 2 of `doc_own_stack.md` decided:
 
 - **The identity is the one read at connect.** A client that `exec`s another program after
   connecting keeps what it connected as, and one that connected as another program gains
   nothing by `exec`ing the bar (`task5_exec_after_connect_keeps_the_connect_identity`). The
-  same holds for a connection handed to another process. Revision 2 must say whether that is
-  acceptable for programs under `/usr`, or ask for a check at each bind, through the pidfd kept
-  from connect.
+  same holds for a connection handed to another process. For programs under `/usr` revision 2
+  accepts it, without a check at each bind (decision 17).
 - A client that names the bar's path and unit, from its own mount namespace with a stalled FUSE
-  mount at that path, still blocks the compositor in the `stat` of its executable. `statx` with
-  `AT_STATX_DONT_SYNC` would read the device and inode without asking the FUSE server; revision
-  2 decides.
+  mount at that path, still blocks the compositor in the `stat` of its executable. Revision 2
+  asks for `statx` with `AT_STATX_DONT_SYNC`, which reads the device and inode without asking the
+  FUSE server, and a test with a stalled FUSE server (decision 18).
 - **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
-- **ext-workspace-v1 is not among OS4's privileged protocols**: every unconfined client may
-  switch workspaces. The bottom and background layers of `wlr-layer-shell` stay offered inside a
-  security context. Revision 2 decides both.
-- Input-method, virtual keyboard and pointer, data control and the private interface are not
-  offered yet; each joins the allow-list's interfaces when it is.
+- The bottom and background layers of `wlr-layer-shell` stay offered inside a security context;
+  revision 2 keeps them open to every client (OS4).
+- Input-method, data control and the private interface are not offered yet; each joins the
+  allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape
   for the user, until task 8 added one (below).
 - The rig has no systemd, and its cgroup tree is `0::/`, mounted read-only:
@@ -160,9 +198,10 @@ surface and the capture was empty. The check therefore also fails when that log 
 says it closed the bar's surface. The bar
 shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
 `zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
-replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies.
+replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies (decision 19).
 
-Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibility.md` AX4):
+Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
+requires (OS4):
 
 - The rig's Orca walks (`rig.sh orca`) do not need it. In the rig under cosmic-comp, which owns
   `org.freedesktop.a11y.Manager` with the monitor on the scene's bus, Orca's debug log records no
@@ -171,8 +210,9 @@ Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibil
   application through the virtual keyboard and, by these signs, not the monitor; cosmic-comp's
   source was not traced to confirm it.
 - Orca's own commands need it. Under this compositor nothing owns `org.freedesktop.a11y.Manager`,
-  so Orca's commands do not reach Orca, and the rig cannot walk any surface yet: `wtype` stops at
-  "Compositor does not support the virtual keyboard protocol".
+  so Orca's commands do not reach Orca. A client the allow-list grants them gets the virtual
+  keyboard and pointer (OS9 task 6); what `wtype` lacks to walk a surface in the rig is its line
+  in the allow-list (OS9 task 7).
 - The size of the work: the monitor on the session bus (`GrabKeyboard`, `UngrabKeyboard`,
   `WatchKeyboard`, `UnwatchKeyboard`, `SetKeyGrabs`, the `KeyEvent` signal) through zbus, already
   a dependency of the workspace, on a thread of its own that talks to calloop through a channel;
@@ -181,10 +221,10 @@ Orca and `org.freedesktop.a11y.KeyboardMonitor`, for revision 2 (`doc_accessibil
   `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
   `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
   checks. Whether the image's session bus returns `ProcessFD` is unverified
-  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). For the rig to test it,
-  `zwp_virtual_keyboard_v1` (Smithay's `VirtualKeyboardManagerState`), whose keys must go through
-  the same filter, which cosmic-comp's do not: about 100 lines more (an estimate). Then
-  `rig.sh orca` can run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
+  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). The virtual keyboard's
+  keys take the hardware's path (OS9 task 6), so they will pass through that filter as well,
+  which cosmic-comp's do not. With `wtype`'s allow-list line (OS9 task 7), `rig.sh orca` can
+  then run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected
@@ -258,7 +298,6 @@ after the client ended, where the backend drew about 725 before it drew only whe
 What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
 
 - 8-bit colour formats only; a monitor that needs deep colour gets 8 bits.
-- The pointer is a solid square, not the cursor surface a client sets: task 9 draws cursors.
 - The primary GPU only; a second GPU, and its monitors, are not used.
 - A change redraws every output, not only those it shows on: a second monitor draws empty frames
   while the first animates.
@@ -444,9 +483,10 @@ minutes, put the real unit on the vendor layout; clear it before the `start` lin
 
 ### 7. How defects are recorded
 
-The plan (task 9) puts every defect with its log lines into the results. The results document
-of the spike, `docs/spikes/c1-own-compositor.md`, does not exist yet: task 10 writes it, with a
-section for every NVIDIA defect and the frame times of each machine. Until then each defect is
-an issue or goes into the pull request that fixes it, as machine, time, what was seen, and the
-verbatim lines of the compositor log, the journal and `dmesg`; task 10 gathers them. A suspend
-or an unplug that resets the desktop is not a defect of this work: it is #604.
+The plan (task 9) puts every defect with its log lines into the results,
+`docs/spikes/c1-own-compositor.md`: a session's defects in section 7.3, a row each with the
+machine, what was seen and where its lines are in the session's archive (the compositor log, the
+journal, `dmesg`, with the time); NVIDIA's defects also in section 8. The laptop's session is
+recorded there; the desktop's rows wait for its session. Each defect also becomes an issue or goes
+into the pull request that fixes it. A suspend or an unplug that resets the desktop is not a
+defect of this work: it is #604.

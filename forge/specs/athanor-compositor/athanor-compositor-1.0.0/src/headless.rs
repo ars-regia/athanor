@@ -3,7 +3,9 @@
 //! GLES, and offers linux-dmabuf with its feedback and linux-drm-syncobj-v1 when the node can
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
+use crate::capture::Target;
 use crate::lock::Lock;
+use crate::input_method::PlacedPopup;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -249,7 +251,9 @@ impl State {
         let mut frames = Vec::with_capacity(headless.outputs.len());
         for index in 0..headless.outputs.len() {
             let started = Instant::now();
-            match headless.draw(index, &self.space, self.lock.as_ref(), false) {
+            let output = headless.outputs[index].output.clone();
+            let popups = self.composing.popups_on(&self.space, &output);
+            match headless.draw(index, &self.space, self.lock.as_ref(), &popups, false) {
                 Ok(drawn) => {
                     frames.push((headless.outputs[index].output.clone(), drawn));
                     if let Some(stats) = &mut self.frame_stats {
@@ -271,6 +275,7 @@ impl State {
             self.locked_drawn();
         }
         self.space.refresh();
+        self.send_toplevel_states();
         self.popups.cleanup();
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");
@@ -291,14 +296,14 @@ impl Headless {
         Ok(())
     }
 
-    /// Draws `window` off screen at scale 1 and reads it back (`capture::read_window`).
-    pub fn read_window(&mut self, window: &Window) -> Result<Vec<u8>, Error> {
+    /// Draws what a capture source names off screen and reads it back (`capture::read_back`).
+    pub fn read_back(&mut self, what: &Target, space: &Space<Window>) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
             Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_window::<_, GlesTexture>(gles(manager, node)?, window)
+                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space)
             }
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_window::<_, Image>(renderer, window)
+                crate::capture::read_back::<_, Image>(renderer, what, space)
             }
         }
     }
@@ -309,6 +314,7 @@ impl Headless {
         index: usize,
         space: &Space<Window>,
         lock: Option<&Lock>,
+        popups: &[PlacedPopup],
         read: bool,
     ) -> Result<Drawn, Error> {
         let virt = self
@@ -323,11 +329,11 @@ impl Headless {
                 buffers,
             } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(gles(manager, node)?, buffer, virt, space, lock, read)
+                draw(gles(manager, node)?, buffer, virt, space, lock, popups, read)
             }
             Gpu::Pixman { renderer, buffers } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(renderer, buffer, virt, space, lock, read)
+                draw(renderer, buffer, virt, space, lock, popups, read)
             }
         };
         // The tracker counts a failed frame as drawn: a new one draws the next frame whole, so
@@ -348,6 +354,7 @@ fn draw<R, T>(
     virt: &mut Virtual,
     space: &Space<Window>,
     lock: Option<&Lock>,
+    popups: &[PlacedPopup],
     read: bool,
 ) -> Result<Drawn, Error>
 where
@@ -357,7 +364,7 @@ where
 {
     let age = usize::from(virt.drawn);
     let mut target = renderer.bind(buffer)?;
-    let view = View::of(space, lock, &virt.output);
+    let view = View::of(space, lock, popups, &virt.output);
     let result = draw_view(
         renderer,
         &mut target,
@@ -498,8 +505,12 @@ impl State {
         let Backend::Headless(headless) = &mut self.backend else {
             return Err("only the headless backend reads frames back".into());
         };
+        let popups = match headless.outputs.get(index) {
+            Some(virt) => self.composing.popups_on(&self.space, &virt.output),
+            None => Vec::new(),
+        };
         headless
-            .draw(index, &self.space, self.lock.as_ref(), true)?
+            .draw(index, &self.space, self.lock.as_ref(), &popups, true)?
             .pixels
             .ok_or_else(|| "the frame was not read back".into())
     }

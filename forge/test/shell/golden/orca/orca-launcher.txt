@@ -1,0 +1,4 @@
+Screen reader on.
+Search text.
+cc window.
+Screen reader off.

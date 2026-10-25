@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="athanor_toplevel_state_v1">
+  <copyright>
+    Copyright © 2026 Athanor Forge
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="the state of a window, and the shell's actions on it">
+    The state of a window the ext-foreign-toplevel-list protocol lists, and the actions the
+    shell takes on it: activate, minimise, restore and close. Reading and acting are two
+    globals, the manager and the actions, so that a client trusted to read every window's
+    state need not be trusted to act on them. The compositor offers each only to the clients
+    it trusts with it; it is Athanor's own protocol (doc_own_stack.md OS5, decision 19).
+
+    A new version adds interfaces, requests, events or enum entries; a client binds the
+    version it knows.
+  </description>
+
+  <interface name="athanor_toplevel_manager_v1" version="1">
+    <description summary="the state of windows">
+      Makes the state object of a window. It acts on nothing: the actions are
+      athanor_toplevel_actions_v1's.
+    </description>
+
+    <enum name="error">
+      <entry name="already_made" value="0"
+        summary="the client already has a state object of this window"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        The state objects made from the manager stay valid.
+      </description>
+    </request>
+
+    <request name="get_toplevel_state">
+      <description summary="the state of a window">
+        Makes the state object of a window. Its current state, the outputs it is on that
+        the client has bound, and a done event are sent at once, then each change followed by
+        done. An output the client binds later is sent with output_enter then.
+
+        On a closed handle the object is inert: it sends nothing. A second state object of the
+        same window, while the client holds the first, is the already_made error.
+      </description>
+      <arg name="id" type="new_id" interface="athanor_toplevel_state_v1"/>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_toplevel_actions_v1" version="1">
+    <description summary="the shell's actions on windows">
+      Activates, minimises, restores and closes windows.
+
+      An action on a closed or unknown handle, on a window that is not mapped or has not
+      drawn, while the session is locked, or while it is paused on another virtual terminal,
+      does nothing.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the actions object"/>
+    </request>
+
+    <request name="activate">
+      <description summary="activate a window">
+        Raises the window, restoring it when it is minimised, and gives it the seat's
+        keyboard unless a surface holds the keyboard exclusively.
+      </description>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+      <arg name="seat" type="object" interface="wl_seat"/>
+    </request>
+
+    <request name="set_minimized">
+      <description summary="minimise a window">
+        Hides the window until it is restored or activated.
+      </description>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+
+    <request name="unset_minimized">
+      <description summary="restore a minimised window">
+        Shows a minimised window where it was, and gives it the keyboard.
+      </description>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+
+    <request name="close">
+      <description summary="ask a window to close">
+        Sends the window's client the request to close it; the client decides.
+      </description>
+      <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_toplevel_state_v1" version="1">
+    <description summary="the state of one window">
+      Events describe the window's state and outputs. They are applied together at done.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the state object"/>
+    </request>
+
+    <enum name="state" bitfield="true">
+      <entry name="activated" value="1"
+        summary="the window is the active one; while a layer surface or the lock holds the keyboard it keeps this state"/>
+      <entry name="minimized" value="2" summary="the window is minimised"/>
+    </enum>
+
+    <event name="state">
+      <description summary="the window's state">
+        Every flag that holds; a flag absent no longer holds.
+      </description>
+      <arg name="state" type="uint" enum="state"/>
+    </event>
+
+    <event name="output_enter">
+      <description summary="the window is on an output"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </event>
+
+    <event name="output_leave">
+      <description summary="the window is no longer on an output"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </event>
+
+    <event name="done">
+      <description summary="the events since the last done apply"/>
+    </event>
+  </interface>
+</protocol>

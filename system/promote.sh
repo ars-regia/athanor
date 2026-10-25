@@ -59,3 +59,4 @@ for name in "${promote[@]}"; do
     [[ $now == "$digest" ]] || die "$repository:stable points at $now, not the evidence digest $digest"
     echo "stable -> $repository@$digest"
 done
+((${#promote[@]} > 0)) || echo "stable unchanged: run $run is the stable build already"

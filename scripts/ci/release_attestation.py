@@ -15,6 +15,9 @@ public keys of the checkout.
   release_attestation.py prior [--timeout SECONDS] --dir DIR --keys-dir DIR
       For candidate: no image of a statement in DIR already carries an attestation that
       verifies with a key of --keys-dir and says something else.
+  release_attestation.py class --keys-dir DIR REPOSITORY@DIGEST
+      For forge/test/iso/serve_candidate.sh: prints the class, feature or security, that every
+      attestation of the image verifying with a key of DIR names (ADR-0130).
 
 Exit 1 with the reason on stderr when a statement or an attestation is refused.
 """
@@ -204,6 +207,43 @@ def verify(ref, statement_path, keys_dir):
         )
 
 
+def release_class(ref, keys_dir):
+    """The class the attestations of ref that verify with a key of keys_dir name: at least one
+    verifies, each is the release statement of ref, and all name the same class. The upgrade
+    acceptance holds the guest to it, so the client cannot fall back to the feature class
+    unseen (ADR-0130)."""
+    repository, _, digest = ref.partition("@")
+    if not DIGEST.match(digest):
+        raise Refused(f"'{ref}' is not a reference by digest")
+    envelopes = attestations(ref, keys_dir)
+    if not envelopes:
+        raise Refused(f"{ref}: no attestation verifies with a key of {keys_dir}")
+    subject = [
+        {"name": repository, "digest": {"sha256": digest.removeprefix("sha256:")}}
+    ]
+    classes = set()
+    for envelope in envelopes:
+        try:
+            payload = json.loads(base64.b64decode(envelope["payload"], validate=True))
+            cls = payload["predicate"]["class"]
+            whole = (
+                envelope["payloadType"] == PAYLOAD_TYPE
+                and payload["predicateType"] == PREDICATE_TYPE
+                and payload["subject"] == subject
+                and cls in ("feature", "security")
+            )
+        except (KeyError, TypeError, ValueError):
+            whole = False
+        if not whole:
+            raise Refused(f"{ref}: an attestation is not a release statement of {ref}")
+        classes.add(cls)
+    if len(classes) != 1:
+        raise Refused(
+            f"{ref}: the attestations disagree on the class: {sorted(classes)}"
+        )
+    return classes.pop()
+
+
 def prior(statements, keys_dir, timeout=TIMEOUT):
     """For candidate, before sign-images: refuses an image that already carries an attestation
     which verifies and differs from its statement. A re-run would add a second one, and an image
@@ -248,6 +288,9 @@ def main(argv):
     r.add_argument("--dir", required=True, type=pathlib.Path)
     r.add_argument("--keys-dir", required=True, type=pathlib.Path)
     r.add_argument("--timeout", type=int, default=TIMEOUT, help="seconds for one cosign call")
+    c = sub.add_parser("class")
+    c.add_argument("--keys-dir", required=True, type=pathlib.Path)
+    c.add_argument("ref")
     a = p.parse_args(argv)
     try:
         if a.cmd == "write":
@@ -257,6 +300,8 @@ def main(argv):
             predicates(a.digests, a.dir, a.out)
         elif a.cmd == "prior":
             prior(a.dir, a.keys_dir, a.timeout)
+        elif a.cmd == "class":
+            print(release_class(a.ref, a.keys_dir))
         else:
             verify(a.ref, a.statement, a.keys_dir)
             print(f"attestation verified: {a.ref}")

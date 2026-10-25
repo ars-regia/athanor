@@ -1,0 +1,12 @@
+# The rig's own grants, appended by session.sh to the shipped allow-list
+# (forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients) where the
+# compositor reads it in the rig, never in the image (test_rig_lines_never_ship). Same format:
+#   <executable under /usr> <systemd unit> <interface>...
+# grim captures each output through the compositor, run by in-unit.sh as rig-grim.service.
+/usr/bin/grim rig-grim.service ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1
+# The test input method of `rig.sh input-method`, run by in-unit.sh as rig-input-method.service.
+/usr/bin/athanor-toolkit-input-method rig-input-method.service zwp_input_method_manager_v2
+# wtype's virtual keyboard presses the keys of the Orca walks (orca_walk.py), run as rig-wtype.service.
+/usr/bin/wtype rig-wtype.service zwp_virtual_keyboard_manager_v1
+# cc-probe reads and acts on the windows of compositor_e2e.py, run by in-unit.sh as rig-cc-probe.service.
+/usr/bin/cc-probe rig-cc-probe.service ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1

@@ -22,7 +22,12 @@
 #     forge/scripts/clean_ghcr.sh keeps its two newest versions, so a run whose builder inputs
 #     changed twice since cannot be promoted, and its plan stops on the pull;
 #   - its build time is newer than the current stable's: a machine never follows a tag
-#     backwards (UT5);
+#     backwards (UT5). An image already stable at the digest is skipped; when that leaves
+#     nothing to move, the promotion is of the stable build again, and it only publishes
+#     the build's GitHub Release (ADR-0131 decisions 5 and 6);
+#   - the build the record names (doc_update_trust.md UT9, doc_pipeline.md PL42): the
+#     org.opencontainers.image.version and org.opencontainers.image.revision labels of the
+#     recorded athanor-system digest, read by digest, so the plan and the apply agree;
 #   - and, once for the run, the installer ISO users will take (ADR-0114): the digest of the
 #     run's iso-digest.txt, the file accept.yml's accept-target.sh read to find the ISO it
 #     tested, built from the athanor-system digest recorded above and still named by
@@ -69,6 +74,10 @@ promotion_args() {
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 keys_dir=${PROMOTE_KEYS_DIR:-$root/system/keys}
 artifacts=${PROMOTE_ARTIFACTS:-artifacts}
+# Checked before the arithmetic, which would evaluate an expression the input carried. The
+# digits are listed: a range such as [0-9] also matches other digits in some locales.
+[[ ${PROMOTE_DWELL_HOURS:-24} =~ ^([0123456789]|1[0123456789]|2[01234])$ ]] ||
+    die "PROMOTE_DWELL_HOURS is '${PROMOTE_DWELL_HOURS}', not a whole number of hours from 0 to 24 (UD5)"
 dwell=$((${PROMOTE_DWELL_HOURS:-24} * 3600))
 SIMPLE_SIGNING=application/vnd.dev.cosign.simplesigning.v1+json
 work=$(mktemp -d)
@@ -83,6 +92,18 @@ created() { # created REPOSITORY DIGEST -> seconds since the epoch
         return 1
     }
     date -u -d "$label" +%s
+}
+
+build_of() { # build_of REPOSITORY DIGEST -> "VERSION REVISION", the UT9 version and the commit
+    local labels version revision
+    labels=$(skopeo inspect --config "docker://$1@$2" |
+        jq -r '.config.Labels // {} | "\(.["org.opencontainers.image.version"] // "") \(.["org.opencontainers.image.revision"] // "")"')
+    version=${labels% *} revision=${labels#* }
+    [[ $version =~ ^[0-9]+\.[0-9]{8}\.[0-9]+$ ]] ||
+        die "$1@$2 has no UT9 version in its org.opencontainers.image.version label ('$version')"
+    [[ $revision =~ ^[0-9a-f]{40}$ ]] ||
+        die "$1@$2 has no commit id in its org.opencontainers.image.revision label ('$revision')"
+    echo "$version $revision"
 }
 
 evidence() { # evidence GATE IMAGE DIGEST -> the evidence's finished_at, seconds since the epoch
@@ -110,6 +131,11 @@ check_promoted() { # check_promoted REPOSITORY DIGEST
 sums() { # sums DIR PATH... (relative to DIR) -> {"PATH": "<sha256>", ...}
     local dir=$1
     shift
+    # No paths, as for a promotion that moves nothing: sha256sum would hash its stdin.
+    if (($# == 0)); then
+        echo '{}'
+        return
+    fi
     (cd "$dir" && sha256sum -- "$@") |
         jq -R -s '[splits("\n") | select(length > 0) | capture("^(?<sha>[0-9a-f]{64})  (?<path>.+)$") | {(.path): .sha}] | add'
 }
@@ -126,6 +152,12 @@ promotion_record() { # promotion_record DAY OUT
         [[ $tag == "$run" ]] || die "image-digests.txt is for run $tag, not $run"
         recorded[${repository##*/}]=$digest
     done < "$artifacts/image-digests.txt"
+
+    # The default image is always among the recorded digests; its labels name the build.
+    local build version revision
+    [[ -n ${recorded[athanor-system]:-} ]] || die "image-digests.txt names no athanor-system digest"
+    build=$(build_of "$REGISTRY/athanor-system" "${recorded[athanor-system]}")
+    version=${build% *} revision=${build#* }
 
     local iso_repository=$REGISTRY/athanor-iso iso_digest iso_bound
     [[ -f $artifacts/iso-digest.txt ]] || die "no $artifacts/iso-digest.txt: the ISO run $run tested is unknown (ADR-0114)"
@@ -194,7 +226,10 @@ promotion_record() { # promotion_record DAY OUT
     printf '%s\n' "${verify[@]}" > "$work/verify.txt"
     VERIFY_KEYS_DIR=$keys_dir bash "$root/system/verify-images.sh" --registry "$REGISTRY" --builder "$builder" "$work/verify.txt" >&2 ||
         die "$(awk '{ printf "%s@%s ", $1, $3 }' "$work/verify.txt")- one of them does not verify with the keys under system/keys: machines would refuse it"
-    ((${#promote[@]} > 0)) || die "nothing to promote from run $run:$(for name in "${!skipped[@]}"; do printf ' %s %s;' "$name" "${skipped[$name]}"; done)"
+    # Nothing to move means athanor-system, which always has gates, was skipped as already
+    # stable: every other outcome promotes it or stops above. The record then moves no tag,
+    # and the promotion publishes the build's Release, the v0.x one when its tag was pushed
+    # after the first promotion (ADR-0131 decisions 5 and 6).
 
     age=$(($(date -u +%s) - newest))
     ((age >= dwell)) ||
@@ -222,11 +257,12 @@ promotion_record() { # promotion_record DAY OUT
     trigger=manual
     if [[ -n ${GITHUB_RUN_ID:-} ]]; then trigger=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID; fi
     jq -n -S --indent 2 --argjson run "$run" --arg day "$day" --arg registry "$REGISTRY" --arg trigger "$trigger" --arg override "$override" --arg builder "$builder" \
+        --arg version "$version" --arg revision "$revision" \
         --argjson images "$images" --argjson skipped "$skips" --arg iso "$iso_digest" --arg iso_system "$iso_bound" \
         --argjson evidence "$evidence_sums" --argjson packages "$package_sums" \
         --argjson keys "$key_sums" --argjson dwell_hours "$((dwell / 3600))" \
         '{run_id: $run, day: $day, registry: $registry, trigger: $trigger, images: $images, iso: $iso, iso_system: $iso_system, skipped: $skipped,
       overrides: (if $override == "" then [] else [$override] end), evidence: $evidence, packages: $packages,
-      keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder}' \
+      keys: $keys, dwell_hours: $dwell_hours, builder_content_hash: $builder, version: $version, revision: $revision}' \
         > "$out"
 }

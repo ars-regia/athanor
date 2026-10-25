@@ -9,6 +9,10 @@ description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milest
 [dependencies]
 # Readiness for the `Type=notify` unit of the preview session (`ready.rs`).
 athanor-unit = { path = "../../../../system/athanor-unit" }
+# The generated code of Athanor's own protocols (`toplevel_state.rs`), and the fixture's
+# client bindings of them: the bitfield enums need bitflags.
+bitflags = { workspace = true }
+wayland-scanner = { workspace = true }
 # The revision and its date are in README.md; deny.toml admits this URL and no other git source.
 smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
 # The DRM backend's connector scan, from the same repository and revision; without
@@ -19,7 +23,9 @@ libc = { workspace = true }
 # WAYLAND_DISPLAY to the user manager (`ready.rs`).
 zbus = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# The pointer's themed cursor (`cursor.rs`); already in the build through wayland-cursor.
+xcursor = { workspace = true }
 
 [dev-dependencies]
 wayland-client = { workspace = true }

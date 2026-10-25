@@ -100,7 +100,7 @@ def gib(value):
 
 
 def main(argv):
-    ceiling = size(os.environ.get("VM_MEMORY", "16G"))
+    ceiling = size(os.environ.get("VM_MEMORY", "12G"))
     floor = size(os.environ.get("BALLOON_FLOOR", "6G"))
     reserve = size(os.environ.get("HOST_RESERVE", "3G"))
     interval = float(os.environ.get("BALLOON_INTERVAL", "2"))
