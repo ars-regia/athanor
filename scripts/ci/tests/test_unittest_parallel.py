@@ -98,6 +98,15 @@ class Parallel(unittest.TestCase):
             time.sleep(0.05)
         return int(path.read_text())
 
+    def kill_helper(self):
+        """Cleanup that tolerates a helper.pid that was never written."""
+        try:
+            pid = int((self.dir / "helper.pid").read_text())
+        except (FileNotFoundError, ValueError):
+            return
+        if not self.is_dead(pid):
+            os.kill(pid, 9)
+
     @staticmethod
     def is_dead(pid):
         try:
@@ -127,30 +136,38 @@ class Parallel(unittest.TestCase):
 
     def test_a_helper_that_left_the_group_and_holds_the_pipe_does_not_stall_the_report(self):
         self.hung_suite(escape=True)
+        self.addCleanup(self.kill_helper)
         started = time.monotonic()
         r = self.run_dir("2", "6")
         took = time.monotonic() - started
-        helper = self.pid("helper.pid")
-        self.addCleanup(lambda: None if self.is_dead(helper) else os.kill(helper, 9))
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("TIMEOUT: test_b.Hung was killed after 6s", r.stdout)
-        self.assertLess(took, 6 + 2 + 5, f"the runner stalled for {took:.1f}s on a pipe held open")
+        self.assertLess(took, 6 + 5, f"the runner stalled for {took:.1f}s with a helper holding its output")
 
-    def test_an_interrupt_kills_the_running_classes_and_ends_the_runner_promptly(self):
+    def interrupted(self, sig):
         self.hung_suite()
+        self.addCleanup(self.kill_helper)
         runner = subprocess.Popen([sys.executable, "-B", str(SCRIPT), str(self.dir), "2", "300"],
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.addCleanup(runner.kill)
         helper, test = self.pid("helper.pid"), self.pid("test.pid")
-        runner.send_signal(signal.SIGINT)
+        runner.send_signal(sig)
         try:
             runner.communicate(timeout=10)
         except subprocess.TimeoutExpired:
-            self.fail("the runner did not end on SIGINT")
+            self.fail(f"the runner did not end on {sig.name}")
         self.assertNotEqual(runner.returncode, 0)
         self.assert_gone(test, "the hung test process")
         self.assert_gone(helper, "the helper it spawned")
 
+    def test_an_interrupt_kills_the_running_classes_and_ends_the_runner_promptly(self):
+        self.interrupted(signal.SIGINT)
+
+    def test_sigterm_of_a_cancelled_job_cleans_up_too(self):
+        self.interrupted(signal.SIGTERM)
+
+    def test_sighup_cleans_up_too(self):
+        self.interrupted(signal.SIGHUP)
 
 if __name__ == "__main__":
     unittest.main()

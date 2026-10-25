@@ -16,10 +16,10 @@ Usage: unittest_parallel.py DIR [JOBS [TIMEOUT]]    (JOBS defaults to the number
 import concurrent.futures
 import os
 import pathlib
-import select
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -53,7 +53,6 @@ def classes(directory: pathlib.Path) -> tuple[list[str], list[str], list[str]]:
 
 LIVE: set[subprocess.Popen] = set()  # the children running now, for kill_all
 STOPPING = threading.Event()  # set by an interrupt: no child may outlive it
-DRAIN = 2.0  # seconds to read what is left after the child ended or was killed
 
 
 def kill_group(child: subprocess.Popen) -> None:
@@ -68,59 +67,46 @@ def kill_all() -> None:
         kill_group(child)
 
 
-def read_output(child: subprocess.Popen, deadline: float) -> tuple[bytes, bool]:
-    """The child's output until EOF, or until `deadline`, or until DRAIN seconds after it ended
-    (a helper that left the group may hold the pipe open for ever). Returns it and whether the
-    deadline was reached."""
-    fd = child.stdout.fileno()
-    chunks: list[bytes] = []
-    ended = None
-    while True:
-        now = time.monotonic()
-        if now >= deadline:
-            return b"".join(chunks), True
-        if child.poll() is not None:
-            ended = ended or now
-            if now - ended >= DRAIN:
-                return b"".join(chunks), False
-        if select.select([fd], [], [], 0.1)[0]:
-            data = os.read(fd, 65536)
-            if not data:
-                return b"".join(chunks), False
-            chunks.append(data)
-
-
 def run_class(name: str, directory: pathlib.Path, timeout: float) -> tuple[str, int, str, float]:
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(directory), os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
     started = time.monotonic()
-    # Its own session, so that a timeout or an interrupt kills the helpers the tests spawned
-    # as well as the child.
-    child = subprocess.Popen(
-        [sys.executable, "-B", "-m", "unittest", "-v", name],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, start_new_session=True,
-    )
-    LIVE.add(child)
-    try:
-        if STOPPING.is_set():
-            kill_group(child)
-        data, timed_out = read_output(child, started + timeout)
-        if timed_out:
-            kill_group(child)
-            child.wait()
-            tail, _ = read_output(child, time.monotonic() + DRAIN)
-            text = (data + tail).decode(errors="replace")
-            return name, 124, f"{text}\nTIMEOUT: {name} was killed after {timeout:g}s\n", time.monotonic() - started
-        code = child.wait()
-        return name, code, data.decode(errors="replace"), time.monotonic() - started
-    finally:
-        if child.poll() is None:
-            kill_group(child)
-            child.wait()
-        LIVE.discard(child)
-        child.stdout.close()
+    # The output goes to a file, not a pipe: a helper that left the group cannot hold it open and
+    # stall the report. Its own session lets a timeout or an interrupt kill the helpers the tests
+    # spawned as well as the child.
+    with tempfile.TemporaryFile() as out:
+        child = subprocess.Popen(
+            [sys.executable, "-B", "-m", "unittest", "-v", name],
+            stdout=out, stderr=subprocess.STDOUT, env=env, start_new_session=True,
+        )
+        LIVE.add(child)
+        timed_out = False
+        try:
+            if STOPPING.is_set():
+                kill_group(child)
+            try:
+                child.wait(timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+        finally:
+            if child.poll() is None:
+                kill_group(child)
+                child.wait()
+            LIVE.discard(child)
+        out.seek(0)
+        text = out.read().decode(errors="replace")
+    if timed_out:
+        return name, 124, f"{text}\nTIMEOUT: {name} was killed after {timeout:g}s\n", time.monotonic() - started
+    return name, child.returncode, text, time.monotonic() - started
+
+
+def stop_on(signum: int, _frame: object) -> None:
+    raise SystemExit(128 + signum)
 
 
 def main(argv: list[str]) -> int:
+    # A cancelled CI job sends SIGTERM: end through the cleanup below, not without it.
+    signal.signal(signal.SIGTERM, stop_on)
+    signal.signal(signal.SIGHUP, stop_on)
     if len(argv) not in (1, 2, 3):
         print(__doc__, file=sys.stderr)
         return 2
