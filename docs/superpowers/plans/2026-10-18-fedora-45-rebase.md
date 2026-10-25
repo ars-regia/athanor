@@ -277,6 +277,7 @@ Green, all on the branch and before the merge (ADR-0078; the definition M5 confi
   - On the branch image: bar, dock, launcher and greeter on GTK 4.24 and libadwaita 1.10.
   - Dead keys with `us(intl)` (`GTK_IM_MODULE=simple`, #332).
 - [ ] **Local checks.** `just check` on the laptop at 4 jobs.
+- [ ] **RPM Fusion GA layout (#802).** Once `free-` and `nonfree-fedora-updates-released-45` answer with a repository, `rpmfusion.repo` returns to the GA layout (`*-updates` enabled, `*-updates-testing` removed) and the branch build is green again. Until then the branch ships the pre-release layout of #800, and no image check enforces the switch.
 
 Then the pull request leaves draft and goes to the card. After the merge, the `iso-v0` run and `accept.yml` are the first CI acceptance. Release 0.10 is dispatched by that build and waits on the `signing` environment, so nothing moves `:latest` without the maintainer. If the `iso-v0` run fails where the branch passed, revert the squashed commit before any release is approved: the base returns to Fedora 43 in one commit.
 
