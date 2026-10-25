@@ -121,12 +121,50 @@ class Gate(unittest.TestCase):
         for text in ("nvidia.ko", "01-nvidia.toml", "fedora-nvidia.repo"):
             self.assertIn(text, r.stderr)
 
+    @staticmethod
+    def fedora_testing(state):
+        return f"[updates-testing]\nenabled={state}\n[updates-testing-debuginfo]\nenabled=0\n"
+
+    @staticmethod
+    def fusion_testing(state):
+        return "".join(f"[rpmfusion-{k}-updates-testing]\nenabled={state}\n" for k in ("free", "nonfree"))
+
+    def repo_gate(self, fedora, fusion):
+        self.touch("usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/vmlinuz")
+        if fedora is not None:
+            self.touch("etc/yum.repos.d/fedora-updates-testing.repo", self.fedora_testing(fedora))
+        self.touch("etc/yum.repos.d/rpmfusion.repo", self.fusion_testing(fusion))
+        return self.run_gate("none")
+
+    def test_updates_testing_both_enabled_passes(self):
+        self.assertEqual(self.repo_gate("1", "1").returncode, 0)
+
+    def test_updates_testing_both_disabled_passes(self):
+        self.assertEqual(self.repo_gate("0", "0").returncode, 0)
+
+    def test_ga_base_with_prerelease_rpmfusion_fails_with_action(self):
+        r = self.repo_gate("0", "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("[rpmfusion-free-updates-testing] enabled=1 but Fedora's [updates-testing] enabled=0: switch rpmfusion.repo to the GA layout", r.stderr)
+        self.assertIn("[rpmfusion-nonfree-updates-testing] enabled=1", r.stderr)
+
+    def test_prerelease_base_with_ga_rpmfusion_fails(self):
+        r = self.repo_gate("1", "0")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("enabled=0 but Fedora's [updates-testing] enabled=1", r.stderr)
+
+    def test_missing_fedora_updates_testing_repo_fails(self):
+        r = self.repo_gate(None, "1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("fedora-updates-testing.repo: [updates-testing] enabled= not found", r.stderr)
+
     def test_clean_default_image_passes(self):
         self.touch("usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/vmlinuz")
         self.touch("usr/lib/bootc/kargs.d/10-athanor-kernel-profile.toml", 'kargs = ["page_alloc.shuffle=1"]')
         self.touch("usr/lib/modprobe.d/dist-blacklist.conf", "blacklist nvidiafb\n")
         self.touch("usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/kernel/drivers/video/fbdev/nvidia/nvidiafb.ko.xz")
-        self.touch("etc/yum.repos.d/rpmfusion.repo", "[rpmfusion-nonfree]\nexclude=*nvidia* *nvrm* *cuda*\n")
+        self.touch("etc/yum.repos.d/rpmfusion.repo", "[rpmfusion-nonfree]\nexclude=*nvidia* *nvrm* *cuda*\n" + self.fusion_testing("1"))
+        self.touch("etc/yum.repos.d/fedora-updates-testing.repo", self.fedora_testing("1"))
         r = self.run_gate("none")
         self.assertEqual(r.returncode, 0, r.stderr)
 

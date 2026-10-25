@@ -7,6 +7,8 @@
 #                  the EGL, GBM and Vulkan files of the userspace, and nouveau blacklisted
 #                  in modprobe.d and on the kernel command line
 #   nvidia-legacy  the same at NVIDIA_LEGACY_VERSION, with the RPM Fusion packages, no GSP check
+# In every mode, RPM Fusion's updates-testing repos are enabled exactly when Fedora's own
+# updates-testing is (Fedora 45 pre-release layout of rpmfusion.repo, switched back at GA).
 # Usage: gate.sh none|nvidia|nvidia-legacy PINS_ENV [ROOT]
 set -euo pipefail
 
@@ -15,6 +17,24 @@ PINS=${2:?usage: gate.sh none|nvidia|nvidia-legacy PINS_ENV [ROOT]}
 ROOT=${3:-/}
 bad=0
 violation() { echo "nvidia gate: $*" >&2; bad=1; }
+
+# Value of enabled= in [SECTION] of FILE; empty when the section or the key is absent.
+repo_enabled() { awk -v s="[$2]" '/^\[/ { in_s = ($0 == s) } in_s && /^enabled=/ { sub(/^enabled=/, ""); print; exit }' "$1"; }
+fedora_testing=$ROOT/etc/yum.repos.d/fedora-updates-testing.repo
+fusion=$ROOT/etc/yum.repos.d/rpmfusion.repo
+if [[ -f $fusion ]]; then
+  fedora_state=
+  [[ ! -f $fedora_testing ]] || fedora_state=$(repo_enabled "$fedora_testing" updates-testing)
+  [[ -n $fedora_state ]] || violation "/etc/yum.repos.d/fedora-updates-testing.repo: [updates-testing] enabled= not found"
+  for repo in rpmfusion-free-updates-testing rpmfusion-nonfree-updates-testing; do
+    state=$(repo_enabled "$fusion" "$repo")
+    if [[ -z $state ]]; then
+      violation "/etc/yum.repos.d/rpmfusion.repo: [$repo] enabled= not found"
+    elif [[ -n $fedora_state && $state != "$fedora_state" ]]; then
+      violation "[$repo] enabled=$state but Fedora's [updates-testing] enabled=$fedora_state: switch rpmfusion.repo to the GA layout (updates enabled=1, updates-testing enabled=0)"
+    fi
+  done
+fi
 
 # Fail closed: a missing or misnamed modules tree must not pass as "no NVIDIA module".
 [[ -d $ROOT/usr/lib/modules ]] || violation "/usr/lib/modules: not a directory under $ROOT"
