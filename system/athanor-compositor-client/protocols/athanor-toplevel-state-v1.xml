@@ -25,21 +25,19 @@
 
   <description summary="the state of a window, and the shell's actions on it">
     The state of a window the ext-foreign-toplevel-list protocol lists, and the actions the
-    shell takes on it: activate, minimise, restore and close. The compositor offers the
-    manager only to the clients it trusts with every window; it is Athanor's own protocol
-    (doc_own_stack.md OS5, decision 19).
+    shell takes on it: activate, minimise, restore and close. Reading and acting are two
+    globals, the manager and the actions, so that a client trusted to read every window's
+    state need not be trusted to act on them. The compositor offers each only to the clients
+    it trusts with it; it is Athanor's own protocol (doc_own_stack.md OS5, decision 19).
 
     A new version adds interfaces, requests, events or enum entries; a client binds the
     version it knows.
   </description>
 
   <interface name="athanor_toplevel_manager_v1" version="1">
-    <description summary="the shell's actions on windows, and their state">
-      Makes the state object of a window, and acts on windows.
-
-      An action on a closed or unknown handle, on a window that is not mapped or has not
-      drawn, while the session is locked, or while it is paused on another virtual terminal,
-      does nothing.
+    <description summary="the state of windows">
+      Makes the state object of a window. It acts on nothing: the actions are
+      athanor_toplevel_actions_v1's.
     </description>
 
     <enum name="error">
@@ -64,6 +62,20 @@
       </description>
       <arg name="id" type="new_id" interface="athanor_toplevel_state_v1"/>
       <arg name="toplevel" type="object" interface="ext_foreign_toplevel_handle_v1"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_toplevel_actions_v1" version="1">
+    <description summary="the shell's actions on windows">
+      Activates, minimises, restores and closes windows.
+
+      An action on a closed or unknown handle, on a window that is not mapped or has not
+      drawn, while the session is locked, or while it is paused on another virtual terminal,
+      does nothing.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the actions object"/>
     </request>
 
     <request name="activate">

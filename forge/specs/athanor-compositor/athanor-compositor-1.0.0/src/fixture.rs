@@ -427,6 +427,7 @@ delegate_noop!(Client: wp_fractional_scale_manager_v1::WpFractionalScaleManagerV
 delegate_noop!(Client: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
 delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 delegate_noop!(Client: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1);
+delegate_noop!(Client: athanor_toplevel::athanor_toplevel_actions_v1::AthanorToplevelActionsV1);
 delegate_noop!(Client: xdg_activation_v1::XdgActivationV1);
 
 impl Dispatch<athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1, ()> for Client {
@@ -984,9 +985,10 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 \
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
-    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1\n\
+    zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
+    athanor_toplevel_actions_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
-    zwlr_output_manager_v1\n";
+    zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
 
 /// The bar's executable file, as the compositor sees it.
 const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
@@ -3671,6 +3673,7 @@ fn os9_every_global_is_classified() {
     let control_center = Local::control_center(&mut run);
     let mut expected = unprivileged.clone();
     expected.insert("zwlr_output_manager_v1");
+    expected.insert("athanor_toplevel_manager_v1");
     offered(&control_center, "the control center", expected);
 
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
@@ -3718,20 +3721,30 @@ fn os9_the_workspace_list_is_privileged() {
     run.stop();
 }
 
-/// `athanor_toplevel_manager_v1` is privileged (OS4, OS5): the bar, granted it, sees it; the
-/// bar's identity inside a security context, and a client with no line, do not.
+/// `athanor_toplevel_manager_v1` and `athanor_toplevel_actions_v1` are privileged (OS4, OS5),
+/// each granted on its own: the fixture's bar, granted both, sees both; the control center,
+/// granted the manager only, reads every window's state and cannot act on one, as the actions
+/// are not offered to it; the bar's identity inside a security context, and a client with no
+/// line, see neither.
 #[test]
-fn the_toplevel_manager_is_privileged() {
+fn the_toplevel_manager_and_actions_are_privileged() {
     const MANAGER: &str = "athanor_toplevel_manager_v1";
+    const ACTIONS: &str = "athanor_toplevel_actions_v1";
     let mut run = Running::start(None);
     let bar = Local::connect(&mut run, None);
     assert!(bar.sees(MANAGER), "the bar, granted it");
+    assert!(bar.sees(ACTIONS), "the bar, granted it");
     let context = sandbox(&run);
     let sandboxed = Local::connect(&mut run, Some(context));
     assert!(!sandboxed.sees(MANAGER), "the bar inside a context");
+    assert!(!sandboxed.sees(ACTIONS), "the bar inside a context");
+    let control_center = Local::control_center(&mut run);
+    assert!(control_center.sees(MANAGER), "the control center");
+    assert!(!control_center.sees(ACTIONS), "the control center");
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
     let other = Local::connect(&mut run, None);
     assert!(!other.sees(MANAGER), "a client with no line");
+    assert!(!other.sees(ACTIONS), "a client with no line");
     run.stop();
 }
 
@@ -4355,11 +4368,12 @@ fn a_minimised_window_keeps_its_thumbnail() {
     run.stop();
 }
 
-/// The dock, as the shell's units connect: the manager of athanor-toplevel-state-v1, the
-/// foreign toplevel list and the seat.
+/// The dock, as the shell's units connect: the manager and the actions of
+/// athanor-toplevel-state-v1, the foreign toplevel list and the seat.
 struct Dock {
     local: Local,
     manager: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
+    actions: athanor_toplevel::athanor_toplevel_actions_v1::AthanorToplevelActionsV1,
     seat: wl_seat::WlSeat,
 }
 
@@ -4368,10 +4382,12 @@ impl Dock {
         let local = Local::connect(run, None);
         let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
         let manager = local.bind(1);
+        let actions = local.bind(1);
         let seat = local.bind(1);
         Self {
             local,
             manager,
+            actions,
             seat,
         }
     }
@@ -4395,7 +4411,7 @@ fn the_dock_raises_minimises_and_closes_a_window() {
     let handle = dock.local.handle(&mut run, "first");
     let other = dock.local.handle(&mut run, "second");
 
-    dock.manager.activate(&handle, &dock.seat);
+    dock.actions.activate(&handle, &dock.seat);
     dock.local.roundtrip(&mut run);
     assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
     assert_eq!(
@@ -4404,11 +4420,11 @@ fn the_dock_raises_minimises_and_closes_a_window() {
         "with the keyboard"
     );
 
-    dock.manager.set_minimized(&handle);
+    dock.actions.set_minimized(&handle);
     dock.local.roundtrip(&mut run);
     assert!(run.state.is_minimised(&window), "minimised");
 
-    dock.manager.unset_minimized(&handle);
+    dock.actions.unset_minimized(&handle);
     dock.local.roundtrip(&mut run);
     assert!(!run.state.is_minimised(&window), "restored");
     assert_eq!(run.state.space.elements().last(), Some(&window), "on top");
@@ -4418,7 +4434,7 @@ fn the_dock_raises_minimises_and_closes_a_window() {
         "with the keyboard"
     );
 
-    dock.manager.close(&other);
+    dock.actions.close(&other);
     dock.local.roundtrip(&mut run);
     let closed = second.toplevel.id();
     app.pump(
@@ -4429,7 +4445,7 @@ fn the_dock_raises_minimises_and_closes_a_window() {
     run.stop();
 }
 
-/// While the session is locked the manager's requests change neither the stack nor the keyboard
+/// While the session is locked the actions change neither the stack nor the keyboard
 /// (L14); with a layer surface holding the keyboard exclusively, `activate` raises the window
 /// and the keyboard stays with the layer.
 #[test]
@@ -4447,8 +4463,8 @@ fn activation_respects_the_lock_and_an_exclusive_layer() {
 
     let (mut locker, lock) = lock_session(&mut run);
     let (before, focus) = (stack(&run), keyboard_focus(&run));
-    dock.manager.activate(&handle, &dock.seat);
-    dock.manager.set_minimized(&other);
+    dock.actions.activate(&handle, &dock.seat);
+    dock.actions.set_minimized(&other);
     dock.local.roundtrip(&mut run);
     assert_eq!(stack(&run), before, "the stack is unchanged while locked");
     assert_eq!(keyboard_focus(&run), focus, "and the keyboard");
@@ -4486,7 +4502,7 @@ fn activation_respects_the_lock_and_an_exclusive_layer() {
     shell.roundtrip(&mut run);
     let exclusive = run.state.exclusive_layer().expect("an exclusive layer");
     assert_eq!(keyboard_focus(&run), Some(exclusive.clone()));
-    dock.manager.activate(&handle, &dock.seat);
+    dock.actions.activate(&handle, &dock.seat);
     dock.local.roundtrip(&mut run);
     assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
     assert_eq!(
@@ -4526,19 +4542,19 @@ fn a_closed_or_undrawn_window_is_left_alone() {
     app.roundtrip(&mut run);
 
     let (before, focus) = (stack(&run), keyboard_focus(&run));
-    dock.manager.activate(&gone_handle, &dock.seat);
-    dock.manager.set_minimized(&gone_handle);
-    dock.manager.unset_minimized(&gone_handle);
-    dock.manager.close(&gone_handle);
-    dock.manager.activate(&hidden_handle, &dock.seat);
-    dock.manager.set_minimized(&hidden_handle);
+    dock.actions.activate(&gone_handle, &dock.seat);
+    dock.actions.set_minimized(&gone_handle);
+    dock.actions.unset_minimized(&gone_handle);
+    dock.actions.close(&gone_handle);
+    dock.actions.activate(&hidden_handle, &dock.seat);
+    dock.actions.set_minimized(&hidden_handle);
     dock.local.roundtrip(&mut run);
     assert_eq!(stack(&run), before, "the stack is unchanged");
     assert_eq!(keyboard_focus(&run), focus, "and the keyboard");
     assert!(run.state.minimised.is_empty(), "nothing is minimised");
     assert!(app.client.toplevel_closed.is_empty(), "nothing is closed");
 
-    dock.manager.activate(&live_handle, &dock.seat);
+    dock.actions.activate(&live_handle, &dock.seat);
     dock.local.roundtrip(&mut run);
     assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
     assert_eq!(
@@ -4697,13 +4713,13 @@ fn a_locked_session_restores_and_closes_nothing() {
     let window = app.server_window(&run, &first.surface);
     let handle = dock.local.handle(&mut run, "first");
     let other = dock.local.handle(&mut run, "second");
-    dock.manager.set_minimized(&handle);
+    dock.actions.set_minimized(&handle);
     dock.local.roundtrip(&mut run);
     assert!(run.state.is_minimised(&window), "minimised");
 
     let (mut locker, lock) = lock_session(&mut run);
-    dock.manager.unset_minimized(&handle);
-    dock.manager.close(&other);
+    dock.actions.unset_minimized(&handle);
+    dock.actions.close(&other);
     dock.local.roundtrip(&mut run);
     app.roundtrip(&mut run);
     assert!(
@@ -4716,7 +4732,7 @@ fn a_locked_session_restores_and_closes_nothing() {
     locker.pump(&mut run, "the session is unlocked", |_, state| {
         state.lock.is_none()
     });
-    dock.manager.close(&other);
+    dock.actions.close(&other);
     dock.local.roundtrip(&mut run);
     let closed = second.toplevel.id();
     app.pump(
@@ -4724,7 +4740,7 @@ fn a_locked_session_restores_and_closes_nothing() {
         "the second window is asked to close",
         |client, _| client.toplevel_closed.contains(&closed),
     );
-    dock.manager.unset_minimized(&handle);
+    dock.actions.unset_minimized(&handle);
     dock.local.roundtrip(&mut run);
     assert!(!run.state.is_minimised(&window), "restored once unlocked");
     run.stop();
