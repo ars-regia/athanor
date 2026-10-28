@@ -2203,8 +2203,12 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # Upstream clients with a line (doc_session.md revision 4, SN12 and SN15): no spec under
 # forge/specs installs them and no crate of the tree builds them, so neither the executable nor
 # its interfaces can be derived here; their interfaces come from SN12's derivation run. Each
-# must keep its line, and a spec that comes to install one ends its exemption with a failure.
-UPSTREAM = {"/usr/bin/cosmic-greeter", "/usr/bin/cosmic-idle", "/usr/bin/cosmic-osd"}
+# must keep one line, for the unit it runs in, and a spec that comes to install one ends its
+# exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
+UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
+            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
+            "/usr/bin/cosmic-osd": "cosmic-osd.service"}
+SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
 # The compositor serves those globals and the layers, and enforces the list: no client to check.
 # Its installed path and its bin target both, so that another binary installed there is checked.
 SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
@@ -2602,10 +2606,17 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
     for executable in lines:
         if executable not in installed and executable not in upstream:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
-    for executable in sorted(upstream):
+    components = read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
+    for executable, unit in sorted(upstream.items()):
         if executable not in lines:
             problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
                             "remove it from UPSTREAM (doc_session.md SN12)")
+        elif [line[0] for line in lines[executable]] != [unit]:
+            problems.append(f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
+                            "the unit it runs in")
+        if unit.endswith(".scope") and f"--unit={unit}" not in components:
+            problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
+                            "names: the grant would reach nothing")
         if executable in installed:
             problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
                             "remove it from UPSTREAM, so that its line is derived")
