@@ -654,21 +654,34 @@ amendment's audit:
       X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7).
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either;
-    - item 1 for every difference that hides, moves or changes a control or a text. A difference of
-      colour, antialiasing or a few pixels is recorded in `athanor-differences.toml` with its cause
-      and its issue, and fixed after the switch;
+    - item 1 for every difference that hides, moves or changes a control or a text, by any
+      amount, and for every difference of colour in a high-contrast variant or in the contrast of
+      a text. Any other difference of colour, and one of antialiasing, is recorded in
+      `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full;
-    - item 3 but the magnifier and the colour filters. A sign-in with either chosen in the
-      greeter's accessibility menu (`ATHANOR_A11Y`) starts cosmic-comp's session, which carries
-      them until the own compositor does;
+    - item 3 but the magnifier and the colour filters. Those stay with cosmic-comp's session:
+      `athanor-compositor-session`, after `athanor-a11y apply-greeter` has applied the greeter's
+      hand-off (`ATHANOR_A11Y`), reads as the user the magnifier key of `doc_accessibility.md`
+      AX2 and cosmic-comp's `a11y_screen_filter.ron`, and when the magnifier is on, or the file
+      holds an inversion or a filter, or cannot be read or parsed, it starts cosmic-comp's session
+      in its place and says why in the journal, whichever entry the greeter had checked;
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
       hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
-      8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back,
-      and every run records its frame times against item 5's thresholds.
+      8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back;
+      every run records its frame times, which meet item 5's thresholds;
+    - revision 4 of `doc_session.md`, approved in the pull request of the switch before its code
+      is merged (ADR-0122 decision 1, ADR-0074). It rewrites SN14 (the own compositor's entry the
+      default, cosmic-comp's the second, the preview's line gone; a compositor that fails before
+      it is ready hands the sign-in to cosmic-comp's session, logged, so that no machine returns
+      to the greeter at every sign-in), SN15 (cosmic-greeter as the locker, cosmic-idle and
+      cosmic-osd run under the own compositor, and the variable that keeps units out is renamed
+      for what still stays out), SN16 (the gaps the switch closes) and acceptance items 9, 10, 15
+      and 16, and `components.toml`'s purpose of the compositor;
+    - the controls that open the overview, the bar's workspaces module and the dock's workspaces
+      button, hidden under the own compositor, and Super+W unbound, until the overview comes.
 
     The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
-    it follows the switch, comes before release 1.0, and the own compositor's session has none
-    until then. Not taken: the switch on the full acceptance, which kept the own compositor out of
+    it follows the switch, and release 1.0 waits for it (`release-1.0.md`, row 13). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier

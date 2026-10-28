@@ -14,7 +14,7 @@ session on Athanor's own compositor, and encryption offered in the installer as 
 choice. Everything else waits.
 
 1.0 has no date. It ships when Athanor's own compositor passes its acceptance and replaces
-cosmic-comp as the default session, with the GTK4 shell on top ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5). The toolkit
+cosmic-comp, whose session then leaves the greeter, with the GTK4 shell on top ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5). The toolkit
 does not gate it: its surfaces replace their GTK4 twins one at a time, under `doc_own_stack.md`
 OS8 (section 6 step 5).
 
@@ -44,7 +44,7 @@ pull request that builds the row adds it, under that name or a better one.
 | Greeter: user list, "Other user", PAM conversation by message type (D7) | `doc_lock_and_prompts.md` LP19 for 0.9, LP18 step 4 for 1.1 | `doc_lock_and_prompts.md` section 5, items 18 to 24: `cargo test -p athanor-greeter-ui` (items 18 to 22, the lockout and expiry against a fake greetd among them); `scripts/devvm/greeter-acceptance.sh` (items 23 and 24, on the dev VM) |
 | Recovery and rollback: text console, GoBack, greenboot | `doc_recovery.md` R1 to R7 | `cargo test -p athanor-update`; `scripts/devvm/acceptance/run.sh` (stage `goback`); `scripts/devvm/switch-acceptance.sh rollback`; `scripts/devvm/acceptance/run.sh` (stages `console` and `greenboot`: acceptance 1 and 7 of `doc_recovery.md`) |
 | Desktop session tier: session lock and polkit agent as upstream components packaged in Fedora, chosen in the pull request that ships them, confined and checked; screenshot and screen share, bar, dock, launcher; cosmic-idle, cosmic-bg, cosmic-workspaces, cosmic-settings coexist (D13, [ADR-0115](../decisions/0115-zero-nine-in-one-week.md)); in 1.0 the tier runs on Athanor's own compositor, which provides the four COSMIC components the protocols they use or replaces them ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md)) | `doc_shell.md` SH3, `doc_lock_and_prompts.md` LP11, `doc_portal.md` PT8, PT9, `doc_settings.md` SE23, `doc_own_stack.md` OS5 | `scripts/devvm/bar-acceptance.sh`, `dock-acceptance.sh`, `launcher-acceptance.sh`, `shield-acceptance.sh`; `forge/test/shell/rig.sh`; `scripts/devvm/lock-acceptance.sh` (the lock and the polkit agent on the dev VM); to add: capture acceptance on the dev VM; the same acceptance against the own compositor |
-| The compositor. Until 1.0, cosmic-comp carries patches 1 and 2 (D14, [ADR-0115](../decisions/0115-zero-nine-in-one-week.md)). In 1.0, Athanor's own compositor replaces it as the default session and passes the acceptance of `doc_own_stack.md` revision 2: OS4 and OS5 tested in the fixture of OS6, the trusted path and the keyboard monitor that answers Orca alone among them ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5; [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md) item 5) | `doc_compositor.md` CO3; `doc_own_stack.md` OS3 to OS6 | `scripts/devvm/compositor-acceptance.sh` (cosmic-comp); `cargo test -p athanor-compositor`; to add: the acceptance that `doc_own_stack.md` revision 2 writes |
+| The compositor. Until 1.0, cosmic-comp carries patches 1 and 2 (D14, [ADR-0115](../decisions/0115-zero-nine-in-one-week.md)). Before 1.0 the own compositor may become the default session with cosmic-comp's as the second choice (`doc_own_stack.md` decision 28); in 1.0 it is the only session and passes the acceptance of `doc_own_stack.md` revision 2: OS4 and OS5 tested in the fixture of OS6, the trusted path and the keyboard monitor that answers Orca alone among them ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5; [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md) item 5) | `doc_compositor.md` CO3; `doc_own_stack.md` OS3 to OS6 | `scripts/devvm/compositor-acceptance.sh` (cosmic-comp); `cargo test -p athanor-compositor`; to add: the acceptance that `doc_own_stack.md` revision 2 writes |
 | Application installation: verified Flathub remote, Flatpak update timer, the packaged store (D8) | `doc_software.md` SW15 to SW17 | `python3 scripts/verify.py contacts`; `system/check-image-contacts.sh` (the `applications` contact: the pinned remote key and the enabled timer, run on the system image in CI) |
 | athanor-attestation and the mesh and post-quantum residue deleted (D10) | ADR-0103 D10 | `python3 scripts/verify.py attestation-absent bus-api-residue` |
 | DNS over TLS opportunistic until the captive-portal probe ships, then strict (D11) | [ADR-0079](../decisions/0079-captive-portals-under-strict-dot.md) | `python3 scripts/verify.py contacts`; the image check of the resolver mode (`system/check-image-contacts.sh`) |
@@ -95,7 +95,7 @@ Four releases lead to 1.0: 0.3, then 0.9 within about one week ([ADR-0115](../de
 [ADR-0105](../decisions/0105-releases-before-1-0.md)), then 0.10 "base", the Fedora rebase, before 2026-12-02 ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md), [ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md)), then 0.11 "anchor", the transitional release, signed with key 1 and carrying the new trust anchor ([ADR-0128](../decisions/0128-row-7-and-key-2-in-1-0.md)). The
 dates are estimates. Each 0.x release is a signed tag on `iso-v0` plus a `:stable` promotion of
 that build on evidence (BRN4 of `branching.md`), with the `release` approval. 1.0 is the last
-0.x release with Athanor's own compositor in place of cosmic-comp as the default session, its
+0.x release with Athanor's own compositor in place of cosmic-comp, its
 acceptance passed, and no blocking defect; it has no date ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5).
 
 **Freeze (D3), lifted on 2026-10-14** ([ADR-0112](../decisions/0112-pace-to-0-9.md)). P2 of
@@ -152,8 +152,10 @@ rows narrowed below.
   SystemPrompter (`doc_lock_and_prompts.md` LP18) are in 1.1 (section 3). In 1.0 the same tier runs on the own
   compositor, which provides cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings the
   protocols they use or replaces them (`doc_own_stack.md` OS5, ADR-0121).
-- **Row 13, the compositor.** cosmic-comp with patches 1 and 2 is 0.9, 0.10 and 0.11. In 1.0 the own
-  compositor replaces it as the default session, and the rows of the register of
+- **Row 13, the compositor.** cosmic-comp with patches 1 and 2 is the default session of 0.9 and of
+  each release before the switch of `doc_own_stack.md` decision 28, and the second choice of each
+  release after it. In 1.0 the own compositor replaces it, with the overview that decision
+  leaves after the switch, and the rows of the register of
   `doc_compositor.md` CO3 become its requirements or leave with cosmic-comp, as
   `doc_own_stack.md` OS4 says. Its acceptance holds OS4 in full, so 1.0 has the compositor
   trusted path for the lock and the prompts and the keyboard monitor that answers Orca alone

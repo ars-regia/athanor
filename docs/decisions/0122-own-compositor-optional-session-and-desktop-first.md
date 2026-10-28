@@ -27,7 +27,8 @@ The maintainer took these decisions on 2026-10-17 (`doc_own_stack.md` decisions 
 
 1. **An optional session before the acceptance.** Once milestone C1's DRM backend has passed the
    console sessions (C1 plan, task 9), the image ships the compositor as a session the greeter
-   offers beside cosmic-comp's, which stays the default until the acceptance. It ships only when:
+   offers beside cosmic-comp's, which stays the default until the acceptance (amended on
+   2026-10-28: see Amendment). It ships only when:
    - privileged globals are granted by executable and unit and the check of C1 task 5 passes
      (`doc_own_stack.md` OS4), so that no confined client reaches layer shell, capture, input
      injection or the session lock;
@@ -55,7 +56,8 @@ builds only while 0.9's rig is idle; both put the compositor in daily use later 
   unchanged, and `doc_shell.md` SH2 and `doc_compositor.md` CO4 hold as ADR-0121 says.
 - The C1 plan gains task 9a, the optional session, with the conditions of decision 1.
 - A defect of the optional session reaches only the machines whose user picks it at the greeter;
-  the default session is unaffected.
+  the default session is unaffected. After the amendment, a defect of the own compositor
+  reaches every machine whose user does not choose cosmic-comp's session.
 
 ## Amendment
 
