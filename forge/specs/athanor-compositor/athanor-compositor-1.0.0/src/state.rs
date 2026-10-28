@@ -74,6 +74,7 @@ use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
@@ -252,6 +253,9 @@ impl State {
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
         ViewporterState::new::<Self>(&dh);
+        // cosmic-idle's fade to black (doc_own_stack.md OS17); Smithay draws such a buffer as
+        // a solid colour on every renderer.
+        SinglePixelBufferState::new::<Self>(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
