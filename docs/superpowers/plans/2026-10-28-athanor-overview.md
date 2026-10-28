@@ -30,9 +30,9 @@
 
 Decisions recorded in this plan, each to be named in the pull request that applies it. D1 and D9 are the maintainer's; the others are the plan's choices, open to review.
 
-- **D1, replace, do not carry (maintainer, 2026-10-28).** ADR-0103 D13 kept cosmic-workspaces in 1.0; ADR-0121 amended D13 so it stays only through the protocols the own compositor provides, or is replaced (OS5, `release-1.0.md`). The maintainer chose the replacement. No task gives cosmic-workspaces the COSMIC protocols under athanor-compositor; C1 T9-6 (refused top layer, then SIGSEGV) stays its state there until Task 31 removes it.
+- **D1, replace, do not carry (maintainer, 2026-10-28).** ADR-0103 D13 kept cosmic-workspaces in 1.0; ADR-0121 amended D13 so it stays only through the protocols the own compositor provides, or is replaced (OS5, `release-1.0.md`). The maintainer chose the replacement. No task gives cosmic-workspaces the COSMIC protocols under athanor-compositor; C1 T9-6 (refused top layer, then SIGSEGV) stays its state there until Task 30 removes it.
 - **D2, GTK4 and Cairo, not the own toolkit (decided by the documents).** OV2 (approved) and SH4 name GTK4; OS5 says the shell does not change to move; OS8 forbids moving a surface to the toolkit before its GTK reference transcript exists; OS11 puts drag and drop, which OV7 needs, in toolkit stage 2; section 6 step 5 of `doc_own_stack.md` does not list the overview. The GTK-free library keeps a later port to the toolkit a change of the binary only. The alternative, writing it on the toolkit now, would ship without drag and drop and without a reference to compare its accessibility against.
-- **D3, the private protocol additions (plan's proposal, Task 1).** Decision 19's set gives no window's workspaces, no geometry, no move to a workspace, no pin and no reorder. Proposed as `doc_own_stack.md` decision 28: `athanor_toplevel_state_v1` version 2 adds `workspace_enter(ext_workspace_handle_v1)`, `workspace_leave(ext_workspace_handle_v1)` and `geometry(wl_output, x, y, width, height)`; `athanor_toplevel_actions_v1` version 2 adds `move_to_workspace(handle, ext_workspace_handle_v1, wl_output)`; and one private `athanor_workspace_v1` keyed by `ext_workspace_handle_v1` carries tiling, pinned, `pin`, `unpin`, `move_before`, `move_after` and the capabilities `pin` and `move`, in place of the tiling-only `athanor_workspace_tiling_v1`. The alternative, a third private interface for the overview alone beside a tiling-only one, doubles the per-workspace objects for the same handle.
+- **D3, the private protocol additions (plan's proposal, Task 1).** Decision 19's set gives no window's workspaces, no geometry, no move to a workspace, no pin and no reorder. Proposed as `doc_own_stack.md` decision 29: `athanor_toplevel_state_v1` version 2 adds `workspace_enter(ext_workspace_handle_v1)`, `workspace_leave(ext_workspace_handle_v1)` and `geometry(wl_output, x, y, width, height)`; `athanor_toplevel_actions_v1` version 2 adds `move_to_workspace(handle, ext_workspace_handle_v1, wl_output)`; and one private `athanor_workspace_v1` keyed by `ext_workspace_handle_v1` carries tiling, pinned, `pin`, `unpin`, `move_before`, `move_after` and the capabilities `pin` and `move`, in place of the tiling-only `athanor_workspace_tiling_v1`. It carries requests that change workspaces, so the client binds it only lazily, from the first call that needs it (Task 8): a client that only reads ext-workspace never binds it, and no grant widens. The alternative, a third private interface for the overview alone beside a tiling-only one, doubles the per-workspace objects for the same handle.
 - **D4, the client's names.** OV3's `Client::move_window` is `WindowActions::move_to_workspace`, beside activate, minimise and close in `src/actions.rs`, so the lazy bind of the private actions keeps every name in one file and `verify.py allow-list` keeps seeing it through `.window_actions`. The other calls keep OV3's names on `Client`. Task 1 records the rename in `doc_overview.md`.
 - **D5, workspace order.** The client reports `Client::workspaces()` in the compositor's order per output (ext-workspace `coordinates`, else creation order) and adds `Workspace.coordinates: Vec<u32>`; the strip's order and acceptance item 7 read it. OV3 does not name it; it is the data the strip needs.
 - **D6, the own compositor's workspaces (plan's choice, Task 2).** Today athanor-compositor serves one fixed workspace per output and ignores every request (`C/src/workspace.rs`). OS2 requires the behaviour the overview relies on: dynamic workspaces per output, an empty one always last (F-overview-04), activate, and a window on exactly one workspace. Task 2 builds that minimum; the keys that switch and carry windows are the OS13 key-bindings plan's. Sticky windows are not in the own compositor's model yet: the overview handles a window on several workspaces (cosmic-comp) and on one (athanor-compositor) with the same code.
@@ -82,7 +82,7 @@ Decisions recorded in this plan, each to be named in the pull request that appli
 ### Task 1: Amend `doc_own_stack.md` and annotate `doc_overview.md`
 
 **Files:**
-- Modify: `docs/architecture/doc_own_stack.md` (OS5's set; section 7, decision 28 per D3; the register rows 3 and 4 per D9); `docs/architecture/doc_overview.md` (a dated amendment note: D4's rename, D5, D8, D10, the allow-list line replacing OV2's main-socket rationale under athanor-compositor, and decisions 4 and 5 deferred per D9); `docs/decisions/README.md` only if the maintainer asks for an ADR in place of the decision.
+- Modify: `docs/architecture/doc_own_stack.md` (OS5's set; section 7, decision 29 per D3; the register rows 3 and 4 per D9); `docs/architecture/doc_overview.md` (a dated amendment note: D4's rename, D5, D8, D10, the allow-list line replacing OV2's main-socket rationale under athanor-compositor, and decisions 4 and 5 deferred per D9, with every line that names their patches); `docs/architecture/doc_accessibility.md` (AX9's reduced-motion line, which names the cosmic-comp patch, per D9); `docs/architecture/doc_compositor.md` (register rows 3 and 4 per D9); `docs/decisions/README.md` only if the maintainer asks for an ADR in place of the decision.
 - Test: `python3 scripts/verify.py` docs checks (`--list` names them).
 
 **Interfaces:**
@@ -90,12 +90,12 @@ Decisions recorded in this plan, each to be named in the pull request that appli
 
 - [ ] **Step 1: Write the failing check.** Run `python3 scripts/verify.py --list` and pick the checks that read `doc_own_stack.md` and `doc_overview.md` (status, links, register); write the amendment text in a scratch file under `.scratch/`.
 - [ ] **Step 2: Apply** with an exact-match replacement script; `git diff --numstat` shows only the added lines.
-- [ ] **Step 3: Run** the checks of Step 1: pass. The pull request asks the maintainer to approve decision 28 and the note; no later task starts before the approval.
+- [ ] **Step 3: Run** the checks of Step 1: pass. The pull request asks the maintainer to approve decision 29 and the note; no later task starts before the approval.
 - [ ] **Step 4: Commit**
 
 ```bash
 git add docs/architecture/doc_own_stack.md docs/architecture/doc_overview.md
-git commit -m "docs(own-stack): document the private protocols the overview needs (decision 28)"
+git commit -m "docs(own-stack): document the private protocols the overview needs (decision 29)"
 ```
 
 ### Task 2: Dynamic workspaces per output in athanor-compositor
@@ -122,7 +122,7 @@ git commit -m "feat(compositor): dynamic workspaces per output with an empty one
 ### Task 3: Toplevel state version 2: workspaces and geometry
 
 **Files:**
-- Modify: `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml` (version 2: events `workspace_enter`, `workspace_leave`, `geometry`, per decision 28), `system/athanor-compositor-client/protocols/README.md`, `C/src/toplevel_state.rs` (sent per frame as a diff, as the state and outputs are)
+- Modify: `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml` (version 2: events `workspace_enter`, `workspace_leave`, `geometry`, per decision 29; `athanor_toplevel_manager_v1` goes to version 2 as well, since `get_toplevel_state` creates the state object at the manager's version), `system/athanor-compositor-client/protocols/README.md`, `C/src/toplevel_state.rs` (sent per frame as a diff, as the state and outputs are)
 - Test: `C/src/fixture.rs`
 
 - [ ] **Step 1: Write the failing tests:** `a_window_reports_its_workspace` (on map, then after `move_window_to`: `leave` of the old, `enter` of the new); `a_window_reports_its_geometry_per_output`; `a_version_1_client_gets_neither` (bound at version 1, no new event).
@@ -134,7 +134,7 @@ git commit -m "feat(compositor): dynamic workspaces per output with an empty one
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
 git add system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml system/athanor-compositor-client/protocols/README.md "$C/src/toplevel_state.rs" "$C/src/fixture.rs"
-git commit -m "feat(compositor): report a window's workspaces and geometry in the toplevel state (decision 28)"
+git commit -m "feat(compositor): report a window's workspaces and geometry in the toplevel state (decision 29)"
 ```
 
 ### Task 4: Toplevel actions version 2: move to a workspace
@@ -152,14 +152,14 @@ git commit -m "feat(compositor): report a window's workspaces and geometry in th
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
 git add system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml "$C/src/toplevel_state.rs" "$C/src/fixture.rs"
-git commit -m "feat(compositor): move a window to a workspace through the private actions (decision 28)"
+git commit -m "feat(compositor): move a window to a workspace through the private actions (decision 29)"
 ```
 
 ### Task 5: The private workspace interface: pin and reorder
 
 **Files:**
 - Create: `system/athanor-compositor-client/protocols/athanor-workspace-v1.xml`; `C/src/workspace_ext.rs`
-- Modify: `C/src/main.rs`, `C/src/state.rs`, `C/src/identity.rs` (`Privilege::Workspace`; `Privilege::ALL` grows by one), `C/data/globals` (`athanor_workspace_manager_v1 privileged`), `C/README.md`, `forge/test/shell/rig.sh` (`compositor-globals`: the refusal list and its count), the protocols README; the tiling state of #739 if it has landed (folded into this interface per D3; otherwise #739 implements it here)
+- Modify: `C/src/main.rs`, `C/src/state.rs`, `C/src/identity.rs` (`Privilege::Workspace`; `Privilege::ALL` grows by one), `C/data/globals` (`athanor_workspace_manager_v1 privileged`), `C/README.md`, `forge/test/shell/rig.sh` (`compositor-globals`: the refusal list and its count), the protocols README; the tiling state of #739 if it has landed (folded into this interface per D3; otherwise #739 implements it here); the compositor's RPM spec (`# repo-input: system/athanor-compositor-client/protocols/athanor-workspace-v1.xml`, as `2026-10-23-compositor-toplevel-state.md` D4 does for its description) if #704 is on the base, otherwise a comment on #704 naming the line as a blocking item
 - Test: `C/src/fixture.rs`
 
 - [ ] **Step 1: Write the failing tests:** `the_workspace_interface_is_privileged`; `a_pinned_workspace_survives_being_emptied`; `move_before_and_after_reorder_and_send_coordinates`; `capabilities_are_sent_at_once`.
@@ -171,7 +171,7 @@ git commit -m "feat(compositor): move a window to a workspace through the privat
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
 git add system/athanor-compositor-client/protocols/ "$C/src/workspace_ext.rs" "$C/src/main.rs" "$C/src/state.rs" "$C/src/identity.rs" "$C/src/fixture.rs" "$C/data/globals" "$C/README.md" forge/test/shell/rig.sh
-git commit -m "feat(compositor): the private workspace interface for pin and order (decision 28)"
+git commit -m "feat(compositor): the private workspace interface for pin and order (decision 29)"
 ```
 
 ### Task 6: `Window.workspaces` in the compositor client
@@ -212,7 +212,7 @@ git commit -m "feat(compositor-client): report each window's geometry per output
 
 - [ ] **Step 1: Write the failing tests:** `rename` is false on cosmic-comp 1.8.0 and on athanor-compositor (OV15 decision 7); `pinned` follows; the snapshot lists workspaces in compositor order.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
-- [ ] **Step 3: Implement.** The private workspace global is bound at connect only if the client already binds ext-workspace there; otherwise lazily, with its names in one file registered in `ON_DEMAND` (as `actions.rs`).
+- [ ] **Step 3: Implement.** The private workspace global is bound lazily, from the first call that needs it, with its names in one file registered in `ON_DEMAND` (as `actions.rs`); never at connect (D3).
 - [ ] **Step 4: Run all** (Task 6, Step 4), `python3 scripts/verify.py allow-list`: pass, the bar's, dock's, launcher's and control centre's lines granted what their code now names, or unchanged when bound lazily.
 - [ ] **Step 5: Commit**
 
@@ -316,7 +316,7 @@ git commit -m "feat(overview): the unit, os.athanor.Overview1 and the compositor
 - Test: the spike's own probe, run on athanor-ref.
 
 - [ ] **Step 1: Write the probe** as a failing check: one gtk4-layer-shell surface switches hidden → indicator → shown → hidden fifty times; the hot-corner surface empties and refills its input region; the overlay draws above a fullscreen window; the shown surface on the focused output gets the keyboard; a drag into the corner does not enter it; a request on a window closed 10 ms earlier.
-- [ ] **Step 2: Run** under cosmic-comp 1.8.0-1.fc43.athanor1 and under athanor-compositor. Expected on the first run under athanor-compositor before Task 13's grant: the layer refusal of C1 T9-6.
+- [ ] **Step 2: Run** under cosmic-comp 1.8.0-1.fc43.athanor1 and under athanor-compositor. Expected under athanor-compositor: the probe's surfaces granted through Task 13's line; with that line removed for one run, the layer refusal of C1 T9-6.
 - [ ] **Step 3: Record** results; a failed rule goes back to the maintainer before Task 16 (section 4, item 1).
 - [ ] **Step 4: Commit**
 
@@ -526,7 +526,7 @@ As Task 24, for OV19 step 4.
 **Files:** `docs/operations/evidence/overview-gate.md` (or the evidence location `contributing.md` names): measurements and verdicts.
 
 - [ ] **Step 1:** On athanor-ref, under both compositors: acceptance 5 (first complete frame p95 within 100 ms over 50 openings), 6 (99% of frames on time over 50 runs; no intermediate frame with animations off), 10, 11, 12 (budgets; the 24-hour soak), 13; on the maintainer's NVIDIA desktop, acceptance 9 (50 cold starts, no `libvulkan` in `/proc/<pid>/maps`).
-- [ ] **Step 2:** In CI: acceptance 1 to 4, the 84 cases, `rig.sh golden-report` and the Orca comparison under athanor-compositor (OS19 items 1 and 3), the ST6 scenarios of F-overview-01 to 06, 08, 09, 11, 13, 17 and F-osd-12.
+- [ ] **Step 2:** In CI: acceptance 1 to 4, 7 and 8 (the tests of Tasks 19 and 25), the 84 cases, `rig.sh golden-report` and the Orca comparison under athanor-compositor (OS19 items 1 and 3), the ST6 scenarios of F-overview-01 to 06, 08, 09, 11, 13, 17 and F-osd-12.
 - [ ] **Step 3:** The maintainer's aesthetic signature (ST2). A failure opens a task before Task 30.
 - [ ] **Step 4: Commit**
 
@@ -538,17 +538,17 @@ git commit -m "docs(overview): record the gate's measurements (OV19 step 5)"
 ### Task 30: The switch and the retirement of cosmic-workspaces (OV17, one change)
 
 **Files:**
-- Modify: `system/athanor-compositor-client/src/launch.rs` (`Opener::Workspaces` calls `os.athanor.Overview1.Show`; its tests at the end of the file updated), which moves the bar's module (`athanor-bar/.../src/ui/mod.rs`), both docks (`athanor-dock/.../src/ui/surface.rs`, `src/toolkit/dock.rs`), `system/athanor-apps/src/entries.rs` and `examples/cc-probe.rs` with it; the `system_actions` file under `/usr/share/athanor/cosmic-defaults` in `athanor-calmo` (`WorkspaceOverview` → `gdbus call --session --dest os.athanor.Overview1 --object-path /os/athanor/Overview1 --method os.athanor.Overview1.Toggle`); the OS13 Super+W binding per D10; `O/data/80-athanor-overview.preset` (`enable`); `scripts/devvm/compositor-acceptance.sh:160`; `forge/config/packages.json:111` (cosmic-workspaces removed); `docs/architecture/shell-features.md` (section 3 of `doc_overview.md`); `docs/architecture/doc_bar.md` BR3 and F-bar-19's source; `docs/architecture/components.toml` (`status`); `docs/operations/release-1.0.md` (cosmic-workspaces leaves the D13 list, citing ADR-0121 and D1)
+- Modify: `system/athanor-compositor-client/src/launch.rs` (`Opener::Workspaces` calls `os.athanor.Overview1.Show`; its tests at the end of the file updated), which moves the bar's module (`athanor-bar/.../src/ui/mod.rs`), both docks (`athanor-dock/.../src/ui/surface.rs`, `src/toolkit/dock.rs`), `system/athanor-apps/src/entries.rs` and `examples/cc-probe.rs` with it; the `system_actions` file under `/usr/share/athanor/cosmic-defaults` in `athanor-calmo`, which `doc_languages.md` LN9 creates and Task 30 waits for (`WorkspaceOverview` → `gdbus call --session --dest os.athanor.Overview1 --object-path /os/athanor/Overview1 --method os.athanor.Overview1.Toggle`); the OS13 Super+W binding per D10; `O/data/80-athanor-overview.preset` (`enable`); `scripts/devvm/compositor-acceptance.sh:160`; `forge/config/packages.json:111` (cosmic-workspaces removed); `docs/architecture/shell-features.md` (section 3 of `doc_overview.md`); `docs/architecture/doc_bar.md` BR3 and F-bar-19's source; `docs/architecture/components.toml` (`status`); `docs/operations/release-1.0.md` (cosmic-workspaces leaves the D13 list, citing ADR-0121 and D1)
 - Test: `launch.rs` tests; `python3 scripts/verify.py` (packages, register, coverage, allow-list); `forge/test/shell/rig.sh compositor-e2e`; acceptance 14 on athanor-ref after `bootc switch` to the built image.
 
-- [ ] **Step 1: Write the failing tests:** the `launch.rs` tests name `os.athanor.Overview1` and `Show`; `test_compositor_shortcuts.py` expects the `WorkspaceOverview` entry; acceptance 14's script.
+- [ ] **Step 1: Write the failing tests:** the `launch.rs` tests name `os.athanor.Overview1` and `Show`; the test LN9 adds for the `system_actions` file expects the `WorkspaceOverview` entry; acceptance 14's script.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement** with exact-match scripts for `packages.json` and docs.
 - [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`), then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add system/athanor-compositor-client/src/launch.rs forge/specs/athanor-calmo forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/operations/release-1.0.md forge/specs/athanor-system-config/tests/test_compositor_shortcuts.py
+git add system/athanor-compositor-client/src/launch.rs forge/specs/athanor-calmo forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/operations/release-1.0.md
 git commit -m "feat(overview): switch every opener to athanor-overview and retire cosmic-workspaces (OV17)"
 ```
 
@@ -558,7 +558,7 @@ One release on `:stable` with the switch; any regression reverts Task 30 as one 
 
 ## Open questions
 
-1. **The shape of the private protocols (D3).** Recommendation: version 2 of the existing toplevel state and actions, and one `athanor_workspace_v1` that also carries tiling, agreed with #739 before either is written. Needs the maintainer's approval as decision 28 (Task 1).
+1. **The shape of the private protocols (D3).** Recommendation: version 2 of the existing toplevel state and actions, and one `athanor_workspace_v1` that also carries tiling, agreed with #739 before either is written. Needs the maintainer's approval as decision 29 (Task 1).
 2. **Who builds the own compositor's dynamic workspaces (D6).** Recommendation: Task 2 here, minimal; the keys stay in the OS13 key-bindings plan. The alternative is a compositor workspaces plan of its own, which would block Tasks 3 to 5.
 3. **Are the cosmic-comp patches of decisions 4 and 5 still wanted (D9)?** Recommendation: no; the own compositor carries the gesture (Task 27) and has no slide to reduce yet. F-overview-12 stays `partial` under cosmic-comp. Needs a dated note in `doc_overview.md` (Task 1).
 4. **One change for switch and removal (OV17)?** Recommendation: keep one change as OV17 says; the rollback is one revert.
