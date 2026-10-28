@@ -56,6 +56,7 @@ impl State {
         source: KeyboardSource,
     ) {
         self.typed(code, key_state, time, source, false);
+        self.send_keyboard_group();
     }
 
     /// As `key_input`, and a key `past_grab` goes to the focused surface past the keyboard's
@@ -295,6 +296,7 @@ impl State {
             ];
             self.set_modifiers(&keyboard, mask);
         }
+        self.send_keyboard_group();
     }
 
     /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
@@ -366,7 +368,7 @@ impl State {
     /// Gives the seat its own keymap and modifiers back when a virtual keyboard's is current:
     /// before a hardware key, before a key of a virtual keyboard with no keymap of its own, and
     /// when that virtual keyboard goes.
-    fn restore_seat_keymap(&mut self) {
+    pub(crate) fn restore_seat_keymap(&mut self) {
         let (Some(current), Some(keyboard)) =
             (self.virtual_keymap.take(), self.seat.get_keyboard())
         else {
@@ -389,6 +391,7 @@ impl State {
             context.set_modifier_mask(depressed, latched, locked, layout)
         });
         self.input_method_keymap_changed();
+        self.send_keyboard_group();
     }
 }
 
@@ -399,7 +402,7 @@ pub struct VirtualKeymap {
     /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
     /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
     seat_keymap: String,
-    seat_modifiers: [u32; 4],
+    pub(crate) seat_modifiers: [u32; 4],
 }
 
 /// The keymap of `xkb`, as the clients are sent it.

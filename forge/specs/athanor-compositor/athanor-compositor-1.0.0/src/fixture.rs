@@ -13,7 +13,7 @@ use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::layer_map_for_output;
-use smithay::input::keyboard::KeyboardSource;
+use smithay::input::keyboard::{KeyboardSource, XkbConfig};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
@@ -246,6 +246,8 @@ struct Client {
     keys_under: Vec<u32>,
     /// The depressed modifiers of each `wl_keyboard.modifiers` the client was sent.
     modifiers: Vec<u32>,
+    /// The group of each `wl_keyboard.modifiers` the client was sent.
+    modifier_groups: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -552,8 +554,13 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 client.keymaps += 1;
                 client.keymap_size = size;
             }
-            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+            wl_keyboard::Event::Modifiers {
+                mods_depressed,
+                group,
+                ..
+            } => {
                 client.modifiers.push(mods_depressed);
+                client.modifier_groups.push(group);
             }
             _ => {}
         }
@@ -3862,6 +3869,126 @@ fn a_keyboard_group_object_is_sent_the_group_at_once() {
     run.stop();
 }
 
+/// Gives the seat two layouts, us and it, switched by Alt+Shift.
+fn two_layouts(run: &mut Running) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let config = XkbConfig {
+        layout: "us,it",
+        variant: ",",
+        options: Some("grp:alt_shift_toggle".into()),
+        ..Default::default()
+    };
+    keyboard
+        .set_xkb_config(&mut run.state, config)
+        .expect("the us and it layouts");
+}
+
+/// `set_group` switches the seat's group: every object hears it once, and the focused window
+/// is sent modifiers in the new group.
+#[test]
+fn set_group_switches_and_every_object_hears_it() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut first = Local::connect(&mut run, None);
+    let (_first_keyboard, one) = first.keyboard_group(&mut run);
+    let mut second = Local::connect(&mut run, None);
+    let (_second_keyboard, two) = second.keyboard_group(&mut run);
+    one.set_group(1);
+    first.roundtrip(&mut run);
+    second.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(first.groups_of(&one), [0, 1], "the object that asked");
+    assert_eq!(second.groups_of(&two), [0, 1], "the other object");
+    assert_eq!(window.client.modifier_groups.last(), Some(&1), "the focus");
+    two.set_group(0);
+    second.roundtrip(&mut run);
+    first.roundtrip(&mut run);
+    assert_eq!(first.groups_of(&one), [0, 1, 0], "back to the first");
+    run.stop();
+}
+
+/// A group at or beyond the keymap's layouts changes nothing.
+#[test]
+fn a_group_beyond_the_layouts_is_ignored() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    // The modifiers of the window's enter may follow the keymap `focused_window` waits for.
+    window.roundtrip(&mut run);
+    let sent = window.client.modifier_groups.len();
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    object.set_group(2);
+    object.set_group(u32::MAX);
+    bar.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0], "no group is sent");
+    assert_eq!(window.client.modifier_groups.len(), sent, "nor modifiers");
+    assert_eq!(run.state.seat_group(), 0);
+    object.set_group(1);
+    bar.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0, 1], "a group in range is");
+    run.stop();
+}
+
+/// The keymap's own shortcut, Alt+Shift, switches the group, and the objects hear it.
+#[test]
+fn the_group_follows_a_shortcut() {
+    const ALT: u32 = 56;
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    for (code, pressed) in [(ALT, true), (SHIFT, true), (SHIFT, false), (ALT, false)] {
+        key(&mut run.state, code, pressed);
+    }
+    bar.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0, 1]);
+    run.stop();
+}
+
+/// A virtual keyboard with no keymap of its own types under its own modifiers, group included,
+/// and the seat's group is not moved.
+#[test]
+fn a_virtual_keyboards_modifiers_leave_the_group_alone() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let (_keyboard, object) = local.keyboard_group(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, None);
+    typist.group(&mut local, &mut run, 1);
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(local.groups_of(&object), [0], "no group is sent");
+    assert_eq!(run.state.seat_group(), 0);
+    run.stop();
+}
+
+/// A virtual keyboard's own keymap leaves the seat's group alone, and `set_group` while it is
+/// current gives the focus the seat's keymap back before it switches.
+#[test]
+fn a_virtual_keymap_leaves_the_group_alone() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let (_keyboard, object) = local.keyboard_group(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(local.groups_of(&object), [0], "no group is sent");
+    let keymaps = local.client.keymaps;
+    object.set_group(1);
+    local.roundtrip(&mut run);
+    assert!(
+        local.client.keymaps > keymaps,
+        "the seat's keymap is sent again"
+    );
+    assert_eq!(local.groups_of(&object), [0, 1]);
+    assert_eq!(local.client.modifier_groups.last(), Some(&1));
+    run.stop();
+}
+
 /// A window of a fixture client besides the one `Local::toplevel` maps: its surface, its xdg
 /// surface and its toplevel.
 struct Other {
@@ -5197,6 +5324,20 @@ impl VirtualKeyboard {
                 Argument::Uint(0),
                 Argument::Uint(code),
                 Argument::Uint(state),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
+    /// Sets the group `group`, with no modifier.
+    fn group(&self, local: &mut Local, run: &mut Running, group: u32) {
+        self.send(
+            2,
+            [
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(group),
             ],
         );
         local.roundtrip(run);
