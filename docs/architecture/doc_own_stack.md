@@ -686,8 +686,8 @@ amendment's audit:
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the magnifier, inversion and filter rows,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
-      history's switch), each recorded in
-      `athanor-differences.toml` with this decision as its cause; and for every difference of colour in a high-contrast variant or in the contrast of
+      history's switch), and the move of the neighbouring controls their absence causes,
+      each recorded in `athanor-differences.toml` with this decision as its cause; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
