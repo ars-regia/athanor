@@ -2,10 +2,11 @@
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
 (`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). The package
-`athanor-compositor` ships it as the greeter's preview session (`docs/architecture/doc_session.md`,
-SN15): `data/athanor-compositor-session` starts `data/athanor-compositor.service`, which starts
-the desktop once the display is ready. The preview is optional: cosmic-comp stays the default
-session until this one passes OS19 of `doc_own_stack.md`, the acceptance of its revision 2.
+`athanor-compositor` ships it as the greeter's default session (`docs/architecture/doc_session.md`,
+SN14 and SN15, revision 4; `doc_own_stack.md` decision 28): `data/athanor-compositor-session`
+starts `data/athanor-compositor.service`, which starts the desktop once the display is ready.
+cosmic-comp's session stays at the greeter as the second entry until this one passes OS19 of
+`doc_own_stack.md` in full and the overview and the window switcher on Alt+Tab have come.
 
 ## Smithay
 
@@ -96,7 +97,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -105,6 +106,8 @@ security context's listener is granted nothing, whatever its identity.
 on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
 plan): the bar's line carries the workspaces, and the output manager is the control center's.
+`zwlr_output_power_manager_v1` turns a screen off and is the idle daemon's: a client it reached
+could blank the session.
 `athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
 on windows: the control center is granted the first, the bar, the dock and the launcher both.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input

@@ -84,6 +84,9 @@ use wayland_protocols_wlr::output_management::v1::client::{
     zwlr_output_configuration_head_v1, zwlr_output_configuration_v1, zwlr_output_head_v1,
     zwlr_output_manager_v1, zwlr_output_mode_v1,
 };
+use wayland_protocols_wlr::output_power_management::v1::client::{
+    zwlr_output_power_manager_v1, zwlr_output_power_v1,
+};
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
@@ -152,7 +155,7 @@ fn background(px: &[u8; 4]) -> bool {
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Every global the compositor offers on every backend.
-const GLOBALS: [&str; 13] = [
+const GLOBALS: [&str; 14] = [
     "wl_compositor",
     "wl_subcompositor",
     "wl_shm",
@@ -161,6 +164,7 @@ const GLOBALS: [&str; 13] = [
     "zwlr_layer_shell_v1",
     "zxdg_output_manager_v1",
     "wp_viewporter",
+    "wp_single_pixel_buffer_manager_v1",
     "wp_fractional_scale_manager_v1",
     "wp_presentation",
     "wp_cursor_shape_manager_v1",
@@ -234,6 +238,16 @@ struct Client {
     activation_token: Option<String>,
     /// The toplevels the compositor asked to close.
     toplevel_closed: Vec<ObjectId>,
+    /// The events of every zwlr_output_power_v1 object, in order.
+    power: Vec<(ObjectId, PowerEvent)>,
+}
+
+/// An event of a zwlr_output_power_v1 object.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PowerEvent {
+    On,
+    Off,
+    Failed,
 }
 
 /// An event of an athanor_toplevel_state_v1 object.
@@ -413,6 +427,28 @@ delegate_noop!(Client: xdg_positioner::XdgPositioner);
 delegate_noop!(Client: ignore xdg_popup::XdgPopup);
 delegate_noop!(Client: ignore wl_seat::WlSeat);
 delegate_noop!(Client: ignore wl_output::WlOutput);
+delegate_noop!(Client: zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1);
+
+impl Dispatch<zwlr_output_power_v1::ZwlrOutputPowerV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &zwlr_output_power_v1::ZwlrOutputPowerV1,
+        event: zwlr_output_power_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let event = match event {
+            zwlr_output_power_v1::Event::Mode {
+                mode: WEnum::Value(zwlr_output_power_v1::Mode::On),
+            } => PowerEvent::On,
+            zwlr_output_power_v1::Event::Mode { .. } => PowerEvent::Off,
+            zwlr_output_power_v1::Event::Failed => PowerEvent::Failed,
+            _ => return,
+        };
+        client.power.push((object.id(), event));
+    }
+}
 delegate_noop!(Client: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1);
 delegate_noop!(Client: ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1);
 delegate_noop!(Client: ext_image_capture_source_v1::ExtImageCaptureSourceV1);
@@ -986,7 +1022,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
-    athanor_toplevel_actions_v1\n\
+    athanor_toplevel_actions_v1 zwlr_output_power_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
 
@@ -7048,5 +7084,171 @@ fn os9_a_key_let_go_past_the_grab_is_not_let_go_past_the_next_one() {
     assert_eq!(states, ["1", "0"], "the next grab sees the press and the release");
     window.roundtrip(&mut run);
     assert_eq!(window.client.released, [30], "the window sees no second release");
+    run.stop();
+}
+
+
+/// A `zwlr_output_power_v1` of output `index`, made through a manager bound now.
+fn power_of(
+    local: &Local,
+    index: usize,
+) -> zwlr_output_power_v1::ZwlrOutputPowerV1 {
+    let manager: zwlr_output_power_manager_v1::ZwlrOutputPowerManagerV1 = local.bind(1);
+    manager.get_output_power(&local.output(index), &local.queue.handle(), ())
+}
+
+/// The events `object` was sent, in order.
+fn power_events(local: &Local, object: &zwlr_output_power_v1::ZwlrOutputPowerV1) -> Vec<PowerEvent> {
+    local
+        .client
+        .power
+        .iter()
+        .filter(|(id, _)| *id == object.id())
+        .map(|(_, event)| *event)
+        .collect()
+}
+
+/// `zwlr_output_power_manager_v1` is privileged (D1): a client the allow-list does not grant it,
+/// the control center here, does not see it; the bar, which the fixture grants it, does.
+#[test]
+fn output_power_is_privileged() {
+    const MANAGER: &str = "zwlr_output_power_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(MANAGER), "the bar");
+    let control_center = Local::control_center(&mut run);
+    assert!(!control_center.sees(MANAGER), "the control center");
+    run.stop();
+}
+
+/// An object is sent the mode when it is made and at each change, and so is every other object
+/// of the same client for the same output (D4); the other output stays on.
+#[test]
+fn the_mode_is_sent_at_creation_and_on_change() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let first = power_of(&local, 0);
+    let second = power_of(&local, 0);
+    local.roundtrip(&mut run);
+    assert_eq!(power_events(&local, &first), [PowerEvent::On]);
+    first.set_mode(zwlr_output_power_v1::Mode::Off);
+    local.roundtrip(&mut run);
+    assert_eq!(power_events(&local, &first), [PowerEvent::On, PowerEvent::Off]);
+    assert_eq!(power_events(&local, &second), [PowerEvent::On, PowerEvent::Off]);
+    let outputs: Vec<_> = run.state.space.outputs().cloned().collect();
+    assert!(!run.state.output_power.is_on(&outputs[0]), "the first output is off");
+    assert!(run.state.output_power.is_on(&outputs[1]), "the second output stays on");
+    second.set_mode(zwlr_output_power_v1::Mode::On);
+    local.roundtrip(&mut run);
+    assert_eq!(
+        power_events(&local, &first),
+        [PowerEvent::On, PowerEvent::Off, PowerEvent::On]
+    );
+    run.stop();
+}
+
+/// While one client controls an output, another client's object for it is sent `failed` and
+/// does nothing; once the first client's object is gone, the second client may take it (D2).
+#[test]
+fn a_second_client_is_refused_while_one_controls() {
+    let mut run = Running::start(None);
+    let mut first = Local::connect(&mut run, None);
+    let mut second = Local::connect(&mut run, None);
+    let held = power_of(&first, 0);
+    first.roundtrip(&mut run);
+    let refused = power_of(&second, 0);
+    second.roundtrip(&mut run);
+    assert_eq!(power_events(&second, &refused), [PowerEvent::Failed]);
+    refused.set_mode(zwlr_output_power_v1::Mode::Off);
+    second.roundtrip(&mut run);
+    let output = run.state.space.outputs().next().cloned().expect("an output");
+    assert!(run.state.output_power.is_on(&output), "a refused object does nothing");
+    let other = power_of(&second, 1);
+    second.roundtrip(&mut run);
+    assert_eq!(power_events(&second, &other), [PowerEvent::On], "another output is free");
+    held.destroy();
+    first.roundtrip(&mut run);
+    let taken = power_of(&second, 0);
+    second.roundtrip(&mut run);
+    assert_eq!(power_events(&second, &taken), [PowerEvent::On]);
+    run.stop();
+}
+
+/// A client that turned an output off and goes leaves it on (D3).
+#[test]
+fn the_output_turns_on_when_its_controller_goes() {
+    let mut run = Running::start(None);
+    let mut daemon = Local::connect(&mut run, None);
+    let power = power_of(&daemon, 0);
+    power.set_mode(zwlr_output_power_v1::Mode::Off);
+    daemon.roundtrip(&mut run);
+    let output = run.state.space.outputs().next().cloned().expect("an output");
+    assert!(!run.state.output_power.is_on(&output), "off");
+    drop(daemon);
+    run.until("the output turns on", |state| state.output_power.is_on(&output));
+    run.stop();
+}
+
+/// The objects of an output that goes are sent `failed`.
+#[test]
+fn a_removed_output_fails_its_objects() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let power = power_of(&local, 1);
+    power.set_mode(zwlr_output_power_v1::Mode::Off);
+    local.roundtrip(&mut run);
+    let second = run.state.space.outputs().nth(1).cloned().expect("the second output");
+    run.state.remove_output(&second);
+    local.pump(&mut run, "failed", |client, _| {
+        client.power.iter().any(|(_, event)| *event == PowerEvent::Failed)
+    });
+    assert_eq!(
+        power_events(&local, &power),
+        [PowerEvent::On, PowerEvent::Off, PowerEvent::Failed]
+    );
+    assert!(run.state.output_power.is_on(&second), "a gone output is not kept off");
+    run.stop();
+}
+
+/// A `set_mode` outside the enum is the protocol error `invalid_mode` (D9). The typed request
+/// cannot carry one, so the message is sent raw.
+#[test]
+fn an_unknown_mode_is_a_protocol_error() {
+    use wayland_client::backend::protocol::{Argument, Message};
+    use wayland_client::backend::smallvec::smallvec;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let power = power_of(&local, 0);
+    local.roundtrip(&mut run);
+    let message = Message {
+        sender_id: power.id(),
+        // `set_mode`, the first request of the interface.
+        opcode: 0,
+        args: smallvec![Argument::Uint(7)],
+    };
+    local
+        .connection
+        .backend()
+        .send_request(message, None, None)
+        .expect("the request");
+    local.connection.flush().expect("flush");
+    let started = Instant::now();
+    let error = loop {
+        if let Some(error) = local.connection.protocol_error() {
+            break error;
+        }
+        assert!(started.elapsed() < TIMEOUT, "the error: not in time");
+        if let Some(guard) = local.queue.prepare_read() {
+            drop(guard.read());
+        }
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    };
+    assert_eq!(error.object_interface, "zwlr_output_power_v1");
+    assert_eq!(
+        error.code,
+        zwlr_output_power_v1::Error::InvalidMode as u32
+    );
     run.stop();
 }

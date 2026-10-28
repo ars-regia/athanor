@@ -253,7 +253,7 @@ area = "shell"
 status = "specified"
 spec = "doc_own_stack.md"
 item = "OS3"
-purpose = "Athanor's own Wayland compositor on Smithay, shipped as the greeter's preview session (doc_session.md, SN15); cosmic-comp stays the default session until it passes OS19 of doc_own_stack.md"
+purpose = "Athanor's own Wayland compositor on Smithay, shipped as the greeter's default session (doc_session.md, SN14 and SN15) under decision 28 of doc_own_stack.md; cosmic-comp's session stays the second until it passes OS19 and the overview and the window switcher on Alt+Tab have come"
 
 [[component]]
 path = "forge/specs/athanor-layout-chooser"

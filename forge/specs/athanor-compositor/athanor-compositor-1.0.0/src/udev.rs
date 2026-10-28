@@ -115,6 +115,9 @@ struct Head {
     drm_output: HeadOutput,
     /// A frame is queued and waits for its VBlank.
     queued: bool,
+    /// The VBlanks still owed for frames queued before the output was turned off: each comes
+    /// and presents nothing (`power_output`). A session switch drops them (`resume`).
+    stale_vblanks: u8,
     /// Whether its frames showed the lock.
     lock: LockFrames,
     /// The next draw, when one is scheduled, and what it is for.
@@ -126,6 +129,8 @@ struct Head {
     /// The earliest next draw: six tenths of a period after a VBlank, a period after a draw
     /// that had nothing new to show.
     not_before: Option<Instant>,
+    /// Whether it is on: an output the power client turned off draws nothing (`power_output`).
+    powered: bool,
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
@@ -338,16 +343,23 @@ impl State {
             return;
         }
         let now = Instant::now();
-        let due: Vec<(crtc::Handle, Duration)> = drm
+        let due: Vec<(crtc::Handle, Duration, Wake)> = drm
             .outputs
             .iter_mut()
             .filter_map(|(crtc, head)| {
                 head.wanted = true;
-                next_draw(head, now).map(|delay| (*crtc, delay))
+                if !head.powered {
+                    // Off, it only sends its surfaces' frame callbacks (`draw`).
+                    return head
+                        .timer
+                        .is_none()
+                        .then_some((*crtc, FRAME_THROTTLE, Wake::Throttle));
+                }
+                next_draw(head, now).map(|delay| (*crtc, delay, Wake::Draw))
             })
             .collect();
-        for (crtc, delay) in due {
-            self.schedule(crtc, delay);
+        for (crtc, delay, wake) in due {
+            self.wake(crtc, delay, wake);
         }
     }
 
@@ -429,11 +441,19 @@ impl State {
         }
         for head in drm.outputs.values_mut() {
             head.queued = false;
+            head.stale_vblanks = 0;
+            // The switch was activity: the idle daemon decides again from it (output power
+            // plan, D8).
+            if !head.powered {
+                head.powered = true;
+                head.drm_output.reset_buffers();
+            }
         }
         self.kept_keys.clear();
         // A failure may have been the switch's: the monitors that failed are tried again.
         drm.failed.clear();
         let device_id = drm.node.dev_id();
+        self.power_restored();
         self.scan(device_id);
         let crtcs: Vec<crtc::Handle> = match &self.backend {
             Backend::Drm(drm) => drm.outputs.keys().copied().collect(),
@@ -565,6 +585,13 @@ impl State {
         if let Err(error) = used {
             tracing::warn!(%error, output = head.output.name(), "the new mode was refused: the output keeps its own");
             return;
+        }
+        // A refused test makes Smithay commit a frame with the new mode, which lights the CRTC
+        // of an output the power client turned off.
+        if !head.powered {
+            if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
+                tracing::warn!(%error, output = head.output.name(), "the output could not be kept off");
+            }
         }
         let output = head.output.clone();
         tracing::info!(
@@ -699,11 +726,13 @@ impl State {
                 output: output.clone(),
                 drm_output,
                 queued: false,
+                stale_vblanks: 0,
                 lock: LockFrames::default(),
                 failing: FailureLog::default(),
                 timer: None,
                 wanted: true,
                 not_before: None,
+                powered: true,
             },
         );
         self.map_output(&output);
@@ -792,6 +821,12 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
+        if head.stale_vblanks > 0 {
+            head.stale_vblanks -= 1;
+            // The frame `clear` dropped: the frame queued since the output came back on, if any,
+            // is not on screen yet, and a lock must not count it as shown.
+            return;
+        }
         head.queued = false;
         let Some(mode) = head.output.current_mode() else {
             return;
@@ -864,10 +899,52 @@ impl State {
         }
     }
 
+    /// Turns `output` on or off at the power client's request, and says whether it is on
+    /// afterwards (output power plan, D5 and D6). Off, its CRTC is disabled and nothing is
+    /// drawn; on, its next frame is drawn whole, and queuing it enables the CRTC again.
+    /// Nested or headless, the mode is only recorded.
+    pub fn power_output(&mut self, output: &Output, on: bool) -> bool {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return on;
+        };
+        let Some((&crtc, head)) = drm
+            .outputs
+            .iter_mut()
+            .find(|(_, head)| &head.output == output)
+        else {
+            return on;
+        };
+        if on {
+            head.powered = true;
+            head.drm_output.reset_buffers();
+            head.wanted = true;
+            self.schedule(crtc, Duration::ZERO);
+            return true;
+        }
+        if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
+            tracing::warn!(%error, output = output.name(), "the output could not be turned off");
+            return true;
+        }
+        head.powered = false;
+        if std::mem::take(&mut head.queued) {
+            head.stale_vblanks = head.stale_vblanks.saturating_add(1);
+        }
+        if let Some((timer, _)) = head.timer.take() {
+            self.loop_handle.remove(timer);
+        }
+        tracing::info!(output = output.name(), "the output is off");
+        // The lock may have waited only for this output.
+        self.confirm_lock();
+        if self.frame_callbacks_waiting() {
+            self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
+        }
+        false
+    }
+
     /// A lock is confirmed only once every output presented a frame drawn locked.
     fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
-            if lock_shown(drm.outputs.values().map(|head| &head.lock)) {
+            if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.lock))) {
                 self.locked_drawn();
             }
         }
@@ -890,6 +967,23 @@ impl State {
         }
         head.wanted = false;
         let output = head.output.clone();
+        if !head.powered {
+            // No element is on it, so its surfaces lose it as their primary output and get
+            // their frame callbacks at the throttle, as a surface shown on no output does.
+            let now = self.clock.now();
+            self.frame_done(
+                &output,
+                &RenderElementStates::default(),
+                false,
+                now,
+                FRAME_THROTTLE,
+            );
+            if self.frame_callbacks_waiting() {
+                self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
+            }
+            self.flush();
+            return;
+        }
         let Some(mode) = output.current_mode() else {
             return;
         };
@@ -1092,9 +1186,12 @@ impl LockFrames {
     }
 }
 
-/// Whether every head of `heads` shows the lock.
-fn lock_shown<'a>(heads: impl IntoIterator<Item = &'a LockFrames>) -> bool {
-    heads.into_iter().all(|frames| frames.shown)
+/// Whether every head of `heads`, each with whether it is on, shows the lock: a head that is
+/// off shows nothing, so it hides the space as well as the lock does (output power plan, D7).
+fn lock_shown<'a>(heads: impl IntoIterator<Item = (bool, &'a LockFrames)>) -> bool {
+    heads
+        .into_iter()
+        .all(|(powered, frames)| !powered || frames.shown)
 }
 
 /// The delay of the next draw of `head`, when it must be scheduled at `now`: when something
@@ -1279,31 +1376,49 @@ mod tests {
     #[test]
     fn the_lock_is_confirmed_only_by_locked_frames_on_every_screen() {
         let (mut first, mut second) = (LockFrames::default(), LockFrames::default());
-        assert!(!lock_shown([&first, &second]), "unlocked frames on screen");
+        assert!(!lock_shown([(true, &first), (true, &second)]), "unlocked frames on screen");
         first.queued(true);
         second.queued(true);
         second.presented();
         // The first output's frame failed to present, then a draw had nothing new: neither
         // reaches it.
         assert!(
-            !lock_shown([&first, &second]),
+            !lock_shown([(true, &first), (true, &second)]),
             "the first screen is not locked yet"
         );
         first.queued(true);
         first.presented();
-        assert!(lock_shown([&first, &second]), "both screens show the lock");
+        assert!(lock_shown([(true, &first), (true, &second)]), "both screens show the lock");
         second.queued(false);
         assert!(
-            !lock_shown([&first, &second]),
+            !lock_shown([(true, &first), (true, &second)]),
             "an unlocked frame on its way: a lock asked for now is not shown by the old frame"
         );
         second.queued(true);
-        assert!(!lock_shown([&first, &second]), "a locked frame only queued");
+        assert!(!lock_shown([(true, &first), (true, &second)]), "a locked frame only queued");
         second.presented();
-        assert!(lock_shown([&first, &second]), "locked again on both");
+        assert!(lock_shown([(true, &first), (true, &second)]), "locked again on both");
         // A lock taken forgets what an earlier one showed.
         first = LockFrames::default();
-        assert!(!lock_shown([&first, &second]));
+        assert!(!lock_shown([(true, &first), (true, &second)]));
+    }
+
+    /// An output that is off shows the lock: cosmic-idle locks after it blanks the outputs, and
+    /// waits for `locked`.
+    #[test]
+    fn an_output_that_is_off_shows_the_lock() {
+        let (off, mut on) = (LockFrames::default(), LockFrames::default());
+        assert!(lock_shown([(false, &off), (false, &on)]), "both off");
+        assert!(
+            !lock_shown([(false, &off), (true, &on)]),
+            "the other shows the space"
+        );
+        on.queued(true);
+        on.presented();
+        assert!(
+            lock_shown([(false, &off), (true, &on)]),
+            "the other shows the lock"
+        );
     }
 
     /// With no output there is nothing to wait for: a lock is confirmed at once.

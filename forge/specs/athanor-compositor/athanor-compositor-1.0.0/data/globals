@@ -17,6 +17,7 @@ wl_output standard
 xdg_wm_base standard
 zxdg_output_manager_v1 standard
 wp_viewporter standard
+wp_single_pixel_buffer_manager_v1 standard
 wp_fractional_scale_manager_v1 standard
 wp_presentation standard
 wp_cursor_shape_manager_v1 standard
@@ -36,6 +37,7 @@ ext_image_copy_capture_manager_v1 privileged
 ext_session_lock_manager_v1 privileged
 ext_workspace_manager_v1 privileged
 zwlr_output_manager_v1 privileged
+zwlr_output_power_manager_v1 privileged
 zwp_virtual_keyboard_manager_v1 privileged
 zwlr_virtual_pointer_manager_v1 privileged
 zwp_input_method_manager_v2 privileged
