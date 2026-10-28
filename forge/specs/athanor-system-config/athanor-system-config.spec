@@ -14,7 +14,7 @@ Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
-# athanor-desktop runs the session's screen locker and idle daemon.
+# session-components runs the session's screen locker and idle daemon.
 Requires: cosmic-greeter cosmic-idle
 # Core UI andDaemons
 Requires: athanor-greeter-ui
@@ -60,6 +60,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-update
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-triggers
 %attr(0755,root,root) /usr/libexec/athanor-usbguard-internal
+%dir /usr/libexec/athanor
+/usr/libexec/athanor/session-components
 /usr/lib/systemd/system/athanor-usbguard-internal.service
 %dir /usr/share/athanor-system-config/flatpak-no-triggers
 /usr/lib/systemd/system/athanor-flatpak-triggers.service
@@ -84,10 +86,15 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
-* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+* Wed Oct 28 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+- The supervisor of the screen locker and the idle daemon moves out of athanor-desktop into
+  /usr/libexec/athanor/session-components, which athanor-desktop and the own compositor's
+  session source (doc_session.md, SN15). It runs cosmic-greeter in
+  cosmic-greeter-locker.scope and cosmic-idle in cosmic-idle.scope, checks its anchor every
+  200 ms and stops both scopes once the anchor is gone.
 - athanor-session stops athanor-compositor.service, where its package is installed, and
-  removes ATHANOR_PREVIEW_SESSION and XKB_DEFAULT_* from the user manager: what a preview
-  session killed before its exit handler leaves (doc_session.md, SN15).
+  both scopes, and removes ATHANOR_OWN_COMPOSITOR and XKB_DEFAULT_* from the user manager:
+  what a session on the own compositor killed before its exit handler leaves (SN15).
 
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:

@@ -12,13 +12,17 @@ set -eu
 # a compositor that died, units failed -- would have this one start half-way. Clear it.
 systemctl --user stop athanor-session.target
 systemctl --user reset-failed
-# A preview session on the own compositor killed before its exit handler ran leaves its
-# compositor and its variables (doc_session.md, SN15). The unit is stopped only where its
-# package is installed: stopping a unit that is not loaded fails, and would end this session.
+# A session on the own compositor killed before its exit handler ran leaves its compositor,
+# the scopes of the locker and the idle daemon, and its variables (doc_session.md, SN15).
+# The compositor's unit is stopped only where its package is installed: stopping a unit that
+# is not loaded fails, and would end this session.
 if [ -e /usr/lib/systemd/user/athanor-compositor.service ]; then
     systemctl --user stop athanor-compositor.service
 fi
-systemctl --user unset-environment ATHANOR_PREVIEW_SESSION XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
+# shellcheck source=SCRIPTDIR/../libexec/athanor/session-components
+. /usr/libexec/athanor/session-components
+stop_component_scopes
+systemctl --user unset-environment ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
 
 # A colon-separated list, most specific first, as the specification reads it: COSMIC's
 # own components and the portals recognise the desktop by its second name. The user
