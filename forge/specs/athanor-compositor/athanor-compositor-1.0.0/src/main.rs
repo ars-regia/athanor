@@ -12,6 +12,7 @@ mod grabs;
 mod handlers;
 mod headless;
 mod identity;
+mod idle_inhibit;
 mod input;
 mod input_method;
 mod keyboard_group;
@@ -141,7 +142,7 @@ fn run() -> Result<(), Error> {
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
     ready::announce(&socket)?;
-    event_loop.run(None, &mut state, |_| {})?;
+    event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),
         None => Ok(()),

@@ -69,8 +69,11 @@ through the toplevel capture source (an output since OS9 task 2), into a client'
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
 `ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
-output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox connects: they
-see none of these globals but the idle notifier, nor the security context manager.
+output (`src/workspace.rs`). Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
+holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
+minimised window, a dead client or the lock lets them run (`src/idle_inhibit.rs`).
+`wp-security-context-v1` tags the clients a sandbox connects: they
+see none of these globals but the idle notifier and the idle inhibitor, nor the security context manager.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
