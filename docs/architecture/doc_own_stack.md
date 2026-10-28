@@ -5,14 +5,14 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
 2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25 and 2026-10-28; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
-15 in ADR-0126, and decisions 16 to 28 in section 7. Text marked "(decision N)" is what the
+15 in ADR-0126, and decisions 16 to 29 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -39,7 +39,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
 - Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and items 1 to 5, decision 10
-  and section 6, step 4.
+  and section 6, step 4; decision 29, with OS13.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -292,14 +292,18 @@ four-finger swipes; Super+Space for the input source (`doc_languages.md` LN9); S
 (`doc_lock_and_prompts.md` section 1 and its acceptance, item 1) and Super+Alt+Escape (LP10);
 Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7), and the
 magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
-decision 26); the keys of `doc_osd.md` OD3; and the switch to a text console. The bindings a user
+decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
+(decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
 overview comes, Super+= and Super+- until the own compositor has the magnifier, Super+A
 until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
-their own fixture tests come with them.
+their own fixture tests come with them. Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
+(`doc_accessibility.md` AX3) exist, the volume and display brightness keys and Super+Alt+S call
+cosmic-settings-daemon, as cosmic-comp's session does, from one source file of the compositor,
+`src/bindings/cosmic.rs` (decision 29).
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
@@ -794,6 +798,27 @@ amendment's audit:
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
     and the colour filters.
+
+Taken by the maintainer on 2026-10-28, answering the open questions of the key bindings' plan
+(`docs/superpowers/plans/2026-10-28-compositor-key-bindings.md`):
+
+29. **The close keys, and the session keys through cosmic-settings-daemon** (OS13;
+    `doc_shell.md` SH2; `doc_osd.md` OD3, OD15; `doc_accessibility.md` AX3). The own compositor
+    binds Super+Q and Alt+F4 to close the window with the keyboard focus. Every other key of COSMIC's defaults that no approved document
+    names stays unbound, and the switch's pull request (`doc_session.md` SN13, step 6) lists them
+    as differences from cosmic-comp's session. Until `athanor-osd` replaces cosmic-osd (OD15) and
+    `athanor-a11y` exists (AX3), the volume keys, the display brightness keys and Super+Alt+S call
+    cosmic-settings-daemon on the session bus (`VolumeUp`, `VolumeDown`,
+    `IncreaseDisplayBrightness`, `DecreaseDisplayBrightness`, `ScreenReader`), as cosmic-comp's
+    session does, so that the same daemon and the same overlay serve both sessions. The caller is
+    an exception to SH2's containment beside decisions 27 and 28: one source file of the
+    compositor, `src/bindings/cosmic.rs`, which names that daemon's bus name, path, interface and
+    those five methods, reads and writes nothing in the user's configuration and names no other
+    COSMIC key, named by path in SH2's exceptions and in `verify.py boundary`. Each key leaves it
+    when its replacement lands, volume and brightness with `athanor-osd` and the screen reader
+    with `athanor-a11y`, and the file leaves with the last. Not taken: for those keys, `wpctl` and
+    logind, with Super+Alt+S doing nothing; waiting, the keys unbound and listed by the switch
+    as gaps; for COSMIC's defaults, none bound, the close keys included.
 
 ## 8. Risks
 
