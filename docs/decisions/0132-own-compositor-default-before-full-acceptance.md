@@ -28,7 +28,7 @@ In short:
 1. The gaps of `doc_session.md` SN16 that reach a user who signs in without choosing are closed
    first: the lock, the idle blank, the polkit agent, X11 applications and the key bindings.
 2. A user who has the magnifier or a colour filter on is started in cosmic-comp's session, which
-   stays at the greeter as the second choice until OS19 holds in full and the overview has come.
+   stays at the greeter as the second choice until OS19 holds in full and the overview and the window switcher on Alt+Tab have come.
 3. The hardware run is fifteen minutes per machine in place of the hour.
 4. Revision 4 of `doc_session.md` is approved in a pull request of its own before the switch's
    code is written, and reverses its section 6, item 1: a session that fails before its target
@@ -45,8 +45,10 @@ In short:
 ## Consequences
 
 - ADR-0122 decision 1 and `doc_own_stack.md` decision 10 are amended; release 1.0 still waits
-  for the full acceptance, and takes cosmic-comp's session off the greeter.
-- The magnifier, the colour filters, the overview and the Alt+Tab switcher are absent from the default session until
+  for the full acceptance, and for the overview and the window switcher on Alt+Tab, and takes
+  cosmic-comp's session off the greeter.
+- The magnifier, the colour filters, the overview, the Alt+Tab switcher, the application library
+  and the workspace indicator of `doc_overview.md` OV12 are absent from the default session until
   the own compositor has them; their controls and bindings are hidden or unbound there.
 - ADR-0123's "cosmic-comp leaves the default session at 1.0" is read as: cosmic-comp's
   session leaves the default at the switch and the greeter at 1.0.

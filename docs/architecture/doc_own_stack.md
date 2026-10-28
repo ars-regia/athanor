@@ -541,7 +541,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    console sessions, the image installs the compositor as an optional session chosen at the
    greeter, cosmic-comp staying the default, under the conditions of decision 10. Decision 28
    then makes it the default session before the acceptance holds in full, cosmic-comp's session
-   staying at the greeter as the second choice until it does and the overview has come.
+   staying at the greeter as the second choice until it does and the overview and the window switcher on Alt+Tab have come.
 5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the
    layout chooser first, then the dock, the launcher, the bar and the control centre; the greeter
    last, because it handles the password (AGENTS.md, "Stop and ask before editing").
@@ -653,7 +653,7 @@ amendment's audit:
     "No fallback when the preview fails"). The own compositor becomes the image's default session before
     OS19 holds in full, in a pull request that records the evidence of each condition below.
     cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full and
-    the overview has come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
+    the overview and the window switcher on Alt+Tab have come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
       under the own compositor, each started by the session's supervisor inside the logind
@@ -685,7 +685,7 @@ amendment's audit:
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
       filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and what
-      only the overview binds (its private workspace interface, `doc_overview.md`). The
+      only the overview binds (the private workspace interface its plan proposes). The
       bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
       item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
@@ -748,9 +748,9 @@ amendment's audit:
     The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
     it follows the switch, and release 1.0 waits for it and for the window switcher on Alt+Tab.
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
-    own compositor, after the change of OV19 step 5 that binds Super+W, `XF86LaunchA` and the
-    three-finger swipe in OS13 to it and shows the workspaces module and button of the bar and
-    the dock (the overview's plan, Task 30) (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
+    and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
+    and the dock, and measures acceptance items 5 and 9 again through them (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
