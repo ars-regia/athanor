@@ -16,7 +16,10 @@ set -euo pipefail
 [[ $# -eq 2 ]] || { echo "usage: build_iso.sh IMAGE OUTPUT_DIR" >&2; exit 2; }
 image=$1 output=$2
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-builder=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
+# Pinned by digest (UD43 of doc_update_delivery.md): the build container below relies
+# on a builder that resolves from the build container's own repos, which upstream main
+# has replaced with repos embedded in the builder. This is :latest of 2026-10-26.
+builder=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder@sha256:b858892139e0779d48869a4dd8cbbc4e257da49f5a4b502824a55d221ed65a55}
 config="${repo}/system/disk_config/iso.toml"
 defs="${repo}/system/disk_config/defs"
 
@@ -58,6 +61,23 @@ retry="${repo}/forge/scripts/retry.sh"
 sudo bash "$retry" podman pull "$builder"
 sudo bash "$retry" podman pull "$image"
 
+# The builder resolves the installer's packages from the repos of its build container,
+# and osbuild's depsolver reads those only from etc/yum.repos.d (osbuild/solver/dnf5.py),
+# while Fedora 45's fedora-repos ships its repo files in /usr/share/dnf5/repos.d: from
+# the image alone it finds no Fedora package at all. The build container is therefore
+# the image with those files copied into /etc/yum.repos.d, without replacing one of the
+# same name there; the payload the ISO installs stays the image itself.
+# ponytail: tied to the pinned builder; drop the build container once osbuild reads
+# usr/share/dnf5/repos.d, or move to --force-repo when the builder's pin moves past
+# osbuild/images' "bib_legacy: use embedded repositories".
+build_image=localhost/athanor-iso-build:latest
+build_context=$(mktemp -d)
+trap 'rm -r "$build_context"' EXIT
+sudo podman build --pull=never -t "$build_image" -f - "$build_context" << EOF
+FROM ${image}
+RUN cp -n /usr/share/dnf5/repos.d/*.repo /etc/yum.repos.d/
+EOF
+
 # --rootfs: the builder formats the installed root with ext4, xfs or btrfs; the image
 # installs btrfs.
 sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
@@ -67,6 +87,7 @@ sudo podman run --rm --privileged --security-opt label=type:unconfined_t \
   -v "${output}:/output" \
   "$builder" build \
     --type anaconda-iso \
+    --build-container "$build_image" \
     --rootfs btrfs \
     --use-librepo=True \
     --chown "$(id -u):$(id -g)" \
