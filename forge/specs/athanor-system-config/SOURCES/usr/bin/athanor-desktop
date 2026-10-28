@@ -31,10 +31,18 @@ if [ -n "${XDG_SESSION_ID:-}" ] && class=$(loginctl show-session "$XDG_SESSION_I
 else
 	echo "athanor-desktop: cannot read the session class from logind; file search stays off" >&2
 fi
-# XDG_CURRENT_DESKTOP already reaches the manager, before any unit starts, from
-# /usr/lib/environment.d/50-athanor-desktop.conf. Importing it again republishes the
-# value athanor-session exported, which is the same one.
-systemctl --user import-environment WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS
+# The import list is one file, which the readiness gate's ExecStop= reads to unset the same
+# names at the end of the session (doc_session.md, SN2). A name this script's environment
+# does not hold is skipped, so the manager keeps its own value. XDG_CURRENT_DESKTOP already
+# reaches the manager, before any unit starts, from /usr/lib/environment.d/50-athanor-desktop.conf;
+# importing it again republishes the value athanor-session exported, which is the same one.
+# Given no name, systemctl would import this script's whole environment.
+if ! names=$(grep -vx -e '#.*' /usr/share/athanor-system-config/session-import) || [ -z "$names" ]; then
+	echo "athanor-desktop: the import list names no variable" >&2
+	exit 1
+fi
+# shellcheck disable=SC2086 # one word per name
+systemctl --user import-environment $names
 
 # Runs a session component again whenever it exits, as cosmic-session does, for as long
 # as the anchor process lives. The anchor is this process: its PID stays the same once

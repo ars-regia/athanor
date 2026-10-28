@@ -1,4 +1,4 @@
-"""athanor-desktop publishes the session class to the user manager
+"""athanor-desktop publishes the session class and the import list to the user manager
 (python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v).
 
 The script runs up to its first import-environment; systemctl and loginctl are stand-ins
@@ -10,7 +10,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "SOURCES/usr/bin/athanor-desktop"
+SOURCES = Path(__file__).resolve().parents[1] / "SOURCES"
+SCRIPT = SOURCES / "usr/bin/athanor-desktop"
+IMPORT_LIST = "/usr/share/athanor-system-config/session-import"
 
 
 class DesktopSession(unittest.TestCase):
@@ -19,7 +21,9 @@ class DesktopSession(unittest.TestCase):
         lines = SCRIPT.read_text().splitlines()
         end = next(i for i, line in enumerate(lines) if "import-environment" in line)
         script = work / "athanor-desktop"
-        script.write_text("\n".join(lines[: end + 1]) + "\n")
+        prologue = "\n".join(lines[: end + 1]) + "\n"
+        self.assertIn(IMPORT_LIST, prologue)
+        script.write_text(prologue.replace(IMPORT_LIST, str(SOURCES / IMPORT_LIST.lstrip("/"))))
         stubs = work / "bin"
         stubs.mkdir()
         (stubs / "systemctl").write_text(
@@ -43,6 +47,19 @@ class DesktopSession(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("XDG_SESSION_CLASS", (work / "systemctl").read_text().split())
         self.assertIn("XDG_SESSION_CLASS=user", (work / "env").read_text().splitlines())
+
+    def test_the_names_of_the_import_list_are_imported(self):
+        result, work = self.run_prologue("echo user")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = [
+            line
+            for line in (SOURCES / IMPORT_LIST.lstrip("/")).read_text().splitlines()
+            if not line.startswith("#")
+        ]
+        self.assertIn("WAYLAND_DISPLAY", names)
+        self.assertEqual(
+            (work / "systemctl").read_text().split(), ["--user", "import-environment", *names]
+        )
 
     def test_a_failing_loginctl_is_logged_and_the_session_goes_on(self):
         result, work = self.run_prologue("exit 1")

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
@@ -67,6 +67,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-launche
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-launcher.mo
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- athanor-launcher.service takes the surface class's restart values: RestartSec=100ms,
+  without RestartSteps= and RestartMaxDelaySec= (doc_session.md, SN6 and SN13 step 1).
+
 * Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Built with the athanor-layout that arms the layout watches before the first read; the
   launcher does not watch the layout, and behaves as before.
