@@ -312,14 +312,14 @@ impl Client {
         self.flush()
     }
 
+    /// Through cosmic-comp's manager, else athanor-compositor's after `watch_keyboard_group`.
     /// The compositor ignores a group beyond the configured layouts.
     pub fn set_keyboard_group(&self, group: u32) -> Result<(), Error> {
         let state = self.inner.live_state()?;
-        state
-            .keyboard_layout
-            .as_ref()
-            .ok_or(Error::Unavailable("zcosmic_keyboard_layout_manager_v1"))?
-            .set_group(group);
+        match &state.keyboard_layout {
+            Some(layout) => layout.set_group(group),
+            None => crate::keyboard_group::set_group(&state, group)?,
+        }
         drop(state);
         self.flush()
     }
@@ -754,10 +754,12 @@ pub(crate) struct Globals {
     athanor_toplevel: Option<AthanorToplevelManagerV1>,
     /// athanor-compositor's window actions, bound at the first action (plan D2).
     pub(crate) actions: crate::actions::Globals,
+    /// athanor-compositor's keyboard group, bound at the first watch.
+    pub(crate) keyboard_group: crate::keyboard_group::Globals,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
-    keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
+    pub(crate) keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     a11y: Option<CosmicA11yManagerV1>,
     security_context: Option<WpSecurityContextManagerV1>,
     /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
@@ -793,12 +795,12 @@ pub(crate) struct State {
     outputs: HashMap<u32, wl_output::WlOutput>,
     output_names: HashMap<ObjectId, String>,
     output_modes: HashMap<ObjectId, OutputMode>,
-    keyboard: Option<wl_keyboard::WlKeyboard>,
+    pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
     keyboard_layouts: Vec<String>,
-    keyboard_group: u32,
+    pub(crate) keyboard_group: u32,
     accessibility: Accessibility,
-    events: Vec<Event>,
+    pub(crate) events: Vec<Event>,
     /// The window pictures in flight, by call.
     #[cfg(feature = "gtk")]
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
@@ -837,6 +839,7 @@ impl State {
             toplevel_manager: bind(globals, qh, 1..=4),
             athanor_toplevel: bind(globals, qh, 1..=1),
             actions: crate::actions::Globals::default(),
+            keyboard_group: crate::keyboard_group::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
             // Version 3 deprecates the screen filter events of version 2.
@@ -1074,6 +1077,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
             if let Some(manager) = &state.globals.keyboard_layouts {
                 state.keyboard_layout = Some(manager.get_keyboard_layout(&keyboard, qh, ()));
             }
+            crate::keyboard_group::watch(state, &keyboard, qh);
             state.keyboard = Some(keyboard);
         }
     }
@@ -1130,10 +1134,7 @@ impl Dispatch<ZcosmicKeyboardLayoutV1, ()> for State {
         _: &QueueHandle<Self>,
     ) {
         let zcosmic_keyboard_layout_v1::Event::Group { group } = event;
-        if group != state.keyboard_group {
-            state.keyboard_group = group;
-            state.events.push(Event::KeyboardGroup(group));
-        }
+        state.set_group(group);
     }
 }
 

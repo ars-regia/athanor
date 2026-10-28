@@ -98,7 +98,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -111,6 +111,15 @@ plan): the bar's line carries the workspaces, and the output manager is the cont
 could blank the session.
 `athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
 on windows: the control center is granted the first, the bar, the dock and the launcher both.
+`athanor_keyboard_group_manager_v1` follows and switches the keyboard's layout group: the bar
+alone is granted it, for its input-source switch. The layouts, options and repeat come from
+cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
+before the first client and again after each change of it (an inotify watch of its directory,
+or of the nearest existing ancestor while the directory is missing), so one file drives the
+keymap under both compositors. The seat keeps its group, clamped to the new layouts, and its
+Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
+most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
+keymap is the environment's and the repeat 25 per second after 200 ms.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
 takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
 keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
@@ -196,9 +205,10 @@ exporting the tree of a surface the compositor closed: in one run of task 7 with
 observation, not a fixture), the walk passed while the compositor's log said it closed the bar's
 surface and the capture was empty. The check therefore also fails when that log is missing or
 says it closed the bar's surface. The bar
-shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
-`zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
-replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies (decision 19).
+shows 7 interactive widgets, not cosmic-comp's 8: the tiling toggle needs
+`zcosmic_workspace_manager_v2`, whose private replacement `docs/spikes/c1-protocols.md` proposes
+and revision 2 specifies (decision 19); the input source follows
+`athanor_keyboard_group_manager_v1`.
 
 Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
 requires (OS4):

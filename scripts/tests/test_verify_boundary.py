@@ -92,6 +92,7 @@ class BoundaryTest(unittest.TestCase):
 
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
             "forge/tools/calmo-cosmic-theme/src/main.rs",
             "system/athanor-compositor-client/src/theme.rs",
         ]
@@ -99,6 +100,7 @@ class BoundaryTest(unittest.TestCase):
             with self.subTest(path):
                 self.assertEqual(problems({path: COSMIC_CONFIG}), [])
         refused = [
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/state.rs",
             "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0/src/main.rs",
             "system/athanor-layout/src/cosmic.rs",
             "system/athanor-layout/src/apply.rs",

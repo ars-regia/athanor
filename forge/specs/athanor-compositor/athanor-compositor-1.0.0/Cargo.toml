@@ -17,6 +17,8 @@ smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca51
 # libdisplay-info, so an output is named by its connector only.
 smithay-drm-extras = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false }
 libc = { workspace = true }
+# The watch of `xkb_config` (`xkb_config.rs`).
+nix = { workspace = true, features = ["inotify"] }
 # The lock request to logind (`lock.rs`), a blocking call on its own thread.
 zbus = { workspace = true }
 tracing = { workspace = true }

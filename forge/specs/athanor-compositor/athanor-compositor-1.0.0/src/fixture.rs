@@ -13,7 +13,7 @@ use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::{Fourcc, Modifier};
 use smithay::backend::input::{ButtonState, InputTime};
 use smithay::desktop::layer_map_for_output;
-use smithay::input::keyboard::KeyboardSource;
+use smithay::input::keyboard::{KeyboardSource, XkbConfig};
 use smithay::input::pointer::CursorImageStatus;
 use smithay::reexports::calloop::{EventLoop, Interest};
 use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::__interfaces::{
@@ -126,6 +126,36 @@ mod athanor_toplevel {
     );
 }
 
+/// The client side of athanor-keyboard-group-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_keyboard_group {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml"
+    );
+}
+
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 /// The left button's evdev code.
 const BTN_LEFT: u32 = 0x110;
@@ -224,6 +254,8 @@ struct Client {
     keys_under: Vec<u32>,
     /// The depressed modifiers of each `wl_keyboard.modifiers` the client was sent.
     modifiers: Vec<u32>,
+    /// The group of each `wl_keyboard.modifiers` the client was sent.
+    modifier_groups: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -242,6 +274,8 @@ struct Client {
     activation_token: Option<String>,
     /// The toplevels the compositor asked to close.
     toplevel_closed: Vec<ObjectId>,
+    /// The `group` events of every athanor_keyboard_group_v1 object, in order.
+    keyboard_groups: Vec<(ObjectId, u32)>,
     /// The events of every zwlr_output_power_v1 object, in order.
     power: Vec<(ObjectId, PowerEvent)>,
 }
@@ -471,6 +505,25 @@ delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 delegate_noop!(Client: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1);
 delegate_noop!(Client: athanor_toplevel::athanor_toplevel_actions_v1::AthanorToplevelActionsV1);
 delegate_noop!(Client: xdg_activation_v1::XdgActivationV1);
+delegate_noop!(
+    Client: athanor_keyboard_group::athanor_keyboard_group_manager_v1::AthanorKeyboardGroupManagerV1
+);
+
+impl Dispatch<athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1, ()>
+    for Client
+{
+    fn event(
+        client: &mut Self,
+        object: &athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+        event: athanor_keyboard_group::athanor_keyboard_group_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_keyboard_group::athanor_keyboard_group_v1::Event::Group { group } = event;
+        client.keyboard_groups.push((object.id(), group));
+    }
+}
 
 impl Dispatch<athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1, ()> for Client {
     fn event(
@@ -543,8 +596,13 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 client.keymaps += 1;
                 client.keymap_size = size;
             }
-            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+            wl_keyboard::Event::Modifiers {
+                mods_depressed,
+                group,
+                ..
+            } => {
                 client.modifiers.push(mods_depressed);
+                client.modifier_groups.push(group);
             }
             _ => {}
         }
@@ -1028,7 +1086,8 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
-    athanor_toplevel_actions_v1 zwlr_output_power_manager_v1\n\
+    athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 \
+    zwlr_output_power_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
 
@@ -3869,6 +3928,385 @@ fn the_toplevel_manager_and_actions_are_privileged() {
     run.stop();
 }
 
+/// `athanor_keyboard_group_manager_v1` is privileged (OS4, OS5): the fixture's bar, granted it,
+/// sees it; the bar's identity inside a security context, the control center and a client with
+/// no line do not.
+#[test]
+fn the_keyboard_group_is_privileged() {
+    const MANAGER: &str = "athanor_keyboard_group_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(MANAGER), "the bar, granted it");
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(MANAGER), "the bar inside a context");
+    let control_center = Local::control_center(&mut run);
+    assert!(!control_center.sees(MANAGER), "the control center");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(MANAGER), "a client with no line");
+    run.stop();
+}
+
+impl Local {
+    /// The seat's keyboard and a keyboard group object of it.
+    fn keyboard_group(
+        &mut self,
+        run: &mut Running,
+    ) -> (
+        wl_keyboard::WlKeyboard,
+        athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+    ) {
+        let manager: athanor_keyboard_group::athanor_keyboard_group_manager_v1::AthanorKeyboardGroupManagerV1 =
+            self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        let keyboard = seat.get_keyboard(&qh, ());
+        let object = manager.get_keyboard_group(&keyboard, &qh, ());
+        self.roundtrip(run);
+        (keyboard, object)
+    }
+
+    /// The groups the keyboard group object `object` was sent, in order.
+    fn groups_of(
+        &self,
+        object: &athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+    ) -> Vec<u32> {
+        self.client
+            .keyboard_groups
+            .iter()
+            .filter(|(id, _)| *id == object.id())
+            .map(|(_, group)| *group)
+            .collect()
+    }
+}
+
+/// A keyboard group object is sent the seat's group when it is made.
+#[test]
+fn a_keyboard_group_object_is_sent_the_group_at_once() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    assert_eq!(bar.groups_of(&object), [0]);
+    run.stop();
+}
+
+/// Gives the seat two layouts, us and it, switched by Alt+Shift.
+fn two_layouts(run: &mut Running) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let config = XkbConfig {
+        layout: "us,it",
+        variant: ",",
+        options: Some("grp:alt_shift_toggle".into()),
+        ..Default::default()
+    };
+    keyboard
+        .set_xkb_config(&mut run.state, config)
+        .expect("the us and it layouts");
+}
+
+/// `set_group` switches the seat's group: every object hears it once, and the focused window
+/// is sent modifiers in the new group.
+#[test]
+fn set_group_switches_and_every_object_hears_it() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut first = Local::connect(&mut run, None);
+    let (_first_keyboard, one) = first.keyboard_group(&mut run);
+    let mut second = Local::connect(&mut run, None);
+    let (_second_keyboard, two) = second.keyboard_group(&mut run);
+    one.set_group(1);
+    first.roundtrip(&mut run);
+    second.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(first.groups_of(&one), [0, 1], "the object that asked");
+    assert_eq!(second.groups_of(&two), [0, 1], "the other object");
+    assert_eq!(window.client.modifier_groups.last(), Some(&1), "the focus");
+    two.set_group(0);
+    second.roundtrip(&mut run);
+    first.roundtrip(&mut run);
+    assert_eq!(first.groups_of(&one), [0, 1, 0], "back to the first");
+    run.stop();
+}
+
+/// A group at or beyond the keymap's layouts changes nothing.
+#[test]
+fn a_group_beyond_the_layouts_is_ignored() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    // The modifiers of the window's enter may follow the keymap `focused_window` waits for.
+    window.roundtrip(&mut run);
+    let sent = window.client.modifier_groups.len();
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    object.set_group(2);
+    object.set_group(u32::MAX);
+    bar.roundtrip(&mut run);
+    window.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0], "no group is sent");
+    assert_eq!(window.client.modifier_groups.len(), sent, "nor modifiers");
+    assert_eq!(run.state.seat_group(), 0);
+    object.set_group(1);
+    bar.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0, 1], "a group in range is");
+    run.stop();
+}
+
+/// The keymap's own shortcut, Alt+Shift, switches the group, and the objects hear it.
+#[test]
+fn the_group_follows_a_shortcut() {
+    const ALT: u32 = 56;
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    for (code, pressed) in [(ALT, true), (SHIFT, true), (SHIFT, false), (ALT, false)] {
+        key(&mut run.state, code, pressed);
+    }
+    bar.roundtrip(&mut run);
+    assert_eq!(bar.groups_of(&object), [0, 1]);
+    run.stop();
+}
+
+/// A virtual keyboard with no keymap of its own types under its own modifiers, group included,
+/// and the seat's group is not moved.
+#[test]
+fn a_virtual_keyboards_modifiers_leave_the_group_alone() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let (_keyboard, object) = local.keyboard_group(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, None);
+    typist.group(&mut local, &mut run, 1);
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(local.groups_of(&object), [0], "no group is sent");
+    assert_eq!(run.state.seat_group(), 0);
+    run.stop();
+}
+
+/// A virtual keyboard's own keymap leaves the seat's group alone, and `set_group` while it is
+/// current gives the focus the seat's keymap back before it switches.
+#[test]
+fn a_virtual_keymap_leaves_the_group_alone() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut local, _) = focused_window(&mut run);
+    let (_keyboard, object) = local.keyboard_group(&mut run);
+    let typist = VirtualKeyboard::new(&mut local, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut local, &mut run, 30, true);
+    typist.key(&mut local, &mut run, 30, false);
+    assert_eq!(local.groups_of(&object), [0], "no group is sent");
+    let keymaps = local.client.keymaps;
+    object.set_group(1);
+    local.roundtrip(&mut run);
+    assert!(
+        local.client.keymaps > keymaps,
+        "the seat's keymap is sent again"
+    );
+    assert_eq!(local.groups_of(&object), [0, 1]);
+    assert_eq!(local.client.modifier_groups.last(), Some(&1));
+    run.stop();
+}
+
+/// An `xkb_config` path in a directory of the test's own.
+fn xkb_file(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("athanor-xkb-{name}-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    dir.join("xkb_config")
+}
+
+/// Writes `text` to `file` as cosmic-config does: a rename into the directory.
+fn write_raw(file: &Path, text: &str) {
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, text).expect("write");
+    std::fs::rename(&tmp, file).expect("rename");
+}
+
+/// Writes the record of the layouts `layout`, each with its default variant.
+fn write_xkb(file: &Path, layout: &str) {
+    let variant = vec![""; layout.split(',').count()].join(",");
+    write_raw(
+        file,
+        &format!(
+            "(rules: \"\", model: \"\", layout: \"{layout}\", variant: \"{variant}\", \
+             options: None, repeat_delay: 600, repeat_rate: 25)"
+        ),
+    );
+}
+
+/// The names of the seat's layouts.
+fn layouts(state: &mut State) -> Vec<String> {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.with_xkb_state(state, |context| {
+        let xkb = context.xkb().lock().expect("xkb");
+        xkb.layouts()
+            .map(|layout| xkb.layout_name(layout).to_owned())
+            .collect()
+    })
+}
+
+/// Whether the seat's Caps Lock is locked.
+fn caps_lock(state: &State) -> bool {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.modifier_state().caps_lock
+}
+
+/// Caps Lock, as evdev numbers it.
+const CAPS: u32 = 58;
+
+/// The file read before the first client gives the seat its layouts and repeat: the bar is sent
+/// that keymap and the first group.
+#[test]
+fn the_seat_starts_from_the_file() {
+    let mut run = Running::start(None);
+    let file = xkb_file("start");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    assert_eq!(layouts(&mut run.state), ["English (US)", "Italian"]);
+    let size = seat_keymap(&mut run.state).len();
+    assert_eq!(bar.client.keymap_size as usize, size, "the bar has that keymap");
+    assert_eq!(bar.groups_of(&object), [0]);
+    assert_eq!(run.state.repeat, (25, 600));
+    run.stop();
+}
+
+/// A change of the file reaches every client with the new keymap; the group, clamped, and Caps
+/// Lock stay, and a virtual keyboard's keymap is replaced by the new one, not the saved one.
+#[test]
+fn a_live_change_rebuilds_the_keymap() {
+    let mut run = Running::start(None);
+    let file = xkb_file("live");
+    write_xkb(&file, "us,it");
+    crate::xkb_config::follow(&mut run.state, &run.event_loop.handle(), file.clone());
+    let (mut window, _) = focused_window(&mut run);
+    let (_keyboard, object) = window.keyboard_group(&mut run);
+    object.set_group(1);
+    key(&mut run.state, CAPS, true);
+    key(&mut run.state, CAPS, false);
+    window.roundtrip(&mut run);
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "us,it,de");
+    window.pump(&mut run, "the three layouts", |client, _| client.keymaps > keymaps);
+    assert_eq!(layouts(&mut run.state).len(), 3);
+    assert_eq!(run.state.seat_group(), 1, "the group stays");
+    assert!(caps_lock(&run.state), "Caps Lock stays");
+    assert_eq!(window.groups_of(&object), [0, 1], "no group is sent twice");
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "fr");
+    window.pump(&mut run, "one layout", |client, _| client.keymaps > keymaps);
+    window.roundtrip(&mut run);
+    assert_eq!(layouts(&mut run.state), ["French"]);
+    assert_eq!(window.groups_of(&object), [0, 1, 0], "the group is clamped");
+
+    write_xkb(&file, "us,it");
+    let keymaps = window.client.keymaps;
+    window.pump(&mut run, "two layouts", |client, _| client.keymaps > keymaps);
+    object.set_group(1);
+    window.roundtrip(&mut run);
+    let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut window, &mut run, 30, true);
+    typist.key(&mut window, &mut run, 30, false);
+    assert!(run.state.virtual_keymap.is_some(), "the virtual keymap is current");
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "us,it,de");
+    window.pump(&mut run, "the file's keymap", |client, _| client.keymaps > keymaps);
+    assert!(run.state.virtual_keymap.is_none(), "the virtual keymap is dropped");
+    assert_eq!(layouts(&mut run.state).len(), 3, "the file's keymap, not the saved one");
+    assert_eq!(run.state.seat_group(), 1, "the seat's group, not the virtual one");
+    assert!(caps_lock(&run.state), "the seat's Caps Lock");
+    run.stop();
+}
+
+/// A change of the file keeps a held Shift held, and an input method's grab is sent the new
+/// repeat, keymap and modifiers.
+#[test]
+fn a_live_change_keeps_held_keys_and_reaches_the_grab() {
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let file = xkb_file("held");
+    write_xkb(&file, "us,it");
+    key(&mut run.state, SHIFT, true);
+    ime.roundtrip(&mut run);
+    let before = method.grabs[0].events().len();
+    run.state.load_xkb_config(&file);
+    ime.roundtrip(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.modifier_state().shift, "Shift stays held");
+    assert_eq!(
+        method.grabs[0].names_after(before),
+        ["repeat_info", "keymap", "modifiers"]
+    );
+    assert_eq!(run.state.repeat, (25, 600));
+    key(&mut run.state, SHIFT, false);
+    run.stop();
+}
+
+/// A malformed, missing or uncompilable file changes nothing; a good one then applies.
+#[test]
+fn a_malformed_file_keeps_the_last_keymap() {
+    let mut run = Running::start(None);
+    let file = xkb_file("malformed");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    let (mut window, _) = focused_window(&mut run);
+    let (_keyboard, object) = window.keyboard_group(&mut run);
+    object.set_group(1);
+    window.roundtrip(&mut run);
+    let keymaps = window.client.keymaps;
+    write_raw(&file, "(rules: \"\", model: \"\", layout: \"de\"");
+    run.state.load_xkb_config(&file);
+    std::fs::remove_file(&file).expect("removed");
+    run.state.load_xkb_config(&file);
+    write_xkb(&file, "xx");
+    run.state.load_xkb_config(&file);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keymaps, keymaps, "no keymap is sent");
+    assert_eq!(layouts(&mut run.state).len(), 2);
+    assert_eq!(run.state.seat_group(), 1, "the group stays");
+    write_xkb(&file, "us,de");
+    run.state.load_xkb_config(&file);
+    window.roundtrip(&mut run);
+    assert!(window.client.keymaps > keymaps, "a good file applies");
+    assert_eq!(layouts(&mut run.state), ["English (US)", "German"]);
+    run.stop();
+}
+
+/// More than four layouts are refused as a whole; four apply.
+#[test]
+fn more_than_four_layouts_are_refused() {
+    let mut run = Running::start(None);
+    let file = xkb_file("four");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    write_xkb(&file, "us,it,de,fr,es");
+    run.state.load_xkb_config(&file);
+    assert_eq!(layouts(&mut run.state).len(), 2, "five are refused");
+    write_xkb(&file, "us,it,de,fr");
+    run.state.load_xkb_config(&file);
+    assert_eq!(layouts(&mut run.state).len(), 4, "four apply");
+    run.stop();
+}
+
+/// Without a file the keymap of the environment stays.
+#[test]
+fn without_a_file_the_environment_keymap_stays() {
+    let mut run = Running::start(None);
+    let before = seat_keymap(&mut run.state);
+    run.state.load_xkb_config(&xkb_file("absent"));
+    assert_eq!(seat_keymap(&mut run.state), before);
+    assert_eq!(run.state.repeat, (25, 200));
+    run.stop();
+}
+
 /// A window of a fixture client besides the one `Local::toplevel` maps: its surface, its xdg
 /// surface and its toplevel.
 struct Other {
@@ -5204,6 +5642,20 @@ impl VirtualKeyboard {
                 Argument::Uint(0),
                 Argument::Uint(code),
                 Argument::Uint(state),
+            ],
+        );
+        local.roundtrip(run);
+    }
+
+    /// Sets the group `group`, with no modifier.
+    fn group(&self, local: &mut Local, run: &mut Running, group: u32) {
+        self.send(
+            2,
+            [
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(0),
+                Argument::Uint(group),
             ],
         );
         local.roundtrip(run);
