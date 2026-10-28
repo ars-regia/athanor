@@ -7841,6 +7841,7 @@ const KEY_ESC: u32 = 1;
 const KEY_MINUS: u32 = 12;
 const KEY_EQUAL: u32 = 13;
 const KEY_TAB: u32 = 15;
+const KEY_Q: u32 = 16;
 const KEY_W: u32 = 17;
 const KEY_T: u32 = 20;
 const KEY_LEFTCTRL: u32 = 29;
@@ -7852,6 +7853,7 @@ const KEY_N: u32 = 49;
 const KEY_M: u32 = 50;
 const KEY_LEFTALT: u32 = 56;
 const KEY_F1: u32 = 59;
+const KEY_F4: u32 = 62;
 const KEY_SYSRQ: u32 = 99;
 /// XF86LaunchA in xkeyboard-config's evdev keycodes.
 const KEY_SCALE: u32 = 120;
@@ -7897,7 +7899,10 @@ fn acts(
     let fired = run.state.fired.len();
     let (pressed, released) = sent_to(to, run, codes);
     let modifiers = &codes[..codes.len() - 1];
-    assert_eq!(pressed, modifiers, "{what}: the client is sent no bound press");
+    assert_eq!(
+        pressed, modifiers,
+        "{what}: the client is sent no bound press"
+    );
     let reversed: Vec<u32> = modifiers.iter().rev().copied().collect();
     assert_eq!(released, reversed, "{what}: nor its release");
     assert_eq!(run.state.fired[fired..], *action.as_slice(), "{what}");
@@ -7929,7 +7934,11 @@ fn super_alt_escape_ends_the_compositor_even_locked() {
     let mut run = Running::start(None);
     let (mut window, _) = focused_window(&mut run);
     let terminate = [KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC];
-    assert_eq!(rounds_until_stopped(&mut run, &terminate), 1, "the loop stops");
+    assert_eq!(
+        rounds_until_stopped(&mut run, &terminate),
+        1,
+        "the loop stops"
+    );
     window.roundtrip(&mut run);
     assert_eq!(window.client.keys, [KEY_LEFTMETA, KEY_LEFTALT]);
     assert_eq!(window.client.released, [KEY_LEFTALT, KEY_LEFTMETA]);
@@ -8014,7 +8023,13 @@ fn the_reveal_key_never_reaches_a_client() {
     let mut run = Running::start(None);
     let (mut window, _) = focused_window(&mut run);
     let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
-    acts(&mut window, &mut run, &reveal, Some(Action::Reveal), "unlocked");
+    acts(
+        &mut window,
+        &mut run,
+        &reveal,
+        Some(Action::Reveal),
+        "unlocked",
+    );
     let (mut locker, _lock) = lock_session(&mut run);
     acts(&mut locker, &mut run, &reveal, None, "locked");
     run.stop();
@@ -8031,7 +8046,10 @@ fn only_the_lock_list_acts_while_locked() {
     for (codes, what) in [
         (&[KEY_LEFTMETA, KEY_ESC][..], "Super+Escape"),
         (&[KEY_LEFTMETA, KEY_C], "Super+C"),
-        (&[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC], "Super+Shift+Escape"),
+        (
+            &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC],
+            "Super+Shift+Escape",
+        ),
     ] {
         reaches(&mut locker, &mut run, codes, what);
     }
@@ -8077,5 +8095,100 @@ fn a_bound_key_never_reaches_the_client_nor_the_input_method() {
     });
     window.roundtrip(&mut run);
     assert!(window.client.keys.is_empty(), "the window saw no key");
+    run.stop();
+}
+
+/// Super+Q and Alt+F4 close the window with the keyboard focus (D15), which sees neither key;
+/// with a layer surface holding the keyboard no window is sent `close`; locked, both keys reach
+/// the lock surface.
+#[test]
+fn super_q_and_alt_f4_close_the_focused_window() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_Q][..], "Super+Q"),
+        (&[KEY_LEFTALT, KEY_F4], "Alt+F4"),
+    ] {
+        let closed = window.client.toplevel_closed.len();
+        acts(
+            &mut window,
+            &mut run,
+            codes,
+            Some(Action::CloseFocused),
+            what,
+        );
+        assert_eq!(
+            window.client.toplevel_closed.len(),
+            closed + 1,
+            "{what}: the window is sent close"
+        );
+    }
+
+    // A launcher's exclusive surface holds the keyboard: nothing is closed.
+    let mut launcher = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = launcher.bind(4);
+    let shm: wl_shm::WlShm = launcher.bind(1);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = launcher.bind(4);
+    let seat: wl_seat::WlSeat = launcher.bind(1);
+    let qh = launcher.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "launcher".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    assert!(
+        launcher.answer(&mut run, &surface),
+        "the launcher is configured"
+    );
+    let (serial, width, height) = launcher.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let (buffer, _) = launcher.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    launcher.roundtrip(&mut run);
+    let exclusive = run.state.exclusive_layer().expect("an exclusive layer");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(exclusive),
+        "the launcher has the keyboard"
+    );
+    let closed = window.client.toplevel_closed.len();
+    acts(
+        &mut launcher,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_Q],
+        Some(Action::CloseFocused),
+        "Super+Q on the launcher",
+    );
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.toplevel_closed.len(),
+        closed,
+        "no window is sent close"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    let fired = run.state.fired.len();
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_Q][..], "Super+Q"),
+        (&[KEY_LEFTALT, KEY_F4], "Alt+F4"),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.toplevel_closed.len(),
+        closed,
+        "locked, nothing is closed"
+    );
+    assert_eq!(run.state.fired.len(), fired);
     run.stop();
 }

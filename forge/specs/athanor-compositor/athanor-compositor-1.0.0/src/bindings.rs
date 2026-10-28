@@ -6,6 +6,7 @@
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
 
 use crate::state::State;
+use smithay::desktop::Window;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
 
 /// The modifiers of a trigger, as a mask of these bits; Caps Lock and Num Lock are not read.
@@ -34,6 +35,8 @@ pub(crate) enum Action {
     /// Super+Alt+T, the reveal key of OS4: kept from every client, locked or not, with no effect
     /// until the border and its overlay (gap 2); while locked it acts on nothing.
     Reveal,
+    /// Super+Q and Alt+F4: the window with the keyboard focus is sent `close` (D15).
+    CloseFocused,
 }
 
 impl Action {
@@ -42,7 +45,7 @@ impl Action {
     pub(crate) fn while_locked(&self) -> bool {
         match self {
             Self::Vt(_) | Self::Terminate => true,
-            Self::Lock | Self::Reveal => false,
+            Self::Lock | Self::Reveal | Self::CloseFocused => false,
         }
     }
 
@@ -71,6 +74,8 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER, Keysym::Escape), Action::Lock),
     (on(SUPER | ALT, Keysym::Escape), Action::Terminate),
     (on(SUPER | ALT, Keysym::t), Action::Reveal),
+    (on(SUPER, Keysym::q), Action::CloseFocused),
+    (on(ALT, Keysym::F4), Action::CloseFocused),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -155,6 +160,21 @@ impl State {
                 self.loop_signal.stop();
             }
             Action::Reveal => {}
+            Action::CloseFocused => self.close_focused(),
+        }
+    }
+
+    /// Super+Q and Alt+F4 (D15): the window with the keyboard focus is sent `close`, as
+    /// athanor_toplevel_actions_v1's close sends it; a layer surface or a popup with the focus,
+    /// or no focus, closes nothing.
+    fn close_focused(&mut self) {
+        let focus = self
+            .seat
+            .get_keyboard()
+            .and_then(|keyboard| keyboard.current_focus());
+        let window = focus.and_then(|surface| self.window_for(&surface));
+        if let Some(toplevel) = window.as_ref().and_then(Window::toplevel) {
+            toplevel.send_close();
         }
     }
 }
@@ -185,6 +205,7 @@ mod tests {
             Action::Vt(1),
             Action::Terminate,
             Action::Reveal,
+            Action::CloseFocused,
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(acting, [Action::Vt(1), Action::Terminate]);
@@ -206,6 +227,7 @@ mod tests {
         ] {
             assert!(action.never_inhibited(), "{action:?}");
         }
+        assert!(!Action::CloseFocused.never_inhibited());
     }
 
     #[test]
@@ -259,6 +281,27 @@ mod tests {
             None
         );
         assert_eq!(plain(CTRL | ALT, Keysym::a, false), None);
+    }
+
+    #[test]
+    fn super_q_and_alt_f4_close_and_ctrl_alt_f4_switches() {
+        assert_eq!(plain(SUPER, Keysym::q, false), Some(Action::CloseFocused));
+        assert_eq!(plain(ALT, Keysym::F4, false), Some(Action::CloseFocused));
+        assert_eq!(
+            plain(ALT, Keysym::F4, true),
+            None,
+            "locked, the lock surface's"
+        );
+        assert_eq!(
+            matching(
+                CTRL | ALT,
+                Keysym::XF86_Switch_VT_4,
+                &[Keysym::F4],
+                Some(Keysym::F4),
+                false
+            ),
+            Some(Action::Vt(4))
+        );
     }
 
     #[test]
