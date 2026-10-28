@@ -75,8 +75,9 @@ pull request that builds the row adds it, under that name or a better one.
   ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md)).
 - The `-nvidia-legacy` evidence: 20 boot-matrix runs and #231 closed (row 1). D24 keeps the
   variant unpromoted without it ([ADR-0115](../decisions/0115-zero-nine-in-one-week.md)).
-- The retirement of cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings, and the
-  programs that replace them (D13). Until then they run on the own compositor through the
+- The retirement of cosmic-idle, cosmic-bg and cosmic-settings, and the programs that replace
+  them (D13); cosmic-workspaces' retirement is 1.0's, since 1.0 waits for the overview that
+  replaces it (`doc_own_stack.md` decision 28). Until then they run on the own compositor through the
   protocols it provides them, unless one is replaced before 1.0 (`doc_own_stack.md` OS5,
   ADR-0121).
 - A snapshot and lock of the Fedora input (D16).

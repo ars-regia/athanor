@@ -342,7 +342,8 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 
 **OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
 (section 6, step 4) when each of the following holds, recorded in the pull request that takes
-cosmic-comp's session off the greeter, which also waits for the overview (decision 28). Decision 28 makes it the default session before then, on
+cosmic-comp's session off the greeter, which also waits for the overview and the window
+switcher on Alt+Tab (decision 28). Decision 28 makes it the default session before then, on
 the parts of them it names, recorded in the pull request that makes it the default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
@@ -685,7 +686,8 @@ amendment's audit:
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
       filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and what
-      only the overview binds (the private workspace interface its plan proposes). The
+      only the overview binds (a private interface that pins and reorders workspaces, which OS5
+      gains with the amendment that introduces it). The
       bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
       item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
@@ -699,8 +701,9 @@ amendment's audit:
       having run first. The filters persist in cosmic-comp's `a11y_screen_filter.ron`
       (`doc_accessibility.md` section 1): the script asks the compositor's binary,
       `athanor-compositor --screen-filter-on`, since a shell script does not parse RON, whether
-      the file holds an inversion or a filter; an absent file is off, and a file that holds
-      either, or cannot be read or parsed, is on. Its reader, one source file of the
+      the file holds an inversion or a filter; an absent file, or one that holds neither, is off
+      (exit status 0), and a file that holds either is on (status 10); any other status, a
+      file that cannot be read or parsed, an abort or a signal, counts as on. Its reader, one source file of the
       compositor, `src/screen_filter.rs`, reads that file and writes nothing: an exception to
       SH2's containment beside decision 27's, named by path in SH2's exceptions and in
       `verify.py boundary`, which leaves when cosmic-comp's session leaves the greeter. Under the
@@ -745,12 +748,15 @@ amendment's audit:
       own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
       in the allow-list, after the switch, and the switch's pull request names the loss.
 
-    The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
-    it follows the switch, and release 1.0 waits for it and for the window switcher on Alt+Tab.
+    The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
+    an item of OS19: it follows the switch, and cosmic-workspaces' retirement moves from 1.1 to 1.0
+    with it (`release-1.0.md`), and release 1.0 waits for it and for the window switcher on Alt+Tab.
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
     own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
-    and the dock, and measures acceptance items 5 and 9 again through them (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
+    step 5 are amended to say so in the first pull request of the overview's implementation
+    (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
