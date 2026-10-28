@@ -21,6 +21,7 @@ mod lock;
 mod output_management;
 mod output_power;
 mod screen_filter;
+mod shutdown;
 mod state;
 mod toplevel_state;
 mod xkb_config;
@@ -131,6 +132,8 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
 fn run() -> Result<(), Error> {
     let options = options(std::env::args().skip(1))?;
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
+    // First, before any thread: see `shutdown::watch`.
+    shutdown::watch(&event_loop)?;
     let display: Display<State> = Display::new()?;
     let mut state = match &options {
         Options::Nested { scale } => winit::start(&mut event_loop, display, *scale)?,
