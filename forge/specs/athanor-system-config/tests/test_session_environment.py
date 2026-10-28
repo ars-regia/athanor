@@ -23,6 +23,9 @@ FORMATS = (
     "LC_TELEPHONE",
     "LC_MEASUREMENT",
 )
+# Exported for cosmic-comp and never imported: environment.d gives the manager its own
+# (doc_session.md, SN2).
+NEVER_IMPORTED = {"XDG_DATA_DIRS", "GTK_IM_MODULE"}
 DEFAULTS = {
     "org.gnome.system.locale region": "''",
     "org.gnome.desktop.interface cursor-size": "24",
@@ -54,12 +57,17 @@ class SessionEnvironment(unittest.TestCase):
             stub("busctl", "exit 1\n")
         else:
             (work / "languages").write_text(languages + "\n")
-            # FindUserById names the object; get-property must read that object.
+            # FindUserById names the object; Get must read Languages on that object, and
+            # both must be method calls, which --timeout bounds.
             stub(
                 "busctl",
-                'case "$3" in\n'
-                'call) echo \'o "/org/freedesktop/Accounts/User1000"\' ;;\n'
-                f'get-property) [ "$5" = /org/freedesktop/Accounts/User1000 ] && cat "{work}/languages" ;;\n'
+                '[ "$1 $2 $3 $4" = "--timeout=2 --system call org.freedesktop.Accounts" ] || exit 2\n'
+                'case "$5 $6 $7" in\n'
+                '"/org/freedesktop/Accounts org.freedesktop.Accounts FindUserById")\n'
+                '    echo \'o "/org/freedesktop/Accounts/User1000"\' ;;\n'
+                '"/org/freedesktop/Accounts/User1000 org.freedesktop.DBus.Properties Get")\n'
+                '    [ "$8 $9 ${10}" = "ss org.freedesktop.Accounts.User Languages" ] || exit 2\n'
+                f'    printf "v " && cat "{work}/languages" ;;\n'
                 "*) exit 2 ;;\n"
                 "esac\n",
             )
@@ -76,16 +84,17 @@ class SessionEnvironment(unittest.TestCase):
             "systemd-cat",
             f'if [ "$1" = -p ]; then cat >> "{work}/journal"; else env > "{work}/env"; fi\n',
         )
-        subprocess.run(
-            ["/bin/sh", str(script)],
-            env={"PATH": f"{stubs}:/usr/bin:/bin", "LANG": lang},
-            check=True,
-        )
+        self.run_env = {"PATH": f"{stubs}:/usr/bin:/bin", "LANG": lang}
+        self.work = work
+        subprocess.run(["/bin/sh", str(script)], env=self.run_env, check=True)
         journal = work / "journal"
         self.journal = journal.read_text() if journal.exists() else ""
+        return self.recorded_environment()
+
+    def recorded_environment(self):
         return dict(
             line.split("=", 1)
-            for line in (work / "env").read_text().splitlines()
+            for line in (self.work / "env").read_text().splitlines()
             if "=" in line
         )
 
@@ -177,15 +186,29 @@ class SessionEnvironment(unittest.TestCase):
                 self.assertNotIn("XCURSOR_SIZE", env)
                 self.assertIn("ignoring the cursor size", self.journal)
 
-    def test_the_import_list_holds_every_variable_the_session_exports(self):
+    def test_every_variable_the_session_exports_is_imported_or_never_imported(self):
+        # Every read succeeds and differs from the login's environment, so every export runs.
+        env = self.session_environment(
+            'as 2 "it_IT.UTF-8" "en_US.UTF-8"',
+            {"org.gnome.system.locale region": "'de_DE.UTF-8'"},
+            lang="C.UTF-8",
+        )
+        # The same stand-in started straight from the login's environment.
+        subprocess.run(
+            ["/bin/sh", "-c", "exec systemd-cat -t athanor-session true"],
+            env=self.run_env,
+            check=True,
+        )
+        baseline = self.recorded_environment()
+        exported = {name for name, value in env.items() if baseline.get(name) != value}
+        self.assertLessEqual({"LANG", "LANGUAGE", "XCURSOR_SIZE", *FORMATS}, exported)
         names = {
             line
             for line in IMPORT_LIST.read_text().splitlines()
             if line and not line.startswith("#")
         }
-        self.assertLessEqual(
-            {"LANG", "LANGUAGE", "XCURSOR_SIZE", "XCURSOR_THEME", *FORMATS}, names
-        )
+        self.assertEqual(exported - names - NEVER_IMPORTED, set())
+        self.assertFalse(names & NEVER_IMPORTED)
 
 
 if __name__ == "__main__":

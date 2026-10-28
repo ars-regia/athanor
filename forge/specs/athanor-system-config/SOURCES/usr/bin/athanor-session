@@ -61,23 +61,25 @@ gsetting_string() {
 
 # LN6: LANG from the first of AccountsService's Languages, LANGUAGE from the list when it
 # has more than one entry. AccountsService names the user's object; busctl prints its
-# type and the path in quotes, then for Languages the type, the count and each entry in
-# quotes. Each call is bounded to 2 s, so a stalled AccountsService cannot hold the login.
+# type and the path in quotes, then for Languages the variant's type, the array's type,
+# the count and each entry in quotes. Both are method calls, which busctl's --timeout
+# bounds to 2 s, so a stalled AccountsService cannot hold the login; get-property would
+# ignore --timeout and wait the bus's 25 s default (systemd 258).
 if user=$(busctl --timeout=2 --system call org.freedesktop.Accounts /org/freedesktop/Accounts \
     org.freedesktop.Accounts FindUserById x "$(id -u)") &&
     case $user in
     'o "/org/freedesktop/Accounts/'*\") user=${user#o \"} ;;
     *) false ;;
     esac &&
-    languages=$(busctl --timeout=2 --system get-property org.freedesktop.Accounts \
-        "${user%\"}" org.freedesktop.Accounts.User Languages); then
+    languages=$(busctl --timeout=2 --system call org.freedesktop.Accounts "${user%\"}" \
+        org.freedesktop.DBus.Properties Get ss org.freedesktop.Accounts.User Languages); then
     set -f
     # shellcheck disable=SC2086 # one word per entry
     set -- $languages
     set +f
     list=
-    if [ "$#" -ge 2 ] && [ "$1" = as ]; then
-        shift 2
+    if [ "$#" -ge 3 ] && [ "$1" = v ] && [ "$2" = as ]; then
+        shift 3
         for entry do
             language=${entry#\"}
             language=${language%\"}
