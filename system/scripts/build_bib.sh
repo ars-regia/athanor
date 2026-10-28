@@ -4,7 +4,7 @@ set -euo pipefail
 TARGET_IMAGE="${1:-localhost/athanor-system}"
 TAG="${2:-latest}"
 TYPE="${3:-qcow2}"
-BIB_IMAGE="${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}"
+BIB_IMAGE="${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder@sha256:b858892139e0779d48869a4dd8cbbc4e257da49f5a4b502824a55d221ed65a55}"
 
 config="disk_config/disk.toml"
 if [[ "${TYPE}" == "iso" ]]; then
