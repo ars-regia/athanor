@@ -223,9 +223,9 @@ git commit -m "feat(compositor-client): report a workspace's capabilities, pin a
 
 ### Task 9: `Client::activate_workspace` and `WindowActions::move_to_workspace`
 
-**Files:** `src/connection.rs` (`activate_workspace`: ext-workspace `activate` and `commit`), `src/actions.rs` (`move_to_workspace(WindowId, WorkspaceId)`: cosmic `move_to_ext_workspace` with the workspace's output, else Task 4's request; the actions' bind goes from `1..=1` to `1..=2`, and `move_to_workspace` is refused, with the version named, when the bound version is below 2; `set_sticky(WindowId)`: cosmic `set_sticky` where `zcosmic_toplevel_manager_v1` is bound at version 3 or later, else refused with the global named, athanor-compositor having no sticky windows, D6), `examples/cc-probe.rs` (`workspace <n>`, `move <app_id> <n>`, `sticky <app_id>`), `forge/test/shell/compositor_e2e.py`.
+**Files:** `src/connection.rs` (`activate_workspace`: ext-workspace `activate` and `commit`), `src/actions.rs` (`move_to_workspace(WindowId, WorkspaceId)`: cosmic `move_to_ext_workspace` with the workspace's output where `zcosmic_toplevel_manager_v1` is bound at version 4 or later, refused with the global and the version named when it is bound below, else Task 4's request; the actions' bind goes from `1..=1` to `1..=2`, and `move_to_workspace` is refused, with the version named, when the bound version is below 2; `set_sticky(WindowId)`: cosmic `set_sticky` where `zcosmic_toplevel_manager_v1` is bound at version 3 or later, else refused with the global named, athanor-compositor having no sticky windows, D6), `examples/cc-probe.rs` (`workspace <n>`, `move <app_id> <n>`, `sticky <app_id>`), `forge/test/shell/compositor_e2e.py`.
 
-- [ ] **Step 1: Write the failing tests:** under both compositors, `activate_workspace` arrives as a `workspace_changed` with `active`; `move_to_workspace` arrives as the window's new workspace; a move of a window closed a moment earlier is refused without a crash of either compositor (S5); under sway both are refused with the missing global named; `set_sticky` puts the window on every workspace under cosmic-comp and is refused, with the global named, under athanor-compositor and sway.
+- [ ] **Step 1: Write the failing tests:** under both compositors, `activate_workspace` arrives as a `workspace_changed` with `active`; `move_to_workspace` arrives as the window's new workspace; a move of a window closed a moment earlier is refused without a crash of either compositor (S5); under sway both are refused with the missing global named; a cosmic manager bound below version 4 refuses `move_to_workspace` without a request sent; `set_sticky` puts the window on every workspace under cosmic-comp and is refused, with the global named, under athanor-compositor and sway.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run all** (Task 6, Step 4): pass.
@@ -392,9 +392,9 @@ git commit -m "feat(overview): window thumbnails with a cache and a capture budg
 
 ### Task 19: Pointer actions and drags
 
-**Files:** `O/src/pointer.rs` (OV7 table: click, double-click, middle click and close button, empty click, scroll at 200 ms; GTK drag and drop of a card onto a miniature, including the last empty one; of a miniature to reorder; within one output), `forge/test/shell/overview_e2e.py`, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients` (the overview's line gains `athanor_toplevel_actions_v1`, bound by the first `window_actions()`).
+**Files:** `O/src/pointer.rs` (OV7 table: click, double-click, middle click and close button, empty click, scroll at 200 ms; GTK drag and drop of a card onto a miniature, including the last empty one; of a miniature to reorder; within one output), `O/src/surface.rs` (Enter on a card activates its window, deferred from Task 17), `forge/test/shell/overview_e2e.py`, `forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients` (the overview's line gains `athanor_toplevel_actions_v1`, bound by the first `window_actions()`).
 
-- [ ] **Step 1: Write the failing tests:** one `overview-e2e` stage per row of OV7 under both compositors, the result read from the compositor client (acceptance 7).
+- [ ] **Step 1: Write the failing tests:** one `overview-e2e` stage per row of OV7 under both compositors, and one where Enter on a card activates its window and hides the overview (OV8), the result read from the compositor client (acceptance 7).
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run all**: pass.
@@ -546,13 +546,13 @@ git commit -m "docs(overview): record the gate's measurements (OV19 step 5)"
 - [ ] **Step 1: Write the failing tests:** the `launch.rs` tests name `os.athanor.Overview1` and `Show`; the test LN9 adds for the `system_actions` file expects the `WorkspaceOverview` entry; acceptance 14's script, `scripts/devvm/overview-acceptance.sh`.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement** with exact-match scripts for `packages.json` and docs.
-- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`), then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
+- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`); under `RIG_COMPOSITOR=athanor`, `rig.sh atspi bar`, `atspi dock` and `golden-report` pass with `rig.sh`'s widget counts raised by one (`forge/test/shell/rig.sh`, the bar's and the dock's `atspi_check.py` counts under athanor) and the rows of `golden/athanor-differences.toml` whose cause is decision 28 hiding the workspaces module or button removed; then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
 - [ ] **Step 5: Commit**
 
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
-LN9_SOURCE=...  # the system_actions source that LN9's change creates, and its generator if it has one
-git add system/athanor-compositor-client/src/launch.rs system/athanor-compositor-client/examples/cc-probe.rs system/athanor-apps/src/entries.rs "$C/src/input.rs" "$C/src/fixture.rs" forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/mod.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/dock.rs $LN9_SOURCE forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh scripts/devvm/overview-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/architecture/doc_own_stack.md docs/operations/release-1.0.md
+: "${LN9_SOURCE:?set it to the system_actions files LN9's change creates, its generator included}"
+git add system/athanor-compositor-client/src/launch.rs system/athanor-compositor-client/examples/cc-probe.rs system/athanor-apps/src/entries.rs "$C/src/input.rs" "$C/src/fixture.rs" forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/mod.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/dock.rs $LN9_SOURCE forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh scripts/devvm/overview-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/architecture/doc_own_stack.md docs/operations/release-1.0.md forge/test/shell/rig.sh forge/test/shell/golden/athanor-differences.toml
 git commit -m "feat(overview): switch every opener to athanor-overview and retire cosmic-workspaces (OV17)"
 ```
 
