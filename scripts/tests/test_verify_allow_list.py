@@ -93,15 +93,16 @@ class AllowList(unittest.TestCase):
             'fn act() { Unavailable("athanor_toplevel_actions_v1") }\n',
         )
 
-    def problems(self):
-        """The problems of the fixture tree, which installs no executable of OUTSIDE_THE_LIST."""
-        return verify.allow_list_problems(self.root, outside=set())
+    def problems(self, upstream=frozenset()):
+        """The problems of the fixture tree, which installs no executable of OUTSIDE_THE_LIST
+        and has no line of UPSTREAM's unless `upstream` names them."""
+        return verify.allow_list_problems(self.root, outside=set(), upstream=upstream)
 
     def exempt(self):
         """(problems, notes) of the fixture tree with the shipped OUTSIDE_THE_LIST."""
         notes = []
         return verify.allow_list_problems(
-            self.root, notes, verify.OUTSIDE_THE_LIST
+            self.root, notes, verify.OUTSIDE_THE_LIST, upstream=set()
         ), notes
 
     def test_a_top_layer_target_without_a_line_fails(self):
@@ -450,6 +451,45 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 1, out)
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
         self.assertIn("installed by no spec", out[0])
+
+    def test_the_upstream_clients_are_the_locker_the_idle_daemon_and_the_agent(self):
+        # doc_session.md revision 4, SN12 and SN15.
+        self.assertEqual(
+            verify.UPSTREAM,
+            {"/usr/bin/cosmic-greeter", "/usr/bin/cosmic-idle", "/usr/bin/cosmic-osd"},
+        )
+
+    def test_an_upstream_line_no_spec_installs_passes(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1\n")
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("/usr/bin/cosmic-osd is installed by no spec", out[0])
+        self.assertEqual(self.problems({"/usr/bin/cosmic-osd"}), [])
+
+    def test_an_upstream_client_without_its_line_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        out = self.problems({"/usr/bin/cosmic-osd"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("has no line", out[0])
+
+    def test_an_upstream_line_still_grants_only_privileged_or_layer_gated_rows(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/cosmic-osd cosmic-osd.service wl_compositor\n")
+        out = self.problems({"/usr/bin/cosmic-osd"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("no privileged or layer-gated row", out[0])
+
+    def test_an_upstream_client_a_spec_installs_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.write(
+            "forge/specs/cosmic-osd/cosmic-osd.spec",
+            "Name: cosmic-osd\n%install\ninstall -D -m 0755 cosmic-osd %{buildroot}/usr/bin/cosmic-osd\n",
+        )
+        self.lines("/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1\n")
+        out = self.problems({"/usr/bin/cosmic-osd"})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("remove it from UPSTREAM", out[0])
 
     def test_the_compositor_serving_the_globals_is_no_client(self):
         self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})

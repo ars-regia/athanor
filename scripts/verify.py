@@ -2200,6 +2200,11 @@ LAYER_SHELL = "zwlr_layer_shell_v1"
 # step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
 # A line for it, or no spec installing it, ends the exemption with a failure.
 OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# Upstream clients with a line (doc_session.md revision 4, SN12 and SN15): no spec under
+# forge/specs installs them and no crate of the tree builds them, so neither the executable nor
+# its interfaces can be derived here; their interfaces come from SN12's derivation run. Each
+# must keep its line, and a spec that comes to install one ends its exemption with a failure.
+UPSTREAM = {"/usr/bin/cosmic-greeter", "/usr/bin/cosmic-idle", "/usr/bin/cosmic-osd"}
 # The compositor serves those globals and the layers, and enforces the list: no client to check.
 # Its installed path and its bin target both, so that another binary installed there is checked.
 SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
@@ -2466,7 +2471,7 @@ def build_flags(spec, package):
     return set(), True, False
 
 
-def allow_list_problems(root=None, notes=None, outside=None):
+def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
     """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
     a crate of the tree, that asks for the top or overlay layer or names a privileged global
     of data/globals has a line in data/privileged-clients, and each of its lines grants
@@ -2474,10 +2479,12 @@ def allow_list_problems(root=None, notes=None, outside=None):
     names; each line names an executable a spec installs, and only interfaces of the
     privileged and layer-gated rows. A grant beyond those is the maintainer's, never
     derived here. An executable of `outside` (OUTSIDE_THE_LIST by default) is appended to
-    `notes` in place of its problem."""
+    `notes` in place of its problem; one of `upstream` (UPSTREAM by default) has a line and
+    is installed by no spec."""
     root = Path(root or ROOT)
     notes = [] if notes is None else notes
     outside = OUTSIDE_THE_LIST if outside is None else outside
+    upstream = UPSTREAM if upstream is None else upstream
     problems = []
     classes = {}
     for number, line in enumerate(read(root / GLOBALS_FILE).splitlines(), 1):
@@ -2587,8 +2594,15 @@ def allow_list_problems(root=None, notes=None, outside=None):
         problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
                         "builds: the check found no target")
     for executable in lines:
-        if executable not in installed:
+        if executable not in installed and executable not in upstream:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    for executable in sorted(upstream):
+        if executable not in lines:
+            problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
+                            "remove it from UPSTREAM (doc_session.md SN12)")
+        if executable in installed:
+            problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
+                            "remove it from UPSTREAM, so that its line is derived")
     for executable in sorted(outside):
         if executable in lines:
             problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "

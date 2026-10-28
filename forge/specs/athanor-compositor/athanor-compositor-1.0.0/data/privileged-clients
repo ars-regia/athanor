@@ -7,3 +7,9 @@
 /usr/bin/athanor-launcher athanor-launcher.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_foreign_toplevel_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 ext_workspace_manager_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1
 /usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1
 /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1 ext_workspace_manager_v1 ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1
+# Upstream clients no spec of the tree installs and no crate of the tree builds
+# (doc_session.md, SN12 and SN15): the locker, the idle daemon (its fade on the overlay
+# layer) and the polkit agent. The locker alone is granted the session lock.
+/usr/bin/cosmic-greeter cosmic-greeter-locker.scope ext_session_lock_manager_v1
+/usr/bin/cosmic-idle cosmic-idle.scope zwlr_output_power_manager_v1 zwlr_layer_shell_v1
+/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1
