@@ -95,9 +95,13 @@ impl State {
                     // Any other press disarms Super alone (D4). Only a hardware key counts: the
                     // input method sends the keys it forwards a second time, as a virtual
                     // keyboard's.
+                    // A second Super while one is held is not Super alone either, and nothing
+                    // arms while the session is locked.
                     if source == KeyboardSource::Physical {
-                        state.super_tap =
-                            bindings::arms_super(modifiers, &handle).then_some(code);
+                        state.super_tap = (state.super_tap.is_none()
+                            && state.lock.is_none()
+                            && bindings::arms_super(modifiers, &handle))
+                        .then_some(code);
                     }
                     match bindings::find(modifiers, &handle, state.lock.is_some()) {
                         Some(action) => {

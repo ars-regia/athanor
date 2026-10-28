@@ -51,13 +51,15 @@ pub(crate) const CONTROL_CENTER: Call = Call {
 
 /// A command the user manager runs as a transient unit (plan D6): a short name for the unit
 /// and a fixed argument vector, whose first element is an absolute path; no shell reads it.
-/// A command never coalesces: each press is one step.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Command {
     pub name: &'static str,
     pub argv: &'static [&'static str],
     /// Whether the key acts while the session is locked, as `Call::while_locked`.
     pub while_locked: bool,
+    /// Whether a repeat queued while the command's request waits is dropped, as
+    /// `Call::coalesce`: a toggle or a dialog, never a step.
+    pub coalesce: bool,
 }
 
 /// `XF86AudioMute`, as cosmic-comp's session runs it (`defaults:117`), until `ToggleMute`
@@ -71,6 +73,7 @@ pub(crate) const MUTE: Command = Command {
         "toggle",
     ],
     while_locked: true,
+    coalesce: true,
 };
 
 /// `XF86AudioMicMute` (`defaults:118`), until `ToggleMicMute`.
@@ -83,6 +86,7 @@ pub(crate) const MIC_MUTE: Command = Command {
         "toggle",
     ],
     while_locked: false,
+    coalesce: true,
 };
 
 /// `XF86AudioPlay` (`defaults:121`), until `PlayPause` (OD3).
@@ -90,6 +94,7 @@ pub(crate) const PLAY_PAUSE: Command = Command {
     name: "play-pause",
     argv: &["/usr/bin/playerctl", "play-pause"],
     while_locked: false,
+    coalesce: true,
 };
 
 /// `XF86AudioNext` (`defaults:122`), until `Next` (OD3).
@@ -97,6 +102,7 @@ pub(crate) const NEXT: Command = Command {
     name: "next",
     argv: &["/usr/bin/playerctl", "next"],
     while_locked: false,
+    coalesce: false,
 };
 
 /// `XF86AudioPrev` (`defaults:123`), until `Previous` (OD3).
@@ -104,6 +110,7 @@ pub(crate) const PREVIOUS: Command = Command {
     name: "previous",
     argv: &["/usr/bin/playerctl", "previous"],
     while_locked: false,
+    coalesce: false,
 };
 
 /// Super+Shift+Escape: cosmic-osd's log-out dialog (`defaults:3`), until
@@ -112,6 +119,7 @@ pub(crate) const LOG_OUT: Command = Command {
     name: "log-out",
     argv: &["/usr/bin/cosmic-osd", "log-out"],
     while_locked: false,
+    coalesce: true,
 };
 
 /// `XF86PowerOff`: cosmic-osd's power dialog, as cosmic-comp's `system_actions` runs it
@@ -120,6 +128,7 @@ pub(crate) const POWER_OFF: Command = Command {
     name: "power-off",
     argv: &["/usr/bin/cosmic-osd", "shutdown"],
     while_locked: false,
+    coalesce: true,
 };
 
 /// What a key asks the worker for.
@@ -138,7 +147,10 @@ impl Job {
     }
 
     fn coalesce(self) -> bool {
-        matches!(self, Self::Call(call) if call.coalesce)
+        match self {
+            Self::Call(call) => call.coalesce,
+            Self::Run(command) => command.coalesce,
+        }
     }
 }
 
@@ -214,14 +226,16 @@ fn unit_name(name: &str, pid: u32, n: u64) -> String {
 }
 
 /// The properties of the transient service that runs `argv`: its first element is executed
-/// with the vector as is, by the user manager, which starts no shell.
+/// with the vector as is, by the user manager, which starts no shell, and the program gains no
+/// privilege. With `Type=exec` a program that cannot be executed fails its unit, which the user
+/// manager's journal records; the call's reply only says the job was queued.
 fn transient_properties(argv: &[&str]) -> Vec<(&'static str, Value<'static>)> {
     let args: Vec<String> = argv.iter().map(|arg| arg.to_string()).collect();
     let program = args.first().cloned().unwrap_or_default();
     vec![
         ("ExecStart", Value::from(vec![(program, args, false)])),
-        // The start job fails when the program cannot be executed.
         ("Type", Value::from("exec")),
+        ("NoNewPrivileges", Value::from(true)),
         ("CollectMode", Value::from("inactive-or-failed")),
         ("Slice", Value::from("app.slice")),
     ]
@@ -240,8 +254,9 @@ struct SessionBus {
 }
 
 impl SessionBus {
-    /// Sends `send` on the connection, opened first when there is none; it is kept only when
-    /// the call succeeded.
+    /// Sends `send` on the connection, opened first when there is none; it is dropped, and
+    /// opened again at the next call, when the call failed for another reason than an error
+    /// reply.
     fn send(
         &mut self,
         send: impl FnOnce(&zbus::blocking::Connection) -> zbus::Result<zbus::Message>,
@@ -252,9 +267,17 @@ impl SessionBus {
                 .method_timeout(CALL_TIMEOUT)
                 .build()?,
         };
-        send(&connection)?;
-        self.connection = Some(connection);
-        Ok(())
+        match send(&connection) {
+            Ok(_) => {
+                self.connection = Some(connection);
+                Ok(())
+            }
+            Err(error @ zbus::Error::MethodError(..)) => {
+                self.connection = Some(connection);
+                Err(error)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -292,7 +315,7 @@ impl Bus for SessionBus {
             )
         });
         match sent {
-            Ok(()) => tracing::debug!(unit, "a key's command started"),
+            Ok(()) => tracing::debug!(unit, "the user manager queued a key's command"),
             Err(error) => tracing::warn!(
                 %error,
                 unit,
@@ -339,6 +362,7 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
         if job.coalesce() {
             while pending.front().is_some_and(|next| next.job == job) {
                 pending.pop_front();
+                tracing::debug!(?job, "a repeat queued while the key's job waited is dropped");
             }
         }
     }
@@ -437,11 +461,11 @@ mod tests {
 
     #[test]
     fn a_full_queue_drops_without_waiting() {
-        let (calls, _requests) = SessionCalls::detached();
+        let (calls, requests) = SessionCalls::detached();
         for _ in 0..QUEUE + 1 {
             calls.send(at(Job::Call(&LAUNCHER), 0));
         }
-        // The ninth returned: the queue holds eight.
+        assert_eq!(requests.try_iter().count(), QUEUE, "the ninth is dropped");
         let (calls, requests) = SessionCalls::detached();
         drop(requests);
         calls.send(at(Job::Call(&LAUNCHER), 0));
@@ -495,11 +519,17 @@ mod tests {
             ["Show", "Toggle", "Show"],
             "Show, Toggle, Show: the third Show is still sent"
         );
+        let next = || at(Job::Run(&NEXT), 0);
+        assert_eq!(
+            worked(vec![next(), next(), next()], 0, None),
+            ["next", "next", "next"],
+            "a step is run every time"
+        );
         let mute = || at(Job::Run(&MUTE), 0);
         assert_eq!(
-            worked(vec![mute(), mute(), mute()], 0, None),
-            ["mute", "mute", "mute"],
-            "a command is run every time"
+            worked(vec![mute(), mute(), at(Job::Run(&NEXT), 0), mute()], 0, None),
+            ["mute", "next", "mute"],
+            "a toggle's repeat is dropped, as a call's"
         );
     }
 
@@ -551,6 +581,7 @@ mod tests {
                         Value::from(vec![(argv[0].clone(), argv.clone(), false)])
                     ),
                     ("Type", Value::from("exec")),
+                    ("NoNewPrivileges", Value::from(true)),
                     ("CollectMode", Value::from("inactive-or-failed")),
                     ("Slice", Value::from("app.slice")),
                 ]

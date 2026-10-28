@@ -291,7 +291,7 @@ The mute, microphone-mute and media keys run `wpctl` and `playerctl` as cosmic-c
 does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. The
 compositor forks nothing: the same thread asks the user manager to run each fixed argument
 vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
-`app.slice` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
+`app.slice` with `NoNewPrivileges` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
 the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
 call cosmic-settings-daemon's `VolumeUp`, `VolumeDown`, `IncreaseDisplayBrightness`,
 `DecreaseDisplayBrightness` and `ScreenReader`, as cosmic-comp's session does, from one file,

@@ -7870,6 +7870,7 @@ const KEY_SCALE: u32 = 120;
 const KEY_BRIGHTNESSDOWN: u32 = 224;
 const KEY_BRIGHTNESSUP: u32 = 225;
 const KEY_LEFTMETA: u32 = 125;
+const KEY_RIGHTMETA: u32 = 126;
 const KEY_NEXTSONG: u32 = 163;
 const KEY_PLAYPAUSE: u32 = 164;
 const KEY_PREVIOUSSONG: u32 = 165;
@@ -8332,6 +8333,49 @@ fn super_alone_does_nothing_while_locked() {
     let mut run = Running::start(None);
     let (mut locker, _lock) = lock_session(&mut run);
     reaches(&mut locker, &mut run, &[KEY_LEFTMETA], "Super");
+    run.stop();
+}
+
+/// Super held into a lock, or Super pressed on the lock surface, opens nothing after the unlock
+/// when it is released; nor does a second Super pressed while one is held (D4).
+#[test]
+fn super_held_across_a_lock_or_beside_another_super_shows_nothing() {
+    use crate::bindings::Action;
+    use smithay::backend::input::{InputTime, KeyState};
+    let key = |run: &mut Running, code: u32, key_state| {
+        run.state.key_input(
+            (code + 8).into(),
+            key_state,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
+    };
+    let launcher = Action::Call(&crate::session_calls::LAUNCHER);
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    for held_into_the_lock in [true, false] {
+        if held_into_the_lock {
+            key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+        }
+        let (mut locker, lock) = lock_session(&mut run);
+        if !held_into_the_lock {
+            key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+        }
+        lock.unlock_and_destroy();
+        locker.pump(&mut run, "the session is unlocked", |_, state| {
+            state.lock.is_none()
+        });
+        key(&mut run, KEY_LEFTMETA, KeyState::Released);
+        assert!(
+            !run.state.fired.contains(&launcher),
+            "held into the lock: {held_into_the_lock}"
+        );
+    }
+    key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+    key(&mut run, KEY_RIGHTMETA, KeyState::Pressed);
+    key(&mut run, KEY_RIGHTMETA, KeyState::Released);
+    key(&mut run, KEY_LEFTMETA, KeyState::Released);
+    assert!(!run.state.fired.contains(&launcher), "two Supers");
     run.stop();
 }
 
