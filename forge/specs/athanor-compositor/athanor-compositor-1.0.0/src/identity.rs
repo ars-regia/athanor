@@ -685,8 +685,10 @@ mod tests {
     /// interfaces each uses (doc_session.md, SN12; #683, widened). `Client::connect` binds every
     /// privileged global the compositor offers it; a client is granted only the ones it uses:
     /// the dock lists windows, the launcher lists and captures them, the control center only
-    /// draws on the overlay layer.
-    const SHELL_CLIENTS: [(&str, &str, &[&str]); 4] = [
+    /// draws on the overlay layer. Then the upstream clients of doc_session.md revision 4,
+    /// SN12 and SN15, which no crate of the tree builds: the locker, the idle daemon and
+    /// cosmic-osd.
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 7] = [
         (
             "athanor-bar",
             "athanor-bar.service",
@@ -696,6 +698,7 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
+                "athanor_keyboard_group_manager_v1",
             ],
         ),
         (
@@ -733,6 +736,17 @@ mod tests {
                 "athanor_toplevel_manager_v1",
             ],
         ),
+        (
+            "cosmic-greeter",
+            "cosmic-greeter-locker.scope",
+            &["ext_session_lock_manager_v1"],
+        ),
+        (
+            "cosmic-idle",
+            "cosmic-idle.scope",
+            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
+        ),
+        ("cosmic-osd", "cosmic-osd.service", &["zwlr_layer_shell_v1"]),
     ];
 
     /// Crates that draw on the top or overlay layer without a line: the compositor itself, and
@@ -812,9 +826,11 @@ mod tests {
             })
             .collect();
         assert_eq!(shipped.0, expected);
-        assert!(shipped
-            .0
-            .iter()
-            .all(|(_, _, privileges)| !privileges.contains(&Privilege::SessionLock)));
+        // Only the locker locks the session (SN15).
+        assert!(shipped.0.iter().all(|(path, unit, privileges)| {
+            !privileges.contains(&Privilege::SessionLock)
+                || (path == Path::new("/usr/bin/cosmic-greeter")
+                    && unit == "cosmic-greeter-locker.scope")
+        }));
     }
 }
