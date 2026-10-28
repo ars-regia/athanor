@@ -42,10 +42,12 @@ pub enum Privilege {
     ToplevelState,
     /// `athanor_toplevel_actions_v1`: every window activated, minimised, restored or closed.
     ToplevelActions,
+    /// `athanor_keyboard_group_manager_v1`: the keyboard's layout group, followed and switched.
+    KeyboardGroup,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 14] = [
+    const ALL: [(Self, &'static str); 15] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -66,6 +68,7 @@ impl Privilege {
         (Self::InputMethod, "zwp_input_method_manager_v2"),
         (Self::ToplevelState, "athanor_toplevel_manager_v1"),
         (Self::ToplevelActions, "athanor_toplevel_actions_v1"),
+        (Self::KeyboardGroup, "athanor_keyboard_group_manager_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -492,6 +495,47 @@ mod tests {
                 granted.contains(&Privilege::ToplevelActions),
                 acts,
                 "{name} acts"
+            );
+        }
+    }
+
+    /// The shipped allow-list lets the bar alone follow and switch the keyboard group: the
+    /// dock, the launcher and the control center never call `watch_keyboard_group`.
+    #[test]
+    fn only_the_bar_follows_the_keyboard_group() {
+        /// Every path is the file of every process.
+        struct Any;
+        impl Process for Any {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn executable_file(&self, _: i32) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+            fn file(&self, _: &Path) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+        }
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (name, follows) in [
+            ("athanor-bar", true),
+            ("athanor-control-center", false),
+            ("athanor-dock", false),
+            ("athanor-launcher", false),
+        ] {
+            let client = Identity {
+                executable: format!("/usr/bin/{name}").into(),
+                unit: Some(format!("{name}.service")),
+            };
+            let granted = shipped.grants(&client, BAR_PID, &Any);
+            assert_eq!(
+                granted.contains(&Privilege::KeyboardGroup),
+                follows,
+                "{name} follows the keyboard group"
             );
         }
     }

@@ -746,15 +746,16 @@ compositor-globals)
     for interface in ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1 \
         ext_foreign_toplevel_image_capture_source_manager_v1 ext_output_image_capture_source_manager_v1 \
         ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
-        zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 athanor_toplevel_manager_v1 \
-        athanor_toplevel_actions_v1; do
+        zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
+        zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
+        athanor_keyboard_group_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 11 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 14 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
@@ -1166,13 +1167,12 @@ atspi)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 6: input source and tiling need zcosmic_keyboard_layout_manager_v1 and
-        # zcosmic_workspace_manager_v2, whose private replacements docs/spikes/c1-protocols.md
-        # (section 3) proposes and revision 2 specifies.
+        # 7: tiling needs zcosmic_workspace_manager_v2, whose private replacement
+        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies.
         unit='' widgets=8
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
-            unit=--unit widgets=6
+            unit=--unit widgets=7
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
@@ -1185,16 +1185,16 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-compositor it names each line the bar lacks (Input source and Tiling, C1).
+        # athanor-compositor it names each line the bar lacks (Tiling, C1).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
-        # Under athanor-compositor 10: as in `bar`, the input source and tiling buttons are missing.
+        # Under athanor-compositor 11: as in `bar`, the tiling button is missing.
         widgets=12
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=11; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
         atspi_variant "$out/seed-atspi-bar-modules"
@@ -1345,7 +1345,7 @@ orca)
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Input source and Tiling, C1). Tab skips Input source (#751), so the
+        # the bar lacks Tiling, C1). Tab skips Input source (#751), so the
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light

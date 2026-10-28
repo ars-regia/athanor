@@ -19,6 +19,7 @@ ext_foreign_toplevel_list_v1 privileged
 ext_session_lock_manager_v1 privileged
 ext_image_copy_capture_manager_v1 privileged
 athanor_toplevel_actions_v1 privileged
+athanor_keyboard_group_manager_v1 privileged
 """
 
 SPEC = """\
@@ -70,14 +71,15 @@ class AllowList(unittest.TestCase):
 
     def client(self):
         """A path dependency that binds the toplevel list at connect, the image copy
-        capture at the first `capture` and the window actions at the first action of
-        `window_actions`, as athanor-compositor-client does."""
+        capture at the first `capture`, the window actions at the first action of
+        `window_actions` and the keyboard group at the first `watch_keyboard_group`, as
+        athanor-compositor-client does."""
         self.write(
             f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
         )
         self.write(
             f"{CLIENT}/src/lib.rs",
-            "mod actions;\nmod capture;\nmod connection;\npub fn connect() {}\n",
+            "mod actions;\nmod capture;\nmod connection;\nmod keyboard_group;\npub fn connect() {}\n",
         )
         self.write(
             f"{CLIENT}/src/connection.rs",
@@ -91,6 +93,10 @@ class AllowList(unittest.TestCase):
         self.write(
             f"{CLIENT}/src/actions.rs",
             'fn act() { Unavailable("athanor_toplevel_actions_v1") }\n',
+        )
+        self.write(
+            f"{CLIENT}/src/keyboard_group.rs",
+            'fn set_group() { Unavailable("athanor_keyboard_group_manager_v1") }\n',
         )
 
     def problems(self, upstream=frozenset()):
@@ -291,6 +297,39 @@ class AllowList(unittest.TestCase):
                 self.lines(
                     "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
                     "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1 athanor_toplevel_actions_v1\n"
+                )
+                self.assertEqual(self.problems(), [])
+
+    def test_the_keyboard_group_counts_only_for_a_target_that_watches_it(self):
+        # The client binds the keyboard group at the first `Client::watch_keyboard_group`
+        # only: the control center, which never watches it, needs no grant of it.
+        self.client()
+        dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
+        self.package(
+            "athanor-control-center",
+            dependency,
+            {"src/main.rs": "use athanor_compositor_client::connect;\nfn f() { client.keyboard_group(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n")
+        self.assertEqual(self.problems(), [])
+        for call in ("client.watch_keyboard_group()", "Client::watch_keyboard_group(&client)"):
+            with self.subTest(call):
+                self.package(
+                    "athanor-bar",
+                    dependency,
+                    {"src/main.rs": f"use athanor_compositor_client::Client;\nfn f() {{ {call}; }}\n"},
+                )
+                self.lines(
+                    "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1\n"
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-bar", out[0])
+                self.assertIn("athanor_keyboard_group_manager_v1", out[0])
+                self.lines(
+                    "/usr/bin/athanor-control-center athanor-control-center.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1 athanor_keyboard_group_manager_v1\n"
                 )
                 self.assertEqual(self.problems(), [])
 
