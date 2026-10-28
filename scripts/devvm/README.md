@@ -172,7 +172,7 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   `cleanup` removes the accounts and the settings the stages made, and is not part of a run.
 - `default-session-acceptance.sh [stage...]` checks items 9 to 15 and 17 to 19 of
   `doc_session.md` section 5 (revision 4: the own compositor's session as the greeter's
-  default, SN13 step 6) and answers section 4, questions 11 to 13. It signs a test account, `pia`,
+  default, SN13 step 6) and answers section 4, questions 11 and 13. It signs a test account, `pia`,
   in at the greeter through `keyboard_type.py` and `greeter_probe.py`, leaving the session
   menu alone for the default or checking cosmic-comp's entry with the keyboard;
   `session_window.py` is the GTK4 field item 14 types into, the window holding item 10's

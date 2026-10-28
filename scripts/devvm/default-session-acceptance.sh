@@ -160,8 +160,8 @@ finish() {
             echo "NOT RESTORED: systemd-localed.service is still masked in /run"
     fi
     if [[ -n $KEYMAP_SAVED ]]; then
-        guest_ssh "sudo localectl set-x11-keymap $KEYMAP_SAVED" ||
-            echo "NOT RESTORED: the system keyboard; set it back with localectl set-x11-keymap $KEYMAP_SAVED"
+        guest_ssh "sudo localectl set-x11-keymap --no-convert $KEYMAP_SAVED" ||
+            echo "NOT RESTORED: the system keyboard; set it back with localectl set-x11-keymap --no-convert $KEYMAP_SAVED"
     fi
     if [[ -n $DCONF_MODES ]]; then
         dconf_restored || echo "NOT RESTORED: the modes of $DCONF and $DCONF/user: $DCONF_MODES"
@@ -177,8 +177,7 @@ finish() {
         idle_set None || echo "NOT RESTORED: $IDLE_DIR/screen_off_time is not None"
     fi
     if [[ -n $FAVORITES_SAVED ]]; then
-        guest_ssh "sudo -u $USER_NAME mv -f $FAVORITES.acceptance $FAVORITES" ||
-            echo "NOT RESTORED: $FAVORITES; the original is $FAVORITES.acceptance"
+        favorites_restored || echo "NOT RESTORED: $FAVORITES ($FAVORITES_SAVED by the dock stage)"
     fi
     if [[ -n $LINGER_SET ]]; then
         guest_ssh sudo loginctl disable-linger "$USER_NAME" || echo "NOT RESTORED: lingering is still enabled for $USER_NAME"
@@ -235,13 +234,14 @@ shot() { # shot NAME: the greeter, as greetd's user, against its own compositor
 
 greeter_up() { probe tree > /dev/null; }
 
-# The test account's sessions that are not closing, as JSON, in SESSIONS. A failed read
-# fails the stage: it must not read as "not signed in".
+# The test account's user sessions that are not closing, as JSON, in SESSIONS; not the
+# session logind lists for a lingering user manager (class manager, systemd 256). A failed
+# read fails the stage: it must not read as "not signed in".
 SESSIONS='[]'
 read_sessions() {
     local list
     list=$(guest_ssh loginctl list-sessions -o json) || fail "cannot list the guest's sessions"
-    SESSIONS=$(jq -c --arg u "$USER_NAME" '[.[] | select(.user == $u and .state != "closing")]' <<< "$list")
+    SESSIONS=$(jq -c --arg u "$USER_NAME" '[.[] | select(.user == $u and .state != "closing" and ((.class // "user") | startswith("user")))]' <<< "$list")
 }
 
 signed_in() {
@@ -257,16 +257,23 @@ is_active() { in_session systemctl --user is-active --quiet "$1"; }
 
 cosmic_running() { guest_ssh pgrep -u "$USER_NAME" -x cosmic-comp > /dev/null; }
 
-# The user manager's environment, one NAME=VALUE per line.
-manager_environment() { in_session systemctl --user show-environment || fail "systemctl --user show-environment"; }
+# The user manager's environment, one NAME=VALUE per line, in ENVIRONMENT.
+ENVIRONMENT=''
+read_environment() {
+    ENVIRONMENT=$(in_session systemctl --user show-environment) || fail "systemctl --user show-environment failed"
+}
+
+user_down() { ! user_up; }
 
 # The session menu's accessible description: the title of the checked entry.
 menu_checked() {
     probe tree | jq -r 'first(.[] | select(.name == "Session" and .showing) | .description) // ""'
 }
 
+# The menu is on the card's page, which the greeter shows once a card is open.
 expect_default_checked() {
     local checked
+    probe open-card "$FULL_NAME" || fail "no card of $FULL_NAME to open"
     checked=$(menu_checked)
     [[ $checked == "$DEFAULT_TITLE" ]] || fail "the menu has '$checked' checked, not the default"
 }
@@ -337,12 +344,31 @@ sign_in() { # sign_in own|cosmic
     wait_until 60 signed_in || fail "no session of $USER_NAME 60 s after the password"
 }
 
-# Signs in to the default and waits for its compositor and the session target.
+# The compositor's main process, 0 when it has none.
+compositor_pid() { in_session systemctl --user show -p MainPID --value "$COMPOSITOR"; }
+
+# The compositor is active with a main process other than BEFORE.
+compositor_restarted() { # compositor_restarted BEFORE
+    local pid
+    pid=$(compositor_pid) || return 1
+    [[ $pid != 0 && $pid != "$1" ]] && is_active "$COMPOSITOR"
+}
+
+# Signs in to the default and waits for a compositor this sign-in started, which a
+# compositor left running by a killed script is not, the session target and both scopes.
 own_up() {
+    local before=0 scope
+    if user_up; then
+        before=$(compositor_pid) || fail "cannot read the MainPID of $COMPOSITOR"
+    fi
     sign_in own
+    wait_until 60 compositor_restarted "$before" ||
+        fail "no $COMPOSITOR started 60 s after the sign-in: $(in_session systemctl --user --failed --no-legend)"
     wait_until 60 is_active athanor-session.target ||
         fail "athanor-session.target is not active 60 s after the sign-in: $(in_session systemctl --user --failed --no-legend)"
-    is_active "$COMPOSITOR" || fail "$COMPOSITOR is not active in the default session"
+    for scope in "${SCOPES[@]}"; do
+        wait_until 20 is_active "$scope" || fail "$scope is not active in the default session"
+    done
 }
 
 # cosmic-comp's session started from a sign-in to the default within LIMIT seconds of the
@@ -352,11 +378,13 @@ handed_off() { # handed_off LIMIT CAUSE
     local log
     wait_until "$1" cosmic_running || fail "no cosmic-comp of $USER_NAME $1 s after the password"
     echo "cosmic-comp's session started $((SECONDS - SIGN_IN_AT)) s after the password"
+    ((SECONDS - SIGN_IN_AT <= $1)) || fail "cosmic-comp's session started later than $1 s after the password"
     log=$(journal "$SIGN_IN_SINCE" -o cat -p warning -t athanor-compositor-session)
-    grep -F "starting cosmic-comp's session" <<< "$log" | grep -qF -- "$2" ||
+    grep -F "starting cosmic-comp's session" <<< "$log" | grep -F -- "$2" > /dev/null ||
         fail "no hand-off naming '$2' under athanor-compositor-session: $log"
     ! is_active "$COMPOSITOR" || fail "$COMPOSITOR is active in cosmic-comp's session"
-    ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$(manager_environment)" ||
+    read_environment
+    ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$ENVIRONMENT" ||
         fail "ATHANOR_OWN_COMPOSITOR is set in cosmic-comp's session"
 }
 
@@ -366,6 +394,8 @@ terminated() {
     wait_until 60 greeter_back || fail "no greeter 60 s after terminate-user"
 }
 
+# The bar's Log Out: StopUnit of the session target on the session bus (athanor-bar,
+# src/ui/logind.rs), made here without its confirmation dialog.
 log_out() { in_session busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
     org.freedesktop.systemd1.Manager StopUnit ss athanor-session.target replace > /dev/null; }
 
@@ -376,20 +406,21 @@ log_out() { in_session busctl --user call org.freedesktop.systemd1 /org/freedesk
 ended() { # ended SECONDS-ALLOWED STARTED-AT(SECONDS)
     wait_until "$1" greeter_back || fail "no greeter $1 s after the session's end"
     echo "the greeter came back after $((SECONDS - $2)) s"
+    ((SECONDS - $2 <= $1)) || fail "the greeter came back later than $1 s after the session's end"
     expect_default_checked
     if ! user_up; then
         echo "the user manager had stopped: nothing of the session is left to read"
         return
     fi
-    local unit environment name
+    local unit name
     for unit in "${SESSION_UNITS[@]}"; do
         ! is_active "$unit" || fail "$unit is still active"
     done
-    environment=$(manager_environment)
+    read_environment
     for name in "${REMOVED[@]}"; do
-        ! grep -q "^$name=" <<< "$environment" || fail "$name is left in the user manager"
+        ! grep -q "^$name=" <<< "$ENVIRONMENT" || fail "$name is left in the user manager"
     done
-    grep -q '^XDG_CURRENT_DESKTOP=Athanor:COSMIC$' <<< "$environment" ||
+    grep -q '^XDG_CURRENT_DESKTOP=Athanor:COSMIC$' <<< "$ENVIRONMENT" ||
         fail "XDG_CURRENT_DESKTOP is not environment.d's Athanor:COSMIC"
 }
 
@@ -480,7 +511,6 @@ stage_account() {
 stage_default() {
     local tree unit result display started
     linger_on
-    probe open-card "$FULL_NAME" || fail "no card of $FULL_NAME to open"
     expect_default_checked
     type_keys @tab @enter
     sleep 1
@@ -494,12 +524,14 @@ stage_default() {
     type_keys @escape @shift+tab @escape
     own_up
     for unit in "$GATE" athanor-shelld.service athanor-bar.service athanor-dock.service cosmic-osd.service \
-        cosmic-settings-daemon.service "${SCOPES[@]}"; do
+        cosmic-settings-daemon.service; do
         wait_until 20 is_active "$unit" || fail "$unit is not active in the default session"
     done
-    result=$(in_session systemctl --user show -p ActiveState -p ConditionResult "$SHORTCUT" | sort | paste -sd ' ')
+    result=$(in_session systemctl --user show -p ActiveState -p ConditionResult "$SHORTCUT" | sort | paste -sd ' ') ||
+        fail "systemctl --user show $SHORTCUT failed"
     [[ $result == "ActiveState=inactive ConditionResult=no" ]] || fail "$SHORTCUT: '$result', not inactive with its condition unmet"
-    display=$(manager_environment | sed -n 's/^DISPLAY=//p')
+    read_environment
+    display=$(sed -n 's/^DISPLAY=//p' <<< "$ENVIRONMENT")
     [[ -n $display ]] || fail "no DISPLAY in the user manager"
     in_session env DISPLAY="$display" xdpyinfo > /dev/null || fail "xdpyinfo reaches no X server on $display"
     started=$SECONDS
@@ -514,7 +546,8 @@ stage_cosmic() {
     wait_until 60 cosmic_running || fail "no cosmic-comp of $USER_NAME 60 s after the password"
     [[ -n $(journal "$SIGN_IN_SINCE" -o cat -t athanor-session) ]] || fail "no athanor-session line in the journal"
     ! is_active "$COMPOSITOR" || fail "$COMPOSITOR is active in cosmic-comp's session"
-    ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$(manager_environment)" || fail "ATHANOR_OWN_COMPOSITOR is set in cosmic-comp's session"
+    read_environment
+    ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$ENVIRONMENT" || fail "ATHANOR_OWN_COMPOSITOR is set in cosmic-comp's session"
     for unit in "${SCOPES[@]}"; do
         wait_until 20 is_active "$unit" || fail "$unit is not active in cosmic-comp's session"
     done
@@ -526,8 +559,26 @@ stage_cosmic() {
     expect_default_checked
 }
 
+# The clients the allow-list grants something, by executable under /usr/bin.
+GRANTED=(athanor-bar athanor-dock athanor-launcher athanor-control-center cosmic-greeter cosmic-idle cosmic-osd)
+GRANTS_LOG=''
+
+# Reads the compositor's journal since the sign-in into GRANTS_LOG and holds once each of
+# GRANTED has a connection line.
+all_connected() {
+    local name
+    # tracing's fmt colours its fields when it is not told otherwise: read them without.
+    GRANTS_LOG=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | sed 's/\x1b\[[0-9;]*m//g') || return 1
+    for name in "${GRANTED[@]}"; do
+        grep -F "executable: \"/usr/bin/$name\"" <<< "$GRANTS_LOG" | grep 'a client connected' > /dev/null || {
+            echo "no connection of /usr/bin/$name in the compositor's debug log" >&2
+            return 1
+        }
+    done
+}
+
 stage_grants() {
-    local log name line closed
+    local name line closed
     drop_in "$COMPOSITOR" $'[Service]\nEnvironment=RUST_LOG=athanor_compositor=debug'
     own_up
     type_keys @super
@@ -535,15 +586,12 @@ stage_grants() {
     type_keys @escape
     in_session python3 - athanor-bar "'Control center'" < "$HERE/dock_press.py" ||
         fail "no showing 'Control center' button on the bar"
-    sleep 3
-    # tracing's fmt colours its fields when it is not told otherwise: read them without.
-    log=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | sed 's/\x1b\[[0-9;]*m//g')
-    for name in athanor-bar athanor-dock athanor-launcher athanor-control-center cosmic-greeter cosmic-idle cosmic-osd; do
-        line=$(grep 'a client connected' <<< "$log" | grep -F "executable: \"/usr/bin/$name\"" | head -n 1)
-        [[ -n $line ]] || fail "no connection of /usr/bin/$name in the compositor's debug log"
-        [[ $line != *'grants=[]'* ]] || fail "/usr/bin/$name was granted nothing: $line"
+    wait_until 20 all_connected || fail "a client did not connect within 20 s"
+    for name in "${GRANTED[@]}"; do
+        line=$(grep -F "executable: \"/usr/bin/$name\"" <<< "$GRANTS_LOG" | grep 'a client connected')
+        ! grep -qF 'grants=[]' <<< "$line" || fail "/usr/bin/$name was granted nothing: $line"
     done
-    closed=$(grep -c 'not granted them was closed' <<< "$log" || [[ $? == 1 ]])
+    closed=$(grep -c 'not granted them was closed' <<< "$GRANTS_LOG" || [[ $? == 1 ]])
     ((closed == 0)) || fail "the compositor closed $closed top or overlay surfaces"
     log_out
     ended 60 "$SECONDS"
@@ -553,7 +601,7 @@ stage_grants() {
 # The inhibiting window's WAYLAND_DEBUG log holds its create_inhibitor request.
 inhibitor_sent() {
     window_journal "$SIGN_IN_SINCE" "$WINDOW_UNIT-inhibit" |
-        grep -qE -- '-> zwp_idle_inhibit_manager_v1#[0-9]+\.create_inhibitor\('
+        grep -E -- '-> zwp_idle_inhibit_manager_v1#[0-9]+\.create_inhibitor\(' > /dev/null
 }
 
 stage_lock() {
@@ -581,12 +629,26 @@ b_on_top() {
     ! app_active "$APP_A" || fail "$APP_A is active under $APP_B"
 }
 
+# Puts the favorites back: the saved file, or none when the stage created it.
+favorites_restored() {
+    if [[ $FAVORITES_SAVED == moved ]]; then
+        guest_ssh "sudo -u $USER_NAME mv -f $FAVORITES.acceptance $FAVORITES"
+    else
+        guest_ssh "sudo rm -f $FAVORITES"
+    fi
+}
+
 stage_dock() {
     local entries=$HOME_DIR/.local/share/applications since pressed name i
     drop_in athanor-dock.service $'[Service]\nEnvironment=WAYLAND_DEBUG=1'
     own_up
-    in_session cp -p "$FAVORITES" "$FAVORITES.acceptance"
-    FAVORITES_SAVED=1
+    if guest_ssh "sudo test -e $FAVORITES"; then
+        in_session cp -p "$FAVORITES" "$FAVORITES.acceptance"
+        FAVORITES_SAVED=moved
+    else
+        in_session mkdir -p "${FAVORITES%/*}"
+        FAVORITES_SAVED=created
+    fi
     in_session mkdir -p "$entries"
     printf '[Desktop Entry]\nType=Application\nName=%s\nExec=python3 %s/session_window.py window %s\n' \
         "$APP_A" "$PROBE_DIR" "$APP_A" | in_session tee "$entries/$APP_A.desktop" > /dev/null
@@ -623,7 +685,7 @@ stage_dock() {
     (($(activations "$since") > pressed)) || fail "the dock's log holds no activate on athanor_toplevel_actions_v1 for Enter"
     in_session systemctl --user stop "$WINDOW_UNIT-a" "$WINDOW_UNIT-b"
     in_session rm -f "$entries/$APP_A.desktop"
-    in_session mv -f "$FAVORITES.acceptance" "$FAVORITES"
+    favorites_restored
     FAVORITES_SAVED=''
     log_out
     ended 60 "$SECONDS"
@@ -637,7 +699,8 @@ stage_kill() {
     started=$SECONDS
     in_session systemctl --user kill -s SIGKILL "$COMPOSITOR"
     ended 20 "$started"
-    state=$(in_session systemctl --user show -p ActiveState -p Result "$COMPOSITOR" | sort | paste -sd ' ')
+    state=$(in_session systemctl --user show -p ActiveState -p Result "$COMPOSITOR" | sort | paste -sd ' ') ||
+        fail "systemctl --user show $COMPOSITOR failed"
     [[ $state == "ActiveState=failed Result=signal" ]] || fail "$COMPOSITOR: '$state', not failed with Result=signal"
     ! cosmic_running || fail "a cosmic-comp of $USER_NAME runs: another session started"
 }
@@ -655,7 +718,7 @@ in_order() { # in_order SINCE FRAGMENT...
     local since=$1
     shift
     journal "$since" -o cat | awk -v list="$(printf '%s\n' "$@")" '
-        BEGIN { n = split(list, want, "\n") - 1 }
+        BEGIN { n = split(list, want, "\n") }
         { for (i = 1; i <= n; i++) if (!seen[i] && index($0, want[i])) seen[i] = NR }
         END { for (i = 1; i <= n; i++) if (!seen[i] || (i > 1 && seen[i] < seen[i - 1])) exit 1 }'
 }
@@ -701,25 +764,28 @@ typed() { # typed KEY...
 }
 
 stage_keyboard() {
-    local text pid
+    local text pid environ
     KEYMAP_SAVED=$(guest_ssh "busctl get-property org.freedesktop.locale1 /org/freedesktop/locale1 \
-org.freedesktop.locale1 X11Layout X11Model X11Variant X11Options" | sed 's/^s //' | paste -sd ' ')
-    guest_ssh sudo localectl set-x11-keymap us '""' intl
+org.freedesktop.locale1 X11Layout X11Model X11Variant X11Options" | sed 's/^s //' | paste -sd ' ') ||
+        fail "cannot read the system keyboard from org.freedesktop.locale1"
+    guest_ssh sudo localectl set-x11-keymap --no-convert us '""' intl
     own_up
-    text=$(typed "'" e)
+    text=$(typed "'" e) || fail "the typing window failed"
     [[ $text == é ]] || fail "US-International: the dead acute and e typed '$text', not é"
     log_out
     ended 60 "$SECONDS"
-    guest_ssh sudo localectl set-x11-keymap us
+    guest_ssh sudo localectl set-x11-keymap --no-convert us
     own_up
-    text=$(typed "'")
+    text=$(typed "'") || fail "the typing window failed"
     [[ $text == "'" ]] || fail "US: the apostrophe key typed '$text' at once, not an apostrophe"
-    pid=$(in_session systemctl --user show -p MainPID --value "$COMPOSITOR")
-    ! guest_ssh sudo cat "/proc/$pid/environ" | tr '\0' '\n' | grep -q '^XKB_DEFAULT_VARIANT=' ||
+    pid=$(compositor_pid) || fail "cannot read the MainPID of $COMPOSITOR"
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || fail "$COMPOSITOR has no main process: '$pid'"
+    environ=$(guest_ssh "sudo cat /proc/$pid/environ" | tr '\0' '\n') || fail "cannot read /proc/$pid/environ"
+    ! grep -q '^XKB_DEFAULT_VARIANT=' <<< "$environ" ||
         fail "XKB_DEFAULT_VARIANT is in the compositor's environment under US"
     log_out
     ended 60 "$SECONDS"
-    guest_ssh "sudo localectl set-x11-keymap $KEYMAP_SAVED"
+    guest_ssh "sudo localectl set-x11-keymap --no-convert $KEYMAP_SAVED"
     KEYMAP_SAVED=''
 }
 
@@ -744,28 +810,30 @@ greeter_beside_compositor() { # greeter_beside_compositor STARTED-AT(SECONDS)
     wait_until 20 greeter_back || fail "no greeter 20 s after the SIGKILL of $SCRIPT"
     echo "the greeter came back after $((SECONDS - $1)) s"
     is_active "$COMPOSITOR" || fail "$COMPOSITOR stopped: the stage needs it running beside the greeter"
-    shot "linger-$STAGE-$1"
+    shot "greeter-beside-compositor-$1"
     probe open-card "$FULL_NAME" || fail "the greeter took no keys while $COMPOSITOR runs"
     type_keys @escape
 }
 
 stage_linger() {
-    local killed_us started scope stopped_us comp first_stop first_start
+    local killed_us started scope stopped_us comp log first_stop first_start
     linger_on
     own_up
     started=$SECONDS
     killed_us=$(script_killed)
     greeter_beside_compositor "$started"
     for scope in "${SCOPES[@]}"; do
-        stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$scope" -o json |
-            jq -r 'select(.MESSAGE | test("^Stopped |Deactivated successfully")) | .__REALTIME_TIMESTAMP' | head -n 1)
+        stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$scope" -o json | jq -rs \
+            'first(.[] | select(.MESSAGE | test("^Stopped |Deactivated successfully")) | .__REALTIME_TIMESTAMP) // ""') ||
+            fail "cannot read the journal of $scope"
         [[ -n $stopped_us ]] || fail "the journal shows no stop of $scope after the SIGKILL"
         ((stopped_us - killed_us <= 1000000)) || fail "$scope stopped $(((stopped_us - killed_us) / 1000)) ms after the SIGKILL, not within 1 s"
     done
     sign_in cosmic
     comp=$(wait_until 60 guest_ssh pgrep -n -u "$USER_NAME" -x cosmic-comp) || fail "no cosmic-comp in cosmic-comp's session"
-    stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o json |
-        jq -r 'select(.MESSAGE | test("^Stopped")) | .__MONOTONIC_TIMESTAMP' | head -n 1)
+    stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o json | jq -rs \
+        'first(.[] | select(.MESSAGE | test("^Stopped")) | .__MONOTONIC_TIMESTAMP) // ""') ||
+        fail "cannot read the journal of $COMPOSITOR"
     [[ -n $stopped_us ]] || fail "the journal shows no stop of $COMPOSITOR since the sign-in"
     ((stopped_us < $(started_us "$comp"))) || fail "$COMPOSITOR stopped after cosmic-comp started"
     wait_until 20 in_session "systemctl --user show -p ConditionResult --value $SHORTCUT | grep -qx yes" ||
@@ -776,8 +844,9 @@ stage_linger() {
     script_killed > /dev/null
     greeter_beside_compositor "$started"
     own_up
-    first_stop=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | grep -n -m 1 '^Stopped ' | cut -d: -f1)
-    first_start=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | grep -n -m 1 '^Starting ' | cut -d: -f1)
+    log=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat) || fail "cannot read the journal of $COMPOSITOR"
+    first_stop=$(awk '/^Stopped /{ print NR; exit }' <<< "$log")
+    first_start=$(awk '/^Starting /{ print NR; exit }' <<< "$log")
     if [[ -z $first_stop || -z $first_start ]] || ((first_stop > first_start)); then
         fail "the journal does not show step 1 stopping $COMPOSITOR before it starts again"
     fi
@@ -812,7 +881,7 @@ stage_magnifier() {
     linger_on
     in_session gsettings reset "$key" screen-magnifier-enabled
     guest_ssh "sudo test -e $DCONF/user" || fail "$DCONF/user does not exist after the key was set"
-    DCONF_MODES=$(guest_ssh "sudo stat -c '%a %n' $DCONF $DCONF/user")
+    DCONF_MODES=$(guest_ssh "sudo stat -c '%a %n' $DCONF $DCONF/user") || fail "cannot read the modes of $DCONF"
     guest_ssh sudo chmod 0000 "$DCONF/user"
     handed_off_for "$DCONF/user cannot be read"
     dconf_restored
@@ -855,8 +924,8 @@ stage_filter() {
     guest_ssh sudo chmod 0000 "$FILTER"
     handed_off_for "--screen-filter-on exited 1)"
     filter_set absent
-    READER_BOUND=1
     guest_ssh sudo mount --bind /usr/bin/false "$READER"
+    READER_BOUND=1
     handed_off_for "--screen-filter-on exited 1)"
     guest_ssh sudo umount "$READER"
     READER_BOUND=''
@@ -913,18 +982,18 @@ stage_absent() {
 }
 
 stage_boot() {
-    local scope
     rebooted
     own_up
-    for scope in "${SCOPES[@]}"; do
-        wait_until 20 is_active "$scope" || fail "$scope is not active at the first sign-in after boot"
-    done
     log_out
     ended 60 "$SECONDS"
 }
 
 stage_cleanup() {
     guest_ssh sudo loginctl disable-linger "$USER_NAME"
+    if signed_in; then
+        guest_ssh sudo loginctl terminate-user "$USER_NAME"
+    fi
+    wait_until 60 user_down || fail "$USER_NAME's user manager still runs 60 s after her sessions ended"
     guest_ssh "if getent passwd $USER_NAME > /dev/null; then sudo userdel -r $USER_NAME; fi"
     guest_ssh "sudo rm -f $PROBE_DIR/session_window.py $PROBE_DIR/dock_press.py"
 }
