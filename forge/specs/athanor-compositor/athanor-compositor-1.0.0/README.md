@@ -323,6 +323,25 @@ What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
 - A change redraws every output, not only those it shows on: a second monitor draws empty frames
   while the first animates.
 
+## X11
+
+When `/usr/bin/xwayland-satellite` is installed, the compositor holds an X11 display
+(`src/xwayland.rs`): the first free `:N`, its lock `/tmp/.X<N>-lock`, the socket
+`/tmp/.X11-unix/X<N>`, and the abstract name of the same path bound but not listening: libxcb,
+which tries it first, is refused and uses the file, so no other server answers under it and no
+process outside the file's mount namespace, a sandboxed application's, reaches the display. The
+first X11 client starts the satellite with the socket (`-listenfd`) and, as `WAYLAND_DISPLAY`, a
+Wayland socket of its own, `$XDG_RUNTIME_DIR/athanor-x11-<N>`, whose every client is confined:
+the standard globals only, no privilege and no identity, as inside a security context, whatever
+its executable (OS4). Not `WAYLAND_SOCKET`: the satellite starts Xwayland before it connects, and
+Xwayland, which inherits the variable and the descriptor, takes the connection. Under the user
+manager (`NOTIFY_SOCKET` set) it runs in a scope of its own, `systemd-run --user --scope`. When it
+exits, the X11 clients that came meanwhile are dropped and the next one starts it again, a second
+after the last start at the soonest: a client that comes sooner waits for it. Without the
+satellite there is no X11 display and the log says so. The display's number is logged with the
+Wayland socket; announcing it to the session as `DISPLAY` is the session's readiness (#704,
+doc_session.md SN13 step 6).
+
 ## Console sessions (C1 task 9, run by the maintainer)
 
 Two machines, each from a text console, with the bar, the dock and a terminal:

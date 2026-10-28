@@ -7835,3 +7835,101 @@ fn an_unknown_mode_is_a_protocol_error() {
     );
     run.stop();
 }
+
+/// A directory of its own for an X11 test, under the system's temporary directory.
+fn x11_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("athanor-x11-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    dir
+}
+
+/// xwayland-satellite's Wayland socket confines its every client: one lists what a client
+/// inside a security context lists, though its process is here the bar's (OS4); the socket goes
+/// with the compositor.
+#[test]
+fn x11_the_satellite_gets_the_standard_globals() {
+    let dir = x11_dir("globals");
+    let mut run = Running::start(None);
+    let program = dir.join("satellite");
+    let number =
+        crate::xwayland::start(&mut run.state, &dir, &dir, program, false).expect("display");
+    let wayland = dir.join(format!("athanor-x11-{number}"));
+    let stream = UnixStream::connect(&wayland).expect("the satellite's socket");
+    let satellite = Local::over(&mut run, stream, None);
+    let standard = rows(|class| matches!(class, Class::Standard | Class::LayerGated));
+    assert_eq!(satellite.listed(), standard);
+    drop(satellite);
+    run.stop();
+    assert!(!wayland.exists(), "the satellite's socket outlives the compositor");
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// The first X11 client starts the satellite with the display, its socket and its own Wayland
+/// socket; the client that came while it ran is dropped when it exits, and the next one starts
+/// it again, no sooner than `RESTART` after the first start.
+#[test]
+fn x11_the_first_client_starts_the_satellite() {
+    use std::io::Read;
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = x11_dir("start");
+    let program = dir.join("satellite");
+    let out = dir.join("satellite.out");
+    std::fs::write(
+        &program,
+        "#!/bin/sh\n[ \"$1\" = --probe ] && exit 0\n{\n  printf '%s\\n' \"$@\"\n  \
+         if [ -e \"/proc/self/fd/$3\" ]; then echo open; else echo closed; fi\n  \
+         echo \"${WAYLAND_DISPLAY-unset}\"\n  \
+         echo \"${WAYLAND_SOCKET-unset} ${DISPLAY-unset} ${NOTIFY_SOCKET-unset}\"\n\
+         } > \"$0.tmp\" && mv \"$0.tmp\" \"$0.out\"\n",
+    )
+    .expect("program");
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("mode");
+    // A process another test thread forks while the script is open for writing holds it until
+    // its exec, and the script's own exec fails meanwhile with ETXTBSY; once one exec succeeds,
+    // no such process is left.
+    loop {
+        match std::process::Command::new(&program).arg("--probe").status() {
+            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            status => {
+                assert!(status.expect("the script runs").success());
+                break;
+            }
+        }
+    }
+
+    let mut run = Running::start(None);
+    let number =
+        crate::xwayland::start(&mut run.state, &dir, &dir, program, false).expect("display");
+    let socket = dir.join(format!(".X11-unix/X{number}"));
+    let wayland = dir.join(format!("athanor-x11-{number}"));
+    let mut x11 = UnixStream::connect(&socket).expect("an X11 client");
+    run.until("the satellite starts", |state| {
+        state.x11.as_ref().is_some_and(|x11| x11.starts == 1)
+    });
+    run.until("the satellite exits", |state| {
+        state.x11.as_ref().is_some_and(|x11| !x11.running)
+    });
+    let lines = std::fs::read_to_string(&out).expect("what the satellite saw");
+    let lines: Vec<&str> = lines.lines().collect();
+    assert_eq!(lines[..2], [format!(":{number}").as_str(), "-listenfd"]);
+    let wayland_display = wayland.to_str().expect("UTF-8");
+    assert_eq!(lines[3..], ["open", wayland_display, "unset unset unset"]);
+
+    x11.set_read_timeout(Some(TIMEOUT)).expect("timeout");
+    let mut byte = [0];
+    assert_eq!(x11.read(&mut byte).expect("read"), 0, "the waiting client stays");
+
+    let first = run.state.x11.as_ref().and_then(|x11| x11.last).expect("started");
+    let _again = UnixStream::connect(&socket).expect("another X11 client");
+    run.until("the satellite starts again", |state| {
+        state.x11.as_ref().is_some_and(|x11| x11.starts == 2 && !x11.running)
+    });
+    let second = run.state.x11.as_ref().and_then(|x11| x11.last).expect("started");
+    assert!(second - first >= crate::xwayland::RESTART, "restarted after {:?}", second - first);
+    run.stop();
+    assert!(!socket.exists(), "the socket outlives the compositor");
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}
