@@ -2198,9 +2198,10 @@ GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/glo
 LAYER_SHELL = "zwlr_layer_shell_v1"
 # Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
 # step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
-# A line for it, or no spec installing it, ends the exemption with a failure. The compositor is
-# the server of those globals, not a client of them.
-OUTSIDE_THE_LIST = {"/usr/bin/athanor-compositor", "/usr/bin/athanor-greeter-ui"}
+# A line for it, or no spec installing it, ends the exemption with a failure.
+OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# The compositor serves those globals and the layers, and enforces the list: no client to check.
+SERVER = "/usr/bin/athanor-compositor"
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
@@ -2532,6 +2533,8 @@ def allow_list_problems(root=None, notes=None, outside=None):
 
     checked = 0
     for built, executable, spec, spec_path, in_tree in targets:
+        if executable == SERVER:
+            continue
         if built not in bins:
             # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
             # carries a crate: then no bin target of the tree has the name it installs, or

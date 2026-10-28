@@ -451,6 +451,16 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
         self.assertIn("installed by no spec", out[0])
 
+    def test_the_compositor_serving_the_globals_is_no_client(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.package(
+            "athanor-compositor",
+            files={
+                "src/main.rs": "fn bind() {\n    ext_session_lock_manager_v1;\n    window.set_layer(Layer::Overlay);\n}\n"
+            },
+        )
+        self.assertEqual(self.problems(), [])
+
     def test_a_target_naming_the_session_lock_needs_its_line(self):
         self.package(
             "athanor-lock",
