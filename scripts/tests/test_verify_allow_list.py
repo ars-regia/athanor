@@ -461,6 +461,17 @@ class AllowList(unittest.TestCase):
         )
         self.assertEqual(self.problems(), [])
 
+    def test_another_binary_installed_as_the_compositor_is_checked(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {\n    window.set_layer(Layer::Overlay);\n}\n"})
+        self.write(
+            "forge/specs/athanor-bar/athanor-bar.spec",
+            "Name:           athanor-bar\n%build\ncargo build --release --locked -p %{name}\n%install\n"
+            "install -D -m 0755 target/release/athanor-bar %{buildroot}/usr/bin/athanor-compositor\n",
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("/usr/bin/athanor-compositor", out[0])
+
     def test_a_target_naming_the_session_lock_needs_its_line(self):
         self.package(
             "athanor-lock",
