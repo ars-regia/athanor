@@ -57,7 +57,7 @@ Decisions recorded in this plan, each to be named in the pull request that appli
 | --- | --- | --- |
 | OV1 openers and one overview per output | 16, 21, 30 | Alt+Tab of section 7: its own plan, which release 1.0 waits for (decision 28) |
 | OV2 crate, unit, D-Bus, renderer | 12, 13 | |
-| OV3 client additions | 4 to 11 | D4, D5 |
+| OV3 client additions | 3 to 5 (protocols), 6 to 11 (client) | D4, D5 |
 | OV4 surfaces and states | 14 (spike), 16 | namespace `athanor-overview` (decision 1) |
 | OV5 strip and grid | 15 | |
 | OV6 thumbnails | 18 | S2, S3 |
@@ -365,9 +365,9 @@ git commit -m "feat(overview): the three surface states, the lock and focus retu
 **Files:** `O/src/surface.rs` (focus ring; accessible names "Overview", "Workspace n, k windows" with current and kept states, "<title>, <application>" with minimised; polite announcements), `forge/test/shell/rig.sh` (`atspi overview`, `orca overview`, and the `italian[overview]` entry that `atspi overview it` compiles `O/po/it.po` from), `O/po/it.po` (the new names), `forge/test/shell/golden/atspi/atspi-overview*.json`, `forge/test/shell/golden/orca/orca-overview*.txt`, `.github/workflows/shell-surfaces.yml` (the `overview` job runs `atspi overview` and `atspi overview it`).
 
 - [ ] **Step 1: Write the failing tests:** library navigation tests already pass; Enter on a card, which activates its window through `window_actions()`, comes with the click at Task 19, where `athanor_toplevel_actions_v1` is granted, and Enter on a miniature activates its workspace here; add the AT-SPI walk and the Orca script for the four scenes, English and Italian.
-- [ ] **Step 2: Run them to see them fail.** Run: `rig.sh atspi overview`, `rig.sh atspi overview it`, `rig.sh orca overview`. Expected: FAIL.
+- [ ] **Step 2: Run them to see them fail.** Run: `rig.sh atspi overview`, `rig.sh atspi overview it`, `rig.sh orca overview`, `rig.sh orca overview it`. Expected: FAIL.
 - [ ] **Step 3: Implement**; record the GTK references under cosmic-comp (OS8).
-- [ ] **Step 4: Run all** under cosmic-comp and with `RIG_COMPOSITOR=athanor`: the athanor transcript no poorer than the reference (OS19 item 3).
+- [ ] **Step 4: Run all** four under cosmic-comp and with `RIG_COMPOSITOR=athanor`: the athanor transcript no poorer than the reference (OS19 item 3).
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -546,7 +546,7 @@ git commit -m "docs(overview): record the gate's measurements (OV19 step 5)"
 - [ ] **Step 1: Write the failing tests:** the `launch.rs` tests name `os.athanor.Overview1` and `Show`; the test LN9 adds for the `system_actions` file expects the `WorkspaceOverview` entry; acceptance 14's script, `scripts/devvm/overview-acceptance.sh`.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement** with exact-match scripts for `packages.json` and docs.
-- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`); under `RIG_COMPOSITOR=athanor`, `rig.sh atspi bar`, `atspi bar-modules`, `atspi dock`, `orca bar`, `orca dock`, the `it` variants of `atspi bar`, `atspi dock`, `orca bar` and `orca dock` (`bar-modules` has none) and `golden-report` pass with `rig.sh`'s counts under athanor for `bar`, `bar-modules` and `dock` each set to the exact number of widgets shown, one more than decision 28's switch set them (today `bar` 6 at `forge/test/shell/rig.sh:1173-1175`, `bar-modules` 10 at `:1197`, and `dock` a flat 4 at `:1218`, whose athanor branch that switch adds), since `atspi_check.py` checks at least that many and a count left low passes; with the exemptions of the workspaces module and button removed from `forge/test/shell/atspi_compare.py` and `forge/test/shell/orca_compare.py`, which fail an exemption for an element that is present; and with the rows of `golden/athanor-differences.toml` whose cause is decision 28 hiding the workspaces module or button removed; then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
+- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`); under `RIG_COMPOSITOR=athanor`, `rig.sh atspi bar`, `atspi bar-modules`, `atspi dock`, `orca bar`, `orca dock`, the `it` variants of `atspi bar`, `atspi dock`, `orca bar` and `orca dock` (`bar-modules` has none) and `golden-report` pass, the athanor walks of `orca bar` and `orca dock` in `rig.sh` taking one more Tab each if decision 28's switch shortened them, with `rig.sh`'s counts under athanor for `bar`, `bar-modules` and `dock` each set to the exact number of widgets shown, one more than decision 28's switch set them (today `bar` 6 at `forge/test/shell/rig.sh:1173-1175`, `bar-modules` 10 at `:1197`, and `dock` a flat 4 at `:1218`, whose athanor branch that switch adds), since `atspi_check.py` checks at least that many and a count left low passes; with the exemptions of the workspaces module and button removed from `forge/test/shell/atspi_compare.py` and `forge/test/shell/orca_compare.py`, which fail an exemption for an element that is present; and with the rows of `golden/athanor-differences.toml` whose cause is decision 28 hiding the workspaces module or button removed; then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
 - [ ] **Step 5: Commit**
 
 ```bash
