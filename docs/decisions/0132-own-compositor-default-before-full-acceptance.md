@@ -31,8 +31,8 @@ In short:
    stays at the greeter as the second choice until OS19 holds in full and the overview has come.
 3. The hardware run is fifteen minutes per machine in place of the hour.
 4. Revision 4 of `doc_session.md` is approved in a pull request of its own before the switch's
-   code is written, and reverses its section 6, item 1: a compositor that fails before it is
-   ready hands the sign-in to cosmic-comp's session.
+   code is written, and reverses its section 6, item 1: a session that fails before its target
+   is active, the readiness gate included, hands the sign-in to cosmic-comp's session.
 5. The overview follows the switch; release 1.0 waits for it.
 
 - Option A, chosen: **the switch under decision 28's conditions.**
@@ -47,3 +47,5 @@ In short:
   for the full acceptance, and takes cosmic-comp's session off the greeter.
 - The magnifier, the colour filters and the overview are absent from the default session until
   the own compositor has them; their controls and bindings are hidden or unbound there.
+- ADR-0123's "cosmic-comp leaves the default session at 1.0" is read as: cosmic-comp's
+  session leaves the default at the switch and the greeter at 1.0.

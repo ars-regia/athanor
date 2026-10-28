@@ -296,8 +296,9 @@ assigns in Settings, system actions and custom commands, keep `athanor_composito
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, and Super+= and Super+- until the own compositor has the magnifier; their
-fixture tests come with them.
+overview comes, Super+= and Super+- until the own compositor has the magnifier, and Super+A
+until the application library ships; until then a fixture test shows each doing nothing, and
+their own fixture tests come with them.
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
@@ -355,8 +356,9 @@ the parts of them it names, recorded in the pull request that makes it the defau
    cases there (C1 results, section 3).
 2. **OS4 and OS5 tested in the fixture of OS6:** each requirement of OS4, OS5 and OS12 to OS17 has a
    fixture test, the identity's limits and the trusted path included, and the bar shows its 8
-   interactive widgets (7 under decision 28 until the overview comes, the workspaces module
-   hidden).
+   interactive widgets (6 under decision 28, the workspaces module hidden until the overview
+   comes and the applications module until the application library ships), and the dock its
+   4 (2 under decision 28, the workspaces and applications buttons hidden).
 3. **AX17's scenarios pass, and Orca's transcripts are no poorer than on cosmic-comp,** in the rig
    and in the development VM, whose part needs `athanor-a11y`, the AX5 gate and the AX4 monitor (OS9
    plan, question 9). The keyboard aids, the magnifier and the colour filters are in
@@ -661,7 +663,14 @@ amendment's audit:
       to name where the session's `session-<id>.scope` changes at every sign-in; the locker's
       line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
       through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
-      layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
+      layer (`doc_session_daemons.md`). The switch's pull request shows, from inside
+      `cosmic-idle.scope`, `loginctl lock-session` locking the session, which logind resolves
+      through its session `auto`, and the locker's `GetSessionByPID` of its parent answering;
+      if the first fails, cosmic-idle's lock command names the session by `XDG_SESSION_ID`.
+      The two scope names have no unit file, so an unconfined process of the user can create
+      either and run the real executable in it: this grants nothing that OS4 does not already
+      leave to unconfined code running as the user, which can shadow a shipped service with a
+      unit of its own, and rests on confined clients not reaching the user manager; a polkit agent (gap 2), cosmic-osd with its line;
       X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
       the keys of the overview, the magnifier and the application library named below.
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
@@ -720,12 +729,14 @@ amendment's audit:
       corner served. The window switcher on Alt+Tab, which `doc_overview.md` owns and designs
       in a later revision, follows with the overview: until then the default session switches
       windows through the dock and the bar, by keyboard through Ctrl+Alt+Tab to the dock
-      (`doc_accessibility.md` AX7), which the switch's pull request shows activating a window;
-    - the bar's Launcher button, which opens cosmic-launcher today
+      (`doc_accessibility.md` AX7), which the switch's pull request shows activating a window.
+      Super+1 to Super+0 and Super+Ctrl with the arrows stay bound and switch workspaces
+      without the indicator of `doc_overview.md` OV12, a loss the switch's pull request names;
+    - the Launcher buttons of the bar and of the dock, which open cosmic-launcher today
       (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
-      allow-list: under the own compositor it opens `athanor-launcher`, which has its line. The
-      bar's Application library button, which opens cosmic-app-library, is hidden under the own
-      compositor and Super+A unbound (OS13), since the application library is a program of its
+      allow-list: under the own compositor they open `athanor-launcher`, which has its line.
+      The Application library buttons of the bar and of the dock, which open
+      cosmic-app-library, are hidden under the own compositor and Super+A unbound (OS13), since the application library is a program of its
       own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
       in the allow-list, after the switch, and the switch's pull request names the loss.
 
