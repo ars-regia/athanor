@@ -2,7 +2,7 @@
 id: ADR-0122
 title: "The own compositor ships as an optional session before 1.0, and takes the desktop first"
 date: 2026-10-17
-status: accepted
+status: amended by ADR-0132
 issues: []
 areas: [shell, security, process]
 ---

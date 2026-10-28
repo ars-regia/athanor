@@ -14,7 +14,7 @@ session on Athanor's own compositor, and encryption offered in the installer as 
 choice. Everything else waits.
 
 1.0 has no date. It ships when Athanor's own compositor passes its acceptance and replaces
-cosmic-comp, whose session then leaves the greeter, with the GTK4 shell on top ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5). The toolkit
+cosmic-comp, whose session then leaves the greeter, with the GTK4 shell on top ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5), and once the overview has come (`doc_own_stack.md` decision 28). The toolkit
 does not gate it: its surfaces replace their GTK4 twins one at a time, under `doc_own_stack.md`
 OS8 (section 6 step 5).
 
