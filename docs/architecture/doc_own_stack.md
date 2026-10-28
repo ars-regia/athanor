@@ -692,7 +692,8 @@ amendment's audit:
       the workspaces and applications buttons of the bar and of the dock, the clipboard
       history's switch), and the move of the neighbouring controls their absence causes:
       where a case of `cases.py` draws the control under the preset and the dock setting it
-      runs with (`doc_bar.md` BR3: the bar's workspaces module in the bar's surfaces and
+      runs with (`doc_bar.md` BR7, the presets' table and the dock, `doc_shell.md` SH7, and
+      the surfaces `rig.sh` draws: the bar's workspaces module in the bar's surfaces and
       layout cases under the `float` and `minimal` presets; its application library button
       there and under the `bar` preset; the magnifier, inversion and filter rows in
       `bar-accessibility` only; the dock's buttons in `dock` and in the layout cases whose
