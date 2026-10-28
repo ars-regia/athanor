@@ -29,6 +29,8 @@ pub enum Privilege {
     Workspaces,
     /// `zwlr_output_manager_v1`: the outputs' configuration, the control center's.
     OutputManagement,
+    /// `zwlr_output_power_manager_v1`: the outputs turned off and on, the idle daemon's.
+    OutputPower,
     /// `zwp_virtual_keyboard_manager_v1`: keys typed as if on the hardware keyboard.
     VirtualKeyboard,
     /// `zwlr_virtual_pointer_manager_v1`: a pointer moved and clicked as if by the hardware one.
@@ -45,7 +47,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 14] = [
+    const ALL: [(Self, &'static str); 15] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -60,6 +62,7 @@ impl Privilege {
         (Self::SessionLock, "ext_session_lock_manager_v1"),
         (Self::Workspaces, "ext_workspace_manager_v1"),
         (Self::OutputManagement, "zwlr_output_manager_v1"),
+        (Self::OutputPower, "zwlr_output_power_manager_v1"),
         (Self::VirtualKeyboard, "zwp_virtual_keyboard_manager_v1"),
         (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
         (Self::InputMethod, "zwp_input_method_manager_v2"),

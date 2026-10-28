@@ -18,6 +18,7 @@ mod keyboard_group;
 mod layer;
 mod lock;
 mod output_management;
+mod output_power;
 mod state;
 mod toplevel_state;
 mod xkb_config;

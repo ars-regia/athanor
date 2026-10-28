@@ -8,6 +8,7 @@ use crate::input_method::PlacedPopup;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
+use crate::output_power::OutputPower;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
@@ -74,6 +75,7 @@ use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
@@ -201,6 +203,8 @@ pub struct State {
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
     pub output_management: OutputManagement,
+    /// The outputs turned off, and the clients of wlr-output-power-management.
+    pub output_power: OutputPower,
 
     /// Which client is granted which privileged global (OS4), read when the compositor starts.
     pub allow_list: AllowList,
@@ -257,6 +261,9 @@ impl State {
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
         ViewporterState::new::<Self>(&dh);
+        // cosmic-idle's fade to black (doc_own_stack.md OS17); Smithay draws such a buffer as
+        // a solid colour on every renderer.
+        SinglePixelBufferState::new::<Self>(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
@@ -284,6 +291,7 @@ impl State {
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
         crate::output_management::global(&dh);
+        crate::output_power::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
         VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
             granted(c, Privilege::VirtualKeyboard)
@@ -354,6 +362,7 @@ impl State {
             repeat: (REPEAT_RATE, REPEAT_DELAY),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
+            output_power: OutputPower::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
         })
@@ -416,6 +425,7 @@ impl State {
     /// An output that goes: its layer surfaces are closed, and the windows no output left shows
     /// are centred on the first one, where the user can reach them.
     pub fn remove_output(&mut self, output: &Output) {
+        self.forget_output_power(output);
         self.close_layers(output);
         self.space.unmap_output(output);
         self.fit_to_outputs();
