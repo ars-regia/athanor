@@ -122,6 +122,11 @@ keymap under both compositors. The seat keeps its group, clamped to the new layo
 Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
 most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
 keymap is the environment's and the repeat 25 per second after 200 ms.
+`athanor-compositor --screen-filter-on` answers athanor-compositor-session, which starts
+cosmic-comp's session in its place while cosmic-comp's colour inversion or filter is on
+(`doc_own_stack.md` decision 28): it reads `cosmic-comp/a11y_screen_filter.ron` under the state
+root, writes nothing and starts no display, and exits 0 when the file is absent or holds neither,
+10 when it holds either, and 1 when it cannot tell.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
 takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
 keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own

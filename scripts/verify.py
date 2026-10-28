@@ -3017,6 +3017,9 @@ COSMIC_ALLOWED = (
     "forge/tools/calmo-cosmic-theme/",
     # The own compositor reads cosmic-comp's keyboard layouts (doc_own_stack.md decision 27).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
+    # It reads cosmic-comp's colour filter until cosmic-comp's session leaves the greeter
+    # (doc_own_stack.md decision 28).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 COSMIC_DESKTOP_ID = re.compile(r"com\.system76\.\w+\.desktop\b")
