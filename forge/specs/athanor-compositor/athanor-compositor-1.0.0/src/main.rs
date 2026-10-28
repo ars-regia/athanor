@@ -12,6 +12,7 @@ mod grabs;
 mod handlers;
 mod headless;
 mod identity;
+mod idle_inhibit;
 mod input;
 mod input_method;
 mod keyboard_group;
@@ -139,7 +140,7 @@ fn run() -> Result<(), Error> {
     xkb_config::start(&mut state, &event_loop.handle());
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
-    event_loop.run(None, &mut state, |_| {})?;
+    event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),
         None => Ok(()),

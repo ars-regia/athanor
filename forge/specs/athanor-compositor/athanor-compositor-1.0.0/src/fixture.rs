@@ -69,6 +69,9 @@ use wayland_protocols::ext::session_lock::v1::client::{
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1, ext_workspace_handle_v1, ext_workspace_manager_v1,
 };
+use wayland_protocols::wp::idle_inhibit::zv1::client::{
+    zwp_idle_inhibit_manager_v1, zwp_idle_inhibitor_v1,
+};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1, wp_fractional_scale_v1,
 };
@@ -185,7 +188,7 @@ fn background(px: &[u8; 4]) -> bool {
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Every global the compositor offers on every backend.
-const GLOBALS: [&str; 14] = [
+const GLOBALS: [&str; 15] = [
     "wl_compositor",
     "wl_subcompositor",
     "wl_shm",
@@ -200,6 +203,7 @@ const GLOBALS: [&str; 14] = [
     "wp_cursor_shape_manager_v1",
     "xdg_activation_v1",
     "wl_data_device_manager",
+    "zwp_idle_inhibit_manager_v1",
 ];
 
 #[derive(Default)]
@@ -489,6 +493,8 @@ delegate_noop!(Client: ext_image_capture_source_v1::ExtImageCaptureSourceV1);
 delegate_noop!(Client: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1);
 delegate_noop!(Client: ext_session_lock_manager_v1::ExtSessionLockManagerV1);
 delegate_noop!(Client: ext_idle_notifier_v1::ExtIdleNotifierV1);
+delegate_noop!(Client: zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1);
+delegate_noop!(Client: zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1);
 delegate_noop!(Client: wp_security_context_manager_v1::WpSecurityContextManagerV1);
 delegate_noop!(Client: wp_security_context_v1::WpSecurityContextV1);
 delegate_noop!(Client: ignore zwlr_output_mode_v1::ZwlrOutputModeV1);
@@ -2483,6 +2489,8 @@ impl Local {
             run.event_loop
                 .dispatch(Some(Duration::from_millis(5)), &mut run.state)
                 .expect("dispatch");
+            // As `main`'s loop does after every dispatch.
+            run.state.refresh_idle_inhibit();
         }
     }
 
@@ -3390,6 +3398,129 @@ fn task4_idle_fires_and_input_resets_it() {
     run.state.activity();
     local.pump(&mut run, "input resumes", |client, _| {
         client.idle == ["idled", "resumed"]
+    });
+    run.stop();
+}
+
+/// A client with a shown window that holds an idle inhibitor on it, and a client with a
+/// 100 ms idle notification.
+fn inhibited_window(
+    run: &mut Running,
+) -> (
+    Local,
+    xdg_toplevel::XdgToplevel,
+    zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
+    Local,
+) {
+    let mut player = Local::connect(run, None);
+    let toplevel = player.toplevel(run);
+    let surface = player.window.as_ref().expect("the window").0.clone();
+    let inhibitors: zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1 = player.bind(1);
+    let inhibitor = inhibitors.create_inhibitor(&surface, &player.queue.handle(), ());
+    player.roundtrip(run);
+    let mut daemon = Local::connect(run, None);
+    let seat: wl_seat::WlSeat = daemon.bind(1);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = daemon.bind(1);
+    let _notification = notifier.get_idle_notification(100, &seat, &daemon.queue.handle(), ());
+    let started = Instant::now();
+    daemon.pump(run, "three timeouts", |_, _| {
+        started.elapsed() >= Duration::from_millis(300)
+    });
+    assert!(
+        daemon.client.idle.is_empty(),
+        "no idle while the inhibiting window is shown"
+    );
+    (player, toplevel, inhibitor, daemon)
+}
+
+/// An inhibitor holds the idle notification off while its window is shown: minimised, the
+/// timer runs; restored, it is held again; destroyed, the timer runs.
+#[test]
+fn an_idle_inhibitor_holds_while_its_window_is_shown() {
+    let mut run = Running::start(None);
+    let (mut player, toplevel, inhibitor, mut daemon) = inhibited_window(&mut run);
+    toplevel.set_minimized();
+    player.roundtrip(&mut run);
+    daemon.pump(&mut run, "minimised, the user is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    let window = run.state.minimised[0].0.clone();
+    assert!(run.state.unminimise(&window), "restored");
+    daemon.pump(&mut run, "restored, the inhibitor holds", |client, _| {
+        client.idle == ["idled", "resumed"]
+    });
+    inhibitor.destroy();
+    player.roundtrip(&mut run);
+    daemon.pump(&mut run, "without the inhibitor, the user is idle", |client, _| {
+        client.idle == ["idled", "resumed", "idled"]
+    });
+    run.stop();
+}
+
+/// An inhibitor on a layer surface counts once the surface draws, not while it is only in the
+/// layer map.
+#[test]
+fn an_idle_inhibitor_on_a_layer_surface_needs_a_buffer() {
+    use zwlr_layer_surface_v1::Anchor;
+    let mut run = Running::start(None);
+    let mut panel = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = panel.bind(4);
+    let shm: wl_shm::WlShm = panel.bind(1);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = panel.bind(4);
+    let inhibitors: zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1 = panel.bind(1);
+    let qh = panel.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Bottom,
+        "panel".into(),
+        &qh,
+        (),
+    );
+    layer.set_anchor(Anchor::Bottom | Anchor::Left | Anchor::Right);
+    layer.set_size(0, 20);
+    assert!(panel.answer(&mut run, &surface), "the panel is configured");
+    let (serial, width, _) = panel.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let _inhibitor = inhibitors.create_inhibitor(&surface, &qh, ());
+    panel.roundtrip(&mut run);
+    let mut daemon = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = daemon.bind(1);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = daemon.bind(1);
+    let _notification = notifier.get_idle_notification(100, &seat, &daemon.queue.handle(), ());
+    daemon.pump(&mut run, "nothing drawn, the user is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    let width = i32::try_from(width).expect("a width");
+    let (buffer, _) = panel.buffer(&shm, width, 20, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    panel.roundtrip(&mut run);
+    daemon.pump(&mut run, "drawn, the inhibitor holds", |client, _| {
+        client.idle == ["idled", "resumed"]
+    });
+    run.stop();
+}
+
+/// The lock lets the idle timer run under an inhibiting window, and the unlock holds it again;
+/// a client that leaves takes its inhibitor with it.
+#[test]
+fn an_idle_inhibitor_yields_to_the_lock_and_leaves_with_its_client() {
+    let mut run = Running::start(None);
+    let (player, _toplevel, _inhibitor, mut daemon) = inhibited_window(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    daemon.pump(&mut run, "locked, the user is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    daemon.pump(&mut run, "unlocked, the inhibitor holds", |client, _| {
+        client.idle == ["idled", "resumed"]
+    });
+    drop(player);
+    daemon.pump(&mut run, "its client gone, the user is idle", |client, _| {
+        client.idle == ["idled", "resumed", "idled"]
     });
     run.stop();
 }
