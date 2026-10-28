@@ -135,7 +135,8 @@
     "wayland-utils",
     "xdg-terminal-exec",
     "xdg-user-dirs",
-    "xdg-user-dirs-gtk"
+    "xdg-user-dirs-gtk",
+    "xwayland-satellite"
   ],
   "upstream_media": [
     "ffmpeg",
