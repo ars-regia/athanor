@@ -662,7 +662,9 @@ amendment's audit:
       session, since cosmic-greeter finds its session through its parent
       (`doc_lock_and_prompts.md` section 1), in a scope of its own,
       `cosmic-greeter-locker.scope` and `cosmic-idle.scope`, which gives the allow-list a unit
-      to name where the session's `session-<id>.scope` changes at every sign-in; the locker's
+      to name where the session's `session-<id>.scope` changes at every sign-in, a previous
+      session's scopes stopped before the new ones start, and a scope that cannot be started
+      logged at `err` and counted as a failure of the lock path; the locker's
       line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
       through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
       layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
@@ -687,8 +689,10 @@ amendment's audit:
       amount, but the controls this decision hides (the magnifier, inversion and filter rows,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
       history's switch), and the move of the neighbouring controls their absence causes,
-      each recorded in `athanor-differences.toml` with this decision as its cause and the
-      issue that tracks the control's return as its issue; and for every difference of colour in a high-contrast variant or in the contrast of
+      each recorded in `athanor-differences.toml` with a cause that names this decision and
+      the hidden control, such as "decision 28 hides the workspaces module", and the issue
+      that tracks that control's return as its issue, since `golden_report.py` takes one
+      entry per case and cause; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
@@ -698,7 +702,9 @@ amendment's audit:
       bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
       item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
-      until the own compositor has them. `athanor-compositor-session`, before it starts the
+      until the own compositor has them, and but the transcripts' lines of the controls this
+      decision hides, which the comparison records as missing with this decision as the
+      reason and the control's issue, as OS8 records a role. `athanor-compositor-session`, before it starts the
       compositor, starts cosmic-comp's session in its place when the user has either on, and
       says why in the journal, whichever entry the greeter had checked. The magnifier is on
       when `ATHANOR_A11Y`, the greeter's hand-off (`doc_accessibility.md` AX13), names
