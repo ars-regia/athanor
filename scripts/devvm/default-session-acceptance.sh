@@ -234,19 +234,28 @@ shot() { # shot NAME: the greeter, as greetd's user, against its own compositor
 
 greeter_up() { probe tree > /dev/null; }
 
-# The test account's user sessions that are not closing, as JSON, in SESSIONS; not the
-# session logind lists for a lingering user manager (class manager, systemd 256). A failed
-# read fails the stage: it must not read as "not signed in".
-SESSIONS='[]'
+# The ids of the test account's user sessions that are not closing, in SESSIONS; not the
+# session logind lists for a lingering user manager (class manager, systemd 256).
+# `list-sessions --json` carries no state, so each session's is read; one that ends between
+# the two reads is gone once logind removed its state file. A failed read fails the stage:
+# it must not read as "not signed in".
+SESSIONS=''
 read_sessions() {
-    local list
-    list=$(guest_ssh loginctl list-sessions -o json) || fail "cannot list the guest's sessions"
-    SESSIONS=$(jq -c --arg u "$USER_NAME" '[.[] | select(.user == $u and .state != "closing" and ((.class // "user") | startswith("user")))]' <<< "$list")
+    local list ids
+    list=$(guest_ssh loginctl list-sessions --json=short) || fail "cannot list the guest's sessions"
+    ids=$(jq -r --arg u "$USER_NAME" \
+        '.[] | select(.user == $u and ((.class // "user") | startswith("user"))) | .session' <<< "$list") ||
+        fail "cannot parse the guest's sessions: $list"
+    SESSIONS=$(guest_ssh "for id in ${ids//$'\n'/ }; do
+        if ! state=\$(loginctl show-session \$id -p State --value); then
+            [ ! -e /run/systemd/sessions/\$id ] || exit 1
+        elif [ \"\$state\" != closing ]; then echo \$id; fi
+    done") || fail "cannot read the state of $USER_NAME's sessions $ids"
 }
 
 signed_in() {
     read_sessions
-    jq -e 'length > 0' <<< "$SESSIONS" > /dev/null
+    [[ -n $SESSIONS ]]
 }
 
 greeter_back() { ! signed_in && greeter_up; }
@@ -439,7 +448,7 @@ no_failures() { # no_failures SINCE
 lock_state() {
     local id
     read_sessions
-    id=$(jq -r 'first(.[].session) // ""' <<< "$SESSIONS")
+    id=${SESSIONS%%$'\n'*}
     [[ -n $id ]] || return 0
     guest_ssh "if sudo test -e $RUNTIME/cosmic-greeter-$id.lock; then echo locked; else echo unlocked; fi"
 }
@@ -460,7 +469,8 @@ unlock() {
 lock_holds() {
     unlocked || fail "the session is locked, or its lock cannot be read, before the lock"
     read_sessions
-    guest_ssh sudo loginctl lock-session "$(jq -r 'first(.[].session)' <<< "$SESSIONS")"
+    [[ -n $SESSIONS ]] || fail "no session of $USER_NAME to lock"
+    guest_ssh sudo loginctl lock-session "${SESSIONS%%$'\n'*}"
     wait_until 10 locked || fail "no lock 10 s after loginctl lock-session"
     unlock
     IDLE_SET=1
@@ -824,7 +834,7 @@ stage_linger() {
     greeter_beside_compositor "$started"
     for scope in "${SCOPES[@]}"; do
         stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$scope" -o json | jq -rs \
-            'first(.[] | select(.MESSAGE | test("^Stopped |Deactivated successfully")) | .__REALTIME_TIMESTAMP) // ""') ||
+            'first(.[] | select(.MESSAGE | strings | test("^Stopped |Deactivated successfully")) | .__REALTIME_TIMESTAMP) // ""') ||
             fail "cannot read the journal of $scope"
         [[ -n $stopped_us ]] || fail "the journal shows no stop of $scope after the SIGKILL"
         ((stopped_us - killed_us <= 1000000)) || fail "$scope stopped $(((stopped_us - killed_us) / 1000)) ms after the SIGKILL, not within 1 s"
@@ -832,7 +842,7 @@ stage_linger() {
     sign_in cosmic
     comp=$(wait_until 60 guest_ssh pgrep -n -u "$USER_NAME" -x cosmic-comp) || fail "no cosmic-comp in cosmic-comp's session"
     stopped_us=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o json | jq -rs \
-        'first(.[] | select(.MESSAGE | test("^Stopped")) | .__MONOTONIC_TIMESTAMP) // ""') ||
+        'first(.[] | select(.MESSAGE | strings | test("^Stopped")) | .__MONOTONIC_TIMESTAMP) // ""') ||
         fail "cannot read the journal of $COMPOSITOR"
     [[ -n $stopped_us ]] || fail "the journal shows no stop of $COMPOSITOR since the sign-in"
     ((stopped_us < $(started_us "$comp"))) || fail "$COMPOSITOR stopped after cosmic-comp started"
