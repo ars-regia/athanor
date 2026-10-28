@@ -7835,3 +7835,247 @@ fn an_unknown_mode_is_a_protocol_error() {
     );
     run.stop();
 }
+
+// The key bindings (doc_own_stack.md OS13, `bindings.rs`), keys as evdev numbers them.
+const KEY_ESC: u32 = 1;
+const KEY_MINUS: u32 = 12;
+const KEY_EQUAL: u32 = 13;
+const KEY_TAB: u32 = 15;
+const KEY_W: u32 = 17;
+const KEY_T: u32 = 20;
+const KEY_LEFTCTRL: u32 = 29;
+const KEY_A: u32 = 30;
+const KEY_LEFTSHIFT: u32 = 42;
+const KEY_C: u32 = 46;
+const KEY_V: u32 = 47;
+const KEY_N: u32 = 49;
+const KEY_M: u32 = 50;
+const KEY_LEFTALT: u32 = 56;
+const KEY_F1: u32 = 59;
+const KEY_SYSRQ: u32 = 99;
+/// XF86LaunchA in xkeyboard-config's evdev keycodes.
+const KEY_SCALE: u32 = 120;
+const KEY_LEFTMETA: u32 = 125;
+const KEY_KBDILLUMTOGGLE: u32 = 228;
+const KEY_KBDILLUMDOWN: u32 = 229;
+const KEY_KBDILLUMUP: u32 = 230;
+const KEY_WLAN: u32 = 238;
+const KEY_RFKILL: u32 = 247;
+
+/// Presses the chord `codes` while `to` holds the keyboard: the presses and the releases `to`
+/// was sent.
+fn sent_to(to: &mut Local, run: &mut Running, codes: &[u32]) -> (Vec<u32>, Vec<u32>) {
+    let (pressed, released) = (to.client.keys.len(), to.client.released.len());
+    chord(&mut run.state, codes);
+    to.roundtrip(run);
+    (
+        to.client.keys[pressed..].to_vec(),
+        to.client.released[released..].to_vec(),
+    )
+}
+
+/// The chord `codes` reaches `to` whole, each press and each release, and the compositor does
+/// nothing with it.
+fn reaches(to: &mut Local, run: &mut Running, codes: &[u32], what: &str) {
+    let fired = run.state.fired.len();
+    let (pressed, released) = sent_to(to, run, codes);
+    assert_eq!(pressed, codes, "{what}: every press reaches the client");
+    let reversed: Vec<u32> = codes.iter().rev().copied().collect();
+    assert_eq!(released, reversed, "{what}: and every release");
+    assert_eq!(run.state.fired.len(), fired, "{what}: and nothing is done");
+}
+
+/// The chord `codes`, whose last key is bound, takes `action`, or none: `to` is sent the
+/// modifiers' presses and releases, never the bound key's.
+fn acts(
+    to: &mut Local,
+    run: &mut Running,
+    codes: &[u32],
+    action: Option<crate::bindings::Action>,
+    what: &str,
+) {
+    let fired = run.state.fired.len();
+    let (pressed, released) = sent_to(to, run, codes);
+    let modifiers = &codes[..codes.len() - 1];
+    assert_eq!(pressed, modifiers, "{what}: the client is sent no bound press");
+    let reversed: Vec<u32> = modifiers.iter().rev().copied().collect();
+    assert_eq!(released, reversed, "{what}: nor its release");
+    assert_eq!(run.state.fired[fired..], *action.as_slice(), "{what}");
+}
+
+/// Runs the compositor's loop as `main` runs it, the chord `codes` pressed in its first round:
+/// the rounds it ran until it stopped, at most 50.
+fn rounds_until_stopped(run: &mut Running, codes: &[u32]) -> u32 {
+    let mut rounds = 0;
+    run.event_loop
+        .run(Duration::from_millis(1), &mut run.state, |state| {
+            rounds += 1;
+            if rounds == 1 {
+                chord(state, codes);
+            } else if rounds == 50 {
+                state.loop_signal.stop();
+            }
+        })
+        .expect("the loop");
+    rounds
+}
+
+/// Super+Alt+Escape ends the compositor, and the session with it (LP10: the only exit from a
+/// lock that cannot start): the loop stops in the round the key is pressed in, unlocked and
+/// while a lock client holds the lock, and no client is sent the Escape.
+#[test]
+fn super_alt_escape_ends_the_compositor_even_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let terminate = [KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC];
+    assert_eq!(rounds_until_stopped(&mut run, &terminate), 1, "the loop stops");
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_LEFTMETA, KEY_LEFTALT]);
+    assert_eq!(window.client.released, [KEY_LEFTALT, KEY_LEFTMETA]);
+    assert_eq!(run.state.fired, [Action::Terminate]);
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    assert_eq!(
+        rounds_until_stopped(&mut run, &terminate),
+        1,
+        "locked, the loop stops"
+    );
+    locker.roundtrip(&mut run);
+    assert_eq!(locker.client.keys, [KEY_LEFTMETA, KEY_LEFTALT]);
+    assert_eq!(locker.client.released, [KEY_LEFTALT, KEY_LEFTMETA]);
+    assert_eq!(run.state.fired, [Action::Terminate, Action::Terminate]);
+    run.stop();
+}
+
+/// Decision 28's six keys stay unbound until what they open is built: Super+W and XF86LaunchA
+/// (the overview), Super+= and Super+- (the magnifier), Super+A (the application library) and
+/// Super+V (the clipboard history) reach the focused client, and the compositor does nothing.
+#[test]
+fn decision_28_keys_reach_the_client_and_do_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_W][..], "Super+W"),
+        (&[KEY_SCALE], "XF86LaunchA"),
+        (&[KEY_LEFTMETA, KEY_EQUAL], "Super+="),
+        (&[KEY_LEFTMETA, KEY_MINUS], "Super+-"),
+        (&[KEY_LEFTMETA, KEY_A], "Super+A"),
+        (&[KEY_LEFTMETA, KEY_V], "Super+V"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// The keys whose target is not built stay unbound (D12, OD15): Super+N (no
+/// `ToggleNotifications`), Super+Alt+A (no entry point of the bar's accessibility menu), and the
+/// keyboard-light, WLAN and RFKill keys (no `os.athanor.Osd1`).
+#[test]
+fn the_unbuilt_targets_do_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_N][..], "Super+N"),
+        (&[KEY_LEFTMETA, KEY_LEFTALT, KEY_A], "Super+Alt+A"),
+        (&[KEY_KBDILLUMTOGGLE], "XF86KbdLightOnOff"),
+        (&[KEY_KBDILLUMDOWN], "XF86KbdBrightnessDown"),
+        (&[KEY_KBDILLUMUP], "XF86KbdBrightnessUp"),
+        (&[KEY_WLAN], "XF86WLAN"),
+        (&[KEY_RFKILL], "XF86RFKill"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// COSMIC's defaults that no approved document names stay unbound (OS13, D15), Alt+Tab among
+/// them (gap 8).
+#[test]
+fn the_unnamed_cosmic_keys_reach_the_client() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_M][..], "Super+M"),
+        (&[KEY_LEFTMETA, KEY_T], "Super+T"),
+        (&[KEY_LEFTALT, KEY_TAB], "Alt+Tab"),
+        (&[KEY_SYSRQ], "Print"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// Super+Alt+T, the reveal key of OS4, is kept from every client, unlocked and locked, with no
+/// effect until the border (D11); while locked it acts on nothing (section 1).
+#[test]
+fn the_reveal_key_never_reaches_a_client() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
+    acts(&mut window, &mut run, &reveal, Some(Action::Reveal), "unlocked");
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(&mut locker, &mut run, &reveal, None, "locked");
+    run.stop();
+}
+
+/// While locked only doc_lock_and_prompts.md section 1's keys act (D3): the terminal switch and
+/// Super+Alt+Escape; Super+Escape, Super+C and Super+Shift+Escape reach the lock surface.
+#[test]
+fn only_the_lock_list_acts_while_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let requests = run.state.lock_requests;
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_ESC][..], "Super+Escape"),
+        (&[KEY_LEFTMETA, KEY_C], "Super+C"),
+        (&[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC], "Super+Shift+Escape"),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    assert_eq!(run.state.lock_requests, requests, "no lock is asked for");
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_F1],
+        Some(Action::Vt(1)),
+        "Ctrl+Alt+F1",
+    );
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC],
+        Some(Action::Terminate),
+        "Super+Alt+Escape",
+    );
+    run.stop();
+}
+
+/// A bound key reaches neither the focused client nor the input method's grab, which the filter
+/// runs before (D2); an unbound key still goes to the grab.
+#[test]
+fn a_bound_key_never_reaches_the_client_nor_the_input_method() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_T]);
+    ime.roundtrip(&mut run);
+    assert_eq!(
+        method.keys(),
+        [KEY_LEFTMETA, KEY_LEFTALT],
+        "the grab is sent the modifiers only"
+    );
+    assert_eq!(run.state.fired, [Action::Reveal]);
+    chord(&mut run.state, &[KEY_A]);
+    ime.pump(&mut run, "an unbound key reaches the grab", |_, _| {
+        method.keys().ends_with(&[KEY_A])
+    });
+    window.roundtrip(&mut run);
+    assert!(window.client.keys.is_empty(), "the window saw no key");
+    run.stop();
+}

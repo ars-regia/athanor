@@ -6,6 +6,7 @@
 // one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
 #![deny(unsafe_code)]
 
+mod bindings;
 mod capture;
 mod cursor;
 mod grabs;

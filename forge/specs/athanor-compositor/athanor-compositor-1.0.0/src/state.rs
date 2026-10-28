@@ -126,6 +126,9 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
+    /// The actions of the bound keys pressed, in order (`State::fire`); the fixture reads them.
+    #[cfg(test)]
+    pub fired: Vec<crate::bindings::Action>,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
@@ -326,6 +329,8 @@ impl State {
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
+            #[cfg(test)]
+            fired: Vec::new(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
             virtual_keymap: None,
