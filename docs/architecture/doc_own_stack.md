@@ -292,8 +292,8 @@ four-finger swipes; Super+Space for the input source (`doc_languages.md` LN9); S
 (`doc_lock_and_prompts.md` section 1 and its acceptance, item 1) and Super+Alt+Escape (LP10);
 Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7), and the
 magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
-decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window (OS12,
-decision 29); and the switch to a text console. The bindings a user
+decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
+(decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
@@ -802,10 +802,9 @@ amendment's audit:
 Taken by the maintainer on 2026-10-28, answering the open questions of the key bindings' plan
 (`docs/superpowers/plans/2026-10-28-compositor-key-bindings.md`):
 
-29. **The close keys, and the session keys through cosmic-settings-daemon** (OS12, OS13;
+29. **The close keys, and the session keys through cosmic-settings-daemon** (OS13;
     `doc_shell.md` SH2; `doc_osd.md` OD3, OD15; `doc_accessibility.md` AX3). The own compositor
-    binds Super+Q and Alt+F4 to close the window with the keyboard focus, through the close OS12's
-    window actions already send. Every other key of COSMIC's defaults that no approved document
+    binds Super+Q and Alt+F4 to close the window with the keyboard focus. Every other key of COSMIC's defaults that no approved document
     names stays unbound, and the switch's pull request (`doc_session.md` SN13, step 6) lists them
     as differences from cosmic-comp's session. Until `athanor-osd` replaces cosmic-osd (OD15) and
     `athanor-a11y` exists (AX3), the volume keys, the display brightness keys and Super+Alt+S call
@@ -817,11 +816,9 @@ Taken by the maintainer on 2026-10-28, answering the open questions of the key b
     those five methods, reads and writes nothing in the user's configuration and names no other
     COSMIC key, named by path in SH2's exceptions and in `verify.py boundary`. Each key leaves it
     when its replacement lands, volume and brightness with `athanor-osd` and the screen reader
-    with `athanor-a11y`, and the file leaves with the last. Not taken: interim targets outside
-    COSMIC (`wpctl` for the volume, logind's `SetBrightness` for the brightness, Super+Alt+S
-    unbound), whose overlay may not follow a change cosmic-settings-daemon did not make; the
-    switch waiting for `athanor-osd` and `athanor-a11y`; Super+Q and Alt+F4 unbound, keys every
-    COSMIC user has.
+    with `athanor-a11y`, and the file leaves with the last. Not taken: for those keys, `wpctl` and
+    logind, with Super+Alt+S doing nothing; waiting, the keys unbound and listed by the switch
+    as gaps; for COSMIC's defaults, none bound, the close keys included.
 
 ## 8. Risks
 
