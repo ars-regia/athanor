@@ -663,27 +663,31 @@ amendment's audit:
       to name where the session's `session-<id>.scope` changes at every sign-in; the locker's
       line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
       through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
-      layer (`doc_session_daemons.md`). The switch's pull request shows, from inside
+      layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
+      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
+      the keys of the overview, the magnifier and the application library named below. The switch's pull request shows, from inside
       `cosmic-idle.scope`, `loginctl lock-session` locking the session, which logind resolves
       through its session `auto`, and the locker's `GetSessionByPID` of its parent answering;
       if the first fails, cosmic-idle's lock command names the session by `XDG_SESSION_ID`.
       The two scope names have no unit file, so an unconfined process of the user can create
       either and run the real executable in it: this grants nothing that OS4 does not already
       leave to unconfined code running as the user, which can shadow a shipped service with a
-      unit of its own, and rests on confined clients not reaching the user manager; a polkit agent (gap 2), cosmic-osd with its line;
-      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
-      the keys of the overview, the magnifier and the application library named below.
+      unit of its own, and rests on confined clients not reaching the user manager.
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2;
     - item 1 for every difference that hides, moves or changes a control or a text, by any
-      amount, and for every difference of colour in a high-contrast variant or in the contrast of
+      amount, but the controls this decision hides (the magnifier, inversion and filter rows,
+      the workspaces and applications buttons of the bar and of the dock), each recorded in
+      `athanor-differences.toml` with this decision as its cause; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
-      filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and the
-      protocols of cosmic-workspaces or its replacement;
+      filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and what
+      only the overview binds (its private workspace interface, `doc_overview.md`). The
+      bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
+      item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
       until the own compositor has them. `athanor-compositor-session`, before it starts the
       compositor, starts cosmic-comp's session in its place when the user has either on, and
@@ -727,7 +731,8 @@ amendment's audit:
       workspaces module and the dock's workspaces button hidden under the own compositor,
       Super+W and `XF86LaunchA` unbound (OS13), and neither the three-finger swipe nor the hot
       corner served. The window switcher on Alt+Tab, which `doc_overview.md` owns and designs
-      in a later revision, follows with the overview: until then the default session switches
+      in a later revision, is absent from the default session until it is built, a loss the
+      switch's pull request names: until then the default session switches
       windows through the dock and the bar, by keyboard through Ctrl+Alt+Tab to the dock
       (`doc_accessibility.md` AX7), which the switch's pull request shows activating a window.
       Super+1 to Super+0 and Super+Ctrl with the arrows stay bound and switch workspaces
@@ -741,7 +746,11 @@ amendment's audit:
       in the allow-list, after the switch, and the switch's pull request names the loss.
 
     The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
-    it follows the switch, and release 1.0 waits for it (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    it follows the switch, and release 1.0 waits for it and for the window switcher on Alt+Tab.
+    The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
+    own compositor, after the change of OV19 step 5 that binds Super+W, `XF86LaunchA` and the
+    three-finger swipe in OS13 to it and shows the workspaces module and button of the bar and
+    the dock (the overview's plan, Task 30) (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
