@@ -88,7 +88,7 @@ pub fn path() -> Option<PathBuf> {
 /// `XkbConfig`, or the rig's one-line form): `(`, `name: value` pairs separated by commas with
 /// an optional trailing one, `)`. Absent repeat fields take cosmic-comp's defaults.
 pub fn parse(text: &str) -> Result<Settings, Refused> {
-    let mut reader = Reader { text, at: 0 };
+    let mut reader = Reader::new(text);
     reader.eat(b'(')?;
     let (mut rules, mut model, mut layout, mut variant) = (None, None, None, None);
     let (mut options, mut repeat_delay, mut repeat_rate) = (None, None, None);
@@ -135,22 +135,26 @@ pub fn parse(text: &str) -> Result<Settings, Refused> {
 }
 
 /// Fills `slot`, refusing a field given twice.
-fn once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), Refused> {
+pub(crate) fn once<T>(slot: &mut Option<T>, value: T, name: &str) -> Result<(), Refused> {
     match slot.replace(value) {
         Some(_) => Err(Refused::Duplicate(name.into())),
         None => Ok(()),
     }
 }
 
-/// The record's tokens, read from byte `at`.
-struct Reader<'a> {
+/// The record's tokens, read from byte `at`; `screen_filter.rs` reads its record with them.
+pub(crate) struct Reader<'a> {
     text: &'a str,
-    at: usize,
+    pub(crate) at: usize,
 }
 
 impl<'a> Reader<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        Self { text, at: 0 }
+    }
+
     /// The next byte after any whitespace, not taken.
-    fn peek(&mut self) -> Option<u8> {
+    pub(crate) fn peek(&mut self) -> Option<u8> {
         let bytes = self.text.as_bytes();
         while bytes.get(self.at).is_some_and(u8::is_ascii_whitespace) {
             self.at += 1;
@@ -158,7 +162,7 @@ impl<'a> Reader<'a> {
         bytes.get(self.at).copied()
     }
 
-    fn eat(&mut self, byte: u8) -> Result<(), Refused> {
+    pub(crate) fn eat(&mut self, byte: u8) -> Result<(), Refused> {
         if self.peek() != Some(byte) {
             return Err(Refused::Syntax(self.at));
         }
@@ -167,7 +171,7 @@ impl<'a> Reader<'a> {
     }
 
     /// A name of letters, digits and underscores.
-    fn ident(&mut self) -> Result<&'a str, Refused> {
+    pub(crate) fn ident(&mut self) -> Result<&'a str, Refused> {
         self.peek();
         let start = self.at;
         let bytes = self.text.as_bytes();
@@ -245,7 +249,7 @@ impl<'a> Reader<'a> {
 /// Reads `path` without blocking: a FIFO, a device or a file larger than `LIMIT` is refused,
 /// so a file system a client controls never stalls the event loop. `None` when it does not
 /// exist.
-fn read(path: &Path) -> Result<Option<String>, Refused> {
+pub(crate) fn read(path: &Path) -> Result<Option<String>, Refused> {
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
