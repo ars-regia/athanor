@@ -47,8 +47,8 @@ In short:
 - ADR-0122 decision 1 and `doc_own_stack.md` decision 10 are amended; release 1.0 still waits
   for the full acceptance, and for the overview and the window switcher on Alt+Tab, and takes
   cosmic-comp's session off the greeter.
-- The magnifier, the colour filters, the overview, the Alt+Tab switcher, the application library
-  and the workspace indicator of `doc_overview.md` OV12 are absent from the default session until
+- The magnifier, the colour filters, the overview, the Alt+Tab switcher, the application library,
+  the clipboard history and the workspace indicator of `doc_overview.md` OV12 are absent from the default session until
   the own compositor has them; their controls and bindings are hidden or unbound there.
 - ADR-0123's "cosmic-comp leaves the default session at 1.0" is read as: cosmic-comp's
   session leaves the default at the switch and the greeter at 1.0.

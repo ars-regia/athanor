@@ -190,7 +190,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | amended by ADR-0123 | security, update, process |
 | ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122, ADR-0126, ADR-0132 | shell, security, process |
 | ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | amended by ADR-0132 | shell, security, process |
-| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | amended by ADR-0128 | process, docs, platform, security, update, shell |
+| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | amended by ADR-0128, ADR-0132 | process, docs, platform, security, update, shell |
 | ADR-0124 | 0124 | [Visual language revision 3: materials in tiers, the accent's measure, springs and the toolkit's surfaces](0124-visual-language-revision-3.md) | accepted | shell, accessibility |
 | ADR-0125 | 0125 | [A change of the Fedora base lands through a protected rebase integration branch](0125-rebase-integration-branches.md) | accepted | process, build, security |
 | ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | accepted | shell, process, security |

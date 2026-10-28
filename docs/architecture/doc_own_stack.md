@@ -297,8 +297,8 @@ assigns in Settings, system actions and custom commands, keep `athanor_composito
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, Super+= and Super+- until the own compositor has the magnifier, and Super+A
-until the application library ships; until then a fixture test shows each doing nothing, and
+overview comes, Super+= and Super+- until the own compositor has the magnifier, Super+A
+until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
 their own fixture tests come with them.
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
@@ -667,7 +667,8 @@ amendment's audit:
       through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
       layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
       X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
-      the keys of the overview, the magnifier and the application library named below. The switch's pull request shows, from inside
+      the keys of the overview, the magnifier, the application library and the clipboard history
+      named below. The switch's pull request shows, from inside
       `cosmic-idle.scope`, `loginctl lock-session` locking the session, which logind resolves
       through its session `auto`, and the locker's `GetSessionByPID` of its parent answering;
       if the first fails, cosmic-idle's lock command names the session by `XDG_SESSION_ID`.
@@ -678,13 +679,14 @@ amendment's audit:
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
       Data control, the other half of gap 6, has no client there either: the clipboard history
-      of `doc_control_center.md` CC10 collects nothing, so its switch and Super+V are hidden or
+      of `doc_control_center.md` CC10 collects nothing, so its switch is hidden and Super+V
       unbound, a loss the switch's pull request names.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2;
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the magnifier, inversion and filter rows,
-      the workspaces and applications buttons of the bar and of the dock), each recorded in
+      the workspaces and applications buttons of the bar and of the dock, the clipboard
+      history's switch), each recorded in
       `athanor-differences.toml` with this decision as its cause; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
