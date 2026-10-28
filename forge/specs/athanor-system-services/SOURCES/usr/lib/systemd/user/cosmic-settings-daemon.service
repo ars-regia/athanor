@@ -4,10 +4,6 @@ Documentation=https://github.com/pop-os/cosmic-settings-daemon
 After=graphical-session.target athanor-desktop.service
 Requisite=athanor-desktop.service
 PartOf=graphical-session.target
-# Not in the preview session on the own compositor (doc_session.md, SN15), whose script alone
-# sets ATHANOR_PREVIEW_SESSION in the user manager: it serves COSMIC's components, which the
-# preview does not run.
-ConditionEnvironment=!ATHANOR_PREVIEW_SESSION
 
 [Service]
 # Applies the session's settings: theme, keyboard and display configuration, the
