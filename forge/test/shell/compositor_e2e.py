@@ -209,10 +209,45 @@ def athanor():
            and SECOND not in apps and FIRST in apps, lines)
     second.wait(timeout=10)
 
+    # The layouts come from the seeded xkb_config, read as cosmic-comp reads it.
+    code, lines = probe("snapshot", unit=True)
+    state = snapshot(lines)
+    expect("athanor: the seeded layouts are named in group order, the first one active",
+           code == 0 and state.get("keyboard_layouts") == ["English (US)", "Italian"]
+           and state.get("keyboard_group") == 0, lines)
+    code, lines = probe("group", "1", "group", "0", unit=True)
+    expect("athanor: the keyboard group follows",
+           code == 0 and events(lines, "keyboard_group") == [1, 0], lines)
+
+    # cosmic-config writes a temporary file beside the old one and renames it over it.
+    config = Path(os.environ["XDG_CONFIG_HOME"]) / "cosmic/com.system76.CosmicComp/v1/xkb_config"
+    seeded = config.read_text()
+    renamed = seeded.replace('layout: "us,it", variant: ","', 'layout: "us,it,de", variant: ",,"')
+    for text, want in ((renamed, ["English (US)", "Italian", "German"]),
+                       (seeded, ["English (US)", "Italian"])):
+        # The probe is connected, its snapshot printed, before the file changes: a client that
+        # connects after the change reads the new keymap at connect, and sends no event for it.
+        watcher = subprocess.Popen([str(IN_UNIT), "rig-cc-probe.service", PROBE, "snapshot",
+                                    "watch", "3"], stdout=subprocess.PIPE, text=True)
+        first = watcher.stdout.readline()
+        swap = config.with_name(".xkb_config.new")
+        swap.write_text(text)
+        swap.rename(config)
+        rest, _ = watcher.communicate(timeout=60)
+        lines = [json.loads(line) for line in (first + rest).splitlines() if line.startswith("{")]
+        layouts = events(lines, "keyboard_layouts")
+        expect(f"athanor: a live change of xkb_config gives {', '.join(want)}",
+               watcher.returncode == 0 and layouts[-1:] == [want], lines)
+
     # The manager's own refusal of an ungranted client is compositor-globals'.
     code, lines = probe("snapshot")
     expect("athanor: outside its unit the probe sees no window",
            code == 0 and snapshot(lines).get("windows") == [], lines)
+    code, lines = probe("group", "1")
+    errors = [line["error"] for line in lines if "error" in line]
+    expect("athanor: outside its unit the keyboard group is refused",
+           code == 1 and len(errors) == 1
+           and "does not offer athanor_keyboard_group_manager_v1" in errors[0], lines)
 
 
 def sway():
