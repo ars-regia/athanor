@@ -112,45 +112,50 @@ pub fn session_command() -> String {
     first_installed(&SESSION_COMMAND_PATHS, SESSION_COMMAND_FALLBACK).to_string()
 }
 
-/// The preview session on Athanor's own compositor (doc_session.md, SN14 and SN15): its
-/// script, which the compositor's package installs.
-const PREVIEW_SESSION_COMMAND: &str = "/usr/bin/athanor-compositor-session";
+/// The session on Athanor's own compositor (doc_session.md, SN14 and SN15): its script,
+/// which the compositor's package installs.
+const OWN_SESSION_COMMAND: &str = "/usr/bin/athanor-compositor-session";
 
-/// A session the greeter offers (doc_session.md, SN14). Both entries are in this code: no
-/// file another package drops adds a login path.
+/// A session the greeter offers (doc_session.md revision 4, SN14). Both entries are in this
+/// code: no file another package drops adds a login path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Session {
-    /// "Athanor", `athanor-session` on cosmic-comp: checked at every start of the greeter,
-    /// which writes no choice anywhere.
+    /// "Athanor", `athanor-compositor-session` on the own compositor: the default where the
+    /// compositor's package is installed, checked at every start of the greeter, which
+    /// writes no choice anywhere.
+    Own,
+    /// "Athanor on cosmic-comp", `athanor-session`: the second entry, and the only session
+    /// of an image without the compositor's package, which shows no menu. The type's
+    /// `Default`, the session started when nothing is chosen.
     #[default]
-    Default,
-    /// "Athanor on the new compositor (preview)".
-    Preview,
+    CosmicComp,
 }
 
 impl Session {
     /// What StartSession's `cmd` holds for this session, and nothing more.
     pub fn command(self) -> String {
         match self {
-            Session::Default => session_command(),
-            Session::Preview => PREVIEW_SESSION_COMMAND.to_string(),
+            Session::Own => OWN_SESSION_COMMAND.to_string(),
+            Session::CosmicComp => session_command(),
         }
     }
 }
 
-/// The sessions the greeter offers, the default first: the preview only where its script
-/// is installed. With one, the greeter shows no session menu.
-pub fn sessions_offered() -> Vec<Session> {
-    sessions_with(PREVIEW_SESSION_COMMAND)
+/// The sessions the greeter offers, the one checked at start first: the own compositor's,
+/// then cosmic-comp's, where its script is installed; cosmic-comp's alone elsewhere. With
+/// one, the greeter shows no session menu.
+pub fn sessions_offered() -> &'static [Session] {
+    sessions_with(OWN_SESSION_COMMAND)
 }
 
-/// `sessions_offered` with the preview's script at `preview`, so that a test owns the tree.
-fn sessions_with(preview: &str) -> Vec<Session> {
-    let mut sessions = vec![Session::Default];
-    if std::path::Path::new(preview).exists() {
-        sessions.push(Session::Preview);
+/// `sessions_offered` with the own compositor's script at `own`, so that a test owns the
+/// tree.
+fn sessions_with(own: &str) -> &'static [Session] {
+    if std::path::Path::new(own).exists() {
+        &[Session::Own, Session::CosmicComp]
+    } else {
+        &[Session::CosmicComp]
     }
-    sessions
 }
 
 /// A question PAM puts, through greetd, to the person at the greeter, in PAM's own words.
@@ -492,8 +497,8 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_is_offered_only_where_its_script_is_installed() {
-        let dir = scratch("preview");
+    fn the_own_compositor_is_offered_first_only_where_its_script_is_installed() {
+        let dir = scratch("own");
         let script = dir
             .join("athanor-compositor-session")
             .to_str()
@@ -501,22 +506,17 @@ mod tests {
             .to_string();
         assert_eq!(
             sessions_with(&script),
-            [Session::Default],
-            "without the script there is one session and no menu"
+            [Session::CosmicComp],
+            "without the script there is cosmic-comp's session alone and no menu"
         );
         std::fs::write(&script, b"").expect("the script");
         assert_eq!(
             sessions_with(&script),
-            [Session::Default, Session::Preview],
-            "with it the menu offers both, the default first"
+            [Session::Own, Session::CosmicComp],
+            "with it the menu offers both, the own compositor's first and checked"
         );
         assert_eq!(
-            Session::default(),
-            Session::Default,
-            "the default is checked at every start"
-        );
-        assert_eq!(
-            Session::Preview.command(),
+            Session::Own.command(),
             "/usr/bin/athanor-compositor-session"
         );
         std::fs::remove_dir_all(&dir).expect("cleaning up");
@@ -572,9 +572,9 @@ mod tests {
         progress: std::cell::RefCell<Vec<String>>,
         infos: std::cell::RefCell<Vec<String>>,
         errors: std::cell::RefCell<Vec<String>>,
-        /// The checked session; the person checks the preview while asked, when set.
+        /// The checked session; the person checks the own compositor's while asked, when set.
         session: std::cell::Cell<Session>,
-        preview_when_asked: bool,
+        own_when_asked: bool,
     }
 
     impl Person {
@@ -601,17 +601,17 @@ mod tests {
             prompt: Prompt,
         ) -> impl std::future::Future<Output = Option<Zeroizing<String>>> {
             self.asked.borrow_mut().push(prompt);
-            if self.preview_when_asked {
-                self.session.set(Session::Preview);
+            if self.own_when_asked {
+                self.session.set(Session::Own);
             }
             let answer = self.answers.borrow_mut().pop_front();
             std::future::ready(answer.map(|answer| Zeroizing::new(answer.to_string())))
         }
         fn session_command(&self) -> String {
             match self.session.get() {
-                // The default's path depends on the machine the test runs on.
-                Session::Default => SESSION_COMMAND_FALLBACK.to_string(),
-                preview => preview.command(),
+                // cosmic-comp's path depends on the machine the test runs on.
+                Session::CosmicComp => SESSION_COMMAND_FALLBACK.to_string(),
+                own => own.command(),
             }
         }
     }
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn each_session_sends_its_own_command_and_the_same_environment() {
         let mut sent = Vec::new();
-        for session in [Session::Default, Session::Preview] {
+        for session in [Session::CosmicComp, Session::Own] {
             let person = Person {
                 session: std::cell::Cell::new(session),
                 ..Person::default()
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     fn the_session_checked_during_the_conversation_is_the_one_started() {
         let person = Person {
-            preview_when_asked: true,
+            own_when_asked: true,
             ..Person::answering(&["493021"])
         };
         let (result, requests) = login(
@@ -877,7 +877,10 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("a locked account does not sign in");
-        assert_eq!(reason, locked, "PAM's text is the reason, greetd's code is not");
+        assert_eq!(
+            reason, locked,
+            "PAM's text is the reason, greetd's code is not"
+        );
         assert_eq!(*person.errors.borrow(), [locked]);
         assert_eq!(answers(&requests), [None]);
         assert_eq!(password_sent(&requests), 0);
@@ -898,7 +901,10 @@ mod tests {
             &person,
         );
         let reason = result.expect_err("an expired password does not sign in");
-        assert_eq!(reason, expired, "PAM's text is the reason, greetd's code is not");
+        assert_eq!(
+            reason, expired,
+            "PAM's text is the reason, greetd's code is not"
+        );
         assert_eq!(*person.errors.borrow(), [expired]);
         assert_eq!(answers(&requests), [Some(PASSWORD.to_string()), None]);
         assert_eq!(password_sent(&requests), 1);

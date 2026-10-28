@@ -318,13 +318,14 @@ fn session_menu(sessions: &[Session], checked: &Rc<Cell<Session>>) -> MenuButton
         .build();
     let mut first: Option<CheckButton> = None;
     for &session in sessions {
+        // cosmic-comp's entry names, in one line, what it has that the default lacks yet.
         let (id, title, gaps) = match session {
-            Session::Default => ("greeter-session-default", tr("Athanor"), None),
-            Session::Preview => (
-                "greeter-session-preview",
-                tr("Athanor on the new compositor (preview)"),
+            Session::Own => ("greeter-session-own", tr("Athanor"), None),
+            Session::CosmicComp => (
+                "greeter-session-cosmic-comp",
+                tr("Athanor on cosmic-comp"),
                 Some(tr(
-                    "No screen lock, no password prompts, no screen reader commands, no shortcuts yet",
+                    "Magnifier, colour filters, workspace overview and Alt+Tab",
                 )),
             ),
         };
@@ -748,11 +749,12 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
         .visible(false)
         .build();
     named(&cancel, "greeter-cancel", &tr("Cancel"));
-    // The default is checked at every start, and the choice is written nowhere (SN14). The
-    // menu is there only where the preview is installed, after the field in the focus chain.
-    let session = Rc::new(Cell::new(Session::default()));
+    // The first offered is checked at every start, and the choice is written nowhere (SN14).
+    // The menu is there only where the own compositor is installed, after the field in the
+    // focus chain.
     let sessions = sessions_offered();
-    let session_menu = (sessions.len() > 1).then(|| session_menu(&sessions, &session));
+    let session = Rc::new(Cell::new(sessions.first().copied().unwrap_or_default()));
+    let session_menu = (sessions.len() > 1).then(|| session_menu(sessions, &session));
     let field_row = Box::builder()
         .orientation(Orientation::Horizontal)
         .spacing(6)
@@ -1228,7 +1230,10 @@ mod tests {
         notices.error.push("Your account has expired".to_string());
         notices.ask();
         notices.fail("Your account has expired");
-        assert!(notices.error.is_empty(), "the failure line shows them instead");
+        assert!(
+            notices.error.is_empty(),
+            "the failure line shows them instead"
+        );
         assert_eq!(notices.info, ["Last login: yesterday"]);
         assert!(!notices.cancellable, "nothing is left to cancel");
 

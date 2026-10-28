@@ -134,17 +134,17 @@ msgstr "Keyboard layout: {layout}"
 msgid "Session"
 msgstr "Session"
 
-#: src/ui.rs:322
+#: src/ui.rs:323
 msgid "Athanor"
 msgstr "Athanor"
 
-#: src/ui.rs:325
-msgid "Athanor on the new compositor (preview)"
-msgstr "Athanor on the new compositor (preview)"
+#: src/ui.rs:326
+msgid "Athanor on cosmic-comp"
+msgstr "Athanor on cosmic-comp"
 
 #: src/ui.rs:327
-msgid "No screen lock, no password prompts, no screen reader commands, no shortcuts yet"
-msgstr "No screen lock, no password prompts, no screen reader commands, no shortcuts yet"
+msgid "Magnifier, colour filters, workspace overview and Alt+Tab"
+msgstr "Magnifier, colour filters, workspace overview and Alt+Tab"
 
 #: src/ui.rs:670
 msgid "%A %-d %B"

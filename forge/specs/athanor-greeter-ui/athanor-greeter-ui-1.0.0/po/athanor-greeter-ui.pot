@@ -142,16 +142,16 @@ msgstr ""
 msgid "Session"
 msgstr ""
 
-#: src/ui.rs:322
+#: src/ui.rs:323
 msgid "Athanor"
 msgstr ""
 
-#: src/ui.rs:325
-msgid "Athanor on the new compositor (preview)"
+#: src/ui.rs:326
+msgid "Athanor on cosmic-comp"
 msgstr ""
 
 #: src/ui.rs:327
-msgid "No screen lock, no password prompts, no screen reader commands, no shortcuts yet"
+msgid "Magnifier, colour filters, workspace overview and Alt+Tab"
 msgstr ""
 
 #: src/ui.rs:670

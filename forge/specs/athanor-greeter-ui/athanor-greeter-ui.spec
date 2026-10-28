@@ -43,11 +43,13 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
-* Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
+* Wed Oct 28 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - A "Session" menu beside the password field, shown only where
-  /usr/bin/athanor-compositor-session is installed, offers "Athanor" (checked at every
-  start, never remembered) and "Athanor on the new compositor (preview)", with what the
-  preview lacks; StartSession runs the checked entry's command (doc_session.md, SN14).
+  /usr/bin/athanor-compositor-session is installed, offers "Athanor", the session on the own
+  compositor (checked at every start, never remembered), and "Athanor on cosmic-comp", with
+  what it has that the default lacks yet; StartSession runs the checked entry's command
+  (doc_session.md revision 4, SN14). Without the script the greeter starts athanor-session
+  as before.
 
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
 - The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
