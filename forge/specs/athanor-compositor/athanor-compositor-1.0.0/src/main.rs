@@ -165,9 +165,8 @@ fn run() -> Result<(), Error> {
         tracing::info!("xwayland-satellite is not installed: no X11 display");
         None
     };
-    // `x11`, the display's number, is what the session's readiness announces as `DISPLAY`.
     tracing::info!(?socket, ?x11, ?options, "listening");
-    ready::announce(&socket)?;
+    ready::announce(&socket, x11)?;
     event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),

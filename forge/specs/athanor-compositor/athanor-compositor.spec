@@ -13,6 +13,8 @@ BuildRequires:  rust cargo gcc pkgconf-pkg-config systemd-devel libxkbcommon-dev
 # the supervisor of the locker and the idle daemon, runs the USBGuard hook and hands the
 # sign-in to athanor-session (athanor-system-config).
 Requires:       systemd glib2 mesa-libEGL mesa-dri-drivers athanor-system-services athanor-system-config
+# The compositor starts xwayland-satellite on the first X11 client (doc_own_stack.md, OS4).
+Requires:       xwayland-satellite
 
 %description
 Athanor's own Wayland compositor on Smithay (doc_own_stack.md, milestone C1), the greeter's
