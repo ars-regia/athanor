@@ -274,7 +274,7 @@ with no effect until the border; Super+Q and Alt+F4 send `close` to the window w
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
 layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
 the session** (LP5), with Super alone. While the session is locked only the terminal switches,
-Super+Alt+Escape, Super+Space and the mute key act (section 1), Super+Alt+T is kept and acts on
+Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
 nothing, and every other key goes to the lock surface. Decision 28's six
 keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
 
@@ -292,7 +292,11 @@ does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power di
 compositor forks nothing: the same thread asks the user manager to run each fixed argument
 vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
 `app.slice` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
-the touchpads' events off and on for the session.
+the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
+call cosmic-settings-daemon's `VolumeUp`, `VolumeDown`, `IncreaseDisplayBrightness`,
+`DecreaseDisplayBrightness` and `ScreenReader`, as cosmic-comp's session does, from one file,
+`src/bindings/cosmic.rs` (`doc_own_stack.md` decision 29), until athanor-osd and athanor-a11y
+take those keys; a volume or brightness step is never coalesced.
 At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock

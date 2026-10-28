@@ -5,6 +5,8 @@
 //! every other key, decision 28's six included, is forwarded. The compositor reads no
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
 
+pub(crate) mod cosmic;
+
 use crate::session_calls::{
     Call, Command, Job, Request, CONTROL_CENTER, LOG_OUT, MIC_MUTE, MUTE, NEXT, PLAY_PAUSE,
     POWER_OFF, PREVIOUS,
@@ -104,6 +106,26 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (
         on(SUPER | CTRL, Keysym::XF86_TouchpadToggle),
         Action::TouchpadToggle,
+    ),
+    (
+        on(0, Keysym::XF86_AudioRaiseVolume),
+        Action::Call(&cosmic::VOLUME_UP),
+    ),
+    (
+        on(0, Keysym::XF86_AudioLowerVolume),
+        Action::Call(&cosmic::VOLUME_DOWN),
+    ),
+    (
+        on(0, Keysym::XF86_MonBrightnessUp),
+        Action::Call(&cosmic::BRIGHTNESS_UP),
+    ),
+    (
+        on(0, Keysym::XF86_MonBrightnessDown),
+        Action::Call(&cosmic::BRIGHTNESS_DOWN),
+    ),
+    (
+        on(SUPER | ALT, Keysym::s),
+        Action::Call(&cosmic::SCREEN_READER),
     ),
 ];
 
@@ -267,6 +289,8 @@ mod tests {
             Action::Run(&MUTE),
             Action::Run(&LOG_OUT),
             Action::TouchpadToggle,
+            Action::Call(&cosmic::VOLUME_UP),
+            Action::Call(&cosmic::SCREEN_READER),
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(
@@ -275,7 +299,8 @@ mod tests {
                 Action::Vt(1),
                 Action::Terminate,
                 Action::NextGroup,
-                Action::Run(&MUTE)
+                Action::Run(&MUTE),
+                Action::Call(&cosmic::VOLUME_UP)
             ]
         );
         let kept: Vec<Action> = all.into_iter().filter(Action::kept_while_locked).collect();
@@ -286,7 +311,8 @@ mod tests {
                 Action::Terminate,
                 Action::Reveal,
                 Action::NextGroup,
-                Action::Run(&MUTE)
+                Action::Run(&MUTE),
+                Action::Call(&cosmic::VOLUME_UP)
             ],
             "the reveal key is kept from the lock surface, and acts on nothing"
         );

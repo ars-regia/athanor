@@ -7846,6 +7846,7 @@ const KEY_EQUAL: u32 = 13;
 const KEY_TAB: u32 = 15;
 const KEY_Q: u32 = 16;
 const KEY_W: u32 = 17;
+const KEY_S: u32 = 31;
 const KEY_T: u32 = 20;
 const KEY_LEFTCTRL: u32 = 29;
 const KEY_A: u32 = 30;
@@ -7861,9 +7862,13 @@ const KEY_F1: u32 = 59;
 const KEY_F4: u32 = 62;
 const KEY_SYSRQ: u32 = 99;
 const KEY_MUTE: u32 = 113;
+const KEY_VOLUMEDOWN: u32 = 114;
+const KEY_VOLUMEUP: u32 = 115;
 const KEY_POWER: u32 = 116;
 /// XF86LaunchA in xkeyboard-config's evdev keycodes.
 const KEY_SCALE: u32 = 120;
+const KEY_BRIGHTNESSDOWN: u32 = 224;
+const KEY_BRIGHTNESSUP: u32 = 225;
 const KEY_LEFTMETA: u32 = 125;
 const KEY_NEXTSONG: u32 = 163;
 const KEY_PLAYPAUSE: u32 = 164;
@@ -8464,5 +8469,66 @@ fn the_touchpad_key_toggles_the_touchpads() {
         &[KEY_TOUCHPAD_TOGGLE],
         "locked, XF86TouchpadToggle",
     );
+    run.stop();
+}
+
+/// The volume and brightness keys call cosmic-settings-daemon as cosmic-comp's session does
+/// (D13, decision 29), unlocked and locked (section 1).
+#[test]
+fn the_volume_and_brightness_keys_call_their_daemon() {
+    use crate::bindings::cosmic::{BRIGHTNESS_DOWN, BRIGHTNESS_UP, VOLUME_DOWN, VOLUME_UP};
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [
+        (KEY_VOLUMEUP, &VOLUME_UP, "XF86AudioRaiseVolume"),
+        (KEY_VOLUMEDOWN, &VOLUME_DOWN, "XF86AudioLowerVolume"),
+        (KEY_BRIGHTNESSUP, &BRIGHTNESS_UP, "XF86MonBrightnessUp"),
+        (
+            KEY_BRIGHTNESSDOWN,
+            &BRIGHTNESS_DOWN,
+            "XF86MonBrightnessDown",
+        ),
+    ];
+    for (code, call, what) in keys {
+        acts(
+            &mut window,
+            &mut run,
+            &[code],
+            Some(Action::Call(call)),
+            what,
+        );
+    }
+    let (mut locker, _lock) = lock_session(&mut run);
+    for (code, call, what) in keys {
+        acts(
+            &mut locker,
+            &mut run,
+            &[code],
+            Some(Action::Call(call)),
+            what,
+        );
+    }
+    run.stop();
+}
+
+/// Super+Alt+S toggles the screen reader through cosmic-settings-daemon (D13); not while
+/// locked, where it reaches the lock surface.
+#[test]
+fn super_alt_s_toggles_the_screen_reader() {
+    use crate::bindings::cosmic::SCREEN_READER;
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [KEY_LEFTMETA, KEY_LEFTALT, KEY_S];
+    acts(
+        &mut window,
+        &mut run,
+        &keys,
+        Some(Action::Call(&SCREEN_READER)),
+        "Super+Alt+S",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &keys, "locked, Super+Alt+S");
     run.stop();
 }
