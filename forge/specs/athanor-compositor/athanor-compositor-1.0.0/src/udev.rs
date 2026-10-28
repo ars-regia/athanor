@@ -229,6 +229,7 @@ pub fn start(
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
+    state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
 
     let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats).build()?;
@@ -380,6 +381,7 @@ impl State {
         // A key kept before the switch is released on the other terminal, if at all: the record
         // would swallow the next release of that key (`key_input`).
         self.kept_keys.clear();
+        self.super_tap = None;
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning
@@ -450,6 +452,7 @@ impl State {
             }
         }
         self.kept_keys.clear();
+        self.super_tap = None;
         // A failure may have been the switch's: the monitors that failed are tried again.
         drm.failed.clear();
         let device_id = drm.node.dev_id();

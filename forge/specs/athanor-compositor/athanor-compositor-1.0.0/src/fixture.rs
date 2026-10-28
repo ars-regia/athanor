@@ -7847,6 +7847,7 @@ const KEY_T: u32 = 20;
 const KEY_LEFTCTRL: u32 = 29;
 const KEY_A: u32 = 30;
 const KEY_LEFTSHIFT: u32 = 42;
+const KEY_X: u32 = 45;
 const KEY_C: u32 = 46;
 const KEY_V: u32 = 47;
 const KEY_N: u32 = 49;
@@ -8246,5 +8247,108 @@ fn super_space_steps_the_layout_group_even_locked() {
         [0, 1, 0, 1],
         "the bar hears every step"
     );
+    run.stop();
+}
+
+/// Super pressed and released alone shows the launcher, after the client was sent both (D4).
+#[test]
+fn super_alone_shows_the_launcher() {
+    use crate::bindings::Action;
+    use crate::session_calls::LAUNCHER;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let (pressed, released) = sent_to(&mut window, &mut run, &[KEY_LEFTMETA]);
+    assert_eq!(
+        (pressed, released),
+        (vec![KEY_LEFTMETA], vec![KEY_LEFTMETA])
+    );
+    assert_eq!(run.state.fired, [Action::Call(&LAUNCHER)]);
+    run.stop();
+}
+
+/// Super with another key, with a click, or followed by Ctrl shows nothing on its release (D4).
+#[test]
+fn super_with_a_key_or_a_click_shows_nothing() {
+    use smithay::backend::input::KeyState;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    reaches(&mut window, &mut run, &[KEY_LEFTMETA, KEY_X], "Super+X");
+    reaches(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL],
+        "Super then Ctrl",
+    );
+    let meta = smithay::input::keyboard::Keycode::from(KEY_LEFTMETA + 8);
+    let key = |state: &mut State, key_state| {
+        state.key_input(meta, key_state, InputTime::now(), KeyboardSource::Physical);
+    };
+    key(&mut run.state, KeyState::Pressed);
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+    key(&mut run.state, KeyState::Released);
+    window.roundtrip(&mut run);
+    assert!(run.state.fired.is_empty(), "Super with a click");
+    run.stop();
+}
+
+/// Super+C toggles the control center; the client sees no C (CC9).
+#[test]
+fn super_c_toggles_the_control_center() {
+    use crate::bindings::Action;
+    use crate::session_calls::CONTROL_CENTER;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_C],
+        Some(Action::Call(&CONTROL_CENTER)),
+        "Super+C",
+    );
+    run.stop();
+}
+
+/// While locked, Super alone reaches the lock surface and shows nothing (D4).
+#[test]
+fn super_alone_does_nothing_while_locked() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &[KEY_LEFTMETA], "Super");
+    run.stop();
+}
+
+/// A call is stamped with the lock epoch it was asked in: a lock moves the epoch on, so the
+/// worker drops a call asked before it; after an unlock a call carries the current one.
+#[test]
+fn a_call_carries_the_current_lock_epoch() {
+    use crate::session_calls::{Request, SessionCalls, CONTROL_CENTER};
+    use std::sync::atomic::Ordering;
+    let mut run = Running::start(None);
+    let (calls, requests) = SessionCalls::detached();
+    run.state.session_calls = Some(calls);
+    let (mut window, _) = focused_window(&mut run);
+    let super_c = [KEY_LEFTMETA, KEY_C];
+    sent_to(&mut window, &mut run, &super_c);
+    let before = Request {
+        call: &CONTROL_CENTER,
+        epoch: 0,
+    };
+    assert_eq!(requests.try_recv().ok(), Some(before));
+    let (mut locker, lock) = lock_session(&mut run);
+    let epoch = run.state.lock_epoch.load(Ordering::SeqCst);
+    assert_eq!(epoch, 1, "the lock moved the epoch on");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    sent_to(&mut window, &mut run, &super_c);
+    let after = Request {
+        call: &CONTROL_CENTER,
+        epoch,
+    };
+    assert_eq!(requests.try_recv().ok(), Some(after), "the current epoch");
     run.stop();
 }

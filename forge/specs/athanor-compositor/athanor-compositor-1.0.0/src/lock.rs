@@ -63,6 +63,9 @@ impl SessionLockHandler for State {
         if self.lock.as_ref().is_some_and(|lock| lock.lock.is_alive()) {
             return;
         }
+        // A call a key asked for before the lock is not made after it (`session_calls`).
+        self.lock_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();

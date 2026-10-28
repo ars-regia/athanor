@@ -92,6 +92,13 @@ impl State {
             key_state,
             |state, modifiers, handle| match key_state {
                 KeyState::Pressed => {
+                    // Any other press disarms Super alone (D4). Only a hardware key counts: the
+                    // input method sends the keys it forwards a second time, as a virtual
+                    // keyboard's.
+                    if source == KeyboardSource::Physical {
+                        state.super_tap =
+                            bindings::arms_super(modifiers, &handle).then_some(code);
+                    }
                     match bindings::find(modifiers, &handle, state.lock.is_some()) {
                         Some(action) => {
                             state.kept_keys.push(code);
@@ -144,6 +151,12 @@ impl State {
             Some(Some(action)) => self.fire(action),
             Some(None) => {}
         }
+        // Super alone, released: the launcher, after the release has reached the client, which
+        // saw Super pressed (D4). Not while locked (`State::fire`).
+        if key_state == KeyState::Released && self.super_tap == Some(code) {
+            self.super_tap = None;
+            self.fire(bindings::Action::Call(&crate::session_calls::LAUNCHER));
+        }
     }
 
     /// Moves the pointer to `location` and gives it to the surface under it.
@@ -166,6 +179,7 @@ impl State {
 
     /// A button pressed or released: a press first focuses what is under the pointer.
     pub fn button_input(&mut self, button: u32, button_state: ButtonState, time: InputTime) {
+        self.super_tap = None;
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -227,6 +241,7 @@ impl State {
                 self.button_input(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => {
+                self.super_tap = None;
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
@@ -250,6 +265,10 @@ impl State {
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }
+            // No gesture is served yet; one still disarms Super alone (D4).
+            InputEvent::GestureSwipeBegin { .. }
+            | InputEvent::GesturePinchBegin { .. }
+            | InputEvent::GestureHoldBegin { .. } => self.super_tap = None,
             _ => {}
         }
     }

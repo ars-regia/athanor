@@ -5,9 +5,11 @@
 //! every other key, decision 28's six included, is forwarded. The compositor reads no
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
 
+use crate::session_calls::{Call, Request, CONTROL_CENTER};
 use crate::state::State;
 use smithay::desktop::Window;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
+use std::sync::atomic::Ordering;
 
 /// The modifiers of a trigger, as a mask of these bits; Caps Lock and Num Lock are not read.
 const SUPER: u8 = 1;
@@ -39,6 +41,8 @@ pub(crate) enum Action {
     CloseFocused,
     /// Super+Space: the seat's next layout group, the compositor's own (D14).
     NextGroup,
+    /// A method of the session bus, which the session-bus worker calls (D5, D7).
+    Call(&'static Call),
 }
 
 impl Action {
@@ -47,6 +51,7 @@ impl Action {
     pub(crate) fn while_locked(&self) -> bool {
         match self {
             Self::Vt(_) | Self::Terminate | Self::NextGroup => true,
+            Self::Call(call) => call.while_locked,
             Self::Lock | Self::Reveal | Self::CloseFocused => false,
         }
     }
@@ -79,6 +84,7 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER, Keysym::q), Action::CloseFocused),
     (on(ALT, Keysym::F4), Action::CloseFocused),
     (on(SUPER, Keysym::space), Action::NextGroup),
+    (on(SUPER, Keysym::c), Action::Call(&CONTROL_CENTER)),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -96,6 +102,16 @@ fn mask(modifiers: &ModifiersState) -> u8 {
     .into_iter()
     .filter(|(held, _)| *held)
     .fold(0, |mask, (_, bit)| mask | bit)
+}
+
+/// Whether the press of `handle` with `modifiers` arms Super alone (D4): Super_L or Super_R,
+/// with no modifier but Super held.
+pub(crate) fn arms_super(modifiers: &ModifiersState, handle: &KeysymHandle<'_>) -> bool {
+    mask(modifiers) & !SUPER == 0
+        && handle
+            .raw_syms()
+            .iter()
+            .any(|sym| [Keysym::Super_L, Keysym::Super_R].contains(sym))
 }
 
 /// The action of the key `handle` pressed with `modifiers`, if the compositor keeps it: none
@@ -165,7 +181,24 @@ impl State {
             Action::Reveal => {}
             Action::CloseFocused => self.close_focused(),
             Action::NextGroup => self.next_keyboard_group(),
+            Action::Call(call) => self.send_call(call),
         }
+    }
+
+    /// Hands `call` to the session-bus worker, stamped with the lock epoch; with no worker,
+    /// headless, it is only logged.
+    fn send_call(&self, call: &'static Call) {
+        let Some(calls) = &self.session_calls else {
+            tracing::debug!(
+                method = call.method,
+                "no session-bus worker; the call is not made"
+            );
+            return;
+        };
+        calls.send(Request {
+            call,
+            epoch: self.lock_epoch.load(Ordering::SeqCst),
+        });
     }
 
     /// Super+Q and Alt+F4 (D15): the window with the keyboard focus is sent `close`, as
@@ -211,6 +244,7 @@ mod tests {
             Action::Reveal,
             Action::CloseFocused,
             Action::NextGroup,
+            Action::Call(&CONTROL_CENTER),
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(
@@ -242,6 +276,7 @@ mod tests {
         }
         assert!(!Action::CloseFocused.never_inhibited());
         assert!(!Action::NextGroup.never_inhibited());
+        assert!(!Action::Call(&CONTROL_CENTER).never_inhibited());
     }
 
     #[test]

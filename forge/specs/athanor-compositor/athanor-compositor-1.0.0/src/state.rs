@@ -129,6 +129,14 @@ pub struct State {
     /// The actions of the bound keys pressed, in order (`State::fire`); the fixture reads them.
     #[cfg(test)]
     pub fired: Vec<crate::bindings::Action>,
+    /// The press of Super, alone, whose release shows the launcher unless another key, a
+    /// button, an axis or a gesture comes first (plan D4).
+    pub super_tap: Option<Keycode>,
+    /// Counts the locks taken: a request for the session bus carries the epoch it was asked
+    /// in, and the worker drops one asked before a lock (`session_calls`).
+    pub lock_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The session-bus worker of the key bindings; none headless.
+    pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
@@ -331,6 +339,9 @@ impl State {
             kept_keys: Vec::new(),
             #[cfg(test)]
             fired: Vec::new(),
+            super_tap: None,
+            lock_epoch: std::sync::Arc::default(),
+            session_calls: None,
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
             virtual_keymap: None,

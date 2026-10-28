@@ -21,6 +21,7 @@ mod layer;
 mod lock;
 mod output_management;
 mod output_power;
+mod session_calls;
 mod state;
 mod toplevel_state;
 mod xkb_config;

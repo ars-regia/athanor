@@ -272,6 +272,15 @@ the session** (LP5), with Super alone: Super+Shift+Escape is the client's. While
 locked only the terminal switches, Super+Alt+Escape and Super+Space act (section 1), Super+Alt+T
 is kept and acts on nothing, and every other key goes to the lock surface. Decision 28's six
 keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
+
+Super pressed and released alone shows the launcher (`os.athanor.Launcher1.Show`), and Super+C
+toggles the control center (`os.athanor.ControlCenter1.Toggle`); a key, a button, an axis or a
+gesture while Super is held, or a lock, cancels the launcher. Both press and release of Super
+reach the client. The calls go to the session bus from one thread, `session-calls`
+(`src/session_calls.rs`), through a queue of eight: a full queue drops the call with a warning,
+the loop never waits on the bus, and the bus starts either program at its first call. A call
+asked before the session locked is dropped, and a press of Super or Super+C repeated while its
+first call waits is sent once.
 At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
