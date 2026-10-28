@@ -266,12 +266,13 @@ which neither the focused client nor the input method's grab sees, press or rele
 Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compositor, and the
 session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
 with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
-keyboard focus, and to nothing when a layer surface holds it; and **Super+Escape takes the
-keyboard back and locks the session** (LP5), with Super alone: Super+Shift+Escape is the
-client's. While the session is locked only the terminal switches and Super+Alt+Escape act
-(section 1), Super+Alt+T is kept and acts on nothing, and every other key goes to the lock
-surface. Decision 28's six keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the
-client. At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
+keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
+layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
+the session** (LP5), with Super alone: Super+Shift+Escape is the client's. While the session is
+locked only the terminal switches, Super+Alt+Escape and Super+Space act (section 1), Super+Alt+T
+is kept and acts on nothing, and every other key goes to the lock surface. Decision 28's six
+keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
+At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
 its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what `loginctl

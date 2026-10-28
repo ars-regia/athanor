@@ -7852,6 +7852,7 @@ const KEY_V: u32 = 47;
 const KEY_N: u32 = 49;
 const KEY_M: u32 = 50;
 const KEY_LEFTALT: u32 = 56;
+const KEY_SPACE: u32 = 57;
 const KEY_F1: u32 = 59;
 const KEY_F4: u32 = 62;
 const KEY_SYSRQ: u32 = 99;
@@ -8190,5 +8191,60 @@ fn super_q_and_alt_f4_close_the_focused_window() {
         "locked, nothing is closed"
     );
     assert_eq!(run.state.fired.len(), fired);
+    run.stop();
+}
+
+/// Super+Space steps the seat's layout group, the first after the last, unlocked and locked
+/// (D14): the client sees no Space, and every keyboard group object hears the group; under a
+/// keymap of one layout it changes nothing.
+#[test]
+fn super_space_steps_the_layout_group_even_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let space = [KEY_LEFTMETA, KEY_SPACE];
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "one layout",
+    );
+    assert_eq!(run.state.seat_group(), 0, "one layout: no step");
+    two_layouts(&mut run);
+    window.roundtrip(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "to it",
+    );
+    assert_eq!(run.state.seat_group(), 1);
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "back to us",
+    );
+    assert_eq!(run.state.seat_group(), 0, "the first after the last");
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(
+        &mut locker,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "locked",
+    );
+    assert_eq!(run.state.seat_group(), 1, "locked, the group still steps");
+    bar.roundtrip(&mut run);
+    assert_eq!(
+        bar.groups_of(&object),
+        [0, 1, 0, 1],
+        "the bar hears every step"
+    );
     run.stop();
 }

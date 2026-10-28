@@ -37,6 +37,8 @@ pub(crate) enum Action {
     Reveal,
     /// Super+Q and Alt+F4: the window with the keyboard focus is sent `close` (D15).
     CloseFocused,
+    /// Super+Space: the seat's next layout group, the compositor's own (D14).
+    NextGroup,
 }
 
 impl Action {
@@ -44,7 +46,7 @@ impl Action {
     /// section 1's list.
     pub(crate) fn while_locked(&self) -> bool {
         match self {
-            Self::Vt(_) | Self::Terminate => true,
+            Self::Vt(_) | Self::Terminate | Self::NextGroup => true,
             Self::Lock | Self::Reveal | Self::CloseFocused => false,
         }
     }
@@ -76,6 +78,7 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER | ALT, Keysym::t), Action::Reveal),
     (on(SUPER, Keysym::q), Action::CloseFocused),
     (on(ALT, Keysym::F4), Action::CloseFocused),
+    (on(SUPER, Keysym::space), Action::NextGroup),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -161,6 +164,7 @@ impl State {
             }
             Action::Reveal => {}
             Action::CloseFocused => self.close_focused(),
+            Action::NextGroup => self.next_keyboard_group(),
         }
     }
 
@@ -206,13 +210,22 @@ mod tests {
             Action::Terminate,
             Action::Reveal,
             Action::CloseFocused,
+            Action::NextGroup,
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
-        assert_eq!(acting, [Action::Vt(1), Action::Terminate]);
+        assert_eq!(
+            acting,
+            [Action::Vt(1), Action::Terminate, Action::NextGroup]
+        );
         let kept: Vec<Action> = all.into_iter().filter(Action::kept_while_locked).collect();
         assert_eq!(
             kept,
-            [Action::Vt(1), Action::Terminate, Action::Reveal],
+            [
+                Action::Vt(1),
+                Action::Terminate,
+                Action::Reveal,
+                Action::NextGroup
+            ],
             "the reveal key is kept from the lock surface, and acts on nothing"
         );
     }
@@ -228,6 +241,7 @@ mod tests {
             assert!(action.never_inhibited(), "{action:?}");
         }
         assert!(!Action::CloseFocused.never_inhibited());
+        assert!(!Action::NextGroup.never_inhibited());
     }
 
     #[test]
