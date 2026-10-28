@@ -17,7 +17,9 @@ pipeline and installation; the image is specified in
 - **No runtime path into the build tree or `/tmp`.** Load artefacts from installed paths,
   never `target/`; privileged state goes under `/run/athanor`, not `/tmp` (`verify.py paths`).
 - **Only `athanor-compositor-client` depends on COSMIC** or reads its configuration
-  (`verify.py boundary`).
+  (`verify.py boundary`). The one exception is athanor-compositor's `src/xkb_config.rs`, which
+  reads cosmic-comp's keyboard layouts and depends on no COSMIC crate (`doc_own_stack.md`
+  decision 27).
 - **The polkit subject identifies the caller**, not the bus connection, and every action the
   code checks is declared in a `.policy` file (`verify.py polkit polkit-subject`).
 - **Dependency versions** come from `[workspace.dependencies]` in the root `Cargo.toml`.

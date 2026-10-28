@@ -9,7 +9,7 @@
 //! it is installed neither then nor at unlock, and is sent nothing, not even the keymap.
 
 use crate::identity::Privilege;
-use crate::state::{granted, unconfined, State, REPEAT_DELAY, REPEAT_RATE};
+use crate::state::{granted, unconfined, State};
 use smithay::backend::input::{InputTime, KeyState, Keycode};
 use smithay::desktop::{layer_map_for_output, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::{
@@ -223,7 +223,8 @@ impl State {
             return;
         };
         method.grab = Some(grab.clone());
-        grab.repeat_info(REPEAT_RATE, REPEAT_DELAY);
+        let (rate, delay) = self.repeat;
+        grab.repeat_info(rate, delay);
         self.send_keyboard_to_grab();
     }
 

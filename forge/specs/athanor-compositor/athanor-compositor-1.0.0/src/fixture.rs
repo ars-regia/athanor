@@ -3989,6 +3989,175 @@ fn a_virtual_keymap_leaves_the_group_alone() {
     run.stop();
 }
 
+/// An `xkb_config` path in a directory of the test's own.
+fn xkb_file(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("athanor-xkb-{name}-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    dir.join("xkb_config")
+}
+
+/// Writes `text` to `file` as cosmic-config does: a rename into the directory.
+fn write_raw(file: &Path, text: &str) {
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, text).expect("write");
+    std::fs::rename(&tmp, file).expect("rename");
+}
+
+/// Writes the record of the layouts `layout`, each with its default variant.
+fn write_xkb(file: &Path, layout: &str) {
+    let variant = vec![""; layout.split(',').count()].join(",");
+    write_raw(
+        file,
+        &format!(
+            "(rules: \"\", model: \"\", layout: \"{layout}\", variant: \"{variant}\", \
+             options: None, repeat_delay: 600, repeat_rate: 25)"
+        ),
+    );
+}
+
+/// The names of the seat's layouts.
+fn layouts(state: &mut State) -> Vec<String> {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.with_xkb_state(state, |context| {
+        let xkb = context.xkb().lock().expect("xkb");
+        xkb.layouts()
+            .map(|layout| xkb.layout_name(layout).to_owned())
+            .collect()
+    })
+}
+
+/// Whether the seat's Caps Lock is locked.
+fn caps_lock(state: &State) -> bool {
+    let keyboard = state.seat.get_keyboard().expect("a keyboard");
+    keyboard.modifier_state().caps_lock
+}
+
+/// Caps Lock, as evdev numbers it.
+const CAPS: u32 = 58;
+
+/// The file read before the first client gives the seat its layouts and repeat: the bar is sent
+/// that keymap and the first group.
+#[test]
+fn the_seat_starts_from_the_file() {
+    let mut run = Running::start(None);
+    let file = xkb_file("start");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    assert_eq!(layouts(&mut run.state), ["English (US)", "Italian"]);
+    let size = seat_keymap(&mut run.state).len();
+    assert_eq!(bar.client.keymap_size as usize, size, "the bar has that keymap");
+    assert_eq!(bar.groups_of(&object), [0]);
+    assert_eq!(run.state.repeat, (25, 600));
+    run.stop();
+}
+
+/// A change of the file reaches every client with the new keymap; the group, clamped, and Caps
+/// Lock stay, and a virtual keyboard's keymap is replaced by the new one, not the saved one.
+#[test]
+fn a_live_change_rebuilds_the_keymap() {
+    let mut run = Running::start(None);
+    let file = xkb_file("live");
+    write_xkb(&file, "us,it");
+    crate::xkb_config::follow(&mut run.state, &run.event_loop.handle(), file.clone());
+    let (mut window, _) = focused_window(&mut run);
+    let (_keyboard, object) = window.keyboard_group(&mut run);
+    object.set_group(1);
+    key(&mut run.state, CAPS, true);
+    key(&mut run.state, CAPS, false);
+    window.roundtrip(&mut run);
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "us,it,de");
+    window.pump(&mut run, "the three layouts", |client, _| client.keymaps > keymaps);
+    assert_eq!(layouts(&mut run.state).len(), 3);
+    assert_eq!(run.state.seat_group(), 1, "the group stays");
+    assert!(caps_lock(&run.state), "Caps Lock stays");
+    assert_eq!(window.groups_of(&object), [0, 1], "no group is sent twice");
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "fr");
+    window.pump(&mut run, "one layout", |client, _| client.keymaps > keymaps);
+    window.roundtrip(&mut run);
+    assert_eq!(layouts(&mut run.state), ["French"]);
+    assert_eq!(window.groups_of(&object), [0, 1, 0], "the group is clamped");
+
+    write_xkb(&file, "us,it");
+    let keymaps = window.client.keymaps;
+    window.pump(&mut run, "two layouts", |client, _| client.keymaps > keymaps);
+    object.set_group(1);
+    window.roundtrip(&mut run);
+    let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut window, &mut run, 30, true);
+    typist.key(&mut window, &mut run, 30, false);
+    assert!(run.state.virtual_keymap.is_some(), "the virtual keymap is current");
+    let keymaps = window.client.keymaps;
+    write_xkb(&file, "us,it,de");
+    window.pump(&mut run, "the file's keymap", |client, _| client.keymaps > keymaps);
+    assert!(run.state.virtual_keymap.is_none(), "the virtual keymap is dropped");
+    assert_eq!(layouts(&mut run.state).len(), 3, "the file's keymap, not the saved one");
+    assert_eq!(run.state.seat_group(), 1, "the seat's group, not the virtual one");
+    assert!(caps_lock(&run.state), "the seat's Caps Lock");
+    run.stop();
+}
+
+/// A malformed, missing or uncompilable file changes nothing; a good one then applies.
+#[test]
+fn a_malformed_file_keeps_the_last_keymap() {
+    let mut run = Running::start(None);
+    let file = xkb_file("malformed");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    let (mut window, _) = focused_window(&mut run);
+    let (_keyboard, object) = window.keyboard_group(&mut run);
+    object.set_group(1);
+    window.roundtrip(&mut run);
+    let keymaps = window.client.keymaps;
+    write_raw(&file, "(rules: \"\", model: \"\", layout: \"de\"");
+    run.state.load_xkb_config(&file);
+    std::fs::remove_file(&file).expect("removed");
+    run.state.load_xkb_config(&file);
+    write_xkb(&file, "xx");
+    run.state.load_xkb_config(&file);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keymaps, keymaps, "no keymap is sent");
+    assert_eq!(layouts(&mut run.state).len(), 2);
+    assert_eq!(run.state.seat_group(), 1, "the group stays");
+    write_xkb(&file, "us,de");
+    run.state.load_xkb_config(&file);
+    window.roundtrip(&mut run);
+    assert!(window.client.keymaps > keymaps, "a good file applies");
+    assert_eq!(layouts(&mut run.state), ["English (US)", "German"]);
+    run.stop();
+}
+
+/// More than four layouts are refused as a whole; four apply.
+#[test]
+fn more_than_four_layouts_are_refused() {
+    let mut run = Running::start(None);
+    let file = xkb_file("four");
+    write_xkb(&file, "us,it");
+    run.state.load_xkb_config(&file);
+    write_xkb(&file, "us,it,de,fr,es");
+    run.state.load_xkb_config(&file);
+    assert_eq!(layouts(&mut run.state).len(), 2, "five are refused");
+    write_xkb(&file, "us,it,de,fr");
+    run.state.load_xkb_config(&file);
+    assert_eq!(layouts(&mut run.state).len(), 4, "four apply");
+    run.stop();
+}
+
+/// Without a file the keymap of the environment stays.
+#[test]
+fn without_a_file_the_environment_keymap_stays() {
+    let mut run = Running::start(None);
+    let before = seat_keymap(&mut run.state);
+    run.state.load_xkb_config(&xkb_file("absent"));
+    assert_eq!(seat_keymap(&mut run.state), before);
+    assert_eq!(run.state.repeat, (25, 200));
+    run.stop();
+}
+
 /// A window of a fixture client besides the one `Local::toplevel` maps: its surface, its xdg
 /// surface and its toplevel.
 struct Other {

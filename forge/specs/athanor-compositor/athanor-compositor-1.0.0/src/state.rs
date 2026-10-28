@@ -194,6 +194,9 @@ pub struct State {
     pub keyboard_groups: Vec<AthanorKeyboardGroupV1>,
     /// The group the live objects were last sent (`State::send_keyboard_group`).
     pub sent_group: u32,
+    /// The keyboard's repeat, rate then delay as `repeat_info` takes them: `REPEAT_RATE` and
+    /// `REPEAT_DELAY` until `xkb_config` sets it.
+    pub repeat: (i32, i32),
     /// The minimised windows, out of the space, each with the location it is restored at.
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
@@ -348,6 +351,7 @@ impl State {
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
+            repeat: (REPEAT_RATE, REPEAT_DELAY),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),

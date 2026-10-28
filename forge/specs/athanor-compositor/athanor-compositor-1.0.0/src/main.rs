@@ -20,6 +20,7 @@ mod lock;
 mod output_management;
 mod state;
 mod toplevel_state;
+mod xkb_config;
 mod udev;
 mod winit;
 mod workspace;
@@ -133,6 +134,8 @@ fn run() -> Result<(), Error> {
         }
         Options::Drm => udev::start(&mut event_loop, display)?,
     };
+    // The layouts of the file before the first client, which never sees the environment's.
+    xkb_config::start(&mut state, &event_loop.handle());
     let socket = state::listen(&event_loop.handle())?;
     tracing::info!(?socket, ?options, "listening");
     event_loop.run(None, &mut state, |_| {})?;
