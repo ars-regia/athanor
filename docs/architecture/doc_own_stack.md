@@ -9,7 +9,7 @@ started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a tool
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
+2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25 and 2026-10-28; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
 15 in ADR-0126, and decisions 16 to 27 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
