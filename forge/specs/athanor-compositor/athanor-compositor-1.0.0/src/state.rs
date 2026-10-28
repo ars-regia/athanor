@@ -189,8 +189,8 @@ pub struct State {
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
     pub idle_notifier_state: IdleNotifierState<Self>,
-    /// The surfaces of the live idle inhibitors, one entry per inhibitor (`idle_inhibit`).
-    pub inhibitors: Vec<WlSurface>,
+    /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
+    pub inhibitors: HashMap<WlSurface, usize>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
@@ -359,7 +359,7 @@ impl State {
             lock_state,
             lock: None,
             idle_notifier_state,
-            inhibitors: Vec::new(),
+            inhibitors: HashMap::new(),
             workspace_groups: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),

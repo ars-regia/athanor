@@ -268,6 +268,6 @@ fn holds_exclusively(layer: &LayerSurface) -> bool {
 }
 
 /// Whether `surface` shows a buffer.
-fn mapped(surface: &WlSurface) -> bool {
+pub(crate) fn mapped(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }

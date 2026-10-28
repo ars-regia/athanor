@@ -11,18 +11,21 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::compositor::get_parent;
 use smithay::wayland::idle_inhibit::IdleInhibitHandler;
 
+// Neither request re-evaluates the inhibition: the event loop does once its dispatch is done, so
+// a burst of requests costs one evaluation.
 impl IdleInhibitHandler for State {
     fn inhibit(&mut self, surface: WlSurface) {
-        self.inhibitors.push(surface);
-        self.refresh_idle_inhibit();
+        *self.inhibitors.entry(surface).or_default() += 1;
     }
 
     fn uninhibit(&mut self, surface: WlSurface) {
-        // One entry per inhibitor: a surface with two keeps the other.
-        if let Some(at) = self.inhibitors.iter().position(|kept| *kept == surface) {
-            self.inhibitors.swap_remove(at);
+        // A surface with two inhibitors keeps the other.
+        if let Some(count) = self.inhibitors.get_mut(&surface) {
+            *count -= 1;
+            if *count == 0 {
+                self.inhibitors.remove(&surface);
+            }
         }
-        self.refresh_idle_inhibit();
     }
 }
 
@@ -32,16 +35,19 @@ impl State {
     /// commits, minimising, the lock and clients leaving; Smithay only reports the requests.
     pub fn refresh_idle_inhibit(&mut self) {
         // A client that leaves sends no `destroy`: its surfaces die with it.
-        self.inhibitors.retain(Resource::is_alive);
+        self.inhibitors.retain(|surface, _| surface.is_alive());
+        // Each surface is looked at once, however many inhibitors it holds.
         let inhibited = self.lock.is_none()
             && self
                 .inhibitors
-                .iter()
+                .keys()
                 .any(|surface| self.surface_shown(surface));
         self.idle_notifier_state.set_is_inhibited(inhibited);
     }
 
-    /// Whether `surface`, or the window or layer surface it is a subsurface of, is on an output.
+    /// Whether `surface`, or the window or layer surface it is a subsurface of, is on an output
+    /// and draws something: a layer surface is in the layer map from its creation, before any
+    /// buffer.
     fn surface_shown(&self, surface: &WlSurface) -> bool {
         let mut root = surface.clone();
         while let Some(parent) = get_parent(&root) {
@@ -55,6 +61,6 @@ impl State {
             layer_map_for_output(output)
                 .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
                 .is_some()
-        })
+        }) && crate::layer::mapped(&root)
     }
 }

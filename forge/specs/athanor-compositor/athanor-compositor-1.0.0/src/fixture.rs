@@ -3457,6 +3457,52 @@ fn an_idle_inhibitor_holds_while_its_window_is_shown() {
     run.stop();
 }
 
+/// An inhibitor on a layer surface counts once the surface draws, not while it is only in the
+/// layer map.
+#[test]
+fn an_idle_inhibitor_on_a_layer_surface_needs_a_buffer() {
+    use zwlr_layer_surface_v1::Anchor;
+    let mut run = Running::start(None);
+    let mut panel = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = panel.bind(4);
+    let shm: wl_shm::WlShm = panel.bind(1);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = panel.bind(4);
+    let inhibitors: zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1 = panel.bind(1);
+    let qh = panel.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Bottom,
+        "panel".into(),
+        &qh,
+        (),
+    );
+    layer.set_anchor(Anchor::Bottom | Anchor::Left | Anchor::Right);
+    layer.set_size(0, 20);
+    assert!(panel.answer(&mut run, &surface), "the panel is configured");
+    let (serial, width, _) = panel.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let _inhibitor = inhibitors.create_inhibitor(&surface, &qh, ());
+    panel.roundtrip(&mut run);
+    let mut daemon = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = daemon.bind(1);
+    let notifier: ext_idle_notifier_v1::ExtIdleNotifierV1 = daemon.bind(1);
+    let _notification = notifier.get_idle_notification(100, &seat, &daemon.queue.handle(), ());
+    daemon.pump(&mut run, "nothing drawn, the user is idle", |client, _| {
+        client.idle == ["idled"]
+    });
+    let width = i32::try_from(width).expect("a width");
+    let (buffer, _) = panel.buffer(&shm, width, 20, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    panel.roundtrip(&mut run);
+    daemon.pump(&mut run, "drawn, the inhibitor holds", |client, _| {
+        client.idle == ["idled", "resumed"]
+    });
+    run.stop();
+}
+
 /// The lock lets the idle timer run under an inhibiting window, and the unlock holds it again;
 /// a client that leaves takes its inhibitor with it.
 #[test]
