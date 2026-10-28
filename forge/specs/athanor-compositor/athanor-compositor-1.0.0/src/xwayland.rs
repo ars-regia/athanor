@@ -12,9 +12,9 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{Interest, Mode, PostAction, RegistrationToken};
 use smithay::reexports::rustix;
 use smithay::reexports::rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -141,22 +141,34 @@ fn take(lock: &Path) -> Result<bool, Error> {
                 }
                 return Ok(true);
             }
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                let holder = std::fs::read_to_string(lock)
-                    .ok()
-                    .and_then(|text| text.trim().parse::<u32>().ok());
-                match holder {
-                    Some(pid) if !Path::new(&format!("/proc/{pid}")).exists() => {
-                        tracing::info!(lock = %lock.display(), pid, "a stale X11 lock is taken");
-                        remove(lock);
-                    }
-                    _ => return Ok(false),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => match holder(lock) {
+                Some(pid) if !Path::new(&format!("/proc/{pid}")).exists() => {
+                    tracing::info!(lock = %lock.display(), pid, "a stale X11 lock is taken");
+                    remove(lock);
                 }
-            }
+                _ => return Ok(false),
+            },
             Err(error) => return Err(format!("{}: {error}", lock.display()).into()),
         }
     }
     Ok(false)
+}
+
+/// The process id a lock names, read as the X server writes it. Another user can put anything
+/// under the name in `/tmp`: a link is not followed, a FIFO does not block the open, and only
+/// a regular file's first bytes are read.
+fn holder(lock: &Path) -> Option<u32> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(lock)
+        .ok()?;
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(16).read_to_string(&mut text).ok()?;
+    text.trim().parse().ok()
 }
 
 /// The abstract name of `path` reserved, then the socket at `path`, a stale one removed first
@@ -228,6 +240,7 @@ pub fn start(
     listener.set_nonblocking(true)?;
     let handle = state.loop_handle.clone();
     let source = Generic::new(listener.try_clone()?, Interest::READ, Mode::Level);
+    let display_source = Generic::new(display.listener.try_clone()?, Interest::READ, Mode::Level);
     let satellite = handle
         .insert_source(source, move |_, _, state| loop {
             match listener.accept() {
@@ -255,19 +268,31 @@ pub fn start(
                 }
             }
         })
-        .map_err(|e| e.error)?;
+        .map_err(|e| e.error);
     let (exits, exited) = channel::channel();
-    handle
+    let exited = handle
         .insert_source(exited, |event, _, state| {
             if let channel::Event::Msg(status) = event {
                 state.satellite_exited(status);
             }
         })
-        .map_err(|e| e.error)?;
-    let source = Generic::new(display.listener.try_clone()?, Interest::READ, Mode::Level);
+        .map_err(|e| e.error);
     let source = handle
-        .insert_source(source, |_, _, state| Ok(state.x11_client()))
-        .map_err(|e| e.error)?;
+        .insert_source(display_source, |_, _, state| Ok(state.x11_client()))
+        .map_err(|e| e.error);
+    // All three or none: a source left behind would serve a display that is gone.
+    let results = [satellite, exited, source];
+    if let Some(error) = results.iter().find_map(|result| result.as_ref().err()) {
+        let error = format!("the X11 display cannot be watched: {error}");
+        for token in results.iter().flatten() {
+            handle.remove(*token);
+        }
+        remove(&wayland);
+        return Err(error.into());
+    }
+    let [Ok(satellite), Ok(_), Ok(source)] = results else {
+        return Err("the X11 display cannot be watched".into());
+    };
     state.x11 = Some(X11 {
         display,
         wayland,
@@ -389,6 +414,11 @@ impl State {
             match x11.display.listener.accept() {
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::ConnectionAborted | ErrorKind::Interrupted
+                    ) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -507,6 +537,25 @@ mod tests {
         std::fs::write(dir.join(".X0-lock"), "not a pid\n").expect("lock");
         let display = Display::open(&dir).expect("display");
         assert_eq!(display.number, 1);
+        drop(display);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A FIFO or a link another user put under a lock's name holds the display, and opening it
+    /// neither blocks nor follows the link to a file that names a dead process.
+    #[test]
+    fn a_fifo_or_a_linked_lock_is_held() {
+        let dir = dir("fifo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(dir.join(".X0-lock"))
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        let stale = dir.join("stale");
+        std::fs::write(&stale, format!("{:>10}\n", u32::MAX)).expect("stale");
+        std::os::unix::fs::symlink(&stale, dir.join(".X1-lock")).expect("link");
+        let display = Display::open(&dir).expect("display");
+        assert_eq!(display.number, 2);
         drop(display);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
