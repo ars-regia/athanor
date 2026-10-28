@@ -180,21 +180,33 @@ fn mode(on: bool) -> Mode {
 }
 
 impl State {
-    /// Turns `output` on or off, and tells every object that controls it. Nothing happens when
-    /// it already is.
+    /// Turns `output` on or off, and tells every object that controls it the mode it is in:
+    /// an output the backend could not turn off stays on, and its objects are told so.
+    /// Nothing happens when it already is.
     pub fn set_output_power(&mut self, output: &Output, on: bool) {
-        let power = &mut self.output_power;
-        if power.is_on(output) == on {
+        if self.output_power.is_on(output) == on {
             return;
         }
-        if on {
-            power.off.retain(|off| off != output);
-        } else {
+        let on = self.power_output(output, on);
+        let power = &mut self.output_power;
+        power.off.retain(|off| off != output);
+        if !on {
             power.off.push(output.clone());
         }
         for control in power.controls.iter().filter(|c| &c.output == output) {
             control.object.mode(mode(on));
         }
+    }
+
+    /// The backend turned every output on, on a resume: their objects are told so.
+    pub fn power_restored(&mut self) {
+        let power = &mut self.output_power;
+        for control in &power.controls {
+            if power.off.contains(&control.output) {
+                control.object.mode(Mode::On);
+            }
+        }
+        power.off.clear();
     }
 
     /// An output that goes: the objects that controlled it are sent `failed`.

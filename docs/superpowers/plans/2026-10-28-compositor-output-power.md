@@ -46,18 +46,18 @@ Decisions recorded in this plan, each to be named in the pull request; all are t
   - `the_output_turns_on_when_its_controller_goes`: client A sets off, then disconnects; a new object reads `mode on`.
   - `a_removed_output_fails_its_objects`.
   - `an_unknown_mode_is_a_protocol_error`.
-- [ ] **Step 2: Implement** `src/output_power.rs` per D1 to D4 and D9, with `State::set_output_power(&Output, bool)` calling `Backend::set_power` (a no-op on winit and headless).
+- [ ] **Step 2: Implement** `src/output_power.rs` per D1 to D4 and D9, with `State::set_output_power(&Output, bool)` recording the mode; Task 2 has it call the backend.
 - [ ] **Step 3: Run** on the laptop: `rig.sh cargo test --locked -j 4 -p athanor-compositor output_power` and the whole crate; clippy `-D warnings`; `python3 scripts/verify.py panics allow-list`.
 - [ ] **Step 4: Commit** `feat(compositor): serve zwlr_output_power_v1 to a granted client`.
 
 ## Task 2: The DRM backend
 
 **Files:**
-- Modify: `src/udev.rs` (`Head::powered`, `Drm::set_power`, `draw`, `lock_shown`, `resume`, `connected`, `disconnected`)
+- Modify: `src/udev.rs` (`Head::powered`, `State::power_output`, `draw`, `request_redraw`, `lock_shown`, `resume`, `set_up`), `src/output_power.rs` (`set_output_power` calls `power_output`; `power_restored`)
 
 - [ ] **Step 1: Write the unit tests** beside `the_lock_is_confirmed_only_by_locked_frames_on_every_screen`:
   - `an_output_that_is_off_shows_the_lock`: `lock_shown` over one head off and one head with a locked frame shown is true; over one head off and one head with an unlocked frame, false.
-  - `an_output_that_is_off_is_not_drawn`: `pacing`'s caller `next_draw` returns `None` for a head that is off, whatever it wanted.
+  - Not a unit test: an output that is off is not drawn. `draw` and `request_redraw` hold the head, which only a DRM device builds; the console check of Task 3 sees it.
 - [ ] **Step 2: Implement** D5 to D8.
 - [ ] **Step 3: Run** as Task 1, Step 3.
 - [ ] **Step 4: Commit** `feat(compositor): turn a DRM output off and on at the power client's request`.
