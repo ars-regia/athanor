@@ -691,14 +691,18 @@ amendment's audit:
       amount, but the controls this decision hides (the magnifier, inversion and filter rows,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
       history's switch), and the move of the neighbouring controls their absence causes:
-      where a case of `cases.py` shows the control (every case of the bar's surfaces and of
-      `dock` in `cases.SURFACES`, and the `layout-*` cases of `cases.layout_cases()` whose
-      preset carries it), one entry per case and hidden control, covering its absence and the move it
+      where a case of `cases.py` draws the control under the preset and the dock setting it
+      runs with (`doc_bar.md` BR3: the bar's workspaces module in the bar's surfaces and
+      layout cases under the `float` and `minimal` presets; its application library button
+      there and under the `bar` preset; the magnifier, inversion and filter rows in
+      `bar-accessibility` only; the dock's buttons in `dock` and in the layout cases whose
+      dock is visible, not auto-hidden or none), one entry per case and hidden control, covering its absence and the move it
       causes, is recorded in `athanor-differences.toml` with a cause that names this decision
       and the control, such as "decision 28 hides the workspaces module", and the issue that
       tracks that control's return, since `golden_report.py` takes one entry per case and
       cause; `golden_report.py` checks only that a differing case has an entry, so the
-      switch's pull request adds the check that each such case names each control it hides; the Settings rows and the clipboard history's switch, which no case shows, are
+      switch's pull request adds the check that each such case names each control it hides,
+      deriving which cases draw which control from that rule; the Settings rows and the clipboard history's switch, which no case shows, are
       covered by the fixture or acceptance test that shows them hidden; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
