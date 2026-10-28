@@ -314,15 +314,31 @@ impl Watch {
         Ok(watch)
     }
 
-    /// Watches the directory, or its nearest existing ancestor, in place of the last watch:
-    /// the same path is watched again, since its directory may have been made anew.
-    fn arm(&mut self) -> nix::Result<()> {
-        let target = self
-            .dir
+    /// The directory, or its nearest existing ancestor.
+    fn nearest(&self) -> nix::Result<PathBuf> {
+        self.dir
             .ancestors()
             .find(|path| path.is_dir())
-            .ok_or(Errno::ENOENT)?
-            .to_path_buf();
+            .map(Path::to_path_buf)
+            .ok_or(Errno::ENOENT)
+    }
+
+    /// Watches the directory, or its nearest existing ancestor, in place of the last watch:
+    /// the same path is watched again, since its directory may have been made anew. A
+    /// component made between the lookup and the new watch raised no event on it, so the
+    /// lookup runs again until the watched path is still the nearest.
+    fn arm(&mut self) -> nix::Result<()> {
+        loop {
+            let target = self.nearest()?;
+            self.watch(target.clone())?;
+            if self.nearest()? == target {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Moves the watch to `target`.
+    fn watch(&mut self, target: PathBuf) -> nix::Result<()> {
         let last = self.watched.take();
         if let Some((_, old)) = &last {
             // A watch whose directory went is already removed: EINVAL is no error.
@@ -440,6 +456,7 @@ impl State {
     /// nothing, a virtual keyboard's current keymap included.
     fn apply_xkb_config(&mut self, settings: &Settings, path: &Path) {
         let Some(keyboard) = self.seat.get_keyboard() else {
+            tracing::warn!(?path, "the seat has no keyboard: xkb_config is not applied");
             return;
         };
         let (locked, group) = match &self.virtual_keymap {
