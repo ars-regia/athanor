@@ -658,14 +658,15 @@ amendment's audit:
     the overview and the window switcher on Alt+Tab have come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
-      under the own compositor, each started by the session's supervisor inside the logind
+      under the own compositor, each started by a supervisor inside the logind
       session, since cosmic-greeter finds its session through its parent
       (`doc_lock_and_prompts.md` section 1), in a scope of its own,
       `cosmic-greeter-locker.scope` and `cosmic-idle.scope`, which gives the allow-list a unit
       to name where the session's `session-<id>.scope` changes at every sign-in; revision 4
-      of `doc_session.md` (SN15) stops a previous session's scopes that are still loaded
-      before the new ones start, and its supervisor restarts a component that exits or
-      cannot start, with its back-off, and logs at `err` one that keeps failing; the locker's
+      of `doc_session.md` (SN15) is to specify that supervisor, the stop of a previous
+      session's scopes that are still loaded before the new ones start, and the restart of a
+      component that exits or cannot start, with a back-off, logged at `err` when it keeps
+      failing; the locker's
       line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
       through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
       layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
@@ -690,12 +691,14 @@ amendment's audit:
       amount, but the controls this decision hides (the magnifier, inversion and filter rows,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
       history's switch), and the move of the neighbouring controls their absence causes:
-      where a case of `cases.py` shows the control (the bar, its accessibility popover, the
-      dock), one entry per case and hidden control, covering its absence and the move it
+      where a case of `cases.py` shows the control (every case of the bar's surfaces and of
+      `dock` in `cases.SURFACES`, and the `layout-*` cases of `cases.layout_cases()` whose
+      preset carries it), one entry per case and hidden control, covering its absence and the move it
       causes, is recorded in `athanor-differences.toml` with a cause that names this decision
       and the control, such as "decision 28 hides the workspaces module", and the issue that
       tracks that control's return, since `golden_report.py` takes one entry per case and
-      cause; the Settings rows and the clipboard history's switch, which no case shows, are
+      cause; `golden_report.py` checks only that a differing case has an entry, so the
+      switch's pull request adds the check that each such case names each control it hides; the Settings rows and the clipboard history's switch, which no case shows, are
       covered by the fixture or acceptance test that shows them hidden; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
@@ -743,7 +746,8 @@ amendment's audit:
       readiness gate does not return to the greeter at every sign-in; a compositor that serves
       the gate and draws nothing is not detected, and its user picks cosmic-comp's session at
       the greeter), SN15 (cosmic-greeter as the locker, cosmic-idle and
-      cosmic-osd run under the own compositor, and the variable that keeps units out is renamed
+      cosmic-osd run under the own compositor, the first two under the supervisor, the stop
+      of a previous session's scopes and the restart with back-off of gap 1 above, and the variable that keeps units out is renamed
       for what still stays out), SN16 (the gaps the switch closes), step 6 of SN13, section 6,
       items 1, 5, 7 and 9, and acceptance items 9 to 13, 15 and 16. In items 11 to 13 a session that fails
       before its target is active (item 11's compositor that exits at once, item 12's readiness
