@@ -38,7 +38,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 5: what milestones C1 and T1 measured.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
-- Amended on 2026-10-28: decision 27; decision 28, with OS19's lead-in and section 6, step 4.
+- Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and items 1 to 5, decision 10
+  and section 6, step 4.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -252,8 +253,9 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
   (OS4), and its description is in the repository, versioned, before its first client;
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
-- for cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings, which ADR-0103 D13 keeps in
-  1.0, either the protocols each uses or its replacement by a component of Athanor's (ADR-0121).
+- for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
+  protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
+  is replaced in 1.0 by `athanor-overview` (decision 28).
   Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
   process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
@@ -295,8 +297,9 @@ assigns in Settings, system actions and custom commands, keep `athanor_composito
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, and Super+= and Super+- until the own compositor has the magnifier; their
-fixture tests come with them.
+overview comes, Super+= and Super+- until the own compositor has the magnifier, Super+A
+until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
+their own fixture tests come with them.
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
@@ -340,7 +343,8 @@ libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 
 **OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
 (section 6, step 4) when each of the following holds, recorded in the pull request that takes
-cosmic-comp's session off the greeter, which also waits for the overview (decision 28). Decision 28 makes it the default session before then, on
+cosmic-comp's session off the greeter, which also waits for the overview and the window
+switcher on Alt+Tab (decision 28). Decision 28 makes it the default session before then, on
 the parts of them it names, recorded in the pull request that makes it the default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
@@ -354,8 +358,9 @@ the parts of them it names, recorded in the pull request that makes it the defau
    cases there (C1 results, section 3).
 2. **OS4 and OS5 tested in the fixture of OS6:** each requirement of OS4, OS5 and OS12 to OS17 has a
    fixture test, the identity's limits and the trusted path included, and the bar shows its 8
-   interactive widgets (7 under decision 28 until the overview comes, the workspaces module
-   hidden).
+   interactive widgets (6 under decision 28, the workspaces module hidden until the overview
+   comes and the applications module until the application library ships), and the dock its
+   4 (2 under decision 28, the workspaces and applications buttons hidden).
 3. **AX17's scenarios pass, and Orca's transcripts are no poorer than on cosmic-comp,** in the rig
    and in the development VM, whose part needs `athanor-a11y`, the AX5 gate and the AX4 monitor (OS9
    plan, question 9). The keyboard aids, the magnifier and the colour filters are in
@@ -538,7 +543,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    console sessions, the image installs the compositor as an optional session chosen at the
    greeter, cosmic-comp staying the default, under the conditions of decision 10. Decision 28
    then makes it the default session before the acceptance holds in full, cosmic-comp's session
-   staying at the greeter as the second choice until it does and the overview has come.
+   staying at the greeter as the second choice until it does and the overview and the window switcher on Alt+Tab have come.
 5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the
    layout chooser first, then the dock, the launcher, the bar and the control centre; the greeter
    last, because it handles the password (AGENTS.md, "Stop and ask before editing").
@@ -632,7 +637,7 @@ audit found that the plan crossed SH2's boundary:
     at its start and at each change, and rebuilds the seat's keymap and key repeat from it. A file
     it refuses (malformed, more than the four layouts LN9 allows, a keymap libxkbcommon cannot
     compile) changes nothing and is logged; without a file the keymap is the one `XKB_DEFAULT_*`
-    gives (SN15). The reader is the one exception to SH2's containment outside
+    gives (SN15). The reader is an exception to SH2's containment outside
     `athanor-compositor-client`: one source file of the compositor, which reads that file, writes
     nothing in the user's configuration and names no other COSMIC key, named by path in SH2's
     exceptions and in `verify.py boundary`. It leaves when the store moves with the compositor
@@ -641,7 +646,7 @@ audit found that the plan crossed SH2's boundary:
     bring gio and glib into the compositor; a store of Athanor's own now, a revision of LN9.
 
 Taken by the maintainer on 2026-10-28, when the switch on the full acceptance was estimated at ten
-to eleven weeks and the own compositor was wanted as the default session within one; the gaps of
+to eleven weeks, an estimate from the count and order of the remaining tasks and not a measurement, and the own compositor was wanted as the default session within one week; the gaps of
 `doc_session.md` SN16 that would reach the default session were added the same day, after the
 amendment's audit:
 
@@ -649,24 +654,72 @@ amendment's audit:
     10 and ADR-0122 decision 1, ADR-0132; reverses `doc_session.md` section 6, item 1, and SN14's
     "No fallback when the preview fails"). The own compositor becomes the image's default session before
     OS19 holds in full, in a pull request that records the evidence of each condition below.
-    cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full,
-    which release 1.0 waits for, and leaves the greeter then. The switch waits for:
+    cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full and
+    the overview and the window switcher on Alt+Tab have come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
-      under the own compositor, each with its line in the allow-list, cosmic-idle blanking the
-      outputs through `zwlr_output_power_manager_v1`; a polkit agent (gap 2), cosmic-osd with its line;
-      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7).
+      under the own compositor, each started by a supervisor inside the logind
+      session, since cosmic-greeter finds its session through its parent
+      (`doc_lock_and_prompts.md` section 1), in a scope of its own,
+      `cosmic-greeter-locker.scope` and `cosmic-idle.scope`, which gives the allow-list a unit
+      to name where the session's `session-<id>.scope` changes at every sign-in; revision 4
+      of `doc_session.md` (SN15) is to specify that supervisor, the stop of a previous
+      session's scopes that are still loaded before the new ones start, and the restart of a
+      component that exits or cannot start, with a back-off, logged at `err` when it keeps
+      failing; the locker's
+      line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
+      through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
+      layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
+      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
+      the keys of the overview, the magnifier, the application library and the clipboard history
+      named below. The switch's pull request shows, from inside
+      `cosmic-idle.scope`, `loginctl lock-session` locking the session, which logind resolves
+      through its session `auto`, and the locker's `GetSessionByPID` of its parent answering;
+      if the first fails, cosmic-idle's lock command names the session by `XDG_SESSION_ID`.
+      The two scope names have no unit file, so an unconfined process of the user can create
+      either and run the real executable in it: this grants nothing that OS4 does not already
+      leave to unconfined code running as the user, which can shadow a shipped service with a
+      unit of its own, and rests on confined clients not reaching the user manager.
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
+      Data control, the other half of gap 6, has no client there either: the clipboard history
+      of `doc_control_center.md` CC10 collects nothing, so its switch is hidden and Super+V
+      unbound, a loss the switch's pull request names.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2;
     - item 1 for every difference that hides, moves or changes a control or a text, by any
-      amount, and for every difference of colour in a high-contrast variant or in the contrast of
+      amount, but the controls this decision hides (the magnifier, inversion and filter rows,
+      the workspaces and applications buttons of the bar and of the dock, the clipboard
+      history's switch), and the move of the neighbouring controls their absence causes:
+      where a case of `cases.py` draws the control under the preset and the dock setting it
+      runs with (`doc_bar.md` BR7, the presets' table and the dock, `doc_shell.md` SH7, and
+      the surfaces `rig.sh` draws: the bar's workspaces module in the bar's surfaces and
+      layout cases under the `float` and `minimal` presets; its application library button
+      there and under the `bar` preset; the magnifier, inversion and filter rows in
+      `bar-accessibility` only; the dock's buttons in `dock` and in the layout cases whose
+      dock is visible, not auto-hidden or none), one entry per case and hidden control, covering its absence and the move it
+      causes, is recorded in `athanor-differences.toml` with a cause that names this decision
+      and the control, such as "decision 28 hides the workspaces module", and the issue that
+      tracks that control's return, since `golden_report.py` takes one entry per case and
+      cause; `golden_report.py` checks only that a differing case has an entry, so the
+      switch's pull request adds the check that each such case names each control it hides,
+      deriving which cases draw which control from that rule; the Settings rows and the clipboard history's switch, which no case shows, are
+      covered by the fixture or acceptance test that shows them hidden; and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
-    - item 2 in full;
+    - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
+      filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and what
+      only the overview binds (a private interface that pins and reorders workspaces, which OS5
+      gains with the amendment that introduces it). The
+      bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
+      item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
-      until the own compositor has them. `athanor-compositor-session`, before it starts the
+      until the own compositor has them, and but the transcripts' lines of the controls this
+      decision hides: `atspi_compare.py` and `orca_compare.py`, which fail today on a
+      missing element or utterance, gain with the switch's code a list of exemptions, each
+      naming this decision as its reason and the control's issue, and an exemption for an
+      element that is present fails, as `golden_report.py` fails an explanation without a
+      difference. `athanor-compositor-session`, before it starts the
       compositor, starts cosmic-comp's session in its place when the user has either on, and
       says why in the journal, whichever entry the greeter had checked. The magnifier is on
       when `ATHANOR_A11Y`, the greeter's hand-off (`doc_accessibility.md` AX13), names
@@ -674,11 +727,18 @@ amendment's audit:
       `org.gnome.desktop.a11y.applications screen-magnifier-enabled`, is true or cannot be
       read; the script reads both, so it does not depend on `athanor-a11y apply-greeter`
       having run first. The filters persist in cosmic-comp's `a11y_screen_filter.ron`
-      (`doc_accessibility.md` section 1): the script asks the compositor's binary, since a shell
-      script does not parse RON, whether the file holds an inversion or a filter; an absent
-      file is off, and a file that holds either, or cannot be read or parsed, is on. Under the
+      (`doc_accessibility.md` section 1): the script asks the compositor's binary,
+      `athanor-compositor --screen-filter-on`, since a shell script does not parse RON, whether
+      the file holds an inversion or a filter; an absent file, or one that holds neither, is off
+      (exit status 0), and a file that holds either is on (status 10); any other status, a
+      file that cannot be read or parsed, an abort or a signal, counts as on. Its reader, one source file of the
+      compositor, `src/screen_filter.rs`, reads that file and writes nothing: an exception to
+      SH2's containment beside decision 27's, named by path in SH2's exceptions and in
+      `verify.py boundary`, which leaves when cosmic-comp's session leaves the greeter. Under the
       own compositor the magnifier, inversion and filter controls of the bar and of Settings
-      are hidden, and Super+= and Super+- unbound (OS13);
+      are hidden, and Super+= and Super+- unbound (OS13). A user who zooms only with those keys,
+      which persist nothing, is not detected: they pick cosmic-comp's session at the greeter,
+      whose entry says that it has the magnifier (revision 4 of `doc_session.md`);
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
       hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
       8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back;
@@ -686,24 +746,50 @@ amendment's audit:
     - revision 4 of `doc_session.md`, approved and merged in a pull request of its own before the
       switch's code is written, as revision 3 was (ADR-0122 decision 1, ADR-0074). It rewrites SN14 (the own compositor's entry the
       default, cosmic-comp's the second, the preview's line gone; a compositor that fails before
-      it is ready hands the sign-in to cosmic-comp's session, logged, so that no machine returns
-      to the greeter at every sign-in), SN15 (cosmic-greeter as the locker, cosmic-idle and
-      cosmic-osd run under the own compositor, and the variable that keeps units out is renamed
+      the session has started, `athanor-session.target` active, hands the sign-in to cosmic-comp's
+      session, logged, so that a machine whose compositor does not start or does not serve the
+      readiness gate does not return to the greeter at every sign-in; a compositor that serves
+      the gate and draws nothing is not detected, and its user picks cosmic-comp's session at
+      the greeter), SN15 (cosmic-greeter as the locker, cosmic-idle and
+      cosmic-osd run under the own compositor, the first two under the supervisor, the stop
+      of a previous session's scopes and the restart with back-off of gap 1 above, and the variable that keeps units out is renamed
       for what still stays out), SN16 (the gaps the switch closes), step 6 of SN13, section 6,
-      item 1, and acceptance items 9 to 13, 15 and 16. In items 11 to 13 a compositor that fails
-      before it sends `READY=1` (item 13, and item 11's compositor that exits at once) hands the
-      sign-in to cosmic-comp's session, and one that fails after it (item 11's `SIGKILL`, item
-      12) still returns to the greeter; new items cover the fallback for the magnifier, for
+      items 1, 5, 7 and 9, and acceptance items 9 to 13, 15 and 16. In items 11 to 13 a session that fails
+      before its target is active (item 11's compositor that exits at once, item 12's readiness
+      gate, item 13) hands the sign-in to cosmic-comp's session, and a compositor that ends after
+      it (item 11's `SIGKILL`) still returns to the greeter; new items cover the fallback for the magnifier, for
       the filters and for a file that cannot be read;
     - every way `doc_overview.md` OV1 opens the overview, until the overview comes: the bar's
       workspaces module and the dock's workspaces button hidden under the own compositor,
       Super+W and `XF86LaunchA` unbound (OS13), and neither the three-finger swipe nor the hot
       corner served. The window switcher on Alt+Tab, which `doc_overview.md` owns and designs
-      in a later revision, follows with the overview: until then the default session switches
-      windows through the dock and the bar.
+      in a later revision, is absent from the default session until it is built, a loss the
+      switch's pull request names: until then the default session switches
+      windows through the dock and the bar, by keyboard through Ctrl+Alt+Tab to the dock
+      (`doc_accessibility.md` AX7), which the switch's pull request shows activating a window.
+      Super+1 to Super+0 and Super+Ctrl with the arrows stay bound and switch workspaces
+      without the indicator of `doc_overview.md` OV12, a loss the switch's pull request names;
+    - the Launcher buttons of the bar and of the dock, which open cosmic-launcher today
+      (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
+      allow-list: under the own compositor they open `athanor-launcher`, which has its line,
+      through its D-Bus activation (`doc_launcher.md` LA8), before LA12's switch, which this
+      decision does not change for cosmic-comp's session. The client chooses the program by the
+      compositor it is connected to: `athanor_toplevel_manager_v1`, which only the own
+      compositor offers, selects `athanor-launcher`, and its absence cosmic-launcher.
+      The Application library buttons of the bar and of the dock, which open
+      cosmic-app-library, are hidden under the own compositor and Super+A unbound (OS13), since the application library is a program of its
+      own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
+      in the allow-list, after the switch, and the switch's pull request names the loss.
 
-    The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
-    it follows the switch, and release 1.0 waits for it (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
+    an item of OS19: it follows the switch, and cosmic-workspaces' retirement moves from 1.1 to 1.0
+    with it (`release-1.0.md`), and release 1.0 waits for it and for the window switcher on Alt+Tab.
+    The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
+    own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
+    and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
+    and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
+    step 5 are amended to say so in the first pull request of the overview's implementation
+    (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -730,6 +816,7 @@ amendment's audit:
   rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
+- **Release 1.0 also waits for the overview and the window switcher on Alt+Tab** (decision 28).
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.

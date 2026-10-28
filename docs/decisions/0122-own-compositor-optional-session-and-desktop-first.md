@@ -53,7 +53,7 @@ builds only while 0.9's rig is idle; both put the compositor in daily use later 
   the compositor is in the image as an optional session before release 1.0. Release 1.0 still
   waits for its acceptance. After the amendment the compositor becomes the default session
   before then, and release 1.0 takes cosmic-comp's session off the greeter.
-- While cosmic-comp is the default, the patch register of `doc_compositor.md` CO3 applies to it
+- While cosmic-comp's session is shipped, the patch register of `doc_compositor.md` CO3 applies to it
   unchanged, and `doc_shell.md` SH2 and `doc_compositor.md` CO4 hold as ADR-0121 says.
 - The C1 plan gains task 9a, the optional session, with the conditions of decision 1.
 - A defect of the optional session reaches only the machines whose user picks it at the greeter;
@@ -66,5 +66,5 @@ On 2026-10-28 the maintainer amended decision 1 through `doc_own_stack.md` decis
 own compositor becomes the default session before its acceptance holds in full, once the gaps of
 `doc_session.md` SN16 that would reach the default session are closed and on the parts of OS19
 that decision names. cosmic-comp's session stays at the greeter as the second choice until the
-acceptance holds in full, and a defect of the own compositor then reaches every machine whose
+acceptance holds in full and the overview and the window switcher on Alt+Tab have come, and a defect of the own compositor then reaches every machine whose
 user does not choose cosmic-comp's session.

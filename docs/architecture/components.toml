@@ -253,7 +253,7 @@ area = "shell"
 status = "specified"
 spec = "doc_own_stack.md"
 item = "OS3"
-purpose = "Athanor's own Wayland compositor on Smithay; the default session once decision 28 of doc_own_stack.md holds, the only one once it passes OS19"
+purpose = "Athanor's own Wayland compositor on Smithay; the default session once decision 28 of doc_own_stack.md holds, the only one once it passes OS19 and the overview and the window switcher on Alt+Tab have come"
 
 [[component]]
 path = "forge/specs/athanor-layout-chooser"
