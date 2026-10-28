@@ -654,9 +654,16 @@ amendment's audit:
     the overview has come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
-      under the own compositor, each with its line in the allow-list, cosmic-idle blanking the
-      outputs through `zwlr_output_power_manager_v1`; a polkit agent (gap 2), cosmic-osd with its line;
-      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7).
+      under the own compositor, each started by the session's supervisor inside the logind
+      session, since cosmic-greeter finds its session through its parent
+      (`doc_lock_and_prompts.md` section 1), in a scope of its own,
+      `cosmic-greeter-locker.scope` and `cosmic-idle.scope`, which gives the allow-list a unit
+      to name where the session's `session-<id>.scope` changes at every sign-in; the locker's
+      line grants `ext_session_lock_manager_v1`, the idle daemon's `zwlr_output_power_manager_v1`,
+      through which it blanks the outputs, and `zwlr_layer_shell_v1`, for its fade on the overlay
+      layer (`doc_session_daemons.md`); a polkit agent (gap 2), cosmic-osd with its line;
+      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7), but
+      the keys of the overview, the magnifier and the application library named below.
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
@@ -695,14 +702,17 @@ amendment's audit:
     - revision 4 of `doc_session.md`, approved and merged in a pull request of its own before the
       switch's code is written, as revision 3 was (ADR-0122 decision 1, ADR-0074). It rewrites SN14 (the own compositor's entry the
       default, cosmic-comp's the second, the preview's line gone; a compositor that fails before
-      it is ready hands the sign-in to cosmic-comp's session, logged, so that no machine returns
-      to the greeter at every sign-in), SN15 (cosmic-greeter as the locker, cosmic-idle and
+      the session has started, `athanor-session.target` active, hands the sign-in to cosmic-comp's
+      session, logged, so that a machine whose compositor does not start or does not serve the
+      readiness gate does not return to the greeter at every sign-in; a compositor that serves
+      the gate and draws nothing is not detected, and its user picks cosmic-comp's session at
+      the greeter), SN15 (cosmic-greeter as the locker, cosmic-idle and
       cosmic-osd run under the own compositor, and the variable that keeps units out is renamed
       for what still stays out), SN16 (the gaps the switch closes), step 6 of SN13, section 6,
-      items 1, 5, 7 and 9, and acceptance items 9 to 13, 15 and 16. In items 11 to 13 a compositor that fails
-      before it sends `READY=1` (item 13, and item 11's compositor that exits at once) hands the
-      sign-in to cosmic-comp's session, and one that fails after it (item 11's `SIGKILL`, item
-      12) still returns to the greeter; new items cover the fallback for the magnifier, for
+      items 1, 5, 7 and 9, and acceptance items 9 to 13, 15 and 16. In items 11 to 13 a session that fails
+      before its target is active (item 11's compositor that exits at once, item 12's readiness
+      gate, item 13) hands the sign-in to cosmic-comp's session, and a compositor that ends after
+      it (item 11's `SIGKILL`) still returns to the greeter; new items cover the fallback for the magnifier, for
       the filters and for a file that cannot be read;
     - every way `doc_overview.md` OV1 opens the overview, until the overview comes: the bar's
       workspaces module and the dock's workspaces button hidden under the own compositor,
@@ -711,10 +721,13 @@ amendment's audit:
       in a later revision, follows with the overview: until then the default session switches
       windows through the dock and the bar, by keyboard through Ctrl+Alt+Tab to the dock
       (`doc_accessibility.md` AX7), which the switch's pull request shows activating a window;
-    - the bar's Launcher and Application library buttons, which open cosmic-launcher and
-      cosmic-app-library today (`system/athanor-compositor-client/src/launch.rs`), clients
-      without a line in the allow-list: under the own compositor they open `athanor-launcher`,
-      which has its line, or are hidden.
+    - the bar's Launcher button, which opens cosmic-launcher today
+      (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
+      allow-list: under the own compositor it opens `athanor-launcher`, which has its line. The
+      bar's Application library button, which opens cosmic-app-library, is hidden under the own
+      compositor and Super+A unbound (OS13), since the application library is a program of its
+      own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
+      in the allow-list, after the switch, and the switch's pull request names the loss.
 
     The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
     it follows the switch, and release 1.0 waits for it (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
