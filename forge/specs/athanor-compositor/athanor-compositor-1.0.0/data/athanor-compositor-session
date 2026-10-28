@@ -90,9 +90,19 @@ fi
 sup=
 end_session() {
     trap '' HUP TERM
-    # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated.
-    if [ -n "$sup" ] && ! kill "$sup" && kill -0 "$sup"; then
-        log err "the supervisor of the locker and the idle daemon did not end"
+    # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated. It is
+    # waited for, so that no job of it starts a scope after the stop below. It logs its own
+    # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM.
+    if [ -n "$sup" ]; then
+        if ! kill "$sup" && kill -0 "$sup"; then
+            log err "the supervisor of the locker and the idle daemon did not end"
+        fi
+        sup_status=0
+        wait "$sup" || sup_status=$?
+        case $sup_status in
+            0 | 1 | 143) ;;
+            *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
+        esac
     fi
     if ! stop_component_scopes; then
         log err "a scope of the locker or the idle daemon did not stop"
