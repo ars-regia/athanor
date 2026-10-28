@@ -200,9 +200,10 @@ exporting the tree of a surface the compositor closed: in one run of task 7 with
 observation, not a fixture), the walk passed while the compositor's log said it closed the bar's
 surface and the capture was empty. The check therefore also fails when that log is missing or
 says it closed the bar's surface. The bar
-shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
-`zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
-replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies (decision 19).
+shows 7 interactive widgets, not cosmic-comp's 8: the tiling toggle needs
+`zcosmic_workspace_manager_v2`, whose private replacement `docs/spikes/c1-protocols.md` proposes
+and revision 2 specifies (decision 19); the input source follows
+`athanor_keyboard_group_manager_v1`.
 
 Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
 requires (OS4):
