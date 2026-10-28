@@ -646,7 +646,7 @@ audit found that the plan crossed SH2's boundary:
     bring gio and glib into the compositor; a store of Athanor's own now, a revision of LN9.
 
 Taken by the maintainer on 2026-10-28, when the switch on the full acceptance was estimated at ten
-to eleven weeks and the own compositor was wanted as the default session within one; the gaps of
+to eleven weeks, an estimate from the count and order of the remaining tasks and not a measurement, and the own compositor was wanted as the default session within one week; the gaps of
 `doc_session.md` SN16 that would reach the default session were added the same day, after the
 amendment's audit:
 
