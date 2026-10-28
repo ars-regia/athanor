@@ -24,6 +24,7 @@ wp_cursor_shape_manager_v1 standard
 xdg_activation_v1 standard
 wl_data_device_manager standard
 ext_idle_notifier_v1 standard
+zwp_idle_inhibit_manager_v1 standard
 # On a render node only, and linux-drm-syncobj-v1 only on one that can wait on a syncobj.
 zwp_linux_dmabuf_v1 standard
 wp_linux_drm_syncobj_manager_v1 standard

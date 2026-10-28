@@ -60,6 +60,7 @@ use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
 use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState};
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
+use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
 use smithay::wayland::image_capture_source::{
     OutputCaptureSourceState, ToplevelCaptureSourceState,
@@ -187,6 +188,8 @@ pub struct State {
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
     pub idle_notifier_state: IdleNotifierState<Self>,
+    /// The surfaces of the live idle inhibitors, one entry per inhibitor (`idle_inhibit`).
+    pub inhibitors: Vec<WlSurface>,
     /// The workspace groups sent to the clients of ext-workspace-v1.
     pub workspace_groups: Vec<Group>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
@@ -256,6 +259,7 @@ impl State {
         // cosmic-idle's fade to black (doc_own_stack.md OS17); Smithay draws such a buffer as
         // a solid colour on every renderer.
         SinglePixelBufferState::new::<Self>(&dh);
+        IdleInhibitManagerState::new::<Self>(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
@@ -346,6 +350,7 @@ impl State {
             lock_state,
             lock: None,
             idle_notifier_state,
+            inhibitors: Vec::new(),
             workspace_groups: Vec::new(),
             toplevel_states: Vec::new(),
             minimised: Vec::new(),
