@@ -62,7 +62,7 @@ Decisions recorded in this plan, each to be named in the pull request that appli
 | OV5 strip and grid | 15 | |
 | OV6 thumbnails | 18 | S2, S3 |
 | OV7 pointer actions | 19, 20 | drags within one output |
-| OV8 keyboard and accessibility | 17 | |
+| OV8 keyboard and accessibility | 17, 19 | |
 | OV9 typing hand-off | 23 | `Show` fallback until `Search` exists |
 | OV10 opening and closing | 16, 15 (motion) | |
 | OV11 `ShowApplication` and the dock entry | 22 | the dock's entry is `doc_bar.md`'s change, its own pull request |
@@ -362,7 +362,7 @@ git commit -m "feat(overview): the three surface states, the lock and focus retu
 
 ### Task 17: Keyboard, AT-SPI and Orca
 
-**Files:** `O/src/surface.rs` (focus ring; accessible names "Overview", "Workspace n, k windows" with current and kept states, "<title>, <application>" with minimised; polite announcements), `forge/test/shell/rig.sh` (`atspi overview`, `orca overview`, and the `italian[overview]` entry that `atspi overview it` compiles `O/po/it.po` from), `O/po/it.po` (the new names), `forge/test/shell/golden/atspi/overview*`, `forge/test/shell/golden/orca/overview*`, `.github/workflows/shell-surfaces.yml` (the `overview` job runs `atspi overview` and `atspi overview it`).
+**Files:** `O/src/surface.rs` (focus ring; accessible names "Overview", "Workspace n, k windows" with current and kept states, "<title>, <application>" with minimised; polite announcements), `forge/test/shell/rig.sh` (`atspi overview`, `orca overview`, and the `italian[overview]` entry that `atspi overview it` compiles `O/po/it.po` from), `O/po/it.po` (the new names), `forge/test/shell/golden/atspi/atspi-overview*.json`, `forge/test/shell/golden/orca/orca-overview*.txt`, `.github/workflows/shell-surfaces.yml` (the `overview` job runs `atspi overview` and `atspi overview it`).
 
 - [ ] **Step 1: Write the failing tests:** library navigation tests already pass; Enter on a card, which activates its window through `window_actions()`, comes with the click at Task 19, where `athanor_toplevel_actions_v1` is granted, and Enter on a miniature activates its workspace here; add the AT-SPI walk and the Orca script for the four scenes, English and Italian.
 - [ ] **Step 2: Run them to see them fail.** Run: `rig.sh atspi overview`, `rig.sh atspi overview it`, `rig.sh orca overview`. Expected: FAIL.
@@ -439,7 +439,7 @@ git commit -m "feat(overview): one strip per output and moves between displays (
 
 Two pull requests: the overview's, then the dock's (owner `doc_bar.md`; its entry is added to `doc_bar.md` in the same pull request, CT5).
 
-**Files:** `O/src/bus.rs` and `O/src/model.rs` (filter by `app_id`, all workspaces); `forge/test/shell/cases.py` (the key `overview-application`, 12 cases), `forge/test/shell/rig.sh` (`overview-application` in `capture_surface`, `require_for` and `update-goldens`), `forge/test/shell/locale/overview-de.po` (its strings), `forge/test/shell/tests/test_cases.py` (`OVERVIEW_SCENES` gains it) and `forge/test/shell/tests/test_golden_report.py` (`23 * 12`, 303), `forge/test/shell/golden/overview-application/`; then `forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs` (application menu entry calling `ShowApplication`) and `docs/architecture/doc_bar.md`.
+**Files:** `O/src/bus.rs` and `O/src/model.rs` (filter by `app_id`, all workspaces); `forge/test/shell/cases.py` (the key `overview-application`, 12 cases), `forge/test/shell/rig.sh` (`overview-application` in `capture_surface`, `require_for` and `update-goldens`), `forge/test/shell/locale/overview-de.po` (its strings), `forge/test/shell/tests/test_cases.py` (`OVERVIEW_SCENES` gains it) and `forge/test/shell/tests/test_golden_report.py` (`23 * 12`, 303), `forge/test/shell/golden/overview-application/`; then `forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs` (application menu entry calling `ShowApplication`) and the same entry in `src/toolkit/dock.rs` (OS8), the dock's `po/` files through `po/update.sh`, `forge/test/shell/locale/dock-de.po`, the window menu walk of `orca dock` in `forge/test/shell/rig.sh` and `forge/test/shell/golden/orca/orca-dock.txt` and `orca-dock-it.txt` recorded again, and `docs/architecture/doc_bar.md`.
 
 - [ ] **Step 1: Write the failing tests:** the scene; `overview-e2e` stage `show-application`; the dock's menu test.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
@@ -450,7 +450,7 @@ Two pull requests: the overview's, then the dock's (owner `doc_bar.md`; its entr
 ```bash
 git add forge/specs/athanor-overview forge/test/shell/cases.py forge/test/shell/rig.sh forge/test/shell/locale/overview-de.po forge/test/shell/tests forge/test/shell/golden forge/test/shell/overview_e2e.py
 git commit -m "feat(overview): show the windows of one application (OV11)"
-git add forge/specs/athanor-dock docs/architecture/doc_bar.md
+git add forge/specs/athanor-dock forge/test/shell/locale/dock-de.po forge/test/shell/rig.sh forge/test/shell/golden/orca docs/architecture/doc_bar.md
 git commit -m "feat(dock): show all windows of an application in the overview (OV11)"
 ```
 
@@ -546,13 +546,13 @@ git commit -m "docs(overview): record the gate's measurements (OV19 step 5)"
 - [ ] **Step 1: Write the failing tests:** the `launch.rs` tests name `os.athanor.Overview1` and `Show`; the test LN9 adds for the `system_actions` file expects the `WorkspaceOverview` entry; acceptance 14's script, `scripts/devvm/overview-acceptance.sh`.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement** with exact-match scripts for `packages.json` and docs.
-- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`); under `RIG_COMPOSITOR=athanor`, `rig.sh atspi bar`, `atspi dock` and `golden-report` pass with `rig.sh`'s widget counts raised by one (`forge/test/shell/rig.sh`, the bar's and the dock's `atspi_check.py` counts under athanor) and the rows of `golden/athanor-differences.toml` whose cause is decision 28 hiding the workspaces module or button removed; then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
+- [ ] **Step 4: Run all** `just check` on the laptop (`-j 4`); under `RIG_COMPOSITOR=athanor`, `rig.sh atspi bar`, `atspi dock` and `golden-report` pass with `rig.sh`'s counts under athanor for `bar`, `bar-modules` and `dock` each set to the exact number of widgets shown, one more than decision 28's switch set them (today `bar` 6 at `forge/test/shell/rig.sh:1173-1175`, `bar-modules` 10 at `:1197`, and `dock` a flat 4 at `:1218`, whose athanor branch that switch adds), since `atspi_check.py` checks at least that many and a count left low passes; with the exemptions of the workspaces module and button removed from `forge/test/shell/atspi_compare.py` and `forge/test/shell/orca_compare.py`, which fail an exemption for an element that is present; and with the rows of `golden/athanor-differences.toml` whose cause is decision 28 hiding the workspaces module or button removed; then acceptance 14: `rpm -q cosmic-workspaces` reports it absent, and every opener opens the overview under both compositors; acceptance 5 and 9 measured again through Super+W, `XF86LaunchA`, the bar's module, the dock's button and `Opener::Workspaces`.
 - [ ] **Step 5: Commit**
 
 ```bash
 C=forge/specs/athanor-compositor/athanor-compositor-1.0.0
 : "${LN9_SOURCE:?set it to the system_actions files LN9's change creates, its generator included}"
-git add system/athanor-compositor-client/src/launch.rs system/athanor-compositor-client/examples/cc-probe.rs system/athanor-apps/src/entries.rs "$C/src/input.rs" "$C/src/fixture.rs" forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/mod.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/dock.rs $LN9_SOURCE forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh scripts/devvm/overview-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/architecture/doc_own_stack.md docs/operations/release-1.0.md forge/test/shell/rig.sh forge/test/shell/golden/athanor-differences.toml
+git add system/athanor-compositor-client/src/launch.rs system/athanor-compositor-client/examples/cc-probe.rs system/athanor-apps/src/entries.rs "$C/src/input.rs" "$C/src/fixture.rs" forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/mod.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/ui/surface.rs forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/dock.rs $LN9_SOURCE forge/specs/athanor-overview/athanor-overview-1.0.0/data/80-athanor-overview.preset scripts/devvm/compositor-acceptance.sh scripts/devvm/overview-acceptance.sh forge/config/packages.json docs/architecture/shell-features.md docs/architecture/doc_bar.md docs/architecture/components.toml docs/architecture/doc_own_stack.md docs/operations/release-1.0.md forge/test/shell/rig.sh forge/test/shell/golden/athanor-differences.toml forge/test/shell/atspi_compare.py forge/test/shell/orca_compare.py
 git commit -m "feat(overview): switch every opener to athanor-overview and retire cosmic-workspaces (OV17)"
 ```
 
