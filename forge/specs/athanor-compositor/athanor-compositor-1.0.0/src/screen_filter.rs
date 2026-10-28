@@ -12,14 +12,18 @@ use std::process::ExitCode;
 /// The file, under the state root (cosmic-comp's `place_state_file`).
 const RELATIVE: &str = "cosmic-comp/a11y_screen_filter.ron";
 
-/// The file: under `$XDG_STATE_HOME` when it is absolute, else `$HOME/.local/state`, as the
+/// The file: under `$XDG_STATE_HOME` when it is absolute, else `.local/state` in the home
+/// directory, which is `$HOME` when set and not empty, else the password database's, as the
 /// xdg crate resolves it for cosmic-comp.
 fn path() -> Option<PathBuf> {
     let root = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|root| root.is_absolute())
         .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            // xdg's own call, which skips an empty $HOME; deprecated on older toolchains.
+            #[allow(deprecated)]
+            let home = std::env::home_dir()?;
+            Some(home.join(".local/state"))
         })?;
     Some(root.join(RELATIVE))
 }
@@ -73,7 +77,7 @@ fn on(text: &str) -> Result<bool, Refused> {
 /// either, 1 when it cannot be told, which the script counts as on.
 pub fn answer() -> ExitCode {
     let Some(path) = path() else {
-        eprintln!("athanor-compositor: neither XDG_STATE_HOME nor HOME is set");
+        eprintln!("athanor-compositor: no state root and no home directory");
         return ExitCode::FAILURE;
     };
     match read(&path).and_then(|text| text.as_deref().map_or(Ok(false), on)) {
