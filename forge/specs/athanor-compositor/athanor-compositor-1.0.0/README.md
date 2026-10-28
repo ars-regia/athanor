@@ -3,8 +3,8 @@
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
 (`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). No package ships it yet. Once
 milestone C1's DRM backend has passed the console sessions, the image ships it as an optional
-session at the greeter, under the conditions of decision 10, and cosmic-comp stays the default
-session until this one passes the acceptance of the specification's revision 2 (OS19).
+session at the greeter, under the conditions of decision 10, and decision 28 makes it the default
+session before the full acceptance of OS19, cosmic-comp's session staying at the greeter until 1.0.
 
 ## Smithay
 
