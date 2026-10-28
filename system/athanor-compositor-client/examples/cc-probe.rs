@@ -188,6 +188,10 @@ fn main() -> ExitCode {
         }
     };
     client.connect_events(|_, e| println!("{}", json!({"event": event(e)})));
+    if let Err(err) = client.watch_keyboard_group() {
+        println!("{}", json!({"error": err.to_string()}));
+        return ExitCode::FAILURE;
+    }
     let main_loop = glib::MainLoop::new(None, false);
     let result = std::rc::Rc::new(std::cell::Cell::new(ExitCode::SUCCESS));
     glib::spawn_future_local({

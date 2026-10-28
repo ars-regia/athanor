@@ -84,3 +84,7 @@ pub mod toplevel_state {
         [wayland_protocols::ext::foreign_toplevel_list::v1]
     );
 }
+
+pub mod keyboard_group {
+    generated!("protocols/athanor-keyboard-group-v1.xml", []);
+}
