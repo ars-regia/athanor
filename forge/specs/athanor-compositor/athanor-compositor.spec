@@ -3,22 +3,23 @@
 Name:           athanor-compositor
 Version:        1.0.0
 Release:        1%{?dist}
-Summary:        Athanor's own Wayland compositor, as the preview session
+Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
 BuildRequires:  rust cargo gcc pkgconf-pkg-config systemd-devel libxkbcommon-devel mesa-libgbm-devel pixman-devel libseat-devel libinput-devel
-# The renderer loads libEGL at run time; the session script calls systemctl, loginctl and
-# busctl, starts athanor-session.target (athanor-system-services) and runs the USBGuard hook
-# (athanor-system-config).
-Requires:       systemd mesa-libEGL mesa-dri-drivers athanor-system-services athanor-system-config
+# The renderer loads libEGL at run time; the session script calls systemctl, loginctl,
+# busctl and gsettings, starts athanor-session.target (athanor-system-services), and sources
+# the supervisor of the locker and the idle daemon, runs the USBGuard hook and hands the
+# sign-in to athanor-session (athanor-system-config).
+Requires:       systemd glib2 mesa-libEGL mesa-dri-drivers athanor-system-services athanor-system-config
 
 %description
-Athanor's own Wayland compositor on Smithay (doc_own_stack.md, milestone C1), offered by
-the greeter as "Athanor on the new compositor (preview)" (doc_session.md, SN14 and SN15):
-athanor-compositor-session starts it as the user unit athanor-compositor.service, which
-starts athanor-session.target once the display is ready. The allow-list of the clients
-granted its privileged globals is /usr/share/athanor/compositor/privileged-clients. The
-default session stays on cosmic-comp.
+Athanor's own Wayland compositor on Smithay (doc_own_stack.md, milestone C1), the greeter's
+default session "Athanor" (doc_session.md, SN14 and SN15): athanor-compositor-session starts
+it as the user unit athanor-compositor.service, which starts athanor-session.target once
+the display is ready. The allow-list of the clients granted its privileged globals is
+/usr/share/athanor/compositor/privileged-clients. cosmic-comp's session stays the second
+entry, and takes the sign-in when this one cannot start.
 
 %prep
 
@@ -45,6 +46,7 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 
 %changelog
 * Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
-- First package (doc_session.md, SN13 step 6): the compositor, its user unit, the preview
-  session's script and the allow-list of the bar, the dock, the control center and the
-  launcher.
+- First package (doc_session.md revision 4, SN13 step 6): the compositor, its user unit,
+  the session's script, the greeter's default, which hands the sign-in to cosmic-comp's
+  session when it cannot start, and the allow-list of the bar, the dock, the control
+  center, the launcher, the locker, the idle daemon and cosmic-osd.
