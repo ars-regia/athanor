@@ -1911,8 +1911,8 @@ fn shell_keys(run: &mut Running, steps: &mpsc::Sender<Step>) -> Vec<u32> {
 /// back. A click on a layer surface of the client that takes the keyboard gives it back; one on
 /// its window, or on its bar, which takes none, does not. With no exclusive surface the key asks
 /// for the lock all the same and is not the window's; while the session is locked it is the lock
-/// surface's, and asks for nothing. Super+Shift+Escape is the window's. A lock alone escapes
-/// nobody.
+/// surface's, and asks for nothing. Super+Shift+Escape, the log-out key, asks for no lock. A
+/// lock alone escapes nobody.
 #[test]
 fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let mut run = Running::start(None);
@@ -1921,7 +1921,6 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         focus(state).is_some()
     });
     let window = focus(&run.state);
-    let window_client = window.as_ref().and_then(|s| s.client()).map(|c| c.id());
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
     let client_state = run.state.client_state(&server_end, None);
@@ -2043,7 +2042,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     assert_eq!(focus(&run.state), window, "a new surface does not either");
 
     // No exclusive surface holds the keyboard: Super+Escape asks for the lock all the same, and
-    // is not the window's; Super+Shift+Escape is.
+    // is not the window's; Super+Shift+Escape asks for no lock.
     use smithay::backend::input::{InputTime, KeyState};
     use smithay::input::keyboard::Keycode;
     let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
@@ -2070,6 +2069,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
     run.state
         .key_input(shift, KeyState::Pressed, now(), KeyboardSource::Physical);
+    let shift_sent = run.state.grab_serials.key_press.clone();
     run.state
         .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
@@ -2078,9 +2078,12 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
             .key_input(key, KeyState::Released, now(), KeyboardSource::Physical);
     }
     assert_eq!(
-        escape_sent.map(|(_, to)| to),
-        window_client,
-        "Super+Shift+Escape is the window's"
+        escape_sent, shift_sent,
+        "Super+Shift+Escape is the log-out key, not the window's"
+    );
+    assert_eq!(
+        run.state.fired.last(),
+        Some(&crate::bindings::Action::Run(&crate::session_calls::LOG_OUT))
     );
     assert_eq!(
         run.state.lock_requests,
@@ -7857,14 +7860,21 @@ const KEY_SPACE: u32 = 57;
 const KEY_F1: u32 = 59;
 const KEY_F4: u32 = 62;
 const KEY_SYSRQ: u32 = 99;
+const KEY_MUTE: u32 = 113;
+const KEY_POWER: u32 = 116;
 /// XF86LaunchA in xkeyboard-config's evdev keycodes.
 const KEY_SCALE: u32 = 120;
 const KEY_LEFTMETA: u32 = 125;
+const KEY_NEXTSONG: u32 = 163;
+const KEY_PLAYPAUSE: u32 = 164;
+const KEY_PREVIOUSSONG: u32 = 165;
 const KEY_KBDILLUMTOGGLE: u32 = 228;
 const KEY_KBDILLUMDOWN: u32 = 229;
 const KEY_KBDILLUMUP: u32 = 230;
 const KEY_WLAN: u32 = 238;
 const KEY_RFKILL: u32 = 247;
+const KEY_MICMUTE: u32 = 248;
+const KEY_TOUCHPAD_TOGGLE: u32 = 530;
 
 /// Presses the chord `codes` while `to` holds the keyboard: the presses and the releases `to`
 /// was sent.
@@ -8324,7 +8334,7 @@ fn super_alone_does_nothing_while_locked() {
 /// worker drops a call asked before it; after an unlock a call carries the current one.
 #[test]
 fn a_call_carries_the_current_lock_epoch() {
-    use crate::session_calls::{Request, SessionCalls, CONTROL_CENTER};
+    use crate::session_calls::{Job, Request, SessionCalls, CONTROL_CENTER};
     use std::sync::atomic::Ordering;
     let mut run = Running::start(None);
     let (calls, requests) = SessionCalls::detached();
@@ -8333,7 +8343,7 @@ fn a_call_carries_the_current_lock_epoch() {
     let super_c = [KEY_LEFTMETA, KEY_C];
     sent_to(&mut window, &mut run, &super_c);
     let before = Request {
-        call: &CONTROL_CENTER,
+        job: Job::Call(&CONTROL_CENTER),
         epoch: 0,
     };
     assert_eq!(requests.try_recv().ok(), Some(before));
@@ -8346,9 +8356,113 @@ fn a_call_carries_the_current_lock_epoch() {
     });
     sent_to(&mut window, &mut run, &super_c);
     let after = Request {
-        call: &CONTROL_CENTER,
+        job: Job::Call(&CONTROL_CENTER),
         epoch,
     };
     assert_eq!(requests.try_recv().ok(), Some(after), "the current epoch");
+    run.stop();
+}
+
+/// The media keys run their commands as transient units of the user manager (D6): mute,
+/// microphone mute, play and pause, next and previous, each with the table's vector; locked,
+/// only mute acts, and the others reach the lock surface.
+#[test]
+fn the_media_keys_run_their_commands() {
+    use crate::bindings::Action;
+    use crate::session_calls::{MIC_MUTE, MUTE, NEXT, PLAY_PAUSE, PREVIOUS};
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [
+        (KEY_MUTE, &MUTE, "XF86AudioMute"),
+        (KEY_MICMUTE, &MIC_MUTE, "XF86AudioMicMute"),
+        (KEY_PLAYPAUSE, &PLAY_PAUSE, "XF86AudioPlay"),
+        (KEY_NEXTSONG, &NEXT, "XF86AudioNext"),
+        (KEY_PREVIOUSSONG, &PREVIOUS, "XF86AudioPrev"),
+    ];
+    for (code, command, what) in keys {
+        acts(
+            &mut window,
+            &mut run,
+            &[code],
+            Some(Action::Run(command)),
+            what,
+        );
+    }
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_MUTE],
+        Some(Action::Run(&MUTE)),
+        "locked, XF86AudioMute",
+    );
+    for (code, _, what) in &keys[1..] {
+        reaches(&mut locker, &mut run, &[*code], what);
+    }
+    run.stop();
+}
+
+/// Super+Shift+Escape and `XF86PowerOff` run cosmic-osd's log-out and power dialogs (D6);
+/// neither acts while locked.
+#[test]
+fn the_session_keys_run_their_commands() {
+    use crate::bindings::Action;
+    use crate::session_calls::{LOG_OUT, POWER_OFF};
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let log_out = [KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC];
+    acts(
+        &mut window,
+        &mut run,
+        &log_out,
+        Some(Action::Run(&LOG_OUT)),
+        "Super+Shift+Escape",
+    );
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_POWER],
+        Some(Action::Run(&POWER_OFF)),
+        "XF86PowerOff",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &log_out,
+        "locked, Super+Shift+Escape",
+    );
+    reaches(&mut locker, &mut run, &[KEY_POWER], "locked, XF86PowerOff");
+    run.stop();
+}
+
+/// The touchpad key, alone or with Super+Ctrl, toggles the touchpads (D16); headless there are
+/// none, and the device side is checked at the console. Not while locked.
+#[test]
+fn the_touchpad_key_toggles_the_touchpads() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_TOUCHPAD_TOGGLE],
+        Some(Action::TouchpadToggle),
+        "XF86TouchpadToggle",
+    );
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_TOUCHPAD_TOGGLE],
+        Some(Action::TouchpadToggle),
+        "Super+Ctrl+XF86TouchpadToggle",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_TOUCHPAD_TOGGLE],
+        "locked, XF86TouchpadToggle",
+    );
     run.stop();
 }

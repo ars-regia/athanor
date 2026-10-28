@@ -50,7 +50,9 @@ use smithay::reexports::drm::Device as _;
 use smithay::reexports::input::event::{
     DeviceEvent, EventTrait, KeyboardEvent, PointerEvent, SwitchEvent,
 };
-use smithay::reexports::input::{Event as LibinputEvent, Libinput};
+use smithay::reexports::input::{
+    Device as InputDevice, Event as LibinputEvent, Libinput, SendEventsMode,
+};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::Display;
@@ -97,6 +99,10 @@ pub struct Drm {
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
     cursor: Cursor,
+    /// The devices that can tap, which the touchpad key turns off and on (D16).
+    touchpads: Vec<InputDevice>,
+    /// Whether the touchpad key has turned them off.
+    touchpads_off: bool,
 }
 
 /// What a scheduled draw of an output is for.
@@ -131,6 +137,23 @@ struct Head {
     not_before: Option<Instant>,
     /// Whether it is on: an output the power client turned off draws nothing (`power_output`).
     powered: bool,
+}
+
+/// Turns `device`'s events on or off; a device that cannot is logged.
+fn send_events(device: &InputDevice, on: bool) {
+    let mode = if on {
+        SendEventsMode::ENABLED
+    } else {
+        SendEventsMode::DISABLED
+    };
+    if let Err(error) = device.config_send_events_set_mode(mode) {
+        tracing::warn!(
+            ?error,
+            device = device.sysname(),
+            on,
+            "a touchpad's events could not be switched"
+        );
+    }
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
@@ -226,6 +249,8 @@ pub fn start(
         failed: HashMap::new(),
         nvidia,
         cursor: Cursor::from_env(),
+        touchpads: Vec::new(),
+        touchpads_off: false,
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
@@ -253,6 +278,7 @@ pub fn start(
         .map_err(|e| e.error)?;
     handle
         .insert_source(LibinputInputBackend::new(libinput), |event, _, state| {
+            state.track_touchpads(&event);
             state.process_input_event(event)
         })
         .map_err(|e| e.error)?;
@@ -322,6 +348,44 @@ impl State {
             if let Err(error) = drm.session.change_vt(vt) {
                 tracing::warn!(%error, vt, "the virtual terminal could not be switched");
             }
+        }
+    }
+
+    /// Keeps the touchpads, the devices that can tap, for the touchpad key (D16); one added
+    /// while the key has turned them off starts off.
+    fn track_touchpads(&mut self, event: &InputEvent<LibinputInputBackend>) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        match event {
+            InputEvent::DeviceAdded { device } if device.config_tap_finger_count() > 0 => {
+                if drm.touchpads_off {
+                    send_events(device, false);
+                }
+                drm.touchpads.push(device.clone());
+            }
+            InputEvent::DeviceRemoved { device } => {
+                drm.touchpads.retain(|touchpad| touchpad != device);
+            }
+            _ => {}
+        }
+    }
+
+    /// The touchpad key (D16): every touchpad stops sending events, or starts again, for the
+    /// session; cosmic-comp's setting of it is not read. Nested or headless, there is none.
+    pub(crate) fn toggle_touchpads(&mut self) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            tracing::debug!("no touchpads outside a session of the seat");
+            return;
+        };
+        drm.touchpads_off = !drm.touchpads_off;
+        tracing::info!(
+            off = drm.touchpads_off,
+            touchpads = drm.touchpads.len(),
+            "the touchpad key"
+        );
+        for touchpad in &drm.touchpads {
+            send_events(touchpad, !drm.touchpads_off);
         }
     }
 
@@ -408,7 +472,10 @@ impl State {
                 _ => {}
             }
             match backend_event(event) {
-                Some(event) => self.process_input_event(event),
+                Some(event) => {
+                    self.track_touchpads(&event);
+                    self.process_input_event(event)
+                }
                 // As `process_input_event` does for every event: a touch, a gesture or a
                 // tablet event keeps the session awake although the handler does not act on it.
                 None => self.activity(),

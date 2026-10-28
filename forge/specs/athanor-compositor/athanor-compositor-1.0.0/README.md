@@ -268,9 +268,9 @@ session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of
 with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
 layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
-the session** (LP5), with Super alone: Super+Shift+Escape is the client's. While the session is
-locked only the terminal switches, Super+Alt+Escape and Super+Space act (section 1), Super+Alt+T
-is kept and acts on nothing, and every other key goes to the lock surface. Decision 28's six
+the session** (LP5), with Super alone. While the session is locked only the terminal switches,
+Super+Alt+Escape, Super+Space and the mute key act (section 1), Super+Alt+T is kept and acts on
+nothing, and every other key goes to the lock surface. Decision 28's six
 keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
 
 Super pressed and released alone shows the launcher (`os.athanor.Launcher1.Show`), and Super+C
@@ -281,6 +281,13 @@ reach the client. The calls go to the session bus from one thread, `session-call
 the loop never waits on the bus, and the bus starts either program at its first call. A call
 asked before the session locked is dropped, and a press of Super or Super+C repeated while its
 first call waits is sent once.
+
+The mute, microphone-mute and media keys run `wpctl` and `playerctl` as cosmic-comp's session
+does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. The
+compositor forks nothing: the same thread asks the user manager to run each fixed argument
+vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
+`app.slice` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
+the touchpads' events off and on for the session.
 At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock

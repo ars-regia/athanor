@@ -5,7 +5,10 @@
 //! every other key, decision 28's six included, is forwarded. The compositor reads no
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
 
-use crate::session_calls::{Call, Request, CONTROL_CENTER};
+use crate::session_calls::{
+    Call, Command, Job, Request, CONTROL_CENTER, LOG_OUT, MIC_MUTE, MUTE, NEXT, PLAY_PAUSE,
+    POWER_OFF, PREVIOUS,
+};
 use crate::state::State;
 use smithay::desktop::Window;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
@@ -43,6 +46,10 @@ pub(crate) enum Action {
     NextGroup,
     /// A method of the session bus, which the session-bus worker calls (D5, D7).
     Call(&'static Call),
+    /// A command, which the user manager runs as a transient unit at the worker's request (D6).
+    Run(&'static Command),
+    /// The touchpad key: the touchpads stop or start sending events, for the session (D16).
+    TouchpadToggle,
 }
 
 impl Action {
@@ -52,7 +59,8 @@ impl Action {
         match self {
             Self::Vt(_) | Self::Terminate | Self::NextGroup => true,
             Self::Call(call) => call.while_locked,
-            Self::Lock | Self::Reveal | Self::CloseFocused => false,
+            Self::Run(command) => command.while_locked,
+            Self::Lock | Self::Reveal | Self::CloseFocused | Self::TouchpadToggle => false,
         }
     }
 
@@ -85,6 +93,18 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(ALT, Keysym::F4), Action::CloseFocused),
     (on(SUPER, Keysym::space), Action::NextGroup),
     (on(SUPER, Keysym::c), Action::Call(&CONTROL_CENTER)),
+    (on(0, Keysym::XF86_AudioMute), Action::Run(&MUTE)),
+    (on(0, Keysym::XF86_AudioMicMute), Action::Run(&MIC_MUTE)),
+    (on(0, Keysym::XF86_AudioPlay), Action::Run(&PLAY_PAUSE)),
+    (on(0, Keysym::XF86_AudioNext), Action::Run(&NEXT)),
+    (on(0, Keysym::XF86_AudioPrev), Action::Run(&PREVIOUS)),
+    (on(SUPER | SHIFT, Keysym::Escape), Action::Run(&LOG_OUT)),
+    (on(0, Keysym::XF86_PowerOff), Action::Run(&POWER_OFF)),
+    (on(0, Keysym::XF86_TouchpadToggle), Action::TouchpadToggle),
+    (
+        on(SUPER | CTRL, Keysym::XF86_TouchpadToggle),
+        Action::TouchpadToggle,
+    ),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -181,22 +201,21 @@ impl State {
             Action::Reveal => {}
             Action::CloseFocused => self.close_focused(),
             Action::NextGroup => self.next_keyboard_group(),
-            Action::Call(call) => self.send_call(call),
+            Action::Call(call) => self.send_job(Job::Call(call)),
+            Action::Run(command) => self.send_job(Job::Run(command)),
+            Action::TouchpadToggle => self.toggle_touchpads(),
         }
     }
 
-    /// Hands `call` to the session-bus worker, stamped with the lock epoch; with no worker,
+    /// Hands `job` to the session-bus worker, stamped with the lock epoch; with no worker,
     /// headless, it is only logged.
-    fn send_call(&self, call: &'static Call) {
+    fn send_job(&self, job: Job) {
         let Some(calls) = &self.session_calls else {
-            tracing::debug!(
-                method = call.method,
-                "no session-bus worker; the call is not made"
-            );
+            tracing::debug!(?job, "no session-bus worker; the key's job is not done");
             return;
         };
         calls.send(Request {
-            call,
+            job,
             epoch: self.lock_epoch.load(Ordering::SeqCst),
         });
     }
@@ -245,11 +264,19 @@ mod tests {
             Action::CloseFocused,
             Action::NextGroup,
             Action::Call(&CONTROL_CENTER),
+            Action::Run(&MUTE),
+            Action::Run(&LOG_OUT),
+            Action::TouchpadToggle,
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(
             acting,
-            [Action::Vt(1), Action::Terminate, Action::NextGroup]
+            [
+                Action::Vt(1),
+                Action::Terminate,
+                Action::NextGroup,
+                Action::Run(&MUTE)
+            ]
         );
         let kept: Vec<Action> = all.into_iter().filter(Action::kept_while_locked).collect();
         assert_eq!(
@@ -258,7 +285,8 @@ mod tests {
                 Action::Vt(1),
                 Action::Terminate,
                 Action::Reveal,
-                Action::NextGroup
+                Action::NextGroup,
+                Action::Run(&MUTE)
             ],
             "the reveal key is kept from the lock surface, and acts on nothing"
         );
@@ -277,6 +305,8 @@ mod tests {
         assert!(!Action::CloseFocused.never_inhibited());
         assert!(!Action::NextGroup.never_inhibited());
         assert!(!Action::Call(&CONTROL_CENTER).never_inhibited());
+        assert!(!Action::Run(&LOG_OUT).never_inhibited());
+        assert!(!Action::TouchpadToggle.never_inhibited());
     }
 
     #[test]
@@ -297,8 +327,11 @@ mod tests {
             Some(Action::Terminate),
             "the only exit from a lock that cannot start (LP10)"
         );
+        assert_eq!(
+            plain(SUPER | SHIFT, Keysym::Escape, false),
+            Some(Action::Run(&LOG_OUT))
+        );
         for (mods, what) in [
-            (SUPER | SHIFT, "Super+Shift+Escape"),
             (SUPER | CTRL, "Super+Ctrl+Escape"),
             (CTRL | ALT, "Ctrl+Alt+Escape"),
         ] {

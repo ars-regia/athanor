@@ -1,14 +1,16 @@
-//! The session-bus worker of the key bindings (doc_own_stack.md OS13, plan D5 and D7): one
+//! The session-bus worker of the key bindings (doc_own_stack.md OS13, plan D5 to D7): one
 //! thread, `session-calls`, makes the calls a bound key asks for, each a method without
-//! arguments, and waits for its reply there, so the event loop never waits on the bus. The loop
-//! hands it requests through a bounded queue; a full queue drops the request with a warning.
-//! A name with a service file is started by the bus at its first call.
+//! arguments, and asks the user manager to run its commands as transient units, waiting for
+//! each reply there, so the event loop never waits on the bus. The loop hands it requests
+//! through a bounded queue; a full queue drops the request with a warning. A name with a
+//! service file is started by the bus at its first call. The compositor forks nothing.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::Duration;
+use zbus::zvariant::Value;
 
 /// A method of the session bus without arguments, and how a key's request for it is queued.
 #[derive(Debug, PartialEq)]
@@ -47,10 +49,103 @@ pub(crate) const CONTROL_CENTER: Call = Call {
     coalesce: true,
 };
 
-/// A call a key asked for, stamped with the lock epoch it was asked in (`State::lock_epoch`).
+/// A command the user manager runs as a transient unit (plan D6): a short name for the unit
+/// and a fixed argument vector, whose first element is an absolute path; no shell reads it.
+/// A command never coalesces: each press is one step.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Command {
+    pub name: &'static str,
+    pub argv: &'static [&'static str],
+    /// Whether the key acts while the session is locked, as `Call::while_locked`.
+    pub while_locked: bool,
+}
+
+/// `XF86AudioMute`, as cosmic-comp's session runs it (`defaults:117`), until `ToggleMute`
+/// (doc_osd.md OD3).
+pub(crate) const MUTE: Command = Command {
+    name: "mute",
+    argv: &[
+        "/usr/bin/wpctl",
+        "set-mute",
+        "@DEFAULT_AUDIO_SINK@",
+        "toggle",
+    ],
+    while_locked: true,
+};
+
+/// `XF86AudioMicMute` (`defaults:118`), until `ToggleMicMute`.
+pub(crate) const MIC_MUTE: Command = Command {
+    name: "mic-mute",
+    argv: &[
+        "/usr/bin/wpctl",
+        "set-mute",
+        "@DEFAULT_AUDIO_SOURCE@",
+        "toggle",
+    ],
+    while_locked: false,
+};
+
+/// `XF86AudioPlay` (`defaults:121`), until `PlayPause` (OD3).
+pub(crate) const PLAY_PAUSE: Command = Command {
+    name: "play-pause",
+    argv: &["/usr/bin/playerctl", "play-pause"],
+    while_locked: false,
+};
+
+/// `XF86AudioNext` (`defaults:122`), until `Next` (OD3).
+pub(crate) const NEXT: Command = Command {
+    name: "next",
+    argv: &["/usr/bin/playerctl", "next"],
+    while_locked: false,
+};
+
+/// `XF86AudioPrev` (`defaults:123`), until `Previous` (OD3).
+pub(crate) const PREVIOUS: Command = Command {
+    name: "previous",
+    argv: &["/usr/bin/playerctl", "previous"],
+    while_locked: false,
+};
+
+/// Super+Shift+Escape: cosmic-osd's log-out dialog (`defaults:3`), until
+/// `os.athanor.Osd1.AskLogOut` (OD3, OD15).
+pub(crate) const LOG_OUT: Command = Command {
+    name: "log-out",
+    argv: &["/usr/bin/cosmic-osd", "log-out"],
+    while_locked: false,
+};
+
+/// `XF86PowerOff`: cosmic-osd's power dialog, as cosmic-comp's `system_actions` runs it
+/// (`defaults:124`), until `AskPowerOff` (OD3).
+pub(crate) const POWER_OFF: Command = Command {
+    name: "power-off",
+    argv: &["/usr/bin/cosmic-osd", "shutdown"],
+    while_locked: false,
+};
+
+/// What a key asks the worker for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Job {
+    Call(&'static Call),
+    Run(&'static Command),
+}
+
+impl Job {
+    fn while_locked(self) -> bool {
+        match self {
+            Self::Call(call) => call.while_locked,
+            Self::Run(command) => command.while_locked,
+        }
+    }
+
+    fn coalesce(self) -> bool {
+        matches!(self, Self::Call(call) if call.coalesce)
+    }
+}
+
+/// A job a key asked for, stamped with the lock epoch it was asked in (`State::lock_epoch`).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Request {
-    pub call: &'static Call,
+    pub job: Job,
     pub epoch: u64,
 }
 
@@ -59,6 +154,10 @@ const QUEUE: usize = 8;
 
 /// How long a call waits for its reply, as logind's `Lock` (`lock.rs`).
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+const SYSTEMD: &str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
+const MANAGER: &str = "org.freedesktop.systemd1.Manager";
 
 /// The loop's end of the worker's queue.
 pub(crate) struct SessionCalls {
@@ -69,22 +168,19 @@ impl SessionCalls {
     /// Queues `request` without waiting: a full queue, or a worker that has ended, drops it
     /// with a warning, and the next press asks again.
     pub(crate) fn send(&self, request: Request) {
-        let method = request.call.method;
-        let destination = request.call.destination;
+        let job = request.job;
         match self.queue.try_send(request) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
                 tracing::warn!(
-                    destination,
-                    method,
-                    "the session-bus queue is full; the key's call is dropped"
+                    ?job,
+                    "the session-bus queue is full; the key's job is dropped"
                 );
             }
             Err(TrySendError::Disconnected(_)) => {
                 tracing::warn!(
-                    destination,
-                    method,
-                    "the session-bus worker has ended; the key's call is dropped"
+                    ?job,
+                    "the session-bus worker has ended; the key's job is dropped"
                 );
             }
         }
@@ -101,15 +197,40 @@ pub(crate) fn start(epoch: Arc<AtomicU64>) -> Option<SessionCalls> {
     match spawned {
         Ok(_) => Some(SessionCalls { queue }),
         Err(error) => {
-            tracing::error!(%error, "the session-bus worker did not start; Super and Super+C do nothing");
+            tracing::error!(%error, "the session-bus worker did not start; the keys of the bus do nothing");
             None
         }
     }
 }
 
-/// Where the worker sends a call; the bus, or a test's record.
+/// The unit a command runs as: `app-athanor\x2dcompositor-<name>-<pid>x<n>.service`, systemd's
+/// naming of an application's units, with `-` inside a component escaped as `\x2d`, `n` the
+/// command's count in this run of the compositor.
+fn unit_name(name: &str, pid: u32, n: u64) -> String {
+    format!(
+        r"app-athanor\x2dcompositor-{}-{pid}x{n}.service",
+        name.replace('-', r"\x2d")
+    )
+}
+
+/// The properties of the transient service that runs `argv`: its first element is executed
+/// with the vector as is, by the user manager, which starts no shell.
+fn transient_properties(argv: &[&str]) -> Vec<(&'static str, Value<'static>)> {
+    let args: Vec<String> = argv.iter().map(|arg| arg.to_string()).collect();
+    let program = args.first().cloned().unwrap_or_default();
+    vec![
+        ("ExecStart", Value::from(vec![(program, args, false)])),
+        // The start job fails when the program cannot be executed.
+        ("Type", Value::from("exec")),
+        ("CollectMode", Value::from("inactive-or-failed")),
+        ("Slice", Value::from("app.slice")),
+    ]
+}
+
+/// Where the worker sends a job; the bus, or a test's record.
 trait Bus {
     fn call(&mut self, call: &Call);
+    fn run(&mut self, unit: &str, command: &Command);
 }
 
 /// The session bus, connected at the first call and again after an error.
@@ -118,30 +239,65 @@ struct SessionBus {
     connection: Option<zbus::blocking::Connection>,
 }
 
+impl SessionBus {
+    /// Sends `send` on the connection, opened first when there is none; it is kept only when
+    /// the call succeeded.
+    fn send(
+        &mut self,
+        send: impl FnOnce(&zbus::blocking::Connection) -> zbus::Result<zbus::Message>,
+    ) -> zbus::Result<()> {
+        let connection = match self.connection.take() {
+            Some(connection) => connection,
+            None => zbus::blocking::connection::Builder::session()?
+                .method_timeout(CALL_TIMEOUT)
+                .build()?,
+        };
+        send(&connection)?;
+        self.connection = Some(connection);
+        Ok(())
+    }
+}
+
 impl Bus for SessionBus {
     fn call(&mut self, call: &Call) {
-        let connection = match self.connection.take() {
-            Some(connection) => Ok(connection),
-            None => zbus::blocking::connection::Builder::session()
-                .and_then(|builder| builder.method_timeout(CALL_TIMEOUT).build()),
-        };
-        let sent = connection.and_then(|connection| {
+        let sent = self.send(|connection| {
             connection.call_method(
                 Some(call.destination),
                 call.path,
                 Some(call.interface),
                 call.method,
                 &(),
-            )?;
-            Ok(connection)
+            )
         });
-        match sent {
-            Ok(connection) => self.connection = Some(connection),
-            Err(error) => tracing::warn!(
+        if let Err(error) = sent {
+            tracing::warn!(
                 %error,
                 destination = call.destination,
                 method = call.method,
                 "a key's call on the session bus failed"
+            );
+        }
+    }
+
+    fn run(&mut self, unit: &str, command: &Command) {
+        let auxiliary: Vec<(&str, Vec<(&str, Value)>)> = Vec::new();
+        let body = (unit, "fail", transient_properties(command.argv), auxiliary);
+        let sent = self.send(|connection| {
+            connection.call_method(
+                Some(SYSTEMD),
+                SYSTEMD_PATH,
+                Some(MANAGER),
+                "StartTransientUnit",
+                &body,
+            )
+        });
+        match sent {
+            Ok(()) => tracing::debug!(unit, "a key's command started"),
+            Err(error) => tracing::warn!(
+                %error,
+                unit,
+                command = command.name,
+                "the user manager did not start a key's command"
             ),
         }
     }
@@ -151,6 +307,8 @@ impl Bus for SessionBus {
 /// before the session locked is dropped unless its key acts while locked, and after each
 /// call the run of identical requests queued behind it is dropped when its call coalesces.
 fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
+    let pid = std::process::id();
+    let mut runs = 0;
     let mut pending = VecDeque::new();
     loop {
         let request = match pending.pop_front() {
@@ -160,24 +318,26 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
                 Err(_) => return,
             },
         };
-        let Request { call, epoch: asked } = request;
-        if asked != epoch.load(Ordering::SeqCst) && !call.while_locked {
-            tracing::info!(
-                destination = call.destination,
-                method = call.method,
-                "the session locked after the key; its call is dropped"
-            );
+        let Request { job, epoch: asked } = request;
+        if asked != epoch.load(Ordering::SeqCst) && !job.while_locked() {
+            tracing::info!(?job, "the session locked after the key; its job is dropped");
             continue;
         }
-        bus.call(call);
+        match job {
+            Job::Call(call) => bus.call(call),
+            Job::Run(command) => {
+                runs += 1;
+                bus.run(&unit_name(command.name, pid, runs), command);
+            }
+        }
         while pending.len() < QUEUE {
             match requests.try_recv() {
                 Ok(request) => pending.push_back(request),
                 Err(_) => break,
             }
         }
-        if call.coalesce {
-            while pending.front().is_some_and(|next| next.call == call) {
+        if job.coalesce() {
+            while pending.front().is_some_and(|next| next.job == job) {
                 pending.pop_front();
             }
         }
@@ -197,34 +357,52 @@ impl SessionCalls {
 mod tests {
     use super::*;
 
-    #[derive(Default)]
-    struct Record(Vec<&'static str>);
+    /// What the worker sent, by method or command name; `lock_on` locks the session while
+    /// that method's call waits for its reply.
+    struct Record<'a> {
+        sent: Vec<&'static str>,
+        lock_on: Option<(&'static str, &'a AtomicU64)>,
+    }
 
-    impl Bus for Record {
+    impl Bus for Record<'_> {
         fn call(&mut self, call: &Call) {
-            self.0.push(call.method);
+            self.sent.push(call.method);
+            if let Some((method, epoch)) = self.lock_on {
+                if method == call.method {
+                    epoch.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+
+        fn run(&mut self, unit: &str, command: &Command) {
+            assert!(unit.contains(&command.name.replace('-', r"\x2d")), "{unit}");
+            self.sent.push(command.name);
         }
     }
 
-    const MUTE: Call = Call {
-        destination: "test.Volume",
-        path: "/test",
-        interface: "test.Volume",
-        method: "Mute",
-        while_locked: true,
-        coalesce: false,
-    };
-
-    /// Runs the worker over `requests`, the lock epoch then being `now`: the methods it called.
-    fn worked(requests: Vec<Request>, now: u64) -> Vec<&'static str> {
+    /// Runs the worker over `requests`, the lock epoch then being `now`, the session locking
+    /// while `lock_on`'s call waits: what it sent.
+    fn worked(
+        requests: Vec<Request>,
+        now: u64,
+        lock_on: Option<&'static str>,
+    ) -> Vec<&'static str> {
         let (queue, receiver) = sync_channel(requests.len());
         for request in requests {
             queue.try_send(request).expect("room");
         }
         drop(queue);
-        let mut bus = Record::default();
-        work(&receiver, &AtomicU64::new(now), &mut bus);
-        bus.0
+        let epoch = AtomicU64::new(now);
+        let mut bus = Record {
+            sent: Vec::new(),
+            lock_on: lock_on.map(|method| (method, &epoch)),
+        };
+        work(&receiver, &epoch, &mut bus);
+        bus.sent
+    }
+
+    fn at(job: Job, epoch: u64) -> Request {
+        Request { job, epoch }
     }
 
     #[test]
@@ -261,53 +439,126 @@ mod tests {
     fn a_full_queue_drops_without_waiting() {
         let (calls, _requests) = SessionCalls::detached();
         for _ in 0..QUEUE + 1 {
-            calls.send(Request {
-                call: &LAUNCHER,
-                epoch: 0,
-            });
+            calls.send(at(Job::Call(&LAUNCHER), 0));
         }
         // The ninth returned: the queue holds eight.
         let (calls, requests) = SessionCalls::detached();
         drop(requests);
-        calls.send(Request {
-            call: &LAUNCHER,
-            epoch: 0,
-        });
+        calls.send(at(Job::Call(&LAUNCHER), 0));
     }
 
     #[test]
     fn a_request_from_before_the_lock_is_dropped_unless_it_acts_locked() {
-        let at = |call, epoch| Request { call, epoch };
         assert_eq!(
             worked(
-                vec![at(&LAUNCHER, 0), at(&MUTE, 0), at(&CONTROL_CENTER, 1),],
-                1
+                vec![
+                    at(Job::Call(&LAUNCHER), 0),
+                    at(Job::Run(&MUTE), 0),
+                    at(Job::Call(&CONTROL_CENTER), 1),
+                ],
+                1,
+                None
             ),
-            ["Mute", "Toggle"],
+            ["mute", "Toggle"],
             "the Show asked before the lock is not sent after it"
+        );
+        // A log-out queued behind a slow Show(), then Super+Escape: the session locks while
+        // the Show waits, and the log-out is not run on the lock.
+        assert_eq!(
+            worked(
+                vec![
+                    at(Job::Call(&LAUNCHER), 0),
+                    at(Job::Run(&LOG_OUT), 0),
+                    at(Job::Run(&MUTE), 0),
+                ],
+                0,
+                Some("Show")
+            ),
+            ["Show", "mute"]
         );
     }
 
     #[test]
     fn only_the_run_behind_a_sent_toggle_is_coalesced() {
-        let at = |call| Request { call, epoch: 0 };
+        let launcher = || at(Job::Call(&LAUNCHER), 0);
         assert_eq!(
             worked(
                 vec![
-                    at(&LAUNCHER),
-                    at(&LAUNCHER),
-                    at(&CONTROL_CENTER),
-                    at(&LAUNCHER),
+                    launcher(),
+                    launcher(),
+                    at(Job::Call(&CONTROL_CENTER), 0),
+                    launcher(),
                 ],
-                0
+                0,
+                None
             ),
             ["Show", "Toggle", "Show"],
             "Show, Toggle, Show: the third Show is still sent"
         );
+        let mute = || at(Job::Run(&MUTE), 0);
         assert_eq!(
-            worked(vec![at(&MUTE), at(&MUTE), at(&MUTE)], 0),
-            ["Mute", "Mute", "Mute"],
-            "a call that does not coalesce is sent every time"
+            worked(vec![mute(), mute(), mute()], 0, None),
+            ["mute", "mute", "mute"],
+            "a command is run every time"
         );
+    }
+
+    #[test]
+    fn the_unit_name_is_escaped_and_unique() {
+        assert_eq!(
+            unit_name("mute", 4242, 1),
+            r"app-athanor\x2dcompositor-mute-4242x1.service"
+        );
+        assert_eq!(
+            unit_name("log-out", 4242, 2),
+            r"app-athanor\x2dcompositor-log\x2dout-4242x2.service"
+        );
+        assert_ne!(unit_name("mute", 4242, 1), unit_name("mute", 4242, 2));
+    }
+
+    #[test]
+    fn the_properties_run_the_vector_without_a_shell() {
+        for command in [
+            &MUTE,
+            &MIC_MUTE,
+            &PLAY_PAUSE,
+            &NEXT,
+            &PREVIOUS,
+            &LOG_OUT,
+            &POWER_OFF,
+        ] {
+            assert!(
+                command
+                    .argv
+                    .first()
+                    .is_some_and(|program| program.starts_with('/')),
+                "{command:?} runs an absolute path"
+            );
+            assert!(
+                command
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b == b'-'),
+                "{command:?}: a name of a unit's component"
+            );
+            let properties = transient_properties(command.argv);
+            let argv: Vec<String> = command.argv.iter().map(|arg| arg.to_string()).collect();
+            assert_eq!(
+                properties,
+                [
+                    (
+                        "ExecStart",
+                        Value::from(vec![(argv[0].clone(), argv.clone(), false)])
+                    ),
+                    ("Type", Value::from("exec")),
+                    ("CollectMode", Value::from("inactive-or-failed")),
+                    ("Slice", Value::from("app.slice")),
+                ]
+            );
+            assert!(
+                !format!("{properties:?}").contains("/bin/sh"),
+                "{command:?}: no shell"
+            );
+        }
     }
 }
