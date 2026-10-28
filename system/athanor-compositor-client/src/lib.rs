@@ -12,6 +12,7 @@ mod cosmic_config;
 pub mod favorites;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
+mod keyboard_group;
 mod keymap;
 mod launch;
 pub mod model;

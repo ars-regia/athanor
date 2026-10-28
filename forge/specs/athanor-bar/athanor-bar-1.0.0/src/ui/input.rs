@@ -81,7 +81,10 @@ impl ModuleUi for InputUi {
 }
 
 pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
-    bar.client()?;
+    // Under athanor-compositor the group comes from a manager bound only by who watches it.
+    if let Err(err) = bar.client()?.watch_keyboard_group() {
+        tracing::warn!("the keyboard group is not followed: {err}");
+    }
     let icon = gtk4::Image::from_icon_name("input-keyboard-symbolic");
     let popup = Popup::new(bar, &icon, &tr("Input source"));
     let list = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
