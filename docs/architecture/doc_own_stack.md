@@ -38,7 +38,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 5: what milestones C1 and T1 measured.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
-- Amended on 2026-10-28: decision 27; decision 28, with OS13, OS19's lead-in and item 2, decision 10
+- Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and item 2, decision 10
   and section 6, step 4.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
@@ -253,8 +253,9 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
   (OS4), and its description is in the repository, versioned, before its first client;
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
-- for cosmic-idle, cosmic-bg, cosmic-workspaces and cosmic-settings, which ADR-0103 D13 keeps in
-  1.0, either the protocols each uses or its replacement by a component of Athanor's (ADR-0121).
+- for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
+  protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
+  is replaced in 1.0 by `athanor-overview` (decision 28).
   Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
   process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
@@ -742,7 +743,9 @@ amendment's audit:
       without the indicator of `doc_overview.md` OV12, a loss the switch's pull request names;
     - the Launcher buttons of the bar and of the dock, which open cosmic-launcher today
       (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
-      allow-list: under the own compositor they open `athanor-launcher`, which has its line.
+      allow-list: under the own compositor they open `athanor-launcher`, which has its line,
+      through its D-Bus activation (`doc_launcher.md` LA8), before LA12's switch, which this
+      decision does not change for cosmic-comp's session.
       The Application library buttons of the bar and of the dock, which open
       cosmic-app-library, are hidden under the own compositor and Super+A unbound (OS13), since the application library is a program of its
       own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
@@ -783,6 +786,7 @@ amendment's audit:
   rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
+- **Release 1.0 also waits for the overview and the window switcher on Alt+Tab** (decision 28).
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.

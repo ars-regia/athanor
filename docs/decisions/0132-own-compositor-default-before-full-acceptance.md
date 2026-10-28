@@ -52,3 +52,5 @@ In short:
   the own compositor has them; their controls and bindings are hidden or unbound there.
 - ADR-0123's "cosmic-comp leaves the default session at 1.0" is read as: cosmic-comp's
   session leaves the default at the switch and the greeter at 1.0.
+- ADR-0103 D13 and ADR-0121, which keep cosmic-workspaces until 1.1, are amended for it:
+  `athanor-overview` replaces it, and its retirement is 1.0's.

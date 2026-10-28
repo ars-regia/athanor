@@ -97,7 +97,8 @@ Four releases lead to 1.0: 0.3, then 0.9 within about one week ([ADR-0115](../de
 dates are estimates. Each 0.x release is a signed tag on `iso-v0` plus a `:stable` promotion of
 that build on evidence (BRN4 of `branching.md`), with the `release` approval. 1.0 is the last
 0.x release with Athanor's own compositor in place of cosmic-comp, its
-acceptance passed, and no blocking defect; it has no date ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5).
+acceptance passed, the overview and the window switcher on Alt+Tab come
+(`doc_own_stack.md` decision 28), and no blocking defect; it has no date ([ADR-0121](../decisions/0121-own-compositor-and-toolkit.md) decision 5).
 
 **Freeze (D3), lifted on 2026-10-14** ([ADR-0112](../decisions/0112-pace-to-0-9.md)). P2 of
 the update-chain plan (#122) is green; spike S1 (#124) still gates P4b. Specification
