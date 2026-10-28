@@ -115,9 +115,9 @@ struct Head {
     drm_output: HeadOutput,
     /// A frame is queued and waits for its VBlank.
     queued: bool,
-    /// The output was turned off with a frame queued: the VBlank of that frame still comes, and
-    /// it presents nothing (`power_output`).
-    stale_vblank: bool,
+    /// The VBlanks still owed for frames queued before the output was turned off: each comes
+    /// and presents nothing (`power_output`). A session switch drops them (`resume`).
+    stale_vblanks: u8,
     /// Whether its frames showed the lock.
     lock: LockFrames,
     /// The next draw, when one is scheduled, and what it is for.
@@ -441,6 +441,7 @@ impl State {
         }
         for head in drm.outputs.values_mut() {
             head.queued = false;
+            head.stale_vblanks = 0;
             // The switch was activity: the idle daemon decides again from it (output power
             // plan, D8).
             if !head.powered {
@@ -725,7 +726,7 @@ impl State {
                 output: output.clone(),
                 drm_output,
                 queued: false,
-                stale_vblank: false,
+                stale_vblanks: 0,
                 lock: LockFrames::default(),
                 failing: FailureLog::default(),
                 timer: None,
@@ -820,7 +821,8 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
-        if std::mem::take(&mut head.stale_vblank) {
+        if head.stale_vblanks > 0 {
+            head.stale_vblanks -= 1;
             // The frame `clear` dropped: the frame queued since the output came back on, if any,
             // is not on screen yet, and a lock must not count it as shown.
             return;
@@ -924,7 +926,9 @@ impl State {
             return true;
         }
         head.powered = false;
-        head.stale_vblank = std::mem::take(&mut head.queued);
+        if std::mem::take(&mut head.queued) {
+            head.stale_vblanks = head.stale_vblanks.saturating_add(1);
+        }
         if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
