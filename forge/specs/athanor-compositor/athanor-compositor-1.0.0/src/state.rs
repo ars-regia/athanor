@@ -7,6 +7,7 @@ use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
+use crate::output_power::OutputPower;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
@@ -193,6 +194,8 @@ pub struct State {
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
     pub output_management: OutputManagement,
+    /// The outputs turned off, and the clients of wlr-output-power-management.
+    pub output_power: OutputPower,
 
     /// Which client is granted which privileged global (OS4), read when the compositor starts.
     pub allow_list: AllowList,
@@ -275,6 +278,7 @@ impl State {
         crate::workspace::global(&dh);
         crate::toplevel_state::global(&dh);
         crate::output_management::global(&dh);
+        crate::output_power::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
         VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
             granted(c, Privilege::VirtualKeyboard)
@@ -342,6 +346,7 @@ impl State {
             toplevel_states: Vec::new(),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
+            output_power: OutputPower::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
         })
@@ -404,6 +409,7 @@ impl State {
     /// An output that goes: its layer surfaces are closed, and the windows no output left shows
     /// are centred on the first one, where the user can reach them.
     pub fn remove_output(&mut self, output: &Output) {
+        self.forget_output_power(output);
         self.close_layers(output);
         self.space.unmap_output(output);
         self.fit_to_outputs();
