@@ -159,7 +159,9 @@ rows narrowed below.
   trusted path for the lock and the prompts and the keyboard monitor that answers Orca alone
   (AX4), which ADR-0115 left to cosmic-comp patches 5 and 6 in 1.1 ([ADR-0123](../decisions/0123-rebase-release-0-10-rows-7-and-25.md) item 5).
   Before 1.0 the image may offer the own compositor as an optional session beside cosmic-comp's,
-  under the conditions of [ADR-0122](../decisions/0122-own-compositor-optional-session-and-desktop-first.md); that session is not a release point.
+  under the conditions of [ADR-0122](../decisions/0122-own-compositor-optional-session-and-desktop-first.md), and then make it the default session with
+  cosmic-comp's at the greeter as the second choice (`doc_own_stack.md` decision 28); neither
+  step is a release point.
 - **Row 1, signed immutable image.** The three variants build in 0.3, and the default and
   `-nvidia` images promote; the `-nvidia-legacy` evidence (20 boot-matrix runs, #231 closed) is
   in 1.1. Until then `-nvidia-legacy` is not promoted (D24).

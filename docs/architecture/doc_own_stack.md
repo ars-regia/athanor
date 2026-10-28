@@ -4,8 +4,8 @@ Status: **revision 2, approved by the maintainer on 2026-10-23 (#755).** Revisio
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
-2026-10-28 by decision 28, the default session before the full acceptance, the amendment
-approved by the maintainer with #810. The document sets out the direction ADR-0121 records: a compositor
+2026-10-28 by decision 28, the default session before the full acceptance, which amends
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -38,6 +38,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 5: what milestones C1 and T1 measured.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
+- Amended on 2026-10-28: decision 27; decision 28, with OS19's lead-in and section 6, step 4.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -336,9 +337,9 @@ SN6, SN15). A console run checks in the compositor's log, at the start and after
 libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 
 **OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
-(section 6, step 4) when each of the following holds, recorded in the pull request that makes it the
-default session. Decision 28 makes it the default session on a part of them, cosmic-comp's session
-staying at the greeter until all of them hold, which release 1.0 waits for:
+(section 6, step 4) when each of the following holds, recorded in the pull request that takes
+cosmic-comp's session off the greeter. Decision 28 makes it the default session before then, on
+the parts of them it names, recorded in the pull request that makes it the default session:
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
    `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
@@ -575,7 +576,8 @@ reaches the maintainer's machines in the least time, and recorded in ADR-0122:
     does not cover (the trusted path, the lock path) listed and accepted by the maintainer, and
     the greeter's session choice, its login path, on an approved revision of `doc_session.md`
     (ADR-0122). The alternative weighed, the compositor outside the image until that
-    acceptance, was not taken.
+    acceptance, was not taken. Amended by decision 28: the own compositor becomes the default
+    session before the acceptance holds in full, on the conditions there.
 11. **The compositor first on the desktop.** Milestone C1 needs the desktop's NVIDIA card and
     takes the desktop before release 0.9's rig work, which moves to the laptop between the
     toolkit's runs; release 0.9 may land some days after 2026-10-21. The alternative weighed, the
@@ -636,21 +638,41 @@ audit found that the plan crossed SH2's boundary:
     bring gio and glib into the compositor; a store of Athanor's own now, a revision of LN9.
 
 Taken by the maintainer on 2026-10-28, when the switch on the full acceptance was estimated at ten
-to eleven weeks and the own compositor was wanted as the default session within one:
+to eleven weeks and the own compositor was wanted as the default session within one; the gaps of
+`doc_session.md` SN16 that would reach the default session were added the same day, after the
+amendment's audit:
 
-28. **The default session before the full acceptance** (OS19; section 6, step 4). The own
-    compositor becomes the image's default session when the following parts of OS19 hold, and
+28. **The default session before the full acceptance** (OS19; section 6, step 4; amends decision
+    10 and ADR-0122 decision 1). The own compositor becomes the image's default session before
+    OS19 holds in full, in a pull request that records the evidence of each condition below.
     cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full,
-    which release 1.0 still waits for. Item 1 holds for the differences a user sees; every other
-    difference is recorded in `athanor-differences.toml` with its cause and its issue. Item 2
-    holds in full. Item 3 holds but for the magnifier and the colour filters, which the
-    cosmic-comp session carries meanwhile. Items 4 and 5 hold on console runs of fifteen minutes
-    per machine in place of the hour, the suspend and resume, the output unplugged and plugged
-    back, and the frame times kept. The overview, cosmic-workspaces' replacement (OS5, ADR-0103
-    D13), follows the switch, and the own compositor's session has none until it comes. Not
-    taken: the switch on the full acceptance, which kept the own compositor out of daily use for
-    weeks; the switch without cosmic-comp's session at the greeter, which left no way back on
-    hardware the short runs did not cover, nor the magnifier and the colour filters.
+    which release 1.0 waits for, and leaves the greeter then. The switch waits for:
+    - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
+      the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
+      under the own compositor, each with its line in the allow-list, cosmic-idle blanking the
+      outputs through `zwlr_output_power_v1`; a polkit agent (gap 2), cosmic-osd with its line;
+      X11 applications, through xwayland-satellite (gap 6); and the key bindings of OS13 (gap 7).
+      The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
+      LN11, `doc_accessibility.md` AX12), which the default session does not have yet either;
+    - item 1 for every difference that hides, moves or changes a control or a text. A difference of
+      colour, antialiasing or a few pixels is recorded in `athanor-differences.toml` with its cause
+      and its issue, and fixed after the switch;
+    - item 2 in full;
+    - item 3 but the magnifier and the colour filters. A sign-in with either chosen in the
+      greeter's accessibility menu (`ATHANOR_A11Y`) starts cosmic-comp's session, which carries
+      them until the own compositor does;
+    - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
+      hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
+      8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back,
+      and every run records its frame times against item 5's thresholds.
+
+    The overview, cosmic-workspaces under ADR-0103 D13 or its replacement, is not an item of OS19:
+    it follows the switch, comes before release 1.0, and the own compositor's session has none
+    until then. Not taken: the switch on the full acceptance, which kept the own compositor out of
+    daily use for weeks; the switch with SN16's gaps accepted, which left the default session
+    without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
+    the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
+    and the colour filters.
 
 ## 8. Risks
 
