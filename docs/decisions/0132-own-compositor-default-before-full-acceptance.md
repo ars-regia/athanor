@@ -49,7 +49,9 @@ In short:
   cosmic-comp's session off the greeter.
 - The magnifier, the colour filters, the overview, the Alt+Tab switcher, the application library,
   the clipboard history and the workspace indicator of `doc_overview.md` OV12 are absent from the default session until
-  the own compositor has them; their controls and bindings are hidden or unbound there.
+  the own compositor has them; their controls and bindings are hidden or unbound there. The
+  input method, the on-screen keyboard and data control are absent until their clients exist,
+  and no fallback routes their users to cosmic-comp's session (decision 28).
 - ADR-0123's "cosmic-comp leaves the default session at 1.0" is read as: cosmic-comp's
   session leaves the default at the switch and the greeter at 1.0.
 - ADR-0103 D13 and ADR-0121, which keep cosmic-workspaces until 1.1, are amended for it:
