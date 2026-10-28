@@ -58,10 +58,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
-* Sun Oct 25 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
-- athanor-control-center-shortcut.service gains ConditionEnvironment=!ATHANOR_PREVIEW_SESSION:
-  the preview session on the own compositor does not read cosmic-comp's shortcuts
-  (doc_session.md, SN15).
+* Wed Oct 28 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- athanor-control-center-shortcut.service gains ConditionEnvironment=!ATHANOR_OWN_COMPOSITOR:
+  the session on the own compositor does not read cosmic-comp's shortcuts (doc_session.md,
+  SN15).
 
 * Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Built with the athanor-layout that arms the layout watches before the first read; the
