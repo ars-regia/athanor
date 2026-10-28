@@ -1,7 +1,7 @@
 //! The calls the volume, brightness and screen-reader keys make to cosmic-settings-daemon
 //! (doc_own_stack.md decision 29, plan D13): the methods cosmic-comp's session calls for them
 //! (`system_actions`), so the same daemon and the same overlay serve both sessions. They read
-//! and write nothing of the user's configuration. The compositor's second exception of
+//! and write nothing of the user's configuration. The compositor's third exception of
 //! doc_shell.md SH2 by path; each key leaves this file when its replacement lands: volume and
 //! brightness with athanor-osd (doc_osd.md OD15), the screen reader with athanor-a11y
 //! (doc_accessibility.md AX3).
