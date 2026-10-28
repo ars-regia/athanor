@@ -6989,11 +6989,19 @@ impl SimulatedInputMethod {
 
     /// The evdev codes of the keys pressed on its grabs.
     fn keys(&self) -> Vec<u32> {
+        self.key_events()
+            .into_iter()
+            .filter_map(|(key, pressed)| pressed.then_some(key))
+            .collect()
+    }
+
+    /// Every key event of its grabs: the evdev code, and whether it is a press.
+    fn key_events(&self) -> Vec<(u32, bool)> {
         self.grabs
             .iter()
             .flat_map(Raw::events)
             .filter_map(|(name, args)| match (name, &args[..]) {
-                ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
+                ("key", [_, _, key, state]) => Some((key.parse().ok()?, state == "1")),
                 _ => None,
             })
             .collect()
@@ -8102,14 +8110,21 @@ fn a_bound_key_never_reaches_the_client_nor_the_input_method() {
     chord(&mut run.state, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_T]);
     ime.roundtrip(&mut run);
     assert_eq!(
-        method.keys(),
-        [KEY_LEFTMETA, KEY_LEFTALT],
-        "the grab is sent the modifiers only"
+        method.key_events(),
+        [
+            (KEY_LEFTMETA, true),
+            (KEY_LEFTALT, true),
+            (KEY_LEFTALT, false),
+            (KEY_LEFTMETA, false)
+        ],
+        "the grab is sent the modifiers only, neither the bound key's press nor its release"
     );
     assert_eq!(run.state.fired, [Action::Reveal]);
     chord(&mut run.state, &[KEY_A]);
     ime.pump(&mut run, "an unbound key reaches the grab", |_, _| {
-        method.keys().ends_with(&[KEY_A])
+        method
+            .key_events()
+            .ends_with(&[(KEY_A, true), (KEY_A, false)])
     });
     window.roundtrip(&mut run);
     assert!(window.client.keys.is_empty(), "the window saw no key");

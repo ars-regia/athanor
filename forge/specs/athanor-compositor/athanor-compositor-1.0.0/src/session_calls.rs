@@ -243,6 +243,9 @@ fn transient_properties(argv: &[&str]) -> Vec<(&'static str, Value<'static>)> {
 
 /// Where the worker sends a job; the bus, or a test's record.
 trait Bus {
+    /// Opens the connection when there is none, before the job's epoch is read: false, logged,
+    /// when it cannot be opened.
+    fn connect(&mut self) -> bool;
     fn call(&mut self, call: &Call);
     fn run(&mut self, unit: &str, command: &Command);
 }
@@ -254,19 +257,16 @@ struct SessionBus {
 }
 
 impl SessionBus {
-    /// Sends `send` on the connection, opened first when there is none; it is dropped, and
-    /// opened again at the next call, when the call failed for another reason than an error
-    /// reply.
+    /// Sends `send` on the connection `Bus::connect` opened; it is dropped, and opened again
+    /// before the next job, when the call failed for another reason than an error reply.
     fn send(
         &mut self,
         send: impl FnOnce(&zbus::blocking::Connection) -> zbus::Result<zbus::Message>,
     ) -> zbus::Result<()> {
-        let connection = match self.connection.take() {
-            Some(connection) => connection,
-            None => zbus::blocking::connection::Builder::session()?
-                .method_timeout(CALL_TIMEOUT)
-                .build()?,
-        };
+        let connection = self
+            .connection
+            .take()
+            .ok_or_else(|| zbus::Error::Failure("no session bus connection".into()))?;
         match send(&connection) {
             Ok(_) => {
                 self.connection = Some(connection);
@@ -282,6 +282,24 @@ impl SessionBus {
 }
 
 impl Bus for SessionBus {
+    fn connect(&mut self) -> bool {
+        if self.connection.is_some() {
+            return true;
+        }
+        let opened = zbus::blocking::connection::Builder::session()
+            .and_then(|builder| builder.method_timeout(CALL_TIMEOUT).build());
+        match opened {
+            Ok(connection) => {
+                self.connection = Some(connection);
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the session bus cannot be reached; the key's job is dropped");
+                false
+            }
+        }
+    }
+
     fn call(&mut self, call: &Call) {
         let sent = self.send(|connection| {
             connection.call_method(
@@ -342,6 +360,11 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
             },
         };
         let Request { job, epoch: asked } = request;
+        // The connection is opened first, which may take a while: a lock that starts meanwhile
+        // still drops the job.
+        if !bus.connect() {
+            continue;
+        }
         if asked != epoch.load(Ordering::SeqCst) && !job.while_locked() {
             tracing::info!(?job, "the session locked after the key; its job is dropped");
             continue;
@@ -360,9 +383,17 @@ fn work(requests: &Receiver<Request>, epoch: &AtomicU64, bus: &mut impl Bus) {
             }
         }
         if job.coalesce() {
-            while pending.front().is_some_and(|next| next.job == job) {
+            // A press from another lock epoch is not a repeat: a mute on the lock surface after
+            // one sent before the lock is a second press.
+            while pending
+                .front()
+                .is_some_and(|next| next.job == job && next.epoch == asked)
+            {
                 pending.pop_front();
-                tracing::debug!(?job, "a repeat queued while the key's job waited is dropped");
+                tracing::debug!(
+                    ?job,
+                    "a repeat queued while the key's job waited is dropped"
+                );
             }
         }
     }
@@ -382,13 +413,23 @@ mod tests {
     use super::*;
 
     /// What the worker sent, by method or command name; `lock_on` locks the session while
-    /// that method's call waits for its reply.
+    /// that method's call waits for its reply, or, named `CONNECT`, while each connection step
+    /// waits.
     struct Record<'a> {
         sent: Vec<&'static str>,
         lock_on: Option<(&'static str, &'a AtomicU64)>,
     }
 
+    const CONNECT: &str = "connect";
+
     impl Bus for Record<'_> {
+        fn connect(&mut self) -> bool {
+            if let Some((CONNECT, epoch)) = self.lock_on {
+                epoch.fetch_add(1, Ordering::SeqCst);
+            }
+            true
+        }
+
         fn call(&mut self, call: &Call) {
             self.sent.push(call.method);
             if let Some((method, epoch)) = self.lock_on {
@@ -427,6 +468,26 @@ mod tests {
 
     fn at(job: Job, epoch: u64) -> Request {
         Request { job, epoch }
+    }
+
+    #[test]
+    fn the_epoch_is_read_after_the_connection_is_opened() {
+        assert_eq!(
+            worked(
+                vec![at(Job::Run(&LOG_OUT), 0), at(Job::Run(&MUTE), 0)],
+                0,
+                Some(CONNECT)
+            ),
+            ["mute"],
+            "a lock that starts while the bus connects drops the log-out"
+        );
+    }
+
+    #[test]
+    fn a_repeat_from_another_lock_epoch_is_not_coalesced() {
+        let mute = |epoch| at(Job::Run(&MUTE), epoch);
+        assert_eq!(worked(vec![mute(0), mute(1)], 1, None), ["mute", "mute"]);
+        assert_eq!(worked(vec![mute(1), mute(1)], 1, None), ["mute"]);
     }
 
     #[test]
@@ -527,7 +588,11 @@ mod tests {
         );
         let mute = || at(Job::Run(&MUTE), 0);
         assert_eq!(
-            worked(vec![mute(), mute(), at(Job::Run(&NEXT), 0), mute()], 0, None),
+            worked(
+                vec![mute(), mute(), at(Job::Run(&NEXT), 0), mute()],
+                0,
+                None
+            ),
             ["mute", "next", "mute"],
             "a toggle's repeat is dropped, as a call's"
         );
