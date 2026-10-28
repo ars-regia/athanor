@@ -375,7 +375,9 @@ impl Watch {
             };
             for event in events {
                 if event.mask.contains(AddWatchFlags::IN_Q_OVERFLOW) {
+                    // The lost events may include the end of the watch itself.
                     reload = true;
+                    rearm = true;
                     continue;
                 }
                 let Some((path, descriptor)) = &self.watched else {
@@ -452,7 +454,7 @@ impl State {
     }
 
     /// Gives the seat the keymap of `settings`, keeping the seat's locked modifiers and its
-    /// group, clamped to the new layouts (D12). A keymap libxkbcommon cannot compile changes
+    /// group, clamped to the new layouts (D12), and the modifiers of the keys held through it. A keymap libxkbcommon cannot compile changes
     /// nothing, a virtual keyboard's current keymap included.
     fn apply_xkb_config(&mut self, settings: &Settings, path: &Path) {
         let Some(keyboard) = self.seat.get_keyboard() else {
@@ -488,12 +490,15 @@ impl State {
             u32::try_from(xkb.layouts().count()).unwrap_or(u32::MAX)
         });
         let group = group.min(layouts.saturating_sub(1));
+        // Smithay replayed the held keys into the new state: their modifiers are kept.
+        let held = keyboard.modifier_state().serialized;
         keyboard.with_xkb_state(self, |mut context| {
-            context.set_modifier_mask(0, 0, locked, group)
+            context.set_modifier_mask(held.depressed, held.latched, locked, group)
         });
         keyboard.change_repeat_info(settings.repeat_rate, settings.repeat_delay);
         self.repeat = (settings.repeat_rate, settings.repeat_delay);
         tracing::info!(?path, layout = %settings.layout, "keymap from xkb_config");
+        self.input_method_repeat_changed();
         self.input_method_keymap_changed();
         self.send_keyboard_group();
     }

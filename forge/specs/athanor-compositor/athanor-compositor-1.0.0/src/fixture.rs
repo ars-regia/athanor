@@ -4138,6 +4138,33 @@ fn a_live_change_rebuilds_the_keymap() {
     run.stop();
 }
 
+/// A change of the file keeps a held Shift held, and an input method's grab is sent the new
+/// repeat, keymap and modifiers.
+#[test]
+fn a_live_change_keeps_held_keys_and_reaches_the_grab() {
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let file = xkb_file("held");
+    write_xkb(&file, "us,it");
+    key(&mut run.state, SHIFT, true);
+    ime.roundtrip(&mut run);
+    let before = method.grabs[0].events().len();
+    run.state.load_xkb_config(&file);
+    ime.roundtrip(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.modifier_state().shift, "Shift stays held");
+    assert_eq!(
+        method.grabs[0].names_after(before),
+        ["repeat_info", "keymap", "modifiers"]
+    );
+    assert_eq!(run.state.repeat, (25, 600));
+    key(&mut run.state, SHIFT, false);
+    run.stop();
+}
+
 /// A malformed, missing or uncompilable file changes nothing; a good one then applies.
 #[test]
 fn a_malformed_file_keeps_the_last_keymap() {

@@ -157,6 +157,14 @@ impl State {
         }
     }
 
+    /// Sends the seat's repeat to the input method's grab, if one is installed.
+    pub fn input_method_repeat_changed(&self) {
+        if let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.as_ref()) {
+            let (rate, delay) = self.repeat;
+            grab.repeat_info(rate, delay);
+        }
+    }
+
     /// Sends the seat's modifiers to the input method's grab, if one is installed: none is
     /// while the session is locked.
     pub fn input_method_modifiers(&self) {
