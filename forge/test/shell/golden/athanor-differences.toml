@@ -7,7 +7,7 @@
 #   #736: athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none
 #   #738: cosmic-comp places a client window at the top left with a focus outline; athanor-compositor centres it without the outline
-#   #739: the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve
+#   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve
 #   #742: the bar draws notification toasts over the open notification centre; the golden shows only the centre
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
@@ -385,7 +385,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -400,7 +400,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -415,7 +415,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -430,7 +430,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -445,7 +445,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -460,7 +460,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -475,7 +475,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -490,7 +490,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -505,7 +505,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -520,7 +520,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -535,7 +535,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -550,7 +550,7 @@ issue = 737
 
 [[difference]]
 case = "bar-power-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -565,7 +565,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -580,7 +580,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -595,7 +595,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -610,7 +610,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -625,7 +625,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -640,7 +640,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -655,7 +655,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -670,7 +670,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -685,7 +685,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -700,7 +700,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -715,7 +715,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -730,7 +730,7 @@ issue = 737
 
 [[difference]]
 case = "bar-input-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -745,7 +745,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -760,7 +760,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -775,7 +775,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -790,7 +790,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -805,7 +805,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -820,7 +820,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -835,7 +835,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -850,7 +850,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -865,7 +865,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -880,7 +880,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -895,7 +895,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -910,7 +910,7 @@ issue = 737
 
 [[difference]]
 case = "bar-calendar-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -925,7 +925,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -940,7 +940,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -955,7 +955,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -970,7 +970,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -985,7 +985,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1000,7 +1000,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1015,7 +1015,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1030,7 +1030,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1045,7 +1045,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1060,7 +1060,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1075,7 +1075,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1090,7 +1090,7 @@ issue = 737
 
 [[difference]]
 case = "bar-accessibility-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1105,7 +1105,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1120,7 +1120,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1135,7 +1135,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1150,7 +1150,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1165,7 +1165,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1180,7 +1180,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1195,7 +1195,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1210,7 +1210,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1225,7 +1225,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1240,7 +1240,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1255,7 +1255,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1270,7 +1270,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tiling-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1285,7 +1285,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1300,7 +1300,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1315,7 +1315,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1330,7 +1330,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1345,7 +1345,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1360,7 +1360,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1375,7 +1375,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1390,7 +1390,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1405,7 +1405,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1420,7 +1420,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1435,7 +1435,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1450,7 +1450,7 @@ issue = 737
 
 [[difference]]
 case = "bar-popups-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1465,7 +1465,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1485,7 +1485,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1505,7 +1505,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1525,7 +1525,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1545,7 +1545,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1565,7 +1565,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1585,7 +1585,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1605,7 +1605,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1625,7 +1625,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1645,7 +1645,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1665,7 +1665,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1685,7 +1685,7 @@ issue = 737
 
 [[difference]]
 case = "bar-notifications-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1705,7 +1705,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1720,7 +1720,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1735,7 +1735,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1750,7 +1750,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1765,7 +1765,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1780,7 +1780,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1795,7 +1795,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1810,7 +1810,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1825,7 +1825,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1840,7 +1840,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1855,7 +1855,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1870,7 +1870,7 @@ issue = 737
 
 [[difference]]
 case = "bar-tray-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1885,7 +1885,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1900,7 +1900,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1915,7 +1915,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1930,7 +1930,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1945,7 +1945,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1960,7 +1960,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1975,7 +1975,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -1990,7 +1990,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2005,7 +2005,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2020,7 +2020,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2035,7 +2035,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2050,7 +2050,7 @@ issue = 737
 
 [[difference]]
 case = "bar-network-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2065,7 +2065,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2080,7 +2080,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2095,7 +2095,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2110,7 +2110,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2125,7 +2125,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2140,7 +2140,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2155,7 +2155,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2170,7 +2170,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2185,7 +2185,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2200,7 +2200,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2215,7 +2215,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2230,7 +2230,7 @@ issue = 737
 
 [[difference]]
 case = "bar-bluetooth-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2245,7 +2245,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2260,7 +2260,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2275,7 +2275,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2290,7 +2290,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2305,7 +2305,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2320,7 +2320,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2335,7 +2335,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2350,7 +2350,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2365,7 +2365,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2380,7 +2380,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2395,7 +2395,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2410,7 +2410,7 @@ issue = 737
 
 [[difference]]
 case = "bar-audio-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2425,7 +2425,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2440,7 +2440,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2455,7 +2455,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2470,7 +2470,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2485,7 +2485,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2500,7 +2500,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2515,7 +2515,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2530,7 +2530,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2545,7 +2545,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2560,7 +2560,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2575,7 +2575,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2590,7 +2590,7 @@ issue = 737
 
 [[difference]]
 case = "bar-battery-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2605,7 +2605,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2620,7 +2620,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2635,7 +2635,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2650,7 +2650,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2665,7 +2665,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2680,7 +2680,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2695,7 +2695,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2710,7 +2710,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2725,7 +2725,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2740,7 +2740,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2755,7 +2755,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -2770,7 +2770,7 @@ issue = 737
 
 [[difference]]
 case = "bar-shield-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3110,7 +3110,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3125,7 +3125,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3140,7 +3140,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3160,7 +3160,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3180,7 +3180,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-bottom-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3190,7 +3190,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-bottom-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3200,7 +3200,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3215,7 +3215,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3230,7 +3230,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3240,7 +3240,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3250,7 +3250,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3265,7 +3265,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3280,7 +3280,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3295,7 +3295,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3310,7 +3310,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-bottom-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3325,7 +3325,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-bottom-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3340,7 +3340,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-bottom-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3355,7 +3355,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-top-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3365,7 +3365,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3380,7 +3380,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3390,7 +3390,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-bottom-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3405,7 +3405,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-bottom-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3415,7 +3415,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-bottom-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3425,7 +3425,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3440,7 +3440,7 @@ issue = 736
 
 [[difference]]
 case = "layout-bar-bottom-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3450,7 +3450,7 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
@@ -3460,7 +3460,7 @@ issue = 736
 
 [[difference]]
 case = "layout-float-bottom-visible-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, input source, tiling, accessibility compositor rows), which athanor-compositor does not serve"
+cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
 
 [[difference]]
