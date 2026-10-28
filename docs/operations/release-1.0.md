@@ -84,7 +84,7 @@ pull request that builds the row adds it, under that name or a better one.
 - Kernel roles, IPE and AutoFDO (D26).
 
 Later, with no release named: cosmic-comp patches 3, 4 and 7 to 10 after a measured rebase drill
-(D14), while cosmic-comp is the default, the own compositor carrying their behaviour as
+(D14), while cosmic-comp's session is shipped, the own compositor carrying their behaviour as
 `doc_own_stack.md` OS4 says; Bazaar after the Fedora 45 rebase (D8); strict DNS over TLS after the probe (D11); the
 first-run account helper (D17); the external-disk backup and its restore interface (D21); SBOM
 and provenance as promotion conditions (D15). The Bridge (UD45 to UD50) is dropped, not moved
