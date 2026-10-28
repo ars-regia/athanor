@@ -20,6 +20,7 @@ mod layer;
 mod lock;
 mod output_management;
 mod output_power;
+mod screen_filter;
 mod state;
 mod toplevel_state;
 mod xkb_config;
@@ -38,7 +39,8 @@ pub type Error = Box<dyn std::error::Error>;
 
 const USAGE: &str = "usage: athanor-compositor [--scale <factor>]\n       \
     athanor-compositor --headless [--render-node <path>] [--output <width>x<height>[@<scale>]]...\n       \
-    athanor-compositor --drm";
+    athanor-compositor --drm\n       \
+    athanor-compositor --screen-filter-on";
 
 /// How the compositor runs, from its arguments.
 #[derive(Debug, PartialEq)]
@@ -148,6 +150,10 @@ fn run() -> Result<(), Error> {
 }
 
 fn main() -> ExitCode {
+    // athanor-compositor-session's question, answered before any log or display.
+    if std::env::args().skip(1).eq(["--screen-filter-on"]) {
+        return screen_filter::answer();
+    }
     // RUST_LOG adds to the log, as `smithay::backend::drm::compositor=trace` for where each
     // element of a frame goes; what it does not name stays at info. Its directives follow
     // `info`, and a later directive replaces an earlier one of the same target, so a bare level
