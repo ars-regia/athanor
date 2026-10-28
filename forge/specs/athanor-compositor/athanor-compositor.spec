@@ -1,4 +1,5 @@
 # repo-input: system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml
+# repo-input: system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
