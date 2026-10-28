@@ -28,7 +28,7 @@ In short:
 1. The gaps of `doc_session.md` SN16 that reach a user who signs in without choosing are closed
    first: the lock, the idle blank, the polkit agent, X11 applications and the key bindings.
 2. A user who has the magnifier or a colour filter on is started in cosmic-comp's session, which
-   stays at the greeter as the second choice until OS19 holds in full.
+   stays at the greeter as the second choice until OS19 holds in full and the overview has come.
 3. The hardware run is fifteen minutes per machine in place of the hour.
 4. Revision 4 of `doc_session.md` is approved in a pull request of its own before the switch's
    code is written, and reverses its section 6, item 1: a compositor that fails before it is

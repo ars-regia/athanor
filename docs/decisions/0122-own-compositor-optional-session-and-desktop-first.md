@@ -66,5 +66,5 @@ On 2026-10-28 the maintainer amended decision 1 through `doc_own_stack.md` decis
 own compositor becomes the default session before its acceptance holds in full, once the gaps of
 `doc_session.md` SN16 that would reach the default session are closed and on the parts of OS19
 that decision names. cosmic-comp's session stays at the greeter as the second choice until the
-acceptance holds in full, and a defect of the own compositor then reaches every machine whose
+acceptance holds in full and the overview has come, and a defect of the own compositor then reaches every machine whose
 user does not choose cosmic-comp's session.
