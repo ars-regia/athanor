@@ -115,6 +115,9 @@ struct Head {
     drm_output: HeadOutput,
     /// A frame is queued and waits for its VBlank.
     queued: bool,
+    /// The output was turned off with a frame queued: the VBlank of that frame still comes, and
+    /// it presents nothing (`power_output`).
+    stale_vblank: bool,
     /// Whether its frames showed the lock.
     lock: LockFrames,
     /// The next draw, when one is scheduled, and what it is for.
@@ -582,6 +585,13 @@ impl State {
             tracing::warn!(%error, output = head.output.name(), "the new mode was refused: the output keeps its own");
             return;
         }
+        // A refused test makes Smithay commit a frame with the new mode, which lights the CRTC
+        // of an output the power client turned off.
+        if !head.powered {
+            if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
+                tracing::warn!(%error, output = head.output.name(), "the output could not be kept off");
+            }
+        }
         let output = head.output.clone();
         tracing::info!(
             output = output.name(),
@@ -715,6 +725,7 @@ impl State {
                 output: output.clone(),
                 drm_output,
                 queued: false,
+                stale_vblank: false,
                 lock: LockFrames::default(),
                 failing: FailureLog::default(),
                 timer: None,
@@ -809,6 +820,11 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
+        if std::mem::take(&mut head.stale_vblank) {
+            // The frame `clear` dropped: the frame queued since the output came back on, if any,
+            // is not on screen yet, and a lock must not count it as shown.
+            return;
+        }
         head.queued = false;
         let Some(mode) = head.output.current_mode() else {
             return;
@@ -908,7 +924,7 @@ impl State {
             return true;
         }
         head.powered = false;
-        head.queued = false;
+        head.stale_vblank = std::mem::take(&mut head.queued);
         if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
