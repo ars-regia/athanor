@@ -31,3 +31,8 @@ the state of each window the foreign toplevel list names, read through
 `athanor_toplevel_actions_v1`, two globals served by athanor-compositor. It is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS`,
 which pins the vendored files only. A published version does not change: a change is a new
 interface version.
+
+`athanor-keyboard-group-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, decisions
+19 and 27): the active layout group of a keyboard, made by `athanor_keyboard_group_manager_v1`
+for a `wl_keyboard`, and the request that switches it, served by athanor-compositor. It is MIT,
+2026 Athanor Forge, and it is not in `SHA256SUMS` either.

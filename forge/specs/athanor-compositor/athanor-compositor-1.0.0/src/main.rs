@@ -14,6 +14,7 @@ mod headless;
 mod identity;
 mod input;
 mod input_method;
+mod keyboard_group;
 mod layer;
 mod lock;
 mod output_management;

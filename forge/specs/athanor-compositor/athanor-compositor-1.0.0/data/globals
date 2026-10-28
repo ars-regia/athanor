@@ -41,3 +41,4 @@ zwlr_virtual_pointer_manager_v1 privileged
 zwp_input_method_manager_v2 privileged
 athanor_toplevel_manager_v1 privileged
 athanor_toplevel_actions_v1 privileged
+athanor_keyboard_group_manager_v1 privileged

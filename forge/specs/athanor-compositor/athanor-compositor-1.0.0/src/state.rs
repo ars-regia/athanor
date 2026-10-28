@@ -5,6 +5,7 @@ use crate::handlers::{shown, HeldCommit};
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
+use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
@@ -189,6 +190,8 @@ pub struct State {
     pub workspace_groups: Vec<Group>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
+    /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
+    pub keyboard_groups: Vec<AthanorKeyboardGroupV1>,
     /// The minimised windows, out of the space, each with the location it is restored at.
     pub minimised: Vec<(Window, Point<i32, Logical>)>,
     /// The heads sent to the clients of wlr-output-management, and their configurations.
@@ -274,6 +277,7 @@ impl State {
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
         crate::workspace::global(&dh);
         crate::toplevel_state::global(&dh);
+        crate::keyboard_group::global(&dh);
         crate::output_management::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
         VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
@@ -340,6 +344,7 @@ impl State {
             idle_notifier_state,
             workspace_groups: Vec::new(),
             toplevel_states: Vec::new(),
+            keyboard_groups: Vec::new(),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),

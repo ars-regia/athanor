@@ -120,6 +120,36 @@ mod athanor_toplevel {
     );
 }
 
+/// The client side of athanor-keyboard-group-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_keyboard_group {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml"
+    );
+}
+
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 /// The left button's evdev code.
 const BTN_LEFT: u32 = 0x110;
@@ -234,6 +264,8 @@ struct Client {
     activation_token: Option<String>,
     /// The toplevels the compositor asked to close.
     toplevel_closed: Vec<ObjectId>,
+    /// The `group` events of every athanor_keyboard_group_v1 object, in order.
+    keyboard_groups: Vec<(ObjectId, u32)>,
 }
 
 /// An event of an athanor_toplevel_state_v1 object.
@@ -429,6 +461,25 @@ delegate_noop!(Client: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 delegate_noop!(Client: athanor_toplevel::athanor_toplevel_manager_v1::AthanorToplevelManagerV1);
 delegate_noop!(Client: athanor_toplevel::athanor_toplevel_actions_v1::AthanorToplevelActionsV1);
 delegate_noop!(Client: xdg_activation_v1::XdgActivationV1);
+delegate_noop!(
+    Client: athanor_keyboard_group::athanor_keyboard_group_manager_v1::AthanorKeyboardGroupManagerV1
+);
+
+impl Dispatch<athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1, ()>
+    for Client
+{
+    fn event(
+        client: &mut Self,
+        object: &athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+        event: athanor_keyboard_group::athanor_keyboard_group_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_keyboard_group::athanor_keyboard_group_v1::Event::Group { group } = event;
+        client.keyboard_groups.push((object.id(), group));
+    }
+}
 
 impl Dispatch<athanor_toplevel::athanor_toplevel_state_v1::AthanorToplevelStateV1, ()> for Client {
     fn event(
@@ -986,7 +1037,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
-    athanor_toplevel_actions_v1\n\
+    athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
 
@@ -3745,6 +3796,69 @@ fn the_toplevel_manager_and_actions_are_privileged() {
     let other = Local::connect(&mut run, None);
     assert!(!other.sees(MANAGER), "a client with no line");
     assert!(!other.sees(ACTIONS), "a client with no line");
+    run.stop();
+}
+
+/// `athanor_keyboard_group_manager_v1` is privileged (OS4, OS5): the fixture's bar, granted it,
+/// sees it; the bar's identity inside a security context, the control center and a client with
+/// no line do not.
+#[test]
+fn the_keyboard_group_is_privileged() {
+    const MANAGER: &str = "athanor_keyboard_group_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(MANAGER), "the bar, granted it");
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(MANAGER), "the bar inside a context");
+    let control_center = Local::control_center(&mut run);
+    assert!(!control_center.sees(MANAGER), "the control center");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(MANAGER), "a client with no line");
+    run.stop();
+}
+
+impl Local {
+    /// The seat's keyboard and a keyboard group object of it.
+    fn keyboard_group(
+        &mut self,
+        run: &mut Running,
+    ) -> (
+        wl_keyboard::WlKeyboard,
+        athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+    ) {
+        let manager: athanor_keyboard_group::athanor_keyboard_group_manager_v1::AthanorKeyboardGroupManagerV1 =
+            self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        let keyboard = seat.get_keyboard(&qh, ());
+        let object = manager.get_keyboard_group(&keyboard, &qh, ());
+        self.roundtrip(run);
+        (keyboard, object)
+    }
+
+    /// The groups the keyboard group object `object` was sent, in order.
+    fn groups_of(
+        &self,
+        object: &athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+    ) -> Vec<u32> {
+        self.client
+            .keyboard_groups
+            .iter()
+            .filter(|(id, _)| *id == object.id())
+            .map(|(_, group)| *group)
+            .collect()
+    }
+}
+
+/// A keyboard group object is sent the seat's group when it is made.
+#[test]
+fn a_keyboard_group_object_is_sent_the_group_at_once() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    assert_eq!(bar.groups_of(&object), [0]);
     run.stop();
 }
 
