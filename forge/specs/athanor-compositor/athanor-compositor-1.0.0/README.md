@@ -29,6 +29,14 @@ It opens one output the size of its window, at the given scale (1 by default), l
 next free `wayland-N` socket and logs that name. In the shell rig, `RIG_COMPOSITOR=athanor`
 runs it in place of cosmic-comp (`forge/test/shell/session.sh`).
 
+SIGTERM and SIGINT, as `systemctl --user stop` sends them, end the event loop as a closed nested
+window does (`src/shutdown.rs`): the compositor stops xwayland-satellite (it runs in a scope
+of its own under the user manager, outside the service's cgroup, so the compositor sends SIGTERM to
+the process it spawned, which `systemd-run --scope` executes in place, then SIGKILL after two
+seconds), removes the X11 display's
+lock and socket while they are still its own, drops the Wayland socket and releases the DRM
+device and the seat, and exits 0.
+
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
 off screen.
 
