@@ -469,7 +469,7 @@ git commit -m "test(shell): Orca references for the bar, launcher and greeter, a
 - Consumes: the rig of tasks 3 and 5; seed gsettings lines (`<seed>.gsettings`); the keys the shell reads: `org.gnome.desktop.interface color-scheme`, `org.gnome.desktop.a11y.interface high-contrast` (`athanor-style` `appearance.rs`) and `org.gnome.desktop.interface text-scaling-factor`.
 - Produces: `atspi_check.problems(nodes, expected, required=(), window=None)` gains the extents check when `window` is given; `password_problems(nodes) -> list[str]`; `ring_check.contrast(png, box) -> float`. `rig.sh atspi <surface> --matrix` runs the twelve variants (four appearances by three text scales) and fails on the first problem with the variant's name.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_a_control_outside_its_window_is_a_problem(self): ...
@@ -480,13 +480,14 @@ def test_a_ring_under_three_to_one_fails(self): ...   # ring_check, on a synthet
 def test_the_ring_width_is_three_in_high_contrast(self): ...
 ```
 
-- [ ] **Step 2: Run them**: `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_*check.py'` fails.
+- [x] **Step 2: Run them**: `python3 -B -m unittest discover -s forge/test/shell/tests -p 'test_*check.py'` fails.
 
-- [ ] **Step 3: Implement** the checks; `ring_check.py` reads the focused control's extents from the walk, samples the 2 px ring (3 px in high contrast) and the surface beside it, and computes the WCAG ratio.
+- [x] **Step 3: Implement** the checks; `ring_check.py` reads the focused control's extents from the walk, samples the 2 px ring (3 px in high contrast) and the surface beside it, and computes the WCAG ratio.
 
 - [ ] **Step 4: Run on the laptop**, both compositors: `forge/test/shell/rig.sh atspi bar --matrix` and `RIG_COMPOSITOR=athanor forge/test/shell/rig.sh atspi bar --matrix`, then the dock and the launcher; the greeter on cosmic-comp, which carries the AX4 password case. Expected: pass, or each problem as a finding with its surface and variant. The greeter runs under the own compositor as its unit, with the line of task 4.
+  Partial (2026-10-25): cosmic-comp ran every matrix and the greeter; under athanor-compositor the bar and launcher matrices stopped at light@1.0 (#739, #803), so 11 variants of each were never walked, and the greeter was not run (SN12). The ring is never checked on the bar or the dock, nor on the launcher under cosmic-comp. Left to #805.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add forge/test/shell/atspi_check.py forge/test/shell/ring_check.py forge/test/shell/tests forge/test/shell/rig.sh
