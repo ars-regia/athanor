@@ -2,14 +2,15 @@
 
 Status: **revision 2, approved by the maintainer on 2026-10-23 (#755).** Revision 1 was approved by
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
-maintainer on 2026-10-19 (#629). The document sets out the direction ADR-0121 records: a compositor
+maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
+layouts under the own compositor, the amendment approved by the maintainer with #806. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18, 2026-10-19 and 2026-10-23; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
-15 in ADR-0126, and decisions 16 to 26 in section 7. Text marked "(decision N)" is what the
+2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25 and 2026-10-28; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
+15 in ADR-0126, and decisions 16 to 27 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -242,7 +243,9 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   windows, with a private `athanor_toplevel_state_v1` keyed by its handle for the state and the
   outputs of a window and a manager interface for activate, minimise, unminimise and close;
   `ext_workspace_manager_v1` for workspaces, with a private `athanor_workspace_tiling_v1` for the
-  tiling state; a private `athanor_keyboard_group_v1` for the keyboard group; and a private
+  tiling state; a private `athanor_keyboard_group_v1` for the keyboard group, made for a `wl_keyboard`
+  by the global `athanor_keyboard_group_manager_v1`, its layouts read from LN9's store (decision
+  27); and a private
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
   (OS4), and its description is in the repository, versioned, before its first client;
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
@@ -610,6 +613,22 @@ the toolkit: the T1 results leave them to revision 2, which does not ask for the
 24. **The frame-time thresholds** (OS19; C1 item 15; OS9 plan, question 6).
 25. **A role spoken differently** (OS8; T1 results, task 8, item 3).
 26. **The full-screen border and the reveal key** (OS4; SN16, gap 2).
+
+Taken by the maintainer on 2026-10-25, for the keyboard group's plan, and on 2026-10-28, after its
+audit found that the plan crossed SH2's boundary:
+
+27. **The keyboard layouts come from `xkb_config`, followed live** (OS5; `doc_languages.md` LN9).
+    The own compositor reads LN9's store, cosmic-comp's `xkb_config` in the user's configuration,
+    at its start and at each change, and rebuilds the seat's keymap and key repeat from it. A file
+    it refuses (malformed, more than the four layouts LN9 allows, a keymap libxkbcommon cannot
+    compile) changes nothing and is logged; without a file the keymap is the one `XKB_DEFAULT_*`
+    gives (SN15). The reader is the one exception to SH2's containment outside
+    `athanor-compositor-client`: one source file of the compositor, which reads that file, writes
+    nothing in the user's configuration and names no other COSMIC key, named by path in SH2's
+    exceptions and in `verify.py boundary`. It leaves when the store moves with the compositor
+    client (LN9). Not taken: `XKB_DEFAULT_*` alone, which has no live change and gives the
+    system's layouts rather than the user's; the compositor client as the reader, which would
+    bring gio and glib into the compositor; a store of Athanor's own now, a revision of LN9.
 
 ## 8. Risks
 
