@@ -38,7 +38,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 5: what milestones C1 and T1 measured.
 - Section 6, steps 4 and 5: the acceptance is OS19; a surface also passes OS20.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
-- Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and item 2, decision 10
+- Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and items 1 to 4, decision 10
   and section 6, step 4.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
@@ -677,6 +677,9 @@ amendment's audit:
       unit of its own, and rests on confined clients not reaching the user manager.
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
+      Data control, the other half of gap 6, has no client there either: the clipboard history
+      of `doc_control_center.md` CC10 collects nothing, so its switch and Super+V are hidden or
+      unbound, a loss the switch's pull request names.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2;
     - item 1 for every difference that hides, moves or changes a control or a text, by any
@@ -745,7 +748,9 @@ amendment's audit:
       (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
       allow-list: under the own compositor they open `athanor-launcher`, which has its line,
       through its D-Bus activation (`doc_launcher.md` LA8), before LA12's switch, which this
-      decision does not change for cosmic-comp's session.
+      decision does not change for cosmic-comp's session. The client chooses the program by the
+      compositor it is connected to: `athanor_toplevel_manager_v1`, which only the own
+      compositor offers, selects `athanor-launcher`, and its absence cosmic-launcher.
       The Application library buttons of the bar and of the dock, which open
       cosmic-app-library, are hidden under the own compositor and Super+A unbound (OS13), since the application library is a program of its
       own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
