@@ -2990,6 +2990,9 @@ COSMIC_ALLOWED = (
     # It reads cosmic-comp's colour filter until cosmic-comp's session leaves the greeter
     # (doc_own_stack.md decision 28).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
+    # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
+    # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 COSMIC_DESKTOP_ID = re.compile(r"com\.system76\.\w+\.desktop\b")
