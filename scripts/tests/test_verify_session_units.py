@@ -184,6 +184,28 @@ class SessionUnitsTest(unittest.TestCase):
                     [("athanor-session.target", "order")],
                 )
 
+    def test_the_compositor_is_started_by_its_script_alone_and_never_restarts(self):
+        compositor = (
+            "[Unit]\nPartOf=graphical-session.target\n"
+            "[Service]\nType=notify\nExecStart=/usr/bin/athanor-compositor --drm\n"
+        )
+        table = dict(TABLE, **{"x-compositor.service": ("compositor", False, "script")})
+        target = TARGET.replace("Wants=x-wanted.service", "Wants=x-compositor.service")
+        for units, enabled, expected in (
+            ({}, (), []),
+            ({"x-compositor.service": compositor + "[Install]\nWantedBy=athanor-session.target\n"}, (), ["install"]),
+            ({}, ("x-compositor.service",), ["install"]),
+            ({"athanor-session.target": target}, (), ["install"]),
+            ({"x-compositor.service": compositor + "Restart=on-failure\n"}, (), ["class"]),
+            ({"x-compositor.service": compositor.replace("PartOf=graphical-session.target\n", "")}, (), ["binding"]),
+        ):
+            with self.subTest(units=units, enabled=enabled):
+                shipped = {"x-compositor.service": compositor, **units}
+                self.assertEqual(
+                    problems(shipped, enabled=("athanor-bar.service", *enabled), table=table),
+                    [("x-compositor.service", rule) for rule in expected],
+                )
+
     def test_an_unclassified_or_unshipped_unit_fails(self):
         self.assertEqual(
             problems({"x-new.service": HELPER}), [("x-new.service", "class")]

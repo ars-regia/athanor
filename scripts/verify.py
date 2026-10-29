@@ -3792,8 +3792,9 @@ def check_services():
 
 # doc_session.md, SN12: every user unit Athanor ships for the session, with its crash class of
 # SN6, whether it connects to the compositor (SN3) and how the session starts it: through a
-# user preset under athanor-session.target, through D-Bus activation, or by name in
-# athanor-session.target itself (the gate through Requires=, the others through Wants=).
+# user preset under athanor-session.target, through D-Bus activation, by name in
+# athanor-session.target itself (the gate through Requires=, the others through Wants=), or by
+# its session's script alone.
 SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
@@ -3812,6 +3813,9 @@ SESSION_UNITS = {
     "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
+    # The own compositor (SN15): athanor-compositor-session starts it and waits on it, and its
+    # ExecStartPost= starts athanor-session.target, so it precedes the gate, which probes it.
+    "athanor-compositor.service": ("compositor", False, "script"),
 }
 SESSION_TARGET = "athanor-session.target"
 # Shipped user units that are not session units, and why.
@@ -3841,6 +3845,8 @@ SESSION_CLASSES = {
     "step": {"Type": "oneshot", "Restart": "no"},
     # COSMIC's units keep their own policy until they leave (SN6, exceptions).
     "cosmic": {"Restart": "on-failure", "RestartSec": 2},
+    # The own compositor has no Restart=: its end ends the session (SN6, exceptions; SN15).
+    "compositor": {"Restart": "no"},
 }
 SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"}
 # Findings the units do not meet yet, each the exact text of the check's finding for that unit,
@@ -3850,6 +3856,10 @@ SN3_CITE = "(doc_session.md, SN3)"
 NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
 ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
 ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
+SCRIPT_STARTED = (
+    f"started by its session's script alone, so no [Install], no user preset and not pulled in by "
+    f"{SESSION_TARGET} (doc_session.md, SN15)"
+)
 SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
 SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
@@ -3959,6 +3969,8 @@ def session_unit_problems(units, enabled):
             fail(unit, "install", ACTIVATED_PRESET)
         if start == "target" and unit not in pulled:
             fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
+        if start == "script" and (install or unit in enabled or unit in pulled):
+            fail(unit, "install", SCRIPT_STARTED)
 
         gate = "athanor-desktop.service"
         edges = (gate in unit_names(head, "After"), gate in unit_names(head, "Requisite"))
