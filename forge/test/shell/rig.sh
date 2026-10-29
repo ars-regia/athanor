@@ -1097,7 +1097,7 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
-            [dock]="athanor-dock Applicazioni" [launcher]="athanor-launcher Cerca")
+            [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$2]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
@@ -1170,10 +1170,10 @@ atspi)
         # 5: tiling needs zcosmic_workspace_manager_v2, whose private replacement
         # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies, and
         # decision 28 of doc_own_stack.md hides workspaces (#835) and applications (#836).
-        unit='' widgets=8
+        unit='' widgets=8 own=()
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
-            unit=--unit widgets=5
+            unit=--unit widgets=5 own=(--own-compositor float - "${3:-en}")
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
@@ -1186,9 +1186,10 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-compositor it names each line the bar lacks (Tiling, C1).
+        # athanor-compositor it names each line the bar lacks (Tiling, C1), and the buttons
+        # decision 28 hides are exempt under its float preset (`own`).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json"
+            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
@@ -1212,8 +1213,8 @@ atspi)
         # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
         # Under athanor-compositor 2: decision 28 hides workspaces (#835) and applications (#836).
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
-        transcript=atspi-dock${3:+-$3}.json widgets=4
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=2; fi
+        transcript=atspi-dock${3:+-$3}.json widgets=4 own=()
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=2 own=(--own-compositor - visible "${3:-en}"); fi
         seed_bar "$out/seed-atspi-dock" float top visible light
         atspi_variant "$out/seed-atspi-dock"
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
@@ -1223,7 +1224,7 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
         surface_not_closed atspi dock atspi-dock
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
+            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript" "${own[@]}"
         ;;
     launcher)
         # 1 interactive widget by atspi_check.py's list of roles: the entry, named "Search".
@@ -1305,7 +1306,7 @@ orca)
         exit 1
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
-    transcript=orca-$2${3:+-$3}.txt
+    transcript=orca-$2${3:+-$3}.txt own=()
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1339,6 +1340,7 @@ orca)
         # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
         # keyboard to the window (#614); orca_dock.py drops that line.
         seed_bar "$out/seed-orca-dock" float top visible light
+        if [ -n "$unit" ]; then own=(--own-compositor - visible "${3:-en}"); fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
             RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
@@ -1348,10 +1350,12 @@ orca)
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Tiling, C1). Tab skips Input source (#751), so the
+        # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
+        # through `own`). Tab skips Input source (#751), so the
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
+        if [ -n "$unit" ]; then own=(--own-compositor float - "${3:-en}"); fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
             RIG_DATA_OVERLAY="$bar_overlay" \
             RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
@@ -1391,7 +1395,7 @@ orca)
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
-        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript"
+        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
     # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-toolkit's, with vello_cpu and with

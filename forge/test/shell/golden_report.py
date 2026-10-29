@@ -47,6 +47,15 @@ HIDDEN = {
     "dock-workspaces": ("decision 28 hides the dock's workspaces button", 835),
     "dock-library": ("decision 28 hides the dock's application library button", 836),
 }
+# The accessible name of each control of HIDDEN that a screen reader's references hold, by
+# language: atspi_compare.py and orca_compare.py exempt it under the own compositor (decision 28
+# item 3). The rows of the accessibility menu are in no reference: no walk opens the menu.
+NAMES = {
+    "bar-workspaces": {"en": "Workspaces", "it": "Spazi di lavoro"},
+    "bar-library": {"en": "Applications", "it": "Applicazioni"},
+    "dock-workspaces": {"en": "Workspaces", "it": "Spazi di lavoro"},
+    "dock-library": {"en": "Applications", "it": "Applicazioni"},
+}
 # rig.sh capture_bar: the bar surfaces that run the bar preset; every other one runs float. The
 # bar surfaces run the bar alone, the dock surface the dock alone.
 BAR_PRESET_SURFACES = ("bar", "bar-shield")
@@ -75,10 +84,25 @@ def differs(result):
     return result.differing is not None and not compare.verdict(result.differing, result.allowed)
 
 
+def drawn(preset, dock, accessibility_menu=False):
+    """The controls of HIDDEN that a bar running `preset` (None: no bar) and a dock set to `dock`
+    draw under cosmic-comp, by the presets of doc_bar.md BR7 (workspaces under float and
+    minimal, the application library under all three) and the dock setting of doc_shell.md SH7
+    (its buttons only on a visible dock)."""
+    controls = set()
+    if preset in ("float", "minimal"):
+        controls.add("bar-workspaces")
+    if preset is not None:
+        controls.add("bar-library")
+    if accessibility_menu:
+        controls.add("bar-a11y-rows")
+    if dock == "visible":
+        controls |= {"dock-workspaces", "dock-library"}
+    return controls
+
+
 def hidden(surface, case):
-    """The controls of HIDDEN the case draws under cosmic-comp, by the presets of doc_bar.md BR7
-    (workspaces under float and minimal, the application library under all three) and the dock
-    setting of doc_shell.md SH7 (its buttons only on a visible dock)."""
+    """The controls of HIDDEN the case draws under cosmic-comp (drawn)."""
     if surface == "layout":
         layout = LAYOUTS.get(case)
         if layout is None:
@@ -90,16 +114,13 @@ def hidden(surface, case):
         preset, dock = None, "visible"
     else:
         return set()
-    controls = set()
-    if preset in ("float", "minimal"):
-        controls.add("bar-workspaces")
-    if preset is not None:
-        controls.add("bar-library")
-    if surface == "bar-accessibility":
-        controls.add("bar-a11y-rows")
-    if dock == "visible":
-        controls |= {"dock-workspaces", "dock-library"}
-    return controls
+    return drawn(preset, dock, surface == "bar-accessibility")
+
+
+def exemptions(preset, dock, lang):
+    """{accessible name: (cause, issue)} of the controls decision 28 hides in a screen reader's
+    scene, a bar running `preset` and a dock set to `dock` (drawn), in `lang` (NAMES)."""
+    return {NAMES[c][lang]: HIDDEN[c] for c in sorted(drawn(preset, dock)) if c in NAMES}
 
 
 def check_hidden(results, by_case):

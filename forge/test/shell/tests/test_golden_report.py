@@ -203,5 +203,16 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(gr.report(results, entries)[1], [])
 
 
+    def test_the_comparators_exempt_by_the_same_rule(self):
+        bar_ws, bar_lib = gr.HIDDEN["bar-workspaces"], gr.HIDDEN["bar-library"]
+        dock_ws, dock_lib = gr.HIDDEN["dock-workspaces"], gr.HIDDEN["dock-library"]
+        self.assertEqual(gr.exemptions("float", "-", "en"), {"Workspaces": bar_ws, "Applications": bar_lib})
+        self.assertEqual(gr.exemptions("bar", "-", "it"), {"Applicazioni": bar_lib})
+        self.assertEqual(
+            gr.exemptions(None, "visible", "it"), {"Spazi di lavoro": dock_ws, "Applicazioni": dock_lib}
+        )
+        self.assertEqual(gr.exemptions(None, "-", "en"), {})
+
+
 if __name__ == "__main__":
     unittest.main()
