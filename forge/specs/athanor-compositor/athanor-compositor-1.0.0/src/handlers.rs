@@ -396,16 +396,17 @@ impl State {
     }
 
     /// The origin in the space of a popup's root, a window or a layer surface, and the area of
-    /// the output it is shown on.
+    /// the output it is shown on: a window's is the output nearest to its centre
+    /// (`output_nearest`), the one it is shown on whether it is settled or being moved.
     fn popup_root_place(
         &self,
         root: &WlSurface,
     ) -> Option<(Point<i32, Logical>, Rectangle<i32, Logical>)> {
         if let Some(window) = self.window_for(root) {
-            return Some((
-                self.space.element_geometry(&window)?.loc,
-                self.output_area()?,
-            ));
+            let geometry = self.space.element_geometry(&window)?;
+            let centre = (geometry.loc + geometry.size.downscale(2)).to_f64();
+            let output = self.output_nearest(centre)?;
+            return Some((geometry.loc, self.space.output_geometry(output)?));
         }
         self.space.outputs().find_map(|output| {
             let area = self.space.output_geometry(output)?;
