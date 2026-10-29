@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- The notification popups already shown on an output hide while a popover of the bar is
+  open there, as new ones already waited, so none is drawn over the notification list under
+  any compositor (#742).
+
 * Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - The layout's directory watches are armed before the first read, so a layout written
   while the bar starts is applied, never lost.

@@ -10,7 +10,6 @@
 #   #738 (no case shows it): cosmic-comp cascades the windows after the first; athanor-compositor places
 #         the first as cosmic-comp does, and cascades none yet
 #   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve
-#   #742: the bar draws notification toasts over the open notification centre; the golden shows only the centre
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
 #   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
@@ -1480,11 +1479,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-light-1.0-en"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1498,11 +1492,6 @@ issue = 737
 case = "bar-notifications-light-1.0-de"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-light-1.0-de"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-notifications-light-1.0-rtl"
@@ -1520,11 +1509,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-light-1.0-rtl"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1538,11 +1522,6 @@ issue = 737
 case = "bar-notifications-light-1.5-en"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-light-1.5-en"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-notifications-light-1.5-de"
@@ -1560,11 +1539,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-light-1.5-de"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1578,11 +1552,6 @@ issue = 737
 case = "bar-notifications-light-1.5-rtl"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-light-1.5-rtl"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-notifications-dark-1.0-en"
@@ -1600,11 +1569,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-dark-1.0-en"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1618,11 +1582,6 @@ issue = 737
 case = "bar-notifications-dark-1.0-de"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-dark-1.0-de"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-notifications-dark-1.0-rtl"
@@ -1640,11 +1599,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-dark-1.0-rtl"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1658,11 +1612,6 @@ issue = 737
 case = "bar-notifications-dark-1.5-en"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-dark-1.5-en"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-notifications-dark-1.5-de"
@@ -1680,11 +1629,6 @@ cause = "the bar lacks the controls that need cosmic protocols (workspaces, tili
 issue = 739
 
 [[difference]]
-case = "bar-notifications-dark-1.5-de"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
-
-[[difference]]
 case = "bar-notifications-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1698,11 +1642,6 @@ issue = 737
 case = "bar-notifications-dark-1.5-rtl"
 cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve"
 issue = 739
-
-[[difference]]
-case = "bar-notifications-dark-1.5-rtl"
-cause = "the bar draws notification toasts over the open notification centre; the golden shows only the centre"
-issue = 742
 
 [[difference]]
 case = "bar-tray-light-1.0-en"
