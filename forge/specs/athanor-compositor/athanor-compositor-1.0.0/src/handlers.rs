@@ -41,6 +41,7 @@ use smithay::wayland::security_context::{
 use smithay::wayland::selection::data_device::{
     set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
 };
+use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -662,8 +663,8 @@ impl SeatHandler for State {
         self.request_redraw();
     }
 
-    /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of
-    /// the selection, and no other client is sent one. An offer a client already holds stays
+    /// The clipboard and the primary selection follow the keyboard: the client that gains the
+    /// focus is sent an offer of each selection, and no other client is sent one. An offer a client already holds stays
     /// readable after it loses the focus, for as long as the selection's source answers:
     /// Smithay checks no focus on `wl_data_offer.receive` and keeps the offer's object data to
     /// itself, so the compositor cannot withdraw it.
@@ -672,6 +673,7 @@ impl SeatHandler for State {
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| surface.client());
+        set_primary_focus(&self.display_handle, seat, client.clone());
         set_data_device_focus(&self.display_handle, seat, client);
         self.text_input_focus(focused.cloned());
         // A lock or a confinement follows the keyboard (decision 30). Once the dispatch is

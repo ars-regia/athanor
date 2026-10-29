@@ -44,10 +44,16 @@ pub enum Privilege {
     ToplevelActions,
     /// `athanor_keyboard_group_manager_v1`: the keyboard's layout group, followed and switched.
     KeyboardGroup,
+    /// `ext_data_control_manager_v1`: the clipboard and the primary selection, read and set
+    /// without the keyboard focus, a clipboard manager's.
+    ExtDataControl,
+    /// `zwlr_data_control_manager_v1`: the same through the wlroots protocol, which
+    /// wl-clipboard 2.2 speaks.
+    WlrDataControl,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 15] = [
+    const ALL: [(Self, &'static str); 17] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -69,6 +75,8 @@ impl Privilege {
         (Self::ToplevelState, "athanor_toplevel_manager_v1"),
         (Self::ToplevelActions, "athanor_toplevel_actions_v1"),
         (Self::KeyboardGroup, "athanor_keyboard_group_manager_v1"),
+        (Self::ExtDataControl, "ext_data_control_manager_v1"),
+        (Self::WlrDataControl, "zwlr_data_control_manager_v1"),
     ];
 
     fn named(interface: &str) -> Option<Self> {

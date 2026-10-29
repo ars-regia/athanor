@@ -726,7 +726,8 @@ compositor-globals)
     missing=()
     standard=(wl_compositor wl_shm wl_seat wl_output xdg_wm_base wp_viewporter
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1
-        wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1)
+        wl_data_device_manager zwp_primary_selection_device_manager_v1 zwlr_layer_shell_v1
+        wp_security_context_manager_v1 ext_idle_notifier_v1)
     # Decision 30's three.
     standard+=(zwp_pointer_constraints_v1 zwp_relative_pointer_manager_v1 zwp_keyboard_shortcuts_inhibit_manager_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
@@ -750,14 +751,14 @@ compositor-globals)
         ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
         zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
         zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
-        athanor_keyboard_group_manager_v1; do
+        athanor_keyboard_group_manager_v1 ext_data_control_manager_v1 zwlr_data_control_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 14 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 16 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;

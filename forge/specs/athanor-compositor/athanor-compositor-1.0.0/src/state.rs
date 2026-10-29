@@ -177,6 +177,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub xdg_activation_state: XdgActivationState,
     pub data_device_state: DataDeviceState,
+    /// Primary selection and data control (`clipboard`).
+    pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
     pub syncobj_state: Option<DrmSyncobjState>,
     /// The clients' frame times and the outputs' draw times.
@@ -296,6 +298,7 @@ impl State {
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         // GDK will not open a display without wl_data_device_manager.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let clipboard = crate::clipboard::Clipboard::new(&dh);
         // The privileged globals of OS4, each to the clients the allow-list grants it.
         let foreign_toplevel_state = ForeignToplevelListState::new_with_filter::<Self>(&dh, |c| {
             granted(c, Privilege::ToplevelList)
@@ -372,6 +375,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             xdg_activation_state,
             data_device_state,
+            clipboard,
             syncobj_state: None,
             frame_stats: None,
             held: Vec::new(),
