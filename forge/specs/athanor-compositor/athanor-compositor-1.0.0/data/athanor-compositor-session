@@ -114,15 +114,26 @@ fi
 # the condition of an `if`, so that one that fails does not end it before the rest; the
 # next sign-in's step 1 clears what it left.
 sup=
-# Ends the children of the supervisor's jobs (the systemd-run), the jobs and the supervisor,
-# in that order, so that no job starts a component again. Run as the condition of an `if`, which keeps
-# errexit off for the whole of it: a pkill that finds nothing is not a failure.
+# Ends the supervisor, its jobs and the jobs' children (the systemd-run). The pids are read
+# first and the jobs and the supervisor are killed before their children, so that no job
+# starts a component again in between. Run as the condition of an `if`, which keeps errexit
+# off for the whole of it: a pgrep that finds nothing is not a failure.
 kill_supervisor_tree() {
-    for job in $(pgrep -P "$sup"); do
-        pkill -KILL -P "$job"
+    jobs_of_sup=$(pgrep -P "$sup")
+    children=
+    for job in $jobs_of_sup; do
+        children="$children $(pgrep -P "$job")"
     done
-    pkill -KILL -P "$sup"
-    kill -KILL "$sup"
+    killed=0
+    # shellcheck disable=SC2086 # word splitting of the pid list is intended
+    kill -KILL $jobs_of_sup "$sup" || killed=1
+    # A child that ended on its own meanwhile is gone, which is what is wanted.
+    for child in $children; do
+        if ! kill -KILL "$child"; then
+            printf 'athanor-compositor-session: pid %s had already ended\n' "$child" >&2
+        fi
+    done
+    return "$killed"
 }
 end_session() {
     trap '' HUP TERM
@@ -176,7 +187,9 @@ end_session() {
             log err "graphical-session.target is still active 10 s after the session's stop"
             break
         fi
-        sleep 0.1
+        if ! sleep 0.1; then
+            log err "sleep failed while waiting for graphical-session.target"
+        fi
         waited=$((waited + 1))
     done
     # shellcheck disable=SC2086 # word splitting of the lists is intended
