@@ -23,9 +23,12 @@ unset ATHANOR_COMPOSITOR_SESSION_JOURNAL
 # shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-components
 . /usr/libexec/athanor/session-components
 
-# The reader of SN2's import list, which athanor-desktop sources too.
+# The reader of SN2's import list, which athanor-desktop sources too, and the user's
+# language, region and cursor, which athanor-session exports too (step 4).
 # shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-import-names
 . /usr/libexec/athanor/session-import-names
+# shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-environment
+. /usr/libexec/athanor/session-environment
 
 # What this session alone sets in the user manager (step 5).
 OWN="ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS"
@@ -168,6 +171,10 @@ export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
 export GTK_IM_MODULE=simple
 export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# LANG, LANGUAGE and the region's LC_* from the user's settings, and XCURSOR_SIZE and
+# XCURSOR_THEME; a value it cannot read is logged and the system's applies, so it never
+# hands off.
+export_user_environment
 # localsearch's unit starts only with XDG_SESSION_CLASS=user, and greetd hands the session
 # no class: read it from logind, as athanor-desktop does.
 if [ -z "${XDG_SESSION_ID:-}" ] ||

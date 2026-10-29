@@ -63,6 +63,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %dir /usr/libexec/athanor
 /usr/libexec/athanor/session-components
 /usr/libexec/athanor/session-import-names
+/usr/libexec/athanor/session-environment
 /usr/lib/systemd/system/athanor-usbguard-internal.service
 %dir /usr/share/athanor-system-config/flatpak-no-triggers
 /usr/lib/systemd/system/athanor-flatpak-triggers.service
@@ -100,6 +101,9 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 - athanor-desktop reads the import list through the function of
   /usr/libexec/athanor/session-import-names, which the own compositor's session sources too,
   so that both sessions parse and refuse the list the same way (doc_session.md, SN2 and SN15).
+- athanor-session's exports of the user's language, region and cursor move into the function
+  of /usr/libexec/athanor/session-environment, which the own compositor's session sources
+  too, so that both sessions export the same values (doc_session.md, SN2 and SN15 step 4).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-73
 - athanor-session exports LANG and LANGUAGE from the user's AccountsService languages,

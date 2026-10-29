@@ -207,6 +207,10 @@ class SessionCleanup(unittest.TestCase):
         text = (
             SESSION.read_text()
             .replace("/usr/libexec/athanor/session-components", str(COMPONENTS))
+            .replace(
+                "/usr/libexec/athanor/session-environment",
+                str(SOURCES / "usr/libexec/athanor/session-environment"),
+            )
             .replace("/usr/lib/systemd/user/athanor-compositor.service", str(unit))
             .replace(
                 "/usr/bin/athanor-usbguard-hook", str(s.bin / "athanor-usbguard-hook")

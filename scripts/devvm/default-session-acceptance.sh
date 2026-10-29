@@ -17,9 +17,8 @@
 # The drop-ins of items 11 to 13 and of the debug logs are written as root under
 # /run/systemd/user/<unit>.d/, which outlives the account's sessions; the trap removes them,
 # with every other change a stage made in the guest. "Locked" is cosmic-greeter's marker
-# file, as in lock-acceptance.sh. The end-state checks read today's import list of SN2
-# (WAYLAND_DISPLAY, DISPLAY, XDG_SESSION_TYPE, XDG_SESSION_CLASS, which
-# athanor-compositor-session removes) and widen with SN13 step 2.
+# file, as in lock-acceptance.sh. The end-state checks read SN2's import list, as SN13 steps 1
+# and 2 left it, less XDG_CURRENT_DESKTOP: what athanor-compositor-session removes.
 #
 #   account    pia (1006, "Pia"), password pia, her idle timers off; the greeter restarted
 #   default    items 9 and 10: the menu shows both entries, "Athanor" checked and cosmic-comp's
@@ -124,10 +123,13 @@ DROP_IN=default-session-acceptance.conf
 WINDOW_UNIT=default-session-acceptance-window
 APP_A=os.athanor.SessionAcceptanceA
 APP_B=os.athanor.SessionAcceptanceB
-# What the session's end removes from the user manager: today's import list of SN2 less
-# XDG_CURRENT_DESKTOP, and what only the own compositor's session sets.
-REMOVED=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS ATHANOR_OWN_COMPOSITOR
-    XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS)
+# What the session's end removes from the user manager: SN2's import list
+# (/usr/share/athanor-system-config/session-import) less XDG_CURRENT_DESKTOP, and what only
+# the own compositor's session sets.
+REMOVED=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS LANG LANGUAGE LC_NUMERIC
+    LC_TIME LC_MONETARY LC_PAPER LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT XCURSOR_SIZE
+    XCURSOR_THEME ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT
+    XKB_DEFAULT_OPTIONS)
 # The session's units, none of which is active once it ended (item 2).
 SESSION_UNITS=(athanor-session.target "$COMPOSITOR" "$GATE" athanor-shelld.service
     athanor-bar.service athanor-dock.service "${SCOPES[@]}")

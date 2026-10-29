@@ -26,6 +26,7 @@ COMPONENTS = (
     SPECS / "athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
 )
 READER = "/usr/libexec/athanor/session-import-names"
+ENVIRONMENT = "/usr/libexec/athanor/session-environment"
 IMPORT_LIST = "/usr/share/athanor-system-config/session-import"
 CONFIG_SOURCES = SPECS / "athanor-system-config/SOURCES"
 # SN2's list, read as the reader reads it, for the shipped file has neither blanks nor CRLF.
@@ -57,6 +58,7 @@ case "$*" in
         esac ;;
     *"show athanor-compositor.service"*) echo Result=exit-code; echo ExecMainStatus=1 ;;
     *is-active*) exit 3 ;;
+    *import-environment*) env > "$W/imported-env" ;;
 esac
 """
 
@@ -94,7 +96,7 @@ class CompositorSession(unittest.TestCase):
         text = SCRIPT.read_text().replace(
             "/usr/libexec/athanor/session-components", str(COMPONENTS)
         )
-        for path in (READER, IMPORT_LIST):
+        for path in (READER, ENVIRONMENT, IMPORT_LIST):
             self.assertIn(path, text)
             text = text.replace(path, str(CONFIG_SOURCES / path.lstrip("/")))
         for name in ("athanor-session", "athanor-compositor", "athanor-usbguard-hook"):
@@ -154,6 +156,7 @@ class CompositorSession(unittest.TestCase):
 
     def assert_cleaned_up(self):
         # SN15 step 3 (d): the import list less XDG_CURRENT_DESKTOP, then this session's own.
+        self.assertIn("XDG_CURRENT_DESKTOP", NAMES)
         removed = [n for n in NAMES if n != "XDG_CURRENT_DESKTOP"]
         self.assertIn("WAYLAND_DISPLAY", removed)
         self.assertIn(
@@ -264,6 +267,39 @@ class CompositorSession(unittest.TestCase):
                         for word in ("set-environment", "import-environment", "start")
                     )
                 )
+
+    def test_the_user_s_language_region_and_cursor_reach_the_import(self):
+        self.assertIn("LANG", NAMES)
+        self.stub(
+            "busctl",
+            'case "$*" in\n'
+            "    *FindUserById*) echo 'o \"/org/freedesktop/Accounts/User1000\"' ;;\n"
+            '    *Languages) echo \'v as 2 "it_IT.UTF-8" "en_US.UTF-8"\' ;;\n'
+            "    *X11Layout) echo 's \"it\"' ;;\n"
+            "    *) echo 's \"\"' ;;\n"
+            "esac",
+        )
+        self.stub(
+            "gsettings",
+            'case "$2 $3" in\n'
+            "    *screen-magnifier-enabled) echo false ;;\n"
+            "    *region) echo \"'de_DE.UTF-8'\" ;;\n"
+            "    *cursor-size) echo 32 ;;\n"
+            "    *cursor-theme) echo \"'Adwaita'\" ;;\n"
+            "esac",
+        )
+        status, stderr = self.run_session()
+        self.assertEqual(status, 0, stderr)
+        self.assertFalse(self.handed_off())
+        exported = (self.work / "imported-env").read_text().splitlines()
+        for line in (
+            "LANG=it_IT.UTF-8",
+            "LANGUAGE=it_IT.UTF-8:en_US.UTF-8",
+            "LC_TIME=de_DE.UTF-8",
+            "XCURSOR_SIZE=32",
+            "XCURSOR_THEME=Adwaita",
+        ):
+            self.assertIn(line, exported)
 
     def test_the_magnifier_from_the_greeter_hands_off(self):
         status, stderr = self.run_session(ATHANOR_A11Y="screen-reader,magnifier")
