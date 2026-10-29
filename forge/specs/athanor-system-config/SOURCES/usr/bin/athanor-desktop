@@ -14,15 +14,9 @@
 # `systemctl --user stop athanor-session.target` is the logout: the wait returns, this
 # process exits, cosmic-comp exits, greetd shows the greeter again.
 #
-# The screen locker and the idle daemon are not units: they run as children of this
-# process, the way cosmic-session starts cosmic-greeter and cosmic-idle. Both need a
-# parent inside the logind session. cosmic-greeter, run as a user other than
-# cosmic-greeter, is the locker: it finds its session with GetSessionByPID on its parent
-# PID, waits for the session's Lock signal and holds the sleep inhibitor that locks the
-# screen before suspend. cosmic-idle turns the screens off after the configured idle time,
-# locks the session with `loginctl lock-session` half a second later and suspends after
-# its own timeout. A child of the user manager belongs to no session, so as a user unit
-# the locker would never see a Lock signal and the idle lock would lock nothing.
+# The screen locker and the idle daemon run as children of the session's supervisor,
+# each in its own scope, shared with the own compositor's session
+# (/usr/libexec/athanor/session-components; doc_session.md, SN15).
 set -eu
 # localsearch's unit starts only with XDG_SESSION_CLASS=user (ConditionEnvironment=), and
 # greetd hands the session no class: read it from logind and publish it with the rest.
@@ -36,111 +30,18 @@ fi
 # does not hold is skipped, so the manager keeps its own value. XDG_CURRENT_DESKTOP already
 # reaches the manager, before any unit starts, from /usr/lib/environment.d/50-athanor-desktop.conf;
 # importing it again republishes the value athanor-session exported, which is the same one.
-# Given no name, systemctl would import this script's whole environment, so the list is
-# parsed here and not handed to systemctl as it stands: a blank, whitespace-only or comment
-# line (a comment may be indented) is skipped, a CRLF line ending is dropped, each name must
-# be a valid variable name, and a list with no name is refused. Globbing is off, so a `*`
-# stays a character and is refused as an invalid name.
-list=/usr/share/athanor-system-config/session-import
-if [ ! -r "$list" ]; then
-	echo "athanor-desktop: cannot read the import list $list" >&2
-	exit 1
-fi
-cr=$(printf '\r')
-names=
-set -f
-while IFS= read -r line || [ -n "$line" ]; do
-	line=${line%"$cr"}
-	# shellcheck disable=SC2086 # split on blanks, with globbing off
-	set -- $line
-	[ "$#" -gt 0 ] || continue
-	case $1 in '#'*) continue ;; esac
-	if [ "$#" -ne 1 ]; then
-		echo "athanor-desktop: $list: more than one word on a line: $line" >&2
-		exit 1
-	fi
-	case $1 in
-	[!A-Za-z_]* | *[!A-Za-z0-9_]*)
-		echo "athanor-desktop: $list: not a variable name: $1" >&2
-		exit 1
-		;;
-	esac
-	names="$names $1"
-done < "$list"
-set +f
-if [ -z "$names" ]; then
-	echo "athanor-desktop: the import list names no variable" >&2
-	exit 1
-fi
-# shellcheck disable=SC2086 # one word per name, each one validated above
+# The reader refuses a list it cannot read or that names no valid variable, since systemctl
+# given no name would import this script's whole environment.
+# shellcheck source=SCRIPTDIR/../libexec/athanor/session-import-names
+. /usr/libexec/athanor/session-import-names
+names=$(session_import_names /usr/share/athanor-system-config/session-import)
+# shellcheck disable=SC2086 # one word per name, each one validated by the reader
 systemctl --user import-environment $names
 
-# Runs a session component again whenever it exits, as cosmic-session does, for as long
-# as the anchor process lives. The anchor is this process: its PID stays the same once
-# it execs systemctl below, and when the session ends the components lose the display,
-# exit, and the loop stops.
-#
-# A component that keeps failing is not restarted every second forever. An exit after a
-# run shorter than 60 seconds counts as a failure; the fifth failure in a row is logged
-# at err priority in the journal, naming the component -- a session with no locker is a
-# session that never locks -- and from then on the delay doubles at every failure, up to
-# 60 seconds. Only a run that lasted longer than 60 seconds resets the count and the
-# delay: a component crash-looping on a long delay never looks healthy again.
-#
-# The supervisor itself must not die: a dead supervisor is a locker that is never
-# restarted. It runs in a background subshell that inherits `set -e`, so errexit is
-# turned off inside it and every status that matters is tested explicitly. Time is read
-# from /proc/uptime, a monotonic clock read by a shell builtin, and a failed read counts
-# the run as short. When systemd-cat cannot write the err entry, the message goes to
-# stderr, which the compositor's own systemd-cat carries to the journal.
-# ponytail: liveness by PID; a PID reused within one retry delay would keep the loop
-# alive until that process exits. A pidfd-based supervisor would close it if it matters.
-uptime_seconds() {
-    if read -r seconds _ < /proc/uptime; then
-        echo "${seconds%.*}"
-    else
-        echo 0
-    fi
-}
-
-session_component() {
-    set +e
-    anchor=$1
-    shift
-    delay=1
-    failures=0
-    while kill -0 "$anchor" 2> /dev/null; do
-        started=$(uptime_seconds)
-        if "$@"; then
-            status=0
-        else
-            status=$?
-        fi
-        now=$(uptime_seconds)
-        if [ $((now - started)) -gt 60 ]; then
-            failures=0
-            delay=1
-        else
-            failures=$((failures + 1))
-            if [ "$failures" -ge 5 ]; then
-                if [ "$failures" -eq 5 ]; then
-                    message="$1 failed 5 times in a row, each run shorter than 60 seconds (last status $status); retrying with backoff"
-                    if ! printf '%s\n' "$message" | systemd-cat -p err -t athanor-desktop; then
-                        printf 'athanor-desktop: %s\n' "$message" >&2
-                    fi
-                fi
-                delay=$((delay * 2))
-                if [ "$delay" -gt 60 ]; then
-                    delay=60
-                fi
-            fi
-        fi
-        echo "athanor-desktop: $1 exited with status $status, restarting in ${delay}s" >&2
-        sleep "$delay"
-    done
-}
-
-session_component "$$" cosmic-greeter &
-session_component "$$" cosmic-idle &
+# The locker and the idle daemon, at once: cosmic-comp already serves. The anchor is this
+# process, whose PID stays the same once it execs systemctl below.
+# shellcheck source=SCRIPTDIR/../libexec/athanor/session-components
+. /usr/libexec/athanor/session-components
+session_components "$$" &
 
 exec systemctl --user start --wait athanor-session.target

@@ -1,10 +1,12 @@
 # athanor-compositor
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
-(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). No package ships it yet. Once
-milestone C1's DRM backend has passed the console sessions, the image ships it as an optional
-session at the greeter, under the conditions of decision 10, and decision 28 makes it the default
-session before the full acceptance of OS19, cosmic-comp's session staying at the greeter until 1.0.
+(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). The package
+`athanor-compositor` ships it as the greeter's default session (`docs/architecture/doc_session.md`,
+SN14 and SN15, revision 4; `doc_own_stack.md` decision 28): `data/athanor-compositor-session`
+starts `data/athanor-compositor.service`, which starts the desktop once the display is ready.
+cosmic-comp's session stays at the greeter as the second entry until this one passes OS19 of
+`doc_own_stack.md` in full and the overview and the window switcher on Alt+Tab have come.
 
 ## Smithay
 
@@ -194,9 +196,13 @@ client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. 
 binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
 client.
 
-The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
-the bar what the plan names, and the fixture grants its clients every privileged global but the
-output manager as the bar, and the output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+`data/privileged-clients` grants the bar, the dock, the control center and the launcher the
+interfaces each uses (`doc_session.md`, SN12); the test
+`every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line` fails when
+a crate under `forge/specs` draws on the top or overlay layer, or connects to the compositor's
+globals, without a line. The greeter is outside the list while it runs on cosmic-comp. The
+fixture grants its clients every privileged global but the output manager as the bar, and the
+output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
 can lock the session until one is added.
 
 What the check does not cover, and what revision 2 of `doc_own_stack.md` decided:
@@ -459,9 +465,9 @@ sudo install -D -m 0644 /dev/stdin /usr/share/athanor/compositor/privileged-clie
 LIST
 ```
 
-The shipped `data/privileged-clients` has no line for the dock, so the dock's top layer and its
-window list are refused in any image: a gap to close in task 9a (#683). The dock line above is only for
-this run.
+The shipped `data/privileged-clients` grants the bar and the dock under their own units,
+`athanor-bar.service` and `athanor-dock.service` (task 9a, #683). The `c1-*` lines above are only
+for this run.
 
 ### 2. Start
 

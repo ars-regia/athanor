@@ -14,15 +14,18 @@ use athanor_style::calmo::{self, Variant};
 use gtk4::accessible::Property;
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Application, ApplicationWindow, Box, Button, Entry, Image, Label, ListBox,
-    ListBoxRow, Orientation, PasswordEntry, ScrolledWindow, Stack, ToggleButton,
+    gdk, Align, Application, ApplicationWindow, Box, Button, CheckButton, Entry, Image, Label,
+    ListBox, ListBoxRow, MenuButton, Orientation, PasswordEntry, Popover, ScrolledWindow, Stack,
+    ToggleButton,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use tokio::sync::oneshot;
 
 use crate::accounts::{typed_name_is_valid, Account};
-use crate::auth::{authenticate_interactive, Conversation, Outcome, Prompt};
+use crate::auth::{
+    authenticate_interactive, sessions_offered, Conversation, Outcome, Prompt, Session,
+};
 use crate::i18n::{tr, tr_with};
 
 /// The seal's state is asked again every hour: the badge ages ("checked within 14 days"
@@ -295,6 +298,95 @@ fn power_chip(id: &str, icon: &str, label: &str, which: Power) -> Button {
     button
 }
 
+/// The session menu (doc_session.md, SN14): a menu button named "Session" whose menu holds
+/// `sessions` as a radio group, the one in `checked` checked. Its accessible description and
+/// its tooltip name the checked entry; a choice goes to `checked` and nowhere else.
+fn session_menu(sessions: &[Session], checked: &Rc<Cell<Session>>) -> MenuButton {
+    let menu = MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .css_classes(["greeter-chip"])
+        .valign(Align::Center)
+        .build();
+    named(&menu, "greeter-session", &tr("Session"));
+    let describe = |menu: &MenuButton, title: &str| {
+        menu.set_tooltip_text(Some(title));
+        menu.update_property(&[Property::Description(title)]);
+    };
+    let entries = Box::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(6)
+        .build();
+    let mut first: Option<CheckButton> = None;
+    for &session in sessions {
+        // cosmic-comp's entry names, in one line, what it has that the default lacks yet.
+        let (id, title, gaps) = match session {
+            Session::Own => ("greeter-session-own", tr("Athanor"), None),
+            Session::CosmicComp => (
+                "greeter-session-cosmic-comp",
+                tr("Athanor on cosmic-comp"),
+                Some(tr(
+                    "Magnifier, colour filters, workspace overview and Alt+Tab",
+                )),
+            ),
+        };
+        let text = Box::builder().orientation(Orientation::Vertical).build();
+        text.append(&Label::builder().label(title.as_str()).xalign(0.0).build());
+        let entry = CheckButton::builder()
+            .child(&text)
+            .active(session == checked.get())
+            .build();
+        named(&entry, id, &title);
+        if let Some(gaps) = gaps {
+            text.append(
+                &Label::builder()
+                    .label(gaps.as_str())
+                    .xalign(0.0)
+                    .wrap(true)
+                    .css_classes(["greeter-status"])
+                    .build(),
+            );
+            entry.update_property(&[Property::Description(&gaps)]);
+        }
+        entry.set_group(first.as_ref());
+        if entry.is_active() {
+            describe(&menu, &title);
+        }
+        let (weak, checked) = (menu.downgrade(), checked.clone());
+        entry.connect_toggled(move |entry| {
+            if !entry.is_active() {
+                return;
+            }
+            checked.set(session);
+            if let Some(menu) = weak.upgrade() {
+                describe(&menu, &title);
+            }
+        });
+        expose_choose_action(&entry);
+        entries.append(&entry);
+        if first.is_none() {
+            first = Some(entry);
+        }
+    }
+    menu.set_popover(Some(&Popover::builder().child(&entries).build()));
+    menu
+}
+
+/// GTK 4.20 gives a check button no AT-SPI action, so an assistive technology that acts
+/// through AT-SPI could not choose an entry: `radio.choose` checks it, as a click would
+/// (the same action as athanor-controls' `expose_choose_action`).
+fn expose_choose_action(button: &CheckButton) {
+    let choose = gtk4::gio::SimpleAction::new("choose", None);
+    let weak = button.downgrade();
+    choose.connect_activate(move |_, _| {
+        if let Some(button) = weak.upgrade() {
+            button.set_active(true);
+        }
+    });
+    let group = gtk4::gio::SimpleActionGroup::new();
+    group.add_action(&choose);
+    button.insert_action_group("radio", Some(&group));
+}
+
 /// Names a text field for a screen reader: the entry and the text widget inside it, which
 /// is the node a screen reader lands on.
 fn label_field<W: IsA<gtk4::Editable> + IsA<gtk4::Accessible>>(field: &W, label: &str) {
@@ -401,6 +493,8 @@ struct SignInForm {
     notices: Rc<RefCell<Notices>>,
     /// Where the answer to PAM's open question goes, while one is open.
     pending: Rc<RefCell<Option<oneshot::Sender<zeroize::Zeroizing<String>>>>>,
+    /// The session checked in the session menu, the default when there is none (SN14).
+    session: Rc<Cell<Session>>,
 }
 
 impl SignInForm {
@@ -509,6 +603,10 @@ impl Conversation for SignInForm {
         self.show_notices();
         field.grab_focus();
         async move { answer.await.ok() }
+    }
+
+    fn session_command(&self) -> String {
+        self.session.get().command()
     }
 }
 
@@ -651,6 +749,12 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
         .visible(false)
         .build();
     named(&cancel, "greeter-cancel", &tr("Cancel"));
+    // The first offered is checked at every start, and the choice is written nowhere (SN14).
+    // The menu is there only where the own compositor is installed, after the field in the
+    // focus chain.
+    let sessions = sessions_offered();
+    let session = Rc::new(Cell::new(sessions.first().copied().unwrap_or_default()));
+    let session_menu = (sessions.len() > 1).then(|| session_menu(sessions, &session));
     let field_row = Box::builder()
         .orientation(Orientation::Horizontal)
         .spacing(6)
@@ -659,6 +763,9 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
     field_row.append(&user_name);
     field_row.append(&password);
     field_row.append(&answer);
+    if let Some(menu) = &session_menu {
+        field_row.append(menu);
+    }
     field_row.append(&submit);
     field_row.append(&cancel);
 
@@ -727,6 +834,7 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
         pam_error: pam_error.clone(),
         notices: Rc::new(RefCell::new(Notices::default())),
         pending: Rc::new(RefCell::new(None)),
+        session,
     };
     {
         let form = form.clone();
@@ -1122,7 +1230,10 @@ mod tests {
         notices.error.push("Your account has expired".to_string());
         notices.ask();
         notices.fail("Your account has expired");
-        assert!(notices.error.is_empty(), "the failure line shows them instead");
+        assert!(
+            notices.error.is_empty(),
+            "the failure line shows them instead"
+        );
         assert_eq!(notices.info, ["Last login: yesterday"]);
         assert!(!notices.cancellable, "nothing is left to cancel");
 
