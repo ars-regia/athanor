@@ -154,6 +154,11 @@ impl State {
                 .map(|(_, surface)| surface.wl_surface().clone()),
             None => surface,
         };
+        // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
+        // confinement follows the keyboard (decision 30, `constraints.rs`).
+        if surface.is_none() {
+            self.loop_handle.insert_idle(|state| state.refresh_constraint());
+        }
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
     }
 

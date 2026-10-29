@@ -332,6 +332,7 @@ impl State {
                 }
             }
             InputEvent::DeviceRemoved { device } => {
+                self.absolute_device_gone(&device.id());
                 if device.has_capability(DeviceCapability::TabletTool) {
                     self.tablet_removed(&TabletDescriptor::from(&device));
                 }

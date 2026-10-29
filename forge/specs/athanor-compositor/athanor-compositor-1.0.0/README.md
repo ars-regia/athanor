@@ -108,8 +108,12 @@ their place as coordinates, the active one's state, and the `activate` capabilit
 manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
 holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
 minimised window, a dead client or the lock lets them run (`src/idle_inhibit.rs`).
+`zwp_primary_selection_device_manager_v1` is every client's and follows the keyboard focus as the
+clipboard does; `ext_data_control_manager_v1` and `zwlr_data_control_manager_v1`, which read and set
+both selections without the focus, are privileged and granted to no client yet (`src/clipboard.rs`).
 `wp-security-context-v1` tags the clients a sandbox connects: they
-see none of these globals but the idle notifier and the idle inhibitor, nor the security context manager.
+see the standard globals, primary selection among them, and no privileged one, data control
+included, nor the security context manager.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
@@ -136,7 +140,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |

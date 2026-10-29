@@ -188,6 +188,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub xdg_activation_state: XdgActivationState,
     pub data_device_state: DataDeviceState,
+    /// Primary selection and data control (`clipboard`).
+    pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
     pub syncobj_state: Option<DrmSyncobjState>,
     /// The clients' frame times and the outputs' draw times.
@@ -213,6 +215,8 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
+    /// The keyboard-shortcuts inhibitors and the clients Ctrl+Alt+Tab suspended (`constraints`).
+    pub input_hold: crate::constraints::Held,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -298,12 +302,14 @@ impl State {
         // a solid colour on every renderer.
         SinglePixelBufferState::new::<Self>(&dh);
         IdleInhibitManagerState::new::<Self>(&dh);
+        let input_hold = crate::constraints::Held::new(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         // GDK will not open a display without wl_data_device_manager.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let clipboard = crate::clipboard::Clipboard::new(&dh);
         // The privileged globals of OS4, each to the clients the allow-list grants it.
         let foreign_toplevel_state = ForeignToplevelListState::new_with_filter::<Self>(&dh, |c| {
             granted(c, Privilege::ToplevelList)
@@ -388,6 +394,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             xdg_activation_state,
             data_device_state,
+            clipboard,
             syncobj_state: None,
             frame_stats: None,
             held: Vec::new(),
@@ -403,6 +410,7 @@ impl State {
             lock: None,
             idle_notifier_state,
             inhibitors: HashMap::new(),
+            input_hold,
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
