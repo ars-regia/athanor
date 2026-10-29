@@ -188,7 +188,7 @@ fn background(px: &[u8; 4]) -> bool {
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Every global the compositor offers on every backend.
-const GLOBALS: [&str; 15] = [
+const GLOBALS: [&str; 16] = [
     "wl_compositor",
     "wl_subcompositor",
     "wl_shm",
@@ -204,6 +204,7 @@ const GLOBALS: [&str; 15] = [
     "xdg_activation_v1",
     "wl_data_device_manager",
     "zwp_idle_inhibit_manager_v1",
+    "zwp_primary_selection_device_manager_v1",
 ];
 
 #[derive(Default)]
@@ -3258,7 +3259,11 @@ fn task4_standard_globals_are_offered() {
     let mut run = Running::start(None);
     for global in rows(|_| true) {
         let count = run.globals.iter().filter(|g| *g == global).count();
-        let once = usize::from(global != "zwlr_output_manager_v1");
+        // The bar is granted neither the output manager nor data control.
+        let once = usize::from(!matches!(
+            global,
+            "zwlr_output_manager_v1" | "ext_data_control_manager_v1" | "zwlr_data_control_manager_v1"
+        ));
         let expected = if global == "wl_output" {
             OUTPUTS.len()
         } else {
@@ -4473,6 +4478,8 @@ fn os9_every_global_is_classified() {
     let bar = Local::connect(&mut run, None);
     let mut expected = rows(|_| true);
     expected.remove("zwlr_output_manager_v1");
+    expected.remove("ext_data_control_manager_v1");
+    expected.remove("zwlr_data_control_manager_v1");
     offered(&bar, "the bar", expected);
 
     let context = sandbox(&run);
@@ -10184,3 +10191,6 @@ fn a_window_is_maximised_on_its_output() {
     assert!(shown.overlaps(geometry), "restored on its output");
     run.stop();
 }
+
+#[cfg(test)]
+mod clipboard;
