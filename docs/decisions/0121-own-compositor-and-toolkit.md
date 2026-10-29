@@ -92,3 +92,11 @@ The maintainer took these decisions on 2026-10-17:
 - Patches of the CO3 register that the own compositor makes unnecessary keep their exit condition;
   until the own compositor ships, the register applies unchanged.
 - New crates take a `components.toml` entry when they are added, not before.
+
+## Amendment
+
+On 2026-10-29 the maintainer amended decision 2 through `doc_own_stack.md` decision 30 (#NNN): code
+may be ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor, MIT.
+Each ported file keeps its source's copyright notice and names the project, the revision and the
+licence. cosmic-comp, `GPL-3.0-only`, stays read and not copied. The compositor is still written
+from Smithay and is not a fork of either.
