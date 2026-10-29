@@ -2942,6 +2942,63 @@ fn dragging_a_window_reaches_the_second_output() {
     run.stop();
 }
 
+/// A popup of a window on the second output is kept inside that output, not the first: one
+/// opened at the window's right edge, by the output's right edge, slides back onto it (#845).
+#[test]
+fn a_popup_is_kept_inside_its_windows_output() {
+    use xdg_positioner::{Anchor, ConstraintAdjustment, Gravity};
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let parent = local.another(&mut run, "parent");
+    let window = local.server_window(&run, &parent.surface);
+    let second = output_at(&run, 1);
+    let shown = run.state.space.output_geometry(&second).expect("placed");
+    let at = shown.loc + Point::from((shown.size.w - WIDTH - 10, 10));
+    run.state.space.relocate_element(&window, at);
+    run.state.settle(&window);
+    assert_eq!(
+        run.state.workspace_of(&window),
+        run.state.active_workspace(&second),
+        "the window is on the second output"
+    );
+
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(WIDTH - 1, 0, 1, 1);
+    positioner.set_anchor(Anchor::TopRight);
+    positioner.set_gravity(Gravity::BottomRight);
+    positioner.set_constraint_adjustment(ConstraintAdjustment::SlideX);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    xdg.get_popup(Some(&parent.xdg), &positioner, &qh, ());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+
+    let root = window.toplevel().expect("a toplevel").wl_surface().clone();
+    let (_, offset) = smithay::desktop::PopupManager::popups_for_surface(&root)
+        .next()
+        .expect("the popup");
+    let geometry = run.state.space.element_geometry(&window).expect("shown");
+    let popup = smithay::utils::Rectangle::new(geometry.loc + offset, (WIDTH, HEIGHT).into());
+    assert!(
+        shown.contains_rect(popup),
+        "the popup {popup:?} stays on the second output {shown:?}"
+    );
+    run.stop();
+}
+
 /// The lock ends a move: the pointer goes to the lock, and the window stays (OS12).
 #[test]
 fn the_lock_ends_a_move() {

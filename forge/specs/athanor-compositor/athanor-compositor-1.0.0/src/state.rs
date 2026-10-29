@@ -574,24 +574,28 @@ impl State {
         Some(inset(Rectangle::new(area.loc, laid_out), laid_out, zone))
     }
 
-    /// What the zones leave of the output under `point`, or of the output nearest to it when
-    /// `point` is on none, in a gap between outputs of different sizes: where a window being
-    /// moved is kept.
+    /// What the zones leave of the output nearest to `point` (`output_nearest`): where a window
+    /// being moved is kept.
     pub fn window_area_at(&self, point: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        self.window_area_on(self.output_nearest(point)?)
+    }
+
+    /// The output under `point`, or the output nearest to it when `point` is on none, in a gap
+    /// between outputs of different sizes.
+    pub fn output_nearest(&self, point: Point<f64, Logical>) -> Option<&Output> {
         let distance = |output: &Output| {
             let shown = self.space.output_geometry(output)?.to_f64();
             let x = point.x.clamp(shown.loc.x, shown.loc.x + shown.size.w);
             let y = point.y.clamp(shown.loc.y, shown.loc.y + shown.size.h);
             Some((x - point.x).powi(2) + (y - point.y).powi(2))
         };
-        let output = self.space.output_under(point).next().or_else(|| {
+        self.space.output_under(point).next().or_else(|| {
             self.space
                 .outputs()
                 .filter_map(|output| Some((distance(output)?, output)))
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .map(|(_, output)| output)
-        })?;
-        self.window_area_on(output)
+        })
     }
 
     /// What the layer surfaces' exclusive zones leave of `output`.
