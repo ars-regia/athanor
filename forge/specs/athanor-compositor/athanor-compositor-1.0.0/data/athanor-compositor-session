@@ -115,7 +115,7 @@ fi
 # next sign-in's step 1 clears what it left.
 sup=
 # children_of <pid>: sets $pids to the children of <pid>. pgrep exits 1 when there are none;
-# any other status is an error, logged, and the list is then unknown.
+# any other status is an error, logged, and the list is then unknown: the tree kill fails.
 children_of() {
     pids=
     if pids=$(pgrep -P "$1"); then
@@ -125,6 +125,7 @@ children_of() {
     fi
     if [ "$pgrep_status" -gt 1 ]; then
         log err "pgrep -P $1 failed with status $pgrep_status"
+        tree_unknown=1
     fi
 }
 # Ends the supervisor, its jobs and the jobs' children (the systemd-run): all are stopped and
@@ -132,6 +133,7 @@ children_of() {
 # job starts a component again in between. Run as the condition of an `if`, which keeps
 # errexit off for the whole of it.
 kill_supervisor_tree() {
+    tree_unknown=0
     # The supervisor is stopped first, then its jobs, so that none starts a new job or a new
     # systemd-run between the reads of the pids and the kills; a pid that is gone is noted.
     if ! kill -STOP "$sup"; then
@@ -163,6 +165,9 @@ kill_supervisor_tree() {
             printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
         fi
     done
+    if [ "$tree_unknown" -ne 0 ]; then
+        killed=1
+    fi
     return "$killed"
 }
 end_session() {
