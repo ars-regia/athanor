@@ -9791,8 +9791,9 @@ fn a_window_of_an_unplugged_output_comes_back_on_the_first() {
     run.stop();
 }
 
-/// A window of the second output's workspace is maximised to the second output's area, and
-/// fitted to it again when the outputs move.
+/// A window of the second output's workspace is maximised to the second output's area, fitted
+/// to it again when the outputs move, and restored on that output when its place there moved
+/// off every output.
 #[test]
 fn a_window_is_maximised_on_its_output() {
     let mut run = Running::start(None);
@@ -9806,6 +9807,9 @@ fn a_window_is_maximised_on_its_output() {
     run.state.settle(&window);
     let list = workspaces_of(&run, 1);
     assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+    let size = run.state.space.output_geometry(&second).expect("placed").size;
+    let edge = at + Point::from((size.w - 20, size.h - 20));
+    run.state.space.relocate_element(&window, edge);
 
     toplevel.set_maximized();
     let area = run.state.window_area_on(&second).expect("an area");
@@ -9824,5 +9828,11 @@ fn a_window_is_maximised_on_its_output() {
     local.redraw(&mut run);
     assert_eq!(location_of(&run, &id), moved.loc);
     assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+
+    toplevel.unset_maximized();
+    local.redraw(&mut run);
+    let shown = run.state.space.output_geometry(&second).expect("placed");
+    let geometry = run.state.space.element_geometry(&window).expect("shown");
+    assert!(shown.overlaps(geometry), "restored on its output");
     run.stop();
 }

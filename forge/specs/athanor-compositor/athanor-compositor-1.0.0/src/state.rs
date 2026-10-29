@@ -606,9 +606,10 @@ impl State {
     }
 
     /// Restores a maximised `window`: a configure without the `maximized` state and with the
-    /// size it had, and the window moves back at the commit that answers it. The geometry it
-    /// had, or `None` when it is not maximised. A window maximised before it had a size picks
-    /// its own and stays where it is.
+    /// size it had, and the window moves back at the commit that answers it, centred in its
+    /// `home_area` when its home output no longer shows that place. The geometry it had, or
+    /// `None` when it is not maximised. A window maximised before it had a size picks its own
+    /// and stays where it is.
     pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let toplevel = window.toplevel()?;
         let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
@@ -620,7 +621,14 @@ impl State {
             .is_initial_configure_sent()
             .then(|| toplevel.send_configure());
         if !kept.is_empty() {
-            relocate(window, kept.loc, serial);
+            let to = match self
+                .home_area(window)
+                .filter(|_| !self.shown_at_home(window, kept))
+            {
+                Some(area) => centred(area, Rectangle::from_size(kept.size)),
+                None => kept.loc,
+            };
+            relocate(window, to, serial);
         }
         Some(kept)
     }
