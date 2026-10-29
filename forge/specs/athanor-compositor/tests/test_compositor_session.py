@@ -386,6 +386,7 @@ class CompositorSession(unittest.TestCase):
             f". {COMPONENTS}\n"
             "session_components() {\n"
             f'    trap "" TERM; : > "{self.work}/stuck-ready"\n'
+            "    ( sleep 1000; : ) &\n"
             "    while :; do sleep 0.1; done\n"
             "}\n"
         )
@@ -402,6 +403,7 @@ class CompositorSession(unittest.TestCase):
         process.send_signal(signal.SIGHUP)
         # The pipes close only when the supervisor and its sleeps are gone.
         _, stderr = process.communicate(timeout=30)
+        self.assertGreaterEqual(time.monotonic() - began, 4.5)
         self.assertLess(time.monotonic() - began, 15)
         self.assertEqual(process.returncode, 129, stderr)
         self.assertIn("did not end within 5 s and was killed", self.journal())

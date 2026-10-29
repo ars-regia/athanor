@@ -120,17 +120,23 @@ end_session() {
     # waited for, so that no job of it starts a scope after the stop below. It logs its own
     # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM. The wait is bounded: a
     # supervisor that does not end in 5 s (a job stuck in systemd-run, a trap that never runs)
-    # would keep greetd from showing the greeter. A watchdog kills its jobs, then it, and the
-    # wait returns 137; the scopes are stopped below either way. The watchdog's sleep is its
-    # only child, and the kill of the sleep cancels it, as `&&` then skips the kills.
+    # would keep greetd from showing the greeter. A watchdog then kills the jobs' children
+    # (the systemd-run), the jobs and the supervisor, and the wait returns 137; the scopes
+    # are stopped below either way. The watchdog is cancelled with KILL (it inherits the
+    # ignored TERM); its sleep has no output, so that it does not hold the journal's pipe.
     if [ -n "$sup" ]; then
         if ! kill "$sup" && kill -0 "$sup"; then
             log err "the supervisor of the locker and the idle daemon did not end"
         fi
-        (sleep 5 && {
+        (
+            set +e
+            sleep 5 > /dev/null 2>&1
+            for job in $(pgrep -P "$sup"); do
+                pkill -KILL -P "$job"
+            done
             pkill -KILL -P "$sup"
             kill -KILL "$sup"
-        }) &
+        ) &
         dog=$!
         sup_status=0
         wait "$sup" || sup_status=$?
@@ -139,8 +145,8 @@ end_session() {
             137) log err "the supervisor of the locker and the idle daemon did not end within 5 s and was killed with its jobs" ;;
             *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
         esac
-        if [ "$sup_status" -ne 137 ] && ! pkill -KILL -P "$dog"; then
-            log err "the watchdog of the supervisor's wait had already fired"
+        if [ "$sup_status" -ne 137 ] && ! kill -KILL "$dog"; then
+            log err "the watchdog of the supervisor's wait could not be cancelled"
         fi
     fi
     if ! stop_component_scopes; then
