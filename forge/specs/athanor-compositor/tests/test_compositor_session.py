@@ -9,6 +9,7 @@ finds athanor-session.target never active, so it starts nothing; the reader of t
 list and the list are the real ones, from athanor-system-config.
 """
 
+import os
 import shutil
 import signal
 import subprocess
@@ -386,7 +387,7 @@ class CompositorSession(unittest.TestCase):
             f". {COMPONENTS}\n"
             "session_components() {\n"
             f'    trap "" TERM; : > "{self.work}/stuck-ready"\n'
-            "    ( sleep 1000; : ) &\n"
+            f'    ( sh -c \'echo $$ > "{self.work}/grandchild"; exec sleep 1000\'; : ) &\n'
             "    while :; do sleep 0.1; done\n"
             "}\n"
         )
@@ -411,6 +412,12 @@ class CompositorSession(unittest.TestCase):
         self.assertNotIn("could not be", journal)
         self.assertNotIn("killed from outside", journal)
         self.assertNotIn("ended with status", journal)
+        # bash itself reports the supervisor's KILL, once, on the forced path only.
+        self.assertEqual(stderr.count("Killed"), 1, stderr)
+        self.assertNotIn("Done", stderr)
+        grandchild = int((self.work / "grandchild").read_text())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(grandchild, 0)
         calls = self.calls()
         scope_check = calls.index(
             "systemctl --user is-active --quiet cosmic-idle.scope",

@@ -114,62 +114,6 @@ fi
 # the condition of an `if`, so that one that fails does not end it before the rest; the
 # next sign-in's step 1 clears what it left.
 sup=
-# children_of <pid>: sets $pids to the children of <pid>. pgrep exits 1 when there are none;
-# any other status is an error, logged, and the list is then unknown: the tree kill fails.
-children_of() {
-    pids=
-    if pids=$(pgrep -P "$1"); then
-        return 0
-    else
-        pgrep_status=$?
-    fi
-    if [ "$pgrep_status" -gt 1 ]; then
-        log err "pgrep -P $1 failed with status $pgrep_status"
-        tree_unknown=1
-    fi
-}
-# Ends the supervisor, its jobs and the jobs' children (the systemd-run): all are stopped and
-# read first, then the jobs and the supervisor are killed before their children, so that no
-# job starts a component again in between. Run as the condition of an `if`, which keeps
-# errexit off for the whole of it.
-kill_supervisor_tree() {
-    tree_unknown=0
-    # The supervisor is stopped first, then its jobs, so that none starts a new job or a new
-    # systemd-run between the reads of the pids and the kills; a pid that is gone is noted.
-    if ! kill -STOP "$sup"; then
-        printf 'athanor-compositor-session: pid %s had already ended\n' "$sup" >&2
-    fi
-    children_of "$sup"
-    jobs_of_sup=$pids
-    for pid in $jobs_of_sup; do
-        if ! kill -STOP "$pid"; then
-            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
-        fi
-    done
-    children=
-    for job in $jobs_of_sup; do
-        children_of "$job"
-        children="$children $pids"
-    done
-    # A job or a child that ended on its own meanwhile (the supervisor's own sleep, for one)
-    # is gone, which is what is wanted; only the supervisor's kill decides the status.
-    for pid in $jobs_of_sup; do
-        if ! kill -KILL "$pid"; then
-            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
-        fi
-    done
-    killed=0
-    kill -KILL "$sup" || killed=1
-    for pid in $children; do
-        if ! kill -KILL "$pid"; then
-            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
-        fi
-    done
-    if [ "$tree_unknown" -ne 0 ]; then
-        killed=1
-    fi
-    return "$killed"
-}
 end_session() {
     trap '' HUP TERM
     # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated. It is
@@ -189,7 +133,10 @@ end_session() {
             if [ "$waited" -ge 50 ]; then
                 forced=1
                 log err "the supervisor of the locker and the idle daemon did not end within 5 s; killing it and its jobs"
-                if ! kill_supervisor_tree; then
+                # The supervisor leads a process group of its own (step 6): one kill reaches
+                # it, its jobs and their systemd-run, and no job can start a component again.
+                # It failed only if the group is still there.
+                if ! kill -KILL -- "-$sup" && kill -0 -- "-$sup"; then
                     log err "the supervisor of the locker and the idle daemon could not be killed"
                 fi
                 break
@@ -303,8 +250,12 @@ if [ -n "$IMPORTED" ] && ! systemctl --user import-environment $IMPORTED; then
 fi
 
 # 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
+# Monitor mode puts the background job in a process group of its own, whose id is its pid,
+# so that the exit handler can end it with its jobs in one kill (step 3).
+set -m
 session_components "$$" target &
 sup=$!
+set +m
 
 # 7. The only start of the compositor, and of the session through its ExecStartPost=. The
 # command returns once the unit is inactive again. It runs in the background and is waited
