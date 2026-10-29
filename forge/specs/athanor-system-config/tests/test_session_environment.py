@@ -14,6 +14,7 @@ from pathlib import Path
 SOURCES = Path(__file__).resolve().parents[1] / "SOURCES"
 SCRIPT = SOURCES / "usr/bin/athanor-session"
 IMPORT_LIST = SOURCES / "usr/share/athanor-system-config/session-import"
+COMPONENTS = "/usr/libexec/athanor/session-components"
 FORMATS = (
     "LC_NUMERIC",
     "LC_TIME",
@@ -43,6 +44,8 @@ class SessionEnvironment(unittest.TestCase):
         hook = "/usr/bin/athanor-usbguard-hook"
         text = SCRIPT.read_text()
         self.assertIn(hook, text)
+        self.assertIn(f". {COMPONENTS}\n", text)
+        text = text.replace(COMPONENTS, str(SOURCES / COMPONENTS.lstrip("/")))
         script = work / "athanor-session"
         script.write_text(text.replace(hook, "true"))
         stubs = work / "bin"
