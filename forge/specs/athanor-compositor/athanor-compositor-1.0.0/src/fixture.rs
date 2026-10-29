@@ -9491,29 +9491,7 @@ fn leaving_a_workspace_ends_its_popup_grab() {
     let menu = local.another(&mut run, "menu");
     let window = local.server_window(&run, &menu.surface);
     run.state.focus(&window);
-    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
-    let compositor: wl_compositor::WlCompositor = local.bind(4);
-    let shm: wl_shm::WlShm = local.bind(1);
-    let seat: wl_seat::WlSeat = local.bind(1);
-    let qh = local.queue.handle();
-    let positioner = wm_base.create_positioner(&qh, ());
-    positioner.set_size(WIDTH, HEIGHT);
-    positioner.set_anchor_rect(0, 0, 1, 1);
-    let surface = compositor.create_surface(&qh, ());
-    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
-    let popup = xdg.get_popup(Some(&menu.xdg), &positioner, &qh, ());
-    let serial = SERIAL_COUNTER.next_serial();
-    run.state.grab_serials.key_press = Some((serial, local.id.clone().expect("an id")));
-    popup.grab(&seat, serial.into());
-    local.client.configure = None;
-    surface.commit();
-    local.pump(&mut run, "the popup is configured", |client, _| {
-        client.configure.is_some()
-    });
-    xdg.ack_configure(local.client.configure.take().expect("a configure"));
-    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
-    surface.attach(Some(&buffer), 0, 0);
-    surface.commit();
+    grabbing_popup(&mut local, &mut run, &menu.xdg);
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     local.pump(&mut run, "the popup's grab takes the keyboard", |_, state| {
         focus(state).is_some_and(|surface| state.popups.find_popup(&surface).is_some())
@@ -9610,4 +9588,64 @@ fn a_window_dropped_on_another_output_takes_its_workspace() {
     assert!(run.state.space.element_location(&window).is_some(), "still shown");
     assert_eq!(run.state.output_of_workspace(last), Some(first));
     run.stop();
+}
+
+/// Maps a popup of `parent`, a window of `local`, that grabs the seat with a key serial of
+/// `local`'s, as a menu opened from the keyboard does.
+fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::XdgSurface) {
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(Some(parent), &positioner, &qh, ());
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, local.id.clone().expect("an id")));
+    popup.grab(&seat, serial.into());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(run);
+}
+
+/// A popup of a window the user cannot see, on an inactive workspace or minimised, grabs
+/// nothing, even with a key serial of its client's: the keyboard stays where it is.
+#[test]
+fn a_popup_of_a_hidden_window_grabs_nothing() {
+    for minimised in [false, true] {
+        let mut run = Running::start(None);
+        let (mut local, _, list) = three_workspaces(&mut run);
+        let hidden = local.another(&mut run, "hidden");
+        let window = local.server_window(&run, &hidden.surface);
+        if minimised {
+            assert!(run.state.minimise(&window));
+        } else {
+            assert!(run.state.activate_workspace(list[0]));
+            assert!(run.state.is_parked(&window));
+        }
+        let focus = keyboard_focus(&run);
+        assert_eq!(
+            focus.as_ref().and_then(|surface| surface.client()).map(|c| c.id()),
+            local.id.clone(),
+            "a window of the popup's client has the keyboard"
+        );
+        grabbing_popup(&mut local, &mut run, &hidden.xdg);
+        let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+        assert!(!keyboard.is_grabbed(), "no keyboard grab");
+        let pointer = run.state.seat.get_pointer().expect("a pointer");
+        assert!(!pointer.is_grabbed(), "no pointer grab");
+        assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
+        run.stop();
+    }
 }

@@ -574,6 +574,14 @@ impl XdgShellHandler for State {
         let Ok(root) = find_popup_root_surface(&popup) else {
             return;
         };
+        // A popup of a window the user cannot see, minimised or on an inactive workspace, takes
+        // neither the keyboard nor the pointer: it is dismissed.
+        if self.popup_root_place(&root).is_none() {
+            if let PopupKind::Xdg(surface) = &popup {
+                surface.send_popup_done();
+            }
+            return;
+        }
         let (keyboard, pointer) = (seat.get_keyboard(), seat.get_pointer());
         let Some(client) = root.client().map(|client| client.id()) else {
             return;
