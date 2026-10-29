@@ -556,10 +556,22 @@ impl State {
             .and_then(|output| self.space.output_geometry(output))
     }
 
-    /// What the layer surfaces' exclusive zones leave of the first output: where windows are
-    /// placed.
+    /// What the layer surfaces' exclusive zones leave of the first output (`window_area_on`):
+    /// where the fixture's windows are kept, maximised and restored.
+    #[cfg(test)]
     pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
         self.window_area_on(self.space.outputs().next()?)
+    }
+
+    /// The first output's `window_area` at the size the layer map lays the output out, its
+    /// logical size rounded rather than the space's ceiling (853 and not 854 for 1280 px at
+    /// 1.5): the non-exclusive zone cosmic-comp places a new window in (`placed`).
+    pub fn placement_area(&self) -> Option<Rectangle<i32, Logical>> {
+        let output = self.space.outputs().next()?;
+        let area = self.space.output_geometry(output)?;
+        let laid_out = laid_out(output)?;
+        let zone = layer_map_for_output(output).non_exclusive_zone();
+        Some(inset(Rectangle::new(area.loc, laid_out), laid_out, zone))
     }
 
     /// What the zones leave of the output nearest to `point` (`output_nearest`): where a window
@@ -592,15 +604,7 @@ impl State {
         // The layer map lays the output out at its logical size rounded, the space at its
         // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
         // fractional scale with no zone places windows as the whole output does.
-        let laid_out = output.current_mode().map(|mode| {
-            let size = mode
-                .size
-                .to_f64()
-                .to_logical(output.current_scale().fractional_scale());
-            output
-                .current_transform()
-                .transform_size(size.to_i32_round())
-        })?;
+        let laid_out = laid_out(output)?;
         let zone = layer_map_for_output(output).non_exclusive_zone();
         Some(inset(area, laid_out, zone))
     }
@@ -1295,6 +1299,42 @@ pub fn centred(
     (x, y).into()
 }
 
+/// `output`'s logical size rounded, at which the layer map lays it out.
+fn laid_out(output: &Output) -> Option<Size<i32, Logical>> {
+    output.current_mode().map(|mode| {
+        let size = mode
+            .size
+            .to_f64()
+            .to_logical(output.current_scale().fractional_scale());
+        output
+            .current_transform()
+            .transform_size(size.to_i32_round())
+    })
+}
+
+/// Where a new window of `geometry` is mapped in `area`, `State::placement_area`, as cosmic-comp
+/// places the first floating window it maps with no place of its own
+/// (`src/shell/layout/floating/mod.rs`, `map_internal`): each half floored on its own, the
+/// window's middle at the area's across, and its top half the area's height less half the
+/// window's below the area's top, but no lower than an eighth of that height. Its top left is
+/// kept inside, where cosmic-comp would shrink a window larger than the area, and every step
+/// saturates, so a client's geometry, however large, cannot overflow. The point is the
+/// geometry's top left: the space draws the buffer at it less the geometry's offset in the
+/// buffer (smithay's `render_location`), so that offset, a client's shadow, is not taken off.
+pub fn placed(
+    area: Rectangle<i32, Logical>,
+    geometry: Rectangle<i32, Logical>,
+) -> Point<i32, Logical> {
+    let half = |of: i32, window: i32| (of / 2).saturating_sub(window / 2).max(0);
+    let across = half(area.size.w, geometry.size.w);
+    let down = half(area.size.h, geometry.size.h).min(area.size.h / 8);
+    (
+        area.loc.x.saturating_add(across),
+        area.loc.y.saturating_add(down),
+    )
+        .into()
+}
+
 /// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of
 /// the output laid out at `laid_out`. Each inset is kept inside the output, so that a client's
 /// exclusive zone, however large, cannot place windows outside it or overflow; zones that leave
@@ -1320,7 +1360,7 @@ fn inset(
 
 #[cfg(test)]
 mod tests {
-    use super::{inset, GrabSerials};
+    use super::{inset, placed, GrabSerials};
     use smithay::reexports::wayland_server::backend::{ClientData, ClientId};
     use smithay::reexports::wayland_server::Display;
     use smithay::utils::{Logical, Rectangle, Serial};
@@ -1361,6 +1401,42 @@ mod tests {
                 rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX)
             ),
             output
+        );
+    }
+
+    /// A new window is placed as cosmic-comp places it: centred across, and no lower than an
+    /// eighth of the area's height below its top (#738).
+    #[test]
+    fn a_new_window_is_placed_as_cosmic_comp_places_it() {
+        let output = rect(0, 0, 1280, 800);
+        // Short: an eighth down, 100, where centring would put it at 350.
+        assert_eq!(placed(output, rect(0, 0, 200, 100)), (540, 100).into());
+        // Tall: centred, 50, above an eighth.
+        assert_eq!(placed(output, rect(0, 0, 200, 700)), (540, 50).into());
+        // Below a bar of 32; the geometry's offset in its buffer is not taken off.
+        assert_eq!(
+            placed(rect(0, 32, 1280, 768), rect(10, 20, 200, 100)),
+            (540, 128).into()
+        );
+        // Larger than the area: its top left kept inside.
+        assert_eq!(placed(output, rect(0, 0, 1400, 900)), (0, 0).into());
+        // Each half floored on its own: 640 - 100 and 400 - 350, where halving the difference
+        // gives 539 and 49.
+        assert_eq!(placed(output, rect(0, 0, 201, 701)), (540, 50).into());
+        // The layer map's 853 by 533 of 1280 by 800 px at 1.5: the chooser's 420 at 216, as on
+        // cosmic-comp's golden chooser-light-1.5-en (324 px), where the space's 854 gives 217.
+        assert_eq!(
+            placed(rect(0, 0, 853, 533), rect(0, 0, 420, 100)),
+            (216, 66).into()
+        );
+        // An area or a geometry at the ends of i32 does not overflow.
+        assert_eq!(
+            placed(rect(i32::MAX, i32::MAX, 1280, 800), rect(0, 0, 200, 100)),
+            (i32::MAX, i32::MAX).into()
+        );
+        assert_eq!(
+            placed(output, rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX)),
+            (0, 0).into()
         );
     }
 

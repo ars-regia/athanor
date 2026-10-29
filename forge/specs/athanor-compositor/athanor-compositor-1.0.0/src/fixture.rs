@@ -1288,11 +1288,12 @@ fn fixture(node: Option<&Path>) {
     let area = state.space.element_geometry(&window).expect("mapped");
     assert_eq!((area.size.w, area.size.h), (WIDTH, HEIGHT));
 
-    // Output 0 at scale 1: the window centred, red above blue, the background around it.
+    // Output 0 at scale 1: the window centred across and an eighth down, red above blue, the
+    // background around it.
     let first = state.capture(0).expect("frame of output 0");
     let (w, h) = (OUTPUTS[0].width, OUTPUTS[0].height);
     assert_eq!(first.len(), (w * h * 4) as usize);
-    let (cx, cy) = (w / 2, h / 2);
+    let (cx, cy) = (w / 2, h / 8 + HEIGHT / 2);
     assert_eq!(pixel(&first, w, cx, cy - HEIGHT / 4), RED, "top half");
     assert_eq!(pixel(&first, w, cx, cy + HEIGHT / 4), BLUE, "bottom half");
     for (x, y, place) in [(0, 0, "corner"), (cx, cy - HEIGHT, "above the window")] {
@@ -1712,9 +1713,10 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
     });
     let exclusive = layer(&run.state, "exclusive");
 
-    // Centred in what the zone leaves: 50 lower by half the zone, at y 375 rather than 350.
+    // Placed in what the zone leaves: an eighth of its 750 below the zone, at y 143 rather
+    // than 100.
     steps.send(Step::Window).expect("the shell's client");
-    let (x, y) = ((OUTPUTS[0].width - WIDTH) / 2, 50 + (750 - HEIGHT) / 2);
+    let (x, y) = ((OUTPUTS[0].width - WIDTH) / 2, 50 + 750 / 8);
     run.until("the window is placed below the zone", |state| {
         state
             .space
@@ -2270,7 +2272,7 @@ fn task8_a_fatal_failure_is_kept_for_main() {
 }
 
 /// An output that goes takes no window with it (C1 task 8): a window only it showed is centred
-/// on the first output, where it was placed at first.
+/// on the first output.
 #[test]
 fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
     let mut run = Running::start(None);
@@ -2281,7 +2283,10 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
         .next()
         .expect("the window")
         .clone();
-    let placed = run.state.space.element_location(&window);
+    let centred = run
+        .state
+        .window_area()
+        .map(|area| crate::state::centred(area, window.geometry()));
     let second = run
         .state
         .space
@@ -2300,7 +2305,7 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
     run.state.remove_output(&second);
     assert_eq!(
         run.state.space.element_location(&window),
-        placed,
+        centred,
         "centred on the first output"
     );
     run.stop();
@@ -2680,6 +2685,69 @@ fn fixture_window(run: &Running) -> (smithay::desktop::Window, ClientId) {
         .expect("the fixture's client")
         .id();
     (window, id)
+}
+
+/// The fixture's window is placed as cosmic-comp places a new floating window: centred across,
+/// and an eighth of the output's height down rather than centred (#738).
+#[test]
+fn the_first_window_is_placed_as_cosmic_comp_places_it() {
+    let run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    assert_eq!(
+        run.state.space.element_location(&window),
+        Some(((OUTPUTS[0].width - WIDTH) / 2, OUTPUTS[0].height / 8).into())
+    );
+    run.stop();
+}
+
+/// At scale 1.5 a window is placed in the layer map's 853 logical pixels of the first output's
+/// 1280, not the space's 854: the chooser's 420 at 216, as on cosmic-comp's golden
+/// chooser-light-1.5-en (#738).
+#[test]
+fn a_window_is_placed_in_the_layer_maps_area_at_a_fractional_scale() {
+    let mut run = Running::start(None);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .next()
+        .expect("the first output")
+        .clone();
+    first.change_current_state(
+        None,
+        None,
+        Some(smithay::output::Scale::Fractional(1.5)),
+        None,
+    );
+    layer_map_for_output(&first).arrange();
+    run.state.arrange_outputs();
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    surface.commit();
+    local.pump(&mut run, "the initial configure", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    // A shadow of 15 by 12 around the 420 px window, as GTK draws the chooser's.
+    let (buffer, _) = local.buffer(&shm, 450, HEIGHT + 24, [0, 0, 0, 255]);
+    xdg.set_window_geometry(15, 12, 420, HEIGHT);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let window = local.server_window(&run, &surface);
+    // 853 / 2 - 420 / 2 across; 533 / 8 down, above 533 / 2 - 100 / 2. The window's
+    // geometry is there, its buffer 15 by 12 up and to the left.
+    assert_eq!(
+        run.state.space.element_location(&window),
+        Some((216, 66).into())
+    );
+    run.stop();
 }
 
 /// Whether `window` belongs to the client `id`.
@@ -3434,7 +3502,7 @@ fn task4_the_lock_hides_and_takes_the_keyboard() {
     let (w, h) = (OUTPUTS[0].width, OUTPUTS[0].height);
     let centre = Point::from((
         f64::from(w) / 2.0,
-        f64::from(h) / 2.0 - f64::from(HEIGHT) / 4.0,
+        f64::from(h) / 8.0 + f64::from(HEIGHT) / 4.0,
     ));
     // The pointer rests on the window, and does not move again.
     let pointer = run.state.seat.get_pointer().expect("a pointer");
@@ -3489,7 +3557,7 @@ fn task4_the_lock_hides_and_takes_the_keyboard() {
 
     let first = run.state.capture(0).expect("frame of output 0");
     assert_eq!(
-        pixel(&first, w, w / 2, h / 2 - HEIGHT / 4),
+        pixel(&first, w, w / 2, h / 8 + HEIGHT / 4),
         [0, 0, 0, 255],
         "the window is hidden"
     );
@@ -3521,7 +3589,7 @@ fn task4_the_lock_hides_and_takes_the_keyboard() {
     );
     let first = run.state.capture(0).expect("frame of output 0");
     assert_eq!(
-        pixel(&first, w, w / 2, h / 2 - HEIGHT / 4),
+        pixel(&first, w, w / 2, h / 8 + HEIGHT / 4),
         RED,
         "the window is back"
     );
@@ -6535,9 +6603,9 @@ fn os9_a_virtual_pointer_moves_and_clicks() {
         .get_pointer()
         .expect("a pointer")
         .current_location();
-    // The red half of the window, centred on the first output.
+    // The red half of the window, on the first output.
     let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
-    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    let target = Point::from((w / 2.0, h / 8.0 + f64::from(HEIGHT) / 4.0));
     pointer.motion(0, target.x - at.x, target.y - at.y);
     pointer.frame();
     local.roundtrip(&mut run);
@@ -6833,9 +6901,9 @@ fn os9_a_virtual_pointer_is_dropped_while_locked() {
     let (mut locker, lock) = lock_session(&mut run);
     let locker_id = locker.id.clone().expect("a client the fixture inserted");
     let seat_pointer = run.state.seat.get_pointer().expect("a pointer");
-    // The red half of the window, centred on the first output.
+    // The red half of the window, on the first output.
     let (w, h) = (f64::from(OUTPUTS[0].width), f64::from(OUTPUTS[0].height));
-    let target = Point::from((w / 2.0, h / 2.0 - f64::from(HEIGHT) / 4.0));
+    let target = Point::from((w / 2.0, h / 8.0 + f64::from(HEIGHT) / 4.0));
     let to_target = |at: Point<f64, smithay::utils::Logical>| (target.x - at.x, target.y - at.y);
 
     let at = seat_pointer.current_location();
