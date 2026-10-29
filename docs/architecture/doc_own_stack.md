@@ -5,14 +5,14 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25 and 2026-10-28; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
-15 in ADR-0126, and decisions 16 to 29 in section 7. Text marked "(decision N)" is what the
+2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25, 2026-10-28 and 2026-10-29; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
+15 in ADR-0126, and decisions 16 to 30 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -40,6 +40,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Section 7: decision 16, the renderer; decisions 17 to 26, taken on 2026-10-23.
 - Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and items 1 to 5, decision 10
   and section 6, step 4; decision 29, with OS13.
+- Amended on 2026-10-29: decision 30, with OS3, OS13 and OS17.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -145,9 +146,10 @@ under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revis
 cosmic-comp take it, added to `deny.toml` with its exact URL; moving the revision is its own pull
 request, as a cosmic-comp rebase is today (CO3). The GLES renderer draws; pixman draws in tests.
 X11 applications run through xwayland-satellite, a separate process the compositor starts when an
-X11 client connects, so that no X11 code runs inside the compositor. cosmic-comp and niri are
-read, not copied: cosmic-comp is `GPL-3.0-only`, and a port from any project names its source and
-a licence that allows `GPL-3.0-or-later` (ADR-0121).
+X11 client connects, so that no X11 code runs inside the compositor. cosmic-comp is read, not
+copied, because it is `GPL-3.0-only`. Code may be ported from niri (`GPL-3.0-or-later`) and from
+anvil (MIT), keeping the copyright notice of its source; a port from any project names its source
+and a licence that allows `GPL-3.0-or-later` (ADR-0121; decision 30).
 
 **OS4. The security model is designed in, not patched on.** Its guarantees hold against confined
 applications and against mistakes, not against unconfined code running as the user, which is the
@@ -296,7 +298,9 @@ decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the 
 (decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
-`doc_lock_and_prompts.md` allows then act (section 1; L14). Each default binding has a fixture test
+`doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
+focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
+reach that surface. Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
 overview comes, Super+= and Super+- until the own compositor has the magnifier, Super+A
 until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
@@ -335,8 +339,11 @@ fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` i
 plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
 (questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
 written (decision 23): data control, privileged, as OS4 says; primary selection,
-idle inhibit, single-pixel buffer and server-side decoration, standard;
+idle inhibit, single-pixel buffer and xdg-decoration, standard;
 `zwlr_output_power_manager_v1`, privileged, for `athanor-idle` (`doc_session_daemons.md` SD4).
+Decision 30 adds pointer constraints, relative pointer, keyboard shortcuts inhibit, tablets,
+pointer gestures and xdg-foreign, standard, and answers every request of xdg-decoration with
+client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
 per-client filter for it (C1 results, section 4).
 
@@ -824,6 +831,55 @@ Taken by the maintainer on 2026-10-28, answering the open questions of the key b
     with `athanor-a11y`, and the file leaves with the last. Not taken: for those keys, `wpctl` and
     logind, with Super+Alt+S doing nothing; waiting, the keys unbound and listed by the switch
     as gaps; for COSMIC's defaults, none bound, the close keys included.
+
+Taken by the maintainer on 2026-10-29, for the protocols that applications expect of a desktop
+compositor and that the own compositor did not yet offer:
+
+30. **The first wave of protocols, and code ported from niri and anvil** (OS3, OS13, OS17; amends
+    decision 2 and ADR-0121 decision 2 in one point). The own compositor offers, each with its row
+    in `data/globals` and its fixture test (OS17; OS19, item 2):
+    - pointer constraints and relative pointer, standard, a security context included, so that
+      the games, 3D tools and virtual machines the shell launches can lock or confine the pointer;
+      by the compositor's policy, a lock or a confinement is active only while its surface has
+      the keyboard focus;
+    - keyboard shortcuts inhibit, standard, with no consent dialog: while the inhibiting surface
+      has the keyboard focus, the compositor delivers its bindings to that surface, except the
+      protected keys it always keeps: the reveal key Super+Alt+T (OS4), Super+Escape and
+      Super+Alt+Escape (`doc_lock_and_prompts.md` section 1, LP10), Ctrl+Alt+Tab, Super+Alt+A
+      and Super+Alt+S (`doc_accessibility.md` AX3, AX7), the magnifier's Super+= and Super+-
+      once they are bound (OS13), and the switch to a text console. The keyboard monitor
+      (`doc_accessibility.md` AX4) and the keyboard aids (AX11) are not bindings, and an
+      inhibitor leaves them working. Ctrl+Alt+Tab always suspends the inhibitor, a pointer
+      lock and a confinement of the focused surface, also when the cycle has no surface of the
+      shell to move the keyboard to. The suspension is kept for that surface's client until the
+      user clicks one of its surfaces or moves the keyboard to one by a key: an inhibitor or a
+      constraint the client requests meanwhile, on any of its surfaces, stays inactive, and a
+      focus a client gives, through xdg-activation or a new surface, does not lift it. A
+      persistent constraint, and one requested meanwhile, are then active again; a oneshot
+      constraint that was active has ended, and the client asks for a new one. It is the way
+      out a user always has;
+    - primary selection, standard, and data control, privileged, as decision 23 set them;
+    - tablets, pointer gestures and xdg-foreign, standard;
+    - xdg-decoration, standard as decision 23 set it, answering every request with client-side
+      decoration: the compositor draws no title bar, and a client that asks for one draws its
+      own, as under GNOME.
+
+    Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
+    MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
+    notice in full for anvil; names the project, the revision and the licence, and the
+    project's authors where the source names no holder; and states that it was changed and
+    when, as GPL-3.0 section 5(a) asks. The pull request names them (ADR-0121 decision 2). cosmic-comp,
+    `GPL-3.0-only`, stays read and not copied (OS3). The outline cosmic-comp draws around the
+    focused window (#738) is not drawn yet. It is a drawn mark that hides, moves or changes no
+    control or text, so it stays recorded in `forge/test/shell/golden/athanor-differences.toml`
+    with its cause and its issue, #851, as a difference of colour is (decision 28), and comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2), which needs the
+    same drawing, so that the two marks are designed to be told apart. Not taken: for shortcuts
+    inhibit, a consent dialog per application, as GNOME asks, which does not exist yet, or no
+    inhibitor; for the way out, a key of its own, or the console switch and Super+Alt+Escape
+    alone; for the pointer, unconfined, which keeps the protocols from every application the
+    shell launches; for decorations, title bars drawn by the compositor, with text, theme and
+    accessibility work the first wave does not need; for the code, ports from cosmic-comp too, which bind the compositor to
+    `GPL-3.0-only`, or reading every source and porting nothing.
 
 ## 8. Risks
 
