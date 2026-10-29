@@ -46,11 +46,21 @@ hand_off_now() {
     exec /usr/bin/athanor-session
 }
 
-# SN2's import list, the one file athanor-desktop and the readiness gate read. The compositor
-# sets WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end
-# removes all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too (step 3). A
-# list the reader refuses ends the script before anything is started, and greetd returns to
-# the greeter: athanor-desktop refuses the same list, so a hand-off could not start either.
+# 1. What a previous session left: units still active, the component scopes, units failed,
+# and the marker. A failure here ends the script with nothing started, and greetd returns
+# to the greeter.
+systemctl --user stop athanor-session.target athanor-compositor.service
+stop_component_scopes
+systemctl --user reset-failed
+rm -f "$MARKER"
+
+# SN2's import list, the one file athanor-desktop and the readiness gate read, read with
+# step 1, after its cleanup and before the exit handler that needs it. The compositor sets
+# WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end removes
+# all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too (step 3). A list the
+# reader refuses fails as step 1 does, with nothing of this session started, and greetd
+# returns to the greeter: athanor-desktop refuses the same list, so a hand-off could not
+# start either.
 if ! names=$(session_import_names /usr/share/athanor-system-config/session-import); then
     log err "the import list cannot be used; no session starts"
     exit 1
@@ -67,14 +77,6 @@ for name in $names; do
         *) REMOVED="$REMOVED $name" ;;
     esac
 done
-
-# 1. What a previous session left: units still active, the component scopes, units failed,
-# and the marker. A failure here ends the script with nothing started, and greetd returns
-# to the greeter.
-systemctl --user stop athanor-session.target athanor-compositor.service
-stop_component_scopes
-systemctl --user reset-failed
-rm -f "$MARKER"
 
 # 2. The magnifier and the colour filters are cosmic-comp's (doc_own_stack.md decision 28):
 # a user who has either on signs in there, before anything else is set. gsettings prints

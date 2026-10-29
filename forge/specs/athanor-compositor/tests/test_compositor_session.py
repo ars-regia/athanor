@@ -250,9 +250,19 @@ class CompositorSession(unittest.TestCase):
                 self.assertIn(reason, stderr + self.journal())
                 self.assertIn("the import list cannot be used", self.journal())
                 self.assertFalse(self.handed_off())
+                # Step 1's cleanup ran; nothing of this session was set or started.
+                calls = self.calls()
+                self.assertIn(
+                    "systemctl --user stop athanor-session.target"
+                    " athanor-compositor.service",
+                    calls,
+                )
                 self.assertFalse(
-                    (self.work / "calls").exists()
-                    and any(c.startswith("systemctl") for c in self.calls())
+                    any(
+                        word in c
+                        for c in calls
+                        for word in ("set-environment", "import-environment", "start")
+                    )
                 )
 
     def test_the_magnifier_from_the_greeter_hands_off(self):
