@@ -97,6 +97,7 @@ The maintainer took these decisions on 2026-10-17:
 
 On 2026-10-29 the maintainer amended decision 2 through `doc_own_stack.md` decision 30 (#848): code
 may be ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor, MIT.
-Each ported file keeps its source's copyright notice and names the project, the revision and the
-licence. cosmic-comp, `GPL-3.0-only`, stays read and not copied. The compositor is still written
+Each ported file keeps its source's copyright and licence notices, the MIT permission notice in
+full for anvil; names the project, the revision and the licence; and states that it was changed
+and when, as GPL-3.0 section 5(a) asks. cosmic-comp, `GPL-3.0-only`, stays read and not copied. The compositor is still written
 from Smithay and is not a fork of either.

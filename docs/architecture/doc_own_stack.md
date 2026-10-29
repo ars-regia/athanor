@@ -339,7 +339,7 @@ fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` i
 plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
 (questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
 written (decision 23): data control, privileged, as OS4 says; primary selection,
-idle inhibit, single-pixel buffer and server-side decoration, standard;
+idle inhibit, single-pixel buffer and xdg-decoration, standard;
 `zwlr_output_power_manager_v1`, privileged, for `athanor-idle` (`doc_session_daemons.md` SD4).
 Decision 30 adds pointer constraints, relative pointer, keyboard shortcuts inhibit, tablets,
 pointer gestures and xdg-foreign, standard, and answers every request of xdg-decoration with
@@ -840,14 +840,19 @@ compositor and that the own compositor did not yet offer:
     in `data/globals` and its fixture test (OS17; OS19, item 2):
     - pointer constraints and relative pointer, standard, a security context included, so that
       the games, 3D tools and virtual machines the shell launches can lock or confine the pointer;
-      a lock or a confinement holds only while its surface has the keyboard focus;
+      by the compositor's policy, a lock or a confinement is active only while its surface has
+      the keyboard focus;
     - keyboard shortcuts inhibit, standard, with no consent dialog: while the inhibiting surface
       has the keyboard focus, the compositor delivers its bindings to that surface, except the
       protected keys it always keeps: the reveal key Super+Alt+T (OS4), Super+Escape and
       Super+Alt+Escape (`doc_lock_and_prompts.md` section 1, LP10), Ctrl+Alt+Tab, Super+Alt+A
-      and Super+Alt+S (`doc_accessibility.md` AX3, AX7), and the switch to a text console.
-      Ctrl+Alt+Tab takes the keyboard focus from the surface, so it also ends the inhibitor, a
-      pointer lock and a confinement;
+      and Super+Alt+S (`doc_accessibility.md` AX3, AX7), the magnifier's Super+= and Super+-
+      once they are bound (OS13), and the switch to a text console. The keyboard monitor
+      (`doc_accessibility.md` AX4) and the keyboard aids (AX11) are not bindings, and an
+      inhibitor leaves them working. Ctrl+Alt+Tab always suspends the inhibitor, a pointer
+      lock and a confinement of the focused surface, also when the cycle has no surface of the
+      shell to move the keyboard to; they are active again when the user clicks or focuses that
+      surface. It is the way out a user always has;
     - primary selection, standard, and data control, privileged, as decision 23 set them;
     - tablets, pointer gestures and xdg-foreign, standard;
     - xdg-decoration, standard as decision 23 set it, answering every request with client-side
@@ -855,17 +860,20 @@ compositor and that the own compositor did not yet offer:
       own, as under GNOME.
 
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
-    MIT. Each ported file keeps its source's copyright notice and names the project, the revision
-    and the licence, and the pull request names them (ADR-0121 decision 2). cosmic-comp,
+    MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
+    notice in full for anvil; names the project, the revision and the licence, and the
+    project's authors where the source names no holder; and states that it was changed and
+    when, as GPL-3.0 section 5(a) asks. The pull request names them (ADR-0121 decision 2). cosmic-comp,
     `GPL-3.0-only`, stays read and not copied (OS3). The outline cosmic-comp draws around the
-    focused window (#738) is not drawn yet: it stays recorded in
-    `forge/test/shell/golden/athanor-differences.toml` as a difference of colour (decision 28),
-    and comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2), which needs the
+    focused window (#738) is not drawn yet. It is a drawn mark that hides, moves or changes no
+    control or text, so it stays recorded in `forge/test/shell/golden/athanor-differences.toml`
+    with its cause and its issue, #851, as a difference of colour is (decision 28), and comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2), which needs the
     same drawing, so that the two marks are designed to be told apart. Not taken: for shortcuts
     inhibit, a consent dialog per application, as GNOME asks, which does not exist yet, or no
-    inhibitor; for the pointer, unconfined, which keeps the protocols from every application the
-    shell launches; for decorations, title bars drawn by the compositor, days of text, theme and
-    accessibility work; for the code, ports from cosmic-comp too, which bind the compositor to
+    inhibitor; for the way out, a key of its own, or the console switch and Super+Alt+Escape
+    alone; for the pointer, unconfined, which keeps the protocols from every application the
+    shell launches; for decorations, title bars drawn by the compositor, with text, theme and
+    accessibility work the first wave does not need; for the code, ports from cosmic-comp too, which bind the compositor to
     `GPL-3.0-only`, or reading every source and porting nothing.
 
 ## 8. Risks
