@@ -235,8 +235,8 @@ class ImageSession(unittest.TestCase):
         self.assertProblem("cosmic-idle.scope")
 
     def test_a_compositor_session_that_does_not_start_the_supervisor_fails(self):
-        self.edit(COMPOSITOR_SESSION, 'session_components "$$" target &\n', "")
-        self.assertProblem('session_components "$$" target &')
+        self.edit(COMPOSITOR_SESSION, 'session_components "$$" target < /dev/null &\n', "")
+        self.assertProblem('session_components "$$" target < /dev/null &')
 
     def test_an_image_without_the_compositor_passes(self):
         (self.root / COMPOSITOR_SESSION).unlink()

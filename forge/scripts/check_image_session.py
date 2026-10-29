@@ -47,7 +47,7 @@ LAUNCHER_LINES = (
 )
 COMPOSITOR_LINES = (
     ". /usr/libexec/athanor/session-components",
-    'session_components "$$" target &',
+    'session_components "$$" target < /dev/null &',
 )
 SUPERVISED = (
     'session_component "$anchor" cosmic-greeter \\',
