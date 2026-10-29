@@ -3963,17 +3963,16 @@ def session_exempt_problems(found):
     return problems
 
 
-FILES_END = re.compile(
-    r"^%(?:prep|build|install|check|clean|changelog|description|package|pre|post|preun|postun"
-    r"|pretrans|posttrans|trigger\w*|files)\b"
-)
+# A line "%word" ends the %files section unless the word is one that belongs in it.
+FILES_WORDS = {"attr", "config", "verify", "defattr", "dir", "ghost", "exclude", "doc", "license", "lang", "artifact", "caps", "if", "ifarch", "ifnarch", "else", "elif", "endif"}
+FILES_END = re.compile(r"^%(\w+)")
 # What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
 FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
 USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
 USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))")
 # A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
 USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
-USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir")
+USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
 
 
 def spec_user_units(text):
@@ -3986,7 +3985,8 @@ def spec_user_units(text):
         if line.startswith("%files"):
             in_files = True
             continue
-        if FILES_END.match(line):
+        header = FILES_END.match(line)
+        if header and header.group(1) not in FILES_WORDS:
             in_files = False
         if not in_files or line.startswith("#") or not USER_UNIT_MENTION.search(line):
             continue
@@ -4006,7 +4006,7 @@ def shipped_user_units(root):
     units, problems = {}, []
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
         names, unclassified = spec_user_units(read(spec))
-        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list it by its path" for line in unclassified]
+        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list each unit as a plain path, optionally after %attr(), %config or %verify()" for line in unclassified]
         for name in names:
             sources = [p for p in walk(spec.parent, name) if p.name == name and "skel" not in p.parts]
             if len(sources) != 1:

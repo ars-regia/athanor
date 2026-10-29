@@ -261,6 +261,19 @@ class SpecFilesTest(unittest.TestCase):
                 names, found = self.files(line)
                 self.assertEqual((names, found), ([], [line]))
 
+    def test_any_other_section_ends_the_files_list(self):
+        for section in ("%verifyscript", "%post", "%sepolicy", "%generate_buildrequires"):
+            with self.subTest(section=section):
+                text = f"%files\n/usr/lib/systemd/user/a.service\n{section}\n/usr/lib/systemd/user/c.service\n"
+                self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
+    def test_conditionals_stay_in_the_files_list(self):
+        text = "%files\n%if 1\n/usr/lib/systemd/user/a.service\n%endif\n"
+        self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
+    def test_another_directory_macro_is_reported(self):
+        self.assertEqual(self.files("%{systemd_user_dir}/a.service"), ([], ["%{systemd_user_dir}/a.service"]))
+
     def test_what_is_not_a_user_unit_is_left_alone(self):
         text = (
             "%install\ninstall -D a /usr/lib/systemd/user/a.service\n"
