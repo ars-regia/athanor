@@ -220,7 +220,8 @@ impl State {
     // restarts the cycle; per output and through `find_popup_root_surface` with several.
     /// Ctrl+Alt+Tab: the keyboard goes to the next of the mapped on-demand surfaces of the top
     /// layer of the output that has it (the first, when a window has it): those anchored to the
-    /// top first, the bar, then the others, the dock; after the last it goes back to the window
+    /// top first, then the others, each group in the order its surfaces were created; after
+    /// the last it goes back to the window
     /// (`focus_top`). The keyboard is not taken from an exclusive surface (D10), and the
     /// surfaces of an identity Super+Escape took the keyboard from are skipped. Not while
     /// locked: `fire` refuses it.

@@ -274,7 +274,7 @@ with no effect until the border; Super+Q and Alt+F4 send `close` to the window w
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
 layout group, the first after the last; Ctrl+Alt+Tab gives the keyboard to the next surface of
 the top layer that takes it on demand, those anchored to the top edge first and then the
-others, in the order they mapped within each group, and after the last to the window, never
+others, in the order their layer surfaces were created within each group, and after the last to the window, never
 from an exclusive surface or while locked, skipping an identity Super+Escape took the keyboard
 from (a bar along the top comes before a dock along the bottom, but a side dock that hides
 itself is anchored to the top too, and a bottom bar falls in the second group; from a window

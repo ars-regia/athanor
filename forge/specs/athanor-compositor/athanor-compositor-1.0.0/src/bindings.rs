@@ -51,7 +51,8 @@ pub(crate) enum Action {
     /// A command, which the user manager runs as a transient unit at the worker's request (D6).
     Run(&'static Command),
     /// Ctrl+Alt+Tab: the keyboard goes to the next surface of the shell that takes it on demand,
-    /// the bar, then the dock, then back to the window (AX7, gap 8 of SN16).
+    /// those anchored to the top first, then the others, then back to the window (AX7, gap 8
+    /// of SN16).
     FocusCycle,
     /// The touchpad key: the touchpads stop or start sending events, for the session (D16).
     TouchpadToggle,
