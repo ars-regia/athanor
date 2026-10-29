@@ -9790,3 +9790,39 @@ fn a_window_of_an_unplugged_output_comes_back_on_the_first() {
     assert!(within.overlaps(geometry), "on the first output");
     run.stop();
 }
+
+/// A window of the second output's workspace is maximised to the second output's area, and
+/// fitted to it again when the outputs move.
+#[test]
+fn a_window_is_maximised_on_its_output() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let at = run.state.space.output_geometry(&second).expect("placed").loc;
+    run.state.space.relocate_element(&window, at);
+    run.state.settle(&window);
+    let list = workspaces_of(&run, 1);
+    assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+
+    toplevel.set_maximized();
+    let area = run.state.window_area_on(&second).expect("an area");
+    let (width, height, _) = local.redraw(&mut run);
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let moved = run.state.window_area_on(&second).expect("an area");
+    assert_ne!(moved.loc, area.loc, "the second output moved");
+    local.redraw(&mut run);
+    assert_eq!(location_of(&run, &id), moved.loc);
+    assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+    run.stop();
+}

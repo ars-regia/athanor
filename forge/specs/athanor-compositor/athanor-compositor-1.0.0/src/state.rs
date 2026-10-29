@@ -478,10 +478,10 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// After the outputs changed (one went, or took another size): the windows their workspace's
-    /// output no longer shows are centred on it, on the first output when theirs went, the
-    /// pointer is brought back onto the outputs and the lock surfaces take the size of their
-    /// output.
+    /// After the outputs changed (one went, or took another size): the windows their home output
+    /// (`State::home_output`) no longer shows are centred on it and the maximised ones fitted to
+    /// it again, the pointer is brought back onto the outputs and the lock surfaces take the size
+    /// of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
@@ -504,6 +504,7 @@ impl State {
                 self.space.relocate_element(&window, at);
             }
         }
+        self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -580,11 +581,11 @@ impl State {
         Some(inset(area, laid_out, zone))
     }
 
-    /// Maximises `window` to `window_area`, or fits a maximised one to it again: a configure
+    /// Maximises `window` to `home_area`, or fits a maximised one to it again: a configure
     /// with the `maximized` state and the area's size, and the window moves into the area at
     /// the commit that answers it. The geometry it had before is kept for `restore`.
     pub fn maximise(&mut self, window: &Window) {
-        let (Some(toplevel), Some(area)) = (window.toplevel(), self.window_area()) else {
+        let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_area(window)) else {
             return;
         };
         let maximised = window.user_data().get_or_insert(Maximised::default);
@@ -651,8 +652,8 @@ impl State {
         true
     }
 
-    /// Restores a minimised `window` where it was, or centred in `window_area` when no output
-    /// shows that place any more, on top and with the keyboard, its workspace activated first.
+    /// Restores a minimised `window` where it was, or centred in its `home_area` when its output
+    /// no longer shows that place, on top and with the keyboard, its workspace activated first.
     /// False when it is not minimised, or draws nothing (it committed a null buffer, as an app
     /// hiding into the tray does): it stays minimised.
     pub fn unminimise(&mut self, window: &Window) -> bool {
@@ -678,12 +679,9 @@ impl State {
         true
     }
 
-    /// Fits the maximised windows to `window_area` again, after the layer surfaces' exclusive
-    /// zones changed it.
+    /// Fits the maximised windows to their `home_area` again, after the layer surfaces'
+    /// exclusive zones or the outputs changed it.
     pub fn fit_maximised(&mut self) {
-        let Some(area) = self.window_area() else {
-            return;
-        };
         let stale: Vec<Window> = self
             .space
             .elements()
@@ -692,7 +690,8 @@ impl State {
                     .user_data()
                     .get::<Maximised>()
                     .and_then(|maximised| maximised.0.get())
-                    .is_some_and(|kept| kept.area != area)
+                    .zip(self.home_area(window))
+                    .is_some_and(|(kept, area)| kept.area != area)
             })
             .cloned()
             .collect();

@@ -77,7 +77,8 @@ first; an xdg-activation token, which a focused client can make at any time, swi
 workspace, and a popup of a window on an inactive workspace or minimised grabs nothing. A window
 a move drops with its centre on another output joins that output's active workspace, and a
 window its output no longer shows after the outputs change is centred on that output, on the
-first when its output went, whose active workspace it then joins. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
+first when its output went, whose active workspace it then joins; a window is maximised to its
+workspace's output, and fitted to it again when the outputs change. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
 their place as coordinates, the active one's state, and the `activate` capability, applied at the
 manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
 holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a

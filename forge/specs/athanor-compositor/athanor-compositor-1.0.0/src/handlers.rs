@@ -561,7 +561,9 @@ impl XdgShellHandler for State {
     /// takes the keyboard only when that root can keep it: never for a layer surface whose
     /// interactivity is `none`, a bar, and while a layer surface holds the keyboard
     /// exclusively only for its own popups; any other grab takes the pointer only. A grab
-    /// refused leaves the popup shown without it, as a popover a client opens at start is.
+    /// refused leaves the popup shown without it, as a popover a client opens at start is,
+    /// except one of a window the user cannot see, minimised or on an inactive workspace, whose
+    /// popup is dismissed.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         // While locked, the keyboard and the pointer stay with the lock surfaces.
         if self.lock.is_some() {
