@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -687,12 +687,13 @@ amendment's audit:
       The input method and the on-screen keyboard of gap 6 come with their clients (`doc_languages.md`
       LN11, `doc_accessibility.md` AX12), which the default session does not have yet either.
       Data control, the other half of gap 6, has no client there either: the clipboard history
-      of `doc_control_center.md` CC10 collects nothing, so its switch is hidden and Super+V
-      unbound, a loss the switch's pull request names.
+      of `doc_control_center.md` CC10 collects nothing, so Super+V is unbound and its switch,
+      which the control center does not build yet, is hidden under the own compositor once it
+      is built (amended on 2026-10-29), a loss the switch's pull request names.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2;
     - item 1 for every difference that hides, moves or changes a control or a text, by any
-      amount, but the controls this decision hides (the magnifier, inversion and filter rows,
+      amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
       history's switch), and the move of the neighbouring controls their absence causes:
       where a case of `cases.py` draws the control under the preset and the dock setting it
@@ -707,8 +708,10 @@ amendment's audit:
       tracks that control's return, since `golden_report.py` takes one entry per case and
       cause; `golden_report.py` checks only that a differing case has an entry, so the
       switch's pull request adds the check that each such case names each control it hides,
-      deriving which cases draw which control from that rule; the Settings rows and the clipboard history's switch, which no case shows, are
-      covered by the fixture or acceptance test that shows them hidden; and for every difference of colour in a high-contrast variant or in the contrast of
+      deriving which cases draw which control from that rule; the clipboard history's switch, which
+      no case shows and the control center does not build yet, is recorded as hidden under the
+      own compositor once it is built, in the pull request that hides the other controls and in
+      the issue that tracks its return, with no test until it is built (amended on 2026-10-29); and for every difference of colour in a high-contrast variant or in the contrast of
       a text. Any other difference of colour, and one of antialiasing, is recorded in
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
@@ -739,8 +742,10 @@ amendment's audit:
       compositor, `src/screen_filter.rs`, reads that file and writes nothing: an exception to
       SH2's containment beside decision 27's, named by path in SH2's exceptions and in
       `verify.py boundary`, which leaves when cosmic-comp's session leaves the greeter. Under the
-      own compositor the magnifier, inversion and filter controls of the bar and of Settings
-      are hidden, and Super+= and Super+- unbound (OS13). A user who zooms only with those keys,
+      own compositor the magnifier, inversion and filter controls of the bar are hidden, and
+      Super+= and Super+- unbound (OS13); those of Settings, the upstream cosmic-settings, stay
+      shown and switched off, since the compositor does not offer `cosmic_a11y_manager_v1`, until
+      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29). A user who zooms only with those keys,
       which persist nothing, is not detected: they pick cosmic-comp's session at the greeter,
       whose entry says that it has the magnifier (revision 4 of `doc_session.md`);
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the

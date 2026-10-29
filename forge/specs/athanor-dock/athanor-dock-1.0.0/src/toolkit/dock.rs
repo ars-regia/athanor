@@ -404,8 +404,12 @@ impl Dock {
                 margin: edge::margin(anchor),
             },
         );
+        let own = self.client.as_ref().is_some_and(|client| client.own_compositor());
         let opener =
             |dock: &mut Dock, ui: &mut Ui, acts: &mut Vec<(WidgetId, Act)>, opener: Opener| {
+                if !opener.shown(own) {
+                    return;
+                }
                 let (icon, name) = entries::opener(opener);
                 let button = dock.icon_button(ui, island, icon, OPENER_ICON, scale, &name, None);
                 acts.push((button, Act::Opener(opener)));

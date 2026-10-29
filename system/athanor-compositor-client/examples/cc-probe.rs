@@ -60,6 +60,7 @@ fn snapshot(client: &Client, display: &gdk::Display) -> Value {
         "keyboard_layouts": client.keyboard_layouts(),
         "keyboard_group": client.keyboard_group(),
         "accessibility": client.accessibility().map(|a11y| format!("{a11y:?}")),
+        "own_compositor": client.own_compositor(),
         "outputs": outputs::current(display).iter()
             .map(|o| json!({"connector": o.connector, "width": o.width, "height": o.height}))
             .collect::<Vec<_>>(),

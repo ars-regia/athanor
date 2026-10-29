@@ -9,13 +9,15 @@ security context, through fake_systemd.py. Under RIG_COMPOSITOR=athanor the prob
 against athanor-compositor instead, as its rig unit (rig-cc-probe.service, which
 rig-privileged-clients grants the toplevel list, athanor_toplevel_manager_v1 and
 athanor_toplevel_actions_v1), and
-outside that unit sees no window. Runs as the scene's RIG_HOLD; checks every expectation and
-exits 1 if any does not hold.
+outside that unit sees no window; there its Launcher opener calls athanor-launcher's
+os.athanor.Launcher1 (doc_own_stack.md, decision 28), here a fake that owns the name. Runs as
+the scene's RIG_HOLD; checks every expectation and exits 1 if any does not hold.
 """
 
 import json
 import os
 import re
+import select
 import subprocess
 import sys
 import tempfile
@@ -35,6 +37,28 @@ PRIVILEGED = {
     "zcosmic_keyboard_layout_manager_v1", "cosmic_a11y_manager_v1",
 }
 FIRST, SECOND = "org.athanor.CcWindow1", "org.athanor.CcWindow2"
+# athanor-launcher's bus interface (doc_launcher.md, LA8), faked: "ready" once the name is
+# owned, then "Show" on each call; with the argument "silent" it never answers.
+FAKE_LAUNCHER = """
+from gi.repository import Gio, GLib
+NAME = "os.athanor.Launcher1"
+NODE = Gio.DBusNodeInfo.new_for_xml(
+    f'<node><interface name="{NAME}"><method name="Show"/></interface></node>')
+import sys
+def call(connection, sender, path, interface, method, parameters, invocation):
+    print(method, flush=True)
+    if sys.argv[1:] != ["silent"]:
+        invocation.return_value(None)
+bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+bus.register_object("/os/athanor/Launcher1", NODE.interfaces[0], call, None, None)
+reply = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                      "RequestName", GLib.Variant("(su)", (NAME, 4)), None,
+                      Gio.DBusCallFlags.NONE, -1, None)
+if reply.unpack()[0] != 1:
+    raise SystemExit(f"{NAME} is owned by another process")
+print("ready", flush=True)
+GLib.MainLoop().run()
+"""
 failures = []
 
 
@@ -58,6 +82,23 @@ def expect(what, holds, lines):
         failures.append(what)
         for line in lines:
             print("     " + json.dumps(line), file=sys.stderr)
+
+
+def line_within(process, seconds):
+    """The next line of the process's output, stripped, or None when none comes in time."""
+    ready = select.select([process.stdout], [], [], seconds)[0]
+    return process.stdout.readline().strip() if ready else None
+
+
+def open_launcher():
+    """cc-probe's Launcher opener in its unit: its exit code, its lines and its seconds."""
+    started = time.monotonic()
+    code, lines = probe("open", "launcher", unit=True)
+    return code, lines, time.monotonic() - started
+
+
+def errors_of(lines):
+    return [line["error"] for line in lines if "error" in line]
 
 
 def snapshot(lines):
@@ -141,6 +182,7 @@ def cosmic_comp():
     expect("the seeded layouts are named in group order",
            state.get("keyboard_layouts") == ["English (US)", "Italian"], lines)
     expect("accessibility is read", state.get("accessibility") is not None, lines)
+    expect("cosmic-comp is not the own compositor", state.get("own_compositor") is False, lines)
     expect("the output has its connector and logical size",
            state.get("outputs") == [{"connector": "WINIT-0", "width": 1280, "height": 800}], lines)
 
@@ -192,6 +234,39 @@ def athanor():
     expect("athanor: both windows are listed, each on headless-0",
            code == 0 and {w["app_id"] for w in windows} == {FIRST, SECOND}
            and all(w["outputs"] == ["headless-0"] for w in windows), lines)
+    expect("athanor: the shell's client knows the own compositor",
+           snapshot(lines).get("own_compositor") is True, lines)
+
+    # The Launcher opener calls athanor-launcher, not cosmic-launcher (decision 28), and fails
+    # with a readable error, never falling back to cosmic-launcher: at once when nothing owns
+    # or activates the name (the rig has no activation file for it), and within the call's
+    # 5-second bound when the owner never answers, where the bus alone would wait 25 seconds.
+    # "At once" is the bus's own refusal, not the bound's "did not answer": a duration would
+    # also time the unit's start.
+    code, lines, took = open_launcher()
+    absent = errors_of(lines)
+    expect("athanor: without os.athanor.Launcher1 the Launcher opener fails at once, naming it",
+           code == 1 and len(absent) == 1 and "os.athanor.Launcher1" in absent[0]
+           and "did not answer" not in absent[0], lines + [{"seconds": round(took, 1)}])
+    for mode in ("answering", "silent"):
+        fake = subprocess.Popen(["python3", "-c", FAKE_LAUNCHER, mode], stdout=subprocess.PIPE,
+                                text=True)
+        try:
+            expect(f"athanor: the {mode} fake athanor-launcher owns its name",
+                   line_within(fake, 5) == "ready", [])
+            code, lines, took = open_launcher()
+            called = line_within(fake, 5)
+            if mode == "answering":
+                expect("athanor: the Launcher opener calls os.athanor.Launcher1's Show",
+                       code == 0 and called == "Show", lines)
+            else:
+                silent = errors_of(lines)
+                expect("athanor: a silent os.athanor.Launcher1 fails the opener within its bound",
+                       code == 1 and called == "Show" and took < 9 and len(silent) == 1
+                       and "did not answer" in silent[0], lines + [{"seconds": round(took, 1)}])
+        finally:
+            fake.terminate()
+            fake.wait(timeout=10)
 
     # The state goes out per frame as a diff: each action has a frame of its own.
     code, lines = probe("minimize", FIRST, "watch", "1", "unminimize", FIRST, "watch", "1",
@@ -241,8 +316,9 @@ def athanor():
 
     # The manager's own refusal of an ungranted client is compositor-globals'.
     code, lines = probe("snapshot")
-    expect("athanor: outside its unit the probe sees no window",
-           code == 0 and snapshot(lines).get("windows") == [], lines)
+    expect("athanor: outside its unit the probe sees no window, nor the own compositor",
+           code == 0 and snapshot(lines).get("windows") == []
+           and snapshot(lines).get("own_compositor") is False, lines)
     code, lines = probe("group", "1")
     errors = [line["error"] for line in lines if "error" in line]
     expect("athanor: outside its unit the keyboard group is refused",
@@ -256,7 +332,7 @@ def sway():
     state = snapshot(lines)
     expect("sway: the snapshot has no COSMIC state",
            code == 0 and state.get("accessibility") is None and state.get("keyboard_layouts") == []
-           and state.get("workspaces") == [], lines)
+           and state.get("workspaces") == [] and state.get("own_compositor") is False, lines)
     refusals = {
         ("tiling", "on"): "no active workspace",
         ("group", "1"): "does not offer athanor_keyboard_group_manager_v1",

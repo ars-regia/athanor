@@ -1,12 +1,14 @@
 """Unit tests of forge/test/shell/atspi_compare.py
 (python3 -B -m unittest discover -s forge/test/shell/tests -v)."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import atspi_compare as compare
+import golden_report as gr
 
 
 def node(role, name, states=(), value=""):
@@ -110,6 +112,63 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
         # The application's node alone is not an element either.
         self.assertEqual(compare.compare(REFERENCE[:1], REFERENCE)[1], empty)
+
+
+GOLDEN = Path(__file__).resolve().parent.parent / "golden/atspi"
+
+
+class HiddenTest(unittest.TestCase):
+    """doc_own_stack.md, decision 28 item 3: under the own compositor the controls it hides are
+    exempt, each with the decision and its control's issue, from golden_report.exemptions."""
+
+    def dock(self, lang):
+        reference = json.loads((GOLDEN / f"atspi-dock{'-it' if lang == 'it' else ''}.json").read_text())
+        exempt = gr.exemptions(None, "visible", lang)
+        return reference, [n for n in reference if n["name"] not in exempt], exempt
+
+    def test_the_dock_without_the_controls_decision_28_hides_passes_with_their_exemptions(self):
+        for lang, names in (("en", ["Workspaces", "Applications"]), ("it", ["Spazi di lavoro", "Applicazioni"])):
+            reference, transcript, exempt = self.dock(lang)
+            self.assertEqual(sorted(exempt), sorted(names))
+            self.assertEqual(
+                sorted(f for f in compare.compare(reference, transcript)[1]),
+                sorted(f"button {name!r}: missing" for name in names),
+                "without the exemptions the hidden buttons fail",
+            )
+            lines, failures = compare.compare(reference, transcript, exempt)
+            self.assertEqual(failures, [])
+            self.assertIn(
+                f"button {names[0]!r}: hidden; decision 28 hides the dock's workspaces button (#835)",
+                lines,
+            )
+
+    def test_the_bar_exempts_its_buttons_but_not_tiling(self):
+        reference = json.loads((GOLDEN / "atspi-bar.json").read_text())
+        exempt = gr.exemptions("float", "-", "en")
+        transcript = [n for n in reference if n["name"] not in {*exempt, "Tiling"}]
+        self.assertEqual(
+            compare.compare(reference, transcript, exempt)[1], ["button 'Tiling': missing"]
+        )
+
+    def test_an_exemption_for_a_present_element_fails(self):
+        reference, _, exempt = self.dock("en")
+        self.assertEqual(
+            compare.compare(reference, reference, exempt)[1],
+            [
+                "button 'Workspaces': present, but exempt: decision 28 hides the dock's workspaces button (#835)",
+                "button 'Applications': present, but exempt: decision 28 hides the dock's application library button (#836)",
+            ],
+        )
+
+    def test_an_exemption_for_no_element_of_the_reference_fails(self):
+        exempt = gr.exemptions("float", "-", "en")
+        self.assertEqual(
+            compare.compare(REFERENCE, REFERENCE, exempt)[1],
+            [
+                "exemption 'Applications' names no element of the reference",
+                "exemption 'Workspaces' names no element of the reference",
+            ],
+        )
 
 
 if __name__ == "__main__":

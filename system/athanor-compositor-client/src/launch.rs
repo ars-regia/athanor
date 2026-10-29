@@ -35,6 +35,8 @@ pub enum LaunchError {
     Bus(#[from] glib::Error),
     #[error("{0} did not appear on the session bus")]
     NoAnswer(&'static str),
+    #[error("{0} did not answer within {SHOW_BOUND_MS} ms")]
+    Silent(&'static str),
     #[error("{unit} did not start: its start job ended with \"{result}\"")]
     Start { unit: String, result: String },
     #[error("the file cannot be read: {0}")]
@@ -485,6 +487,22 @@ impl Opener {
         }
     }
 
+    /// Whether the button that opens the component is shown. Under the own compositor the
+    /// application library and the workspaces are hidden until athanor-library and
+    /// athanor-overview come: cosmic-app-library and cosmic-workspaces have no line in its
+    /// allow-list (doc_own_stack.md, decision 28).
+    pub fn shown(self, own_compositor: bool) -> bool {
+        !own_compositor || self == Opener::Launcher
+    }
+
+    /// The bus name and path of `athanor-launcher` when it replaces the component: the
+    /// Launcher under the own compositor, whose allow-list has no line for cosmic-launcher
+    /// (doc_own_stack.md, decision 28).
+    fn athanor_launcher(self, own_compositor: bool) -> Option<(&'static str, &'static str)> {
+        (own_compositor && self == Opener::Launcher)
+            .then_some((ATHANOR_LAUNCHER, "/os/athanor/Launcher1"))
+    }
+
     /// The object libcosmic exports its activation interface on.
     fn path(self) -> String {
         format!("/{}", self.app_id().replace('.', "/"))
@@ -513,6 +531,9 @@ impl Opener {
     }
 }
 
+/// athanor-launcher's name and interface (doc_launcher.md, LA8): `Show`, without arguments,
+/// shows the launcher or hides it when shown, and the bus starts its unit when it is down.
+const ATHANOR_LAUNCHER: &str = "os.athanor.Launcher1";
 /// libcosmic's single-instance interface, exported beside the app id's name.
 const ACTIVATION: &str = "org.freedesktop.DbusActivation";
 /// A libcosmic action is the JSON form of the component's subcommand: here `Input` with no
@@ -521,15 +542,49 @@ const SHOW_ACTION: &str = r#"{"Input":{"input":null}}"#;
 
 /// How long a component has to take its name after it was started.
 const APPEAR: Duration = Duration::from_secs(5);
+/// How long athanor-launcher has to answer `Show`, its bus activation included: the same five
+/// seconds a cold component has to appear. Its show time is bounded at 150 ms and measured at
+/// 16 ms through activation (doc_launcher.md, section 5 item 1), so only a launcher that hangs
+/// reaches it, and the press fails then instead of after the bus's default of 25 seconds. The
+/// bus still delivers the call: a launcher that answers later shows itself then, and since
+/// `Show` toggles, a press made after the error hides it again.
+const SHOW_BOUND_MS: i32 = 5_000;
 const POLL: Duration = Duration::from_millis(50);
 
+/// A bus call that ran out of time is the callee's silence, named; any other failure is the bus's.
+fn silent(err: glib::Error, name: &'static str) -> LaunchError {
+    if err.matches(gio::IOErrorEnum::TimedOut) {
+        LaunchError::Silent(name)
+    } else {
+        LaunchError::Bus(err)
+    }
+}
+
 impl Client {
-    /// Shows the component, starting it first when it does not run, and leaves it shown
-    /// when it already is. A component started cold only takes its name, so it is always
-    /// shown through the bus (spike P4).
+    /// Shows the component, starting it first when it does not run; on cosmic-comp it is
+    /// left shown when it already is. A component started cold only takes its name, so it is
+    /// always shown through the bus (spike P4). Under the own compositor the Launcher is
+    /// athanor-launcher instead, which the bus activates, and its `Show` (LA8) toggles: a
+    /// press while it is shown hides it. A name nothing owns or activates fails at once, and
+    /// a launcher that does not answer within `SHOW_BOUND_MS` fails then.
     pub async fn open(&self, opener: Opener) -> Result<(), LaunchError> {
         self.live()?;
         let bus = gio::bus_get_future(gio::BusType::Session).await?;
+        if let Some((name, path)) = opener.athanor_launcher(self.own_compositor()) {
+            bus.call_future(
+                Some(name),
+                path,
+                ATHANOR_LAUNCHER,
+                "Show",
+                None,
+                None,
+                gio::DBusCallFlags::NONE,
+                SHOW_BOUND_MS,
+            )
+            .await
+            .map_err(|err| silent(err, name))?;
+            return Ok(());
+        }
         let name = opener.app_id();
         let cold = !has_owner(&bus, name).await?;
         if cold {
@@ -819,6 +874,41 @@ mod tests {
         assert_eq!(Opener::Launcher.path(), "/com/system76/CosmicLauncher");
         assert_eq!(Opener::AppLibrary.app_id(), "com.system76.CosmicAppLibrary");
         assert_eq!(Opener::Workspaces.program(), "cosmic-workspaces");
+    }
+
+    #[test]
+    fn only_the_launcher_is_shown_under_the_own_compositor() {
+        for opener in [Opener::Launcher, Opener::AppLibrary, Opener::Workspaces] {
+            assert!(opener.shown(false), "{opener:?} hidden under cosmic-comp");
+        }
+        assert!(Opener::Launcher.shown(true));
+        assert!(!Opener::AppLibrary.shown(true));
+        assert!(!Opener::Workspaces.shown(true));
+    }
+
+    #[test]
+    fn only_the_launcher_under_the_own_compositor_opens_athanor_launcher() {
+        assert_eq!(
+            Opener::Launcher.athanor_launcher(true),
+            Some(("os.athanor.Launcher1", "/os/athanor/Launcher1"))
+        );
+        assert_eq!(Opener::Launcher.athanor_launcher(false), None);
+        for opener in [Opener::AppLibrary, Opener::Workspaces] {
+            for own in [true, false] {
+                assert_eq!(opener.athanor_launcher(own), None);
+            }
+        }
+    }
+
+    #[test]
+    fn a_timed_out_show_names_the_silent_launcher() {
+        let timed_out = glib::Error::new(gio::IOErrorEnum::TimedOut, "Timeout was reached");
+        assert_eq!(
+            silent(timed_out, ATHANOR_LAUNCHER).to_string(),
+            "os.athanor.Launcher1 did not answer within 5000 ms"
+        );
+        let unknown = glib::Error::new(gio::DBusError::ServiceUnknown, "not activatable");
+        assert!(matches!(silent(unknown, ATHANOR_LAUNCHER), LaunchError::Bus(_)));
     }
 
     #[test]
