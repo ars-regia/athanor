@@ -18,6 +18,8 @@
 # tree, so its parent is still inside the session, and gives it a unit the own compositor's
 # allow-list can name: cosmic-greeter-locker.scope and cosmic-idle.scope. --collect unloads a
 # scope whose component failed, so that the next start can take the name again.
+# TimeoutStopSec=5s kills a component still running 5 s after its scope's stop, in place of
+# the default 90 s, which would hold the greeter back at the end of the session.
 
 # The components' scopes, the locker's first.
 COMPONENT_SCOPES="cosmic-greeter-locker.scope cosmic-idle.scope"
@@ -133,7 +135,8 @@ stop_component_scopes_polling() {
 
 # session_components <anchor> [target]: the supervisor, run in the background by the
 # session's script, whose PID is <anchor>. It starts the locker and the idle daemon as two
-# jobs and, on TERM, kills both and exits; the caller then stops their scopes. With
+# jobs and, on TERM, kills both, stops their scopes and exits: a scope lies outside the
+# session's own scope, so `loginctl terminate-session` alone would leave both running. With
 # `target`, as under the own compositor, it first waits for athanor-session.target to be
 # active and takes WAYLAND_DISPLAY from the user manager, where the compositor set it.
 #
@@ -161,12 +164,12 @@ session_components() {
         export WAYLAND_DISPLAY="$display"
     fi
     session_component "$anchor" cosmic-greeter \
-        systemd-run --user --scope --collect --unit=cosmic-greeter-locker.scope cosmic-greeter &
+        systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &
     locker=$!
     session_component "$anchor" cosmic-idle \
-        systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &
+        systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &
     idle=$!
-    trap 'kill "$locker" "$idle"; exit 143' TERM
+    trap 'kill "$locker" "$idle"; stop_component_scopes_polling; exit 143' TERM
     while kill -0 "$anchor" 2> /dev/null; do
         sleep 0.2
     done

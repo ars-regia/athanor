@@ -52,8 +52,8 @@ COMPOSITOR_LINES = (
 SUPERVISED = (
     'session_component "$anchor" cosmic-greeter \\',
     'session_component "$anchor" cosmic-idle \\',
-    "systemd-run --user --scope --collect --unit=cosmic-greeter-locker.scope cosmic-greeter &",
-    "systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
+    "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &",
+    "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 # Unit directories as an image has them, the lowest priority first (systemd.unit(5), "User Unit

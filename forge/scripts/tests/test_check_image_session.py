@@ -229,8 +229,8 @@ class ImageSession(unittest.TestCase):
     def test_a_commented_supervisor_line_fails(self):
         self.edit(
             SUPERVISOR,
-            "systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
-            "# systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
+            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
+            "# systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
         )
         self.assertProblem("cosmic-idle.scope")
 

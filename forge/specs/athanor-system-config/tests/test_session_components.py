@@ -131,11 +131,11 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         runs = [c for c in s.calls() if c.startswith("systemd-run")]
         self.assertIn(
-            "systemd-run --user --scope --collect --unit=cosmic-greeter-locker.scope cosmic-greeter",
+            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter",
             runs,
         )
         self.assertIn(
-            "systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle",
+            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle",
             runs,
         )
         self.assertEqual(
@@ -193,6 +193,41 @@ class Supervisor(unittest.TestCase):
         delays = [c for c in s.calls() if c.startswith("sleep")]
         self.assertEqual(
             delays[:7], ["sleep 1"] * 4 + ["sleep 2", "sleep 4", "sleep 8"]
+        )
+
+    def test_on_term_it_stops_both_scopes_and_exits_143(self):
+        # `loginctl terminate-session` sends TERM to the session's processes, and a scope lies
+        # outside the session's own scope: the supervisor stops both before it exits.
+        s = Scratch(self)
+        s.stub(
+            "systemctl",
+            'case "$*" in'
+            ' *"stop --no-block"*) : > "$W/stopped" ;;'
+            ' *is-active*) [ ! -e "$W/stopped" ] ;;'
+            " esac",
+        )
+        s.stub("systemd-run", "exec /bin/sleep 5")
+        supervisor = subprocess.Popen(
+            [
+                "/bin/sh",
+                "-c",
+                f'. "{COMPONENTS}"; session_components {anchor(self, 30)}',
+            ],
+            env=s.env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(supervisor.kill)
+        deadline = time.monotonic() + 5
+        while sum(c.startswith("systemd-run") for c in s.calls()) < 2:
+            self.assertLess(time.monotonic(), deadline, "both components started")
+            time.sleep(0.05)
+        supervisor.terminate()
+        self.assertEqual(supervisor.wait(timeout=5), 143)
+        self.assertIn(
+            "systemctl --user stop --no-block cosmic-greeter-locker.scope cosmic-idle.scope",
+            s.calls(),
         )
 
 
