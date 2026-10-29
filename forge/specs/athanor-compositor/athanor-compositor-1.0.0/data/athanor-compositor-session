@@ -120,6 +120,13 @@ sup=
 # off for the whole of it: a pgrep that finds nothing is not a failure.
 kill_supervisor_tree() {
     jobs_of_sup=$(pgrep -P "$sup")
+    # Stopped first, so that a job cannot fork a new systemd-run between the read of the
+    # children and the kill; a pid that is gone is noted below with the kill.
+    for pid in $jobs_of_sup "$sup"; do
+        if ! kill -STOP "$pid"; then
+            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
+        fi
+    done
     children=
     for job in $jobs_of_sup; do
         children="$children $(pgrep -P "$job")"
