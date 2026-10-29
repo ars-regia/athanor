@@ -280,7 +280,12 @@ Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compos
 session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
 with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
-layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
+layout group, the first after the last; Super+1 to Super+9 activate the n-th workspace of the
+focused window's output (the first output's when no window has the keyboard), its last when n is
+past it, and Super+0 the last; Super+Shift with a digit moves the focused window there and the
+workspace follows; Super+Ctrl with Left, Up, h or k, or Right, Down, j or l, steps one workspace
+back or on, with no wrap, and Super+Shift+Ctrl with the same keys carries the focused window that
+step (OV13); and **Super+Escape takes the keyboard back and locks
 the session** (LP5), with Super alone. While the session is locked only the terminal switches,
 Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
 nothing, and every other key goes to the lock surface. Decision 28's six

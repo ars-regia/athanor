@@ -8296,6 +8296,18 @@ const KEY_WLAN: u32 = 238;
 const KEY_RFKILL: u32 = 247;
 const KEY_MICMUTE: u32 = 248;
 const KEY_TOUCHPAD_TOGGLE: u32 = 530;
+const KEY_1: u32 = 2;
+const KEY_2: u32 = 3;
+const KEY_9: u32 = 10;
+const KEY_0: u32 = 11;
+const KEY_H: u32 = 35;
+const KEY_J: u32 = 36;
+const KEY_K: u32 = 37;
+const KEY_L: u32 = 38;
+const KEY_UP: u32 = 103;
+const KEY_LEFT: u32 = 105;
+const KEY_RIGHT: u32 = 106;
+const KEY_DOWN: u32 = 108;
 
 /// Presses the chord `codes` while `to` holds the keyboard: the presses and the releases `to`
 /// was sent.
@@ -9095,4 +9107,253 @@ fn x11_the_first_client_starts_the_satellite() {
     run.stop();
     assert!(!socket.exists(), "the socket outlives the compositor");
     std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Three workspaces on the first output: the first with the fixture's window and the client's
+/// first, the second with the client's second, which is active and holds the keyboard, and the
+/// third empty. The client, its second window and the list.
+fn three_workspaces(
+    run: &mut Running,
+) -> (
+    Local,
+    smithay::desktop::Window,
+    Vec<crate::workspace::WorkspaceId>,
+) {
+    let (mut local, first) = focused_window(run);
+    // `focused_window` returns once the window is mapped, which is before its first buffer
+    // places it on a workspace.
+    local.pump(run, "the first window is placed", |_, state| {
+        state.workspace_of(&first).is_some()
+    });
+    let list = workspaces_of(run, 0);
+    assert_eq!(run.state.workspace_of(&first), Some(list[0]));
+    assert_eq!(list.len(), 2);
+    assert!(run.state.activate_workspace(list[1]));
+    let second = local.another(run, "second");
+    let second = local.server_window(run, &second.surface);
+    let list = workspaces_of(run, 0);
+    assert_eq!(list.len(), 3, "the second workspace took a window");
+    assert!(keyboard_on(run, &second));
+    (local, second, list)
+}
+
+/// Whether `window` holds the keyboard.
+fn keyboard_on(run: &Running, window: &smithay::desktop::Window) -> bool {
+    let focus = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.current_focus());
+    focus.is_some() && focus.as_ref() == window.toplevel().map(|t| t.wl_surface())
+}
+
+/// Presses the chord `codes`: the actions the compositor took.
+fn fires(run: &mut Running, codes: &[u32]) -> Vec<crate::bindings::Action> {
+    let fired = run.state.fired.len();
+    chord(&mut run.state, codes);
+    run.state.fired[fired..].to_vec()
+}
+
+/// Super+1 to Super+9 activate the n-th workspace of the output with the keyboard's focus, its
+/// last when n is past it, and Super+0 the last (OV13); while locked they reach the lock
+/// surface.
+#[test]
+fn super_digit_switches_the_workspace() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_1],
+        Some(Action::Workspace(1)),
+        "Super+1",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_2],
+        Some(Action::Workspace(2)),
+        "Super+2",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[1]));
+    // The last is empty: the keyboard leaves the client before the keys' release.
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_9]), [Action::Workspace(9)]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[2]),
+        "past the last, the last"
+    );
+    assert!(run.state.activate_workspace(list[0]));
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_0]), [Action::LastWorkspace]);
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert_eq!(workspaces_of(&run, 0), list, "switching moves no window");
+
+    assert!(run.state.activate_workspace(list[0]));
+    let (mut locker, _lock) = lock_session(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_2][..], "Super+2"),
+        (&[KEY_LEFTMETA, KEY_0], "Super+0"),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    run.stop();
+}
+
+/// Super+Shift+1 to Super+Shift+9 and Super+Shift+0 move the focused window to that workspace,
+/// which is activated with the window holding the keyboard; while locked they move nothing.
+#[test]
+fn super_shift_digit_moves_the_window() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut local, second, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_1],
+        Some(Action::MoveTo(1)),
+        "Super+Shift+1",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[0]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert!(keyboard_on(&run, &second), "the window keeps the keyboard");
+    assert!(run.state.space.element_location(&second).is_some());
+    assert_eq!(
+        workspaces_of(&run, 0),
+        [list[0], list[2]],
+        "the emptied second workspace is removed"
+    );
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_0],
+        Some(Action::MoveToLast),
+        "Super+Shift+0",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0).len(), 3, "an empty one follows");
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_1],
+        "Super+Shift+1",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    run.stop();
+}
+
+/// Super+Ctrl with Left, Up, h or k activates the workspace before the active one, with Right,
+/// Down, j or l the one after it, one step and no wrap at either end; while locked nothing.
+#[test]
+fn super_ctrl_steps_the_workspace() {
+    use crate::bindings::Action;
+    use crate::workspace::Step;
+    let mut run = Running::start(None);
+    let (_local, _, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    for (key, step, to) in [
+        (KEY_LEFT, Step::Previous, list[0]),
+        (KEY_UP, Step::Previous, list[0]),
+        (KEY_H, Step::Previous, list[0]),
+        (KEY_K, Step::Previous, list[0]),
+        (KEY_RIGHT, Step::Next, list[2]),
+        (KEY_DOWN, Step::Next, list[2]),
+        (KEY_J, Step::Next, list[2]),
+        (KEY_L, Step::Next, list[2]),
+    ] {
+        assert!(run.state.activate_workspace(list[1]));
+        assert_eq!(
+            fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, key]),
+            [Action::Step(step)],
+            "key {key}"
+        );
+        assert_eq!(run.state.active_workspace(&output), Some(to), "key {key}");
+    }
+    assert!(run.state.activate_workspace(list[0]));
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFT]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "no wrap at the first"
+    );
+    assert!(run.state.activate_workspace(list[2]));
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_RIGHT]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[2]),
+        "no wrap at the last"
+    );
+    assert_eq!(workspaces_of(&run, 0), list, "stepping moves no window");
+
+    assert!(run.state.activate_workspace(list[1]));
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFT],
+        "Super+Ctrl+Left",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[1]));
+    run.stop();
+}
+
+/// Super+Shift+Ctrl with the same keys carries the focused window one workspace, which is
+/// activated with the window holding the keyboard; no wrap; while locked nothing.
+#[test]
+fn super_shift_ctrl_carries_the_window() {
+    use crate::bindings::Action;
+    use crate::workspace::Step;
+    let mut run = Running::start(None);
+    let (mut local, second, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    let carry = |key| [KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_LEFTCTRL, key];
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_K),
+        Some(Action::Carry(Step::Previous)),
+        "Super+Shift+Ctrl+k",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[0]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0), [list[0], list[2]]);
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_LEFT),
+        Some(Action::Carry(Step::Previous)),
+        "Super+Shift+Ctrl+Left",
+    );
+    assert_eq!(
+        run.state.workspace_of(&second),
+        Some(list[0]),
+        "no wrap at the first"
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_RIGHT),
+        Some(Action::Carry(Step::Next)),
+        "Super+Shift+Ctrl+Right",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0).len(), 3, "an empty one follows");
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &carry(KEY_H), "Super+Shift+Ctrl+h");
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    run.stop();
 }

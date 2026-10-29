@@ -12,6 +12,7 @@ use crate::session_calls::{
     POWER_OFF, PREVIOUS,
 };
 use crate::state::State;
+use crate::workspace::Step;
 use smithay::desktop::Window;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
 use std::sync::atomic::Ordering;
@@ -52,6 +53,20 @@ pub(crate) enum Action {
     Run(&'static Command),
     /// The touchpad key: the touchpads stop or start sending events, for the session (D16).
     TouchpadToggle,
+    /// Super+1 to Super+9: the n-th workspace of the output the keys act on, its last when n is
+    /// past it (OV13).
+    Workspace(u8),
+    /// Super+0: the last workspace of the output the keys act on.
+    LastWorkspace,
+    /// Super+Shift+1 to Super+Shift+9: the focused window moves to the n-th workspace, and the
+    /// workspace follows.
+    MoveTo(u8),
+    /// Super+Shift+0: the focused window moves to the last workspace, and the workspace follows.
+    MoveToLast,
+    /// Super+Ctrl with Left, Up, h, k or Right, Down, j, l: one workspace back or on, no wrap.
+    Step(Step),
+    /// Super+Shift+Ctrl with the same keys: the focused window is carried one workspace.
+    Carry(Step),
 }
 
 impl Action {
@@ -63,6 +78,8 @@ impl Action {
             Self::Call(call) => call.while_locked,
             Self::Run(command) => command.while_locked,
             Self::Lock | Self::Reveal | Self::CloseFocused | Self::TouchpadToggle => false,
+            Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
+            Self::Step(_) | Self::Carry(_) => false,
         }
     }
 
@@ -127,6 +144,42 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
         on(SUPER | ALT, Keysym::s),
         Action::Call(&cosmic::SCREEN_READER),
     ),
+    (on(SUPER, Keysym::_1), Action::Workspace(1)),
+    (on(SUPER, Keysym::_2), Action::Workspace(2)),
+    (on(SUPER, Keysym::_3), Action::Workspace(3)),
+    (on(SUPER, Keysym::_4), Action::Workspace(4)),
+    (on(SUPER, Keysym::_5), Action::Workspace(5)),
+    (on(SUPER, Keysym::_6), Action::Workspace(6)),
+    (on(SUPER, Keysym::_7), Action::Workspace(7)),
+    (on(SUPER, Keysym::_8), Action::Workspace(8)),
+    (on(SUPER, Keysym::_9), Action::Workspace(9)),
+    (on(SUPER, Keysym::_0), Action::LastWorkspace),
+    (on(SUPER | SHIFT, Keysym::_1), Action::MoveTo(1)),
+    (on(SUPER | SHIFT, Keysym::_2), Action::MoveTo(2)),
+    (on(SUPER | SHIFT, Keysym::_3), Action::MoveTo(3)),
+    (on(SUPER | SHIFT, Keysym::_4), Action::MoveTo(4)),
+    (on(SUPER | SHIFT, Keysym::_5), Action::MoveTo(5)),
+    (on(SUPER | SHIFT, Keysym::_6), Action::MoveTo(6)),
+    (on(SUPER | SHIFT, Keysym::_7), Action::MoveTo(7)),
+    (on(SUPER | SHIFT, Keysym::_8), Action::MoveTo(8)),
+    (on(SUPER | SHIFT, Keysym::_9), Action::MoveTo(9)),
+    (on(SUPER | SHIFT, Keysym::_0), Action::MoveToLast),
+    (on(SUPER | CTRL, Keysym::Left), Action::Step(Step::Previous)),
+    (on(SUPER | CTRL, Keysym::Up), Action::Step(Step::Previous)),
+    (on(SUPER | CTRL, Keysym::h), Action::Step(Step::Previous)),
+    (on(SUPER | CTRL, Keysym::k), Action::Step(Step::Previous)),
+    (on(SUPER | CTRL, Keysym::Right), Action::Step(Step::Next)),
+    (on(SUPER | CTRL, Keysym::Down), Action::Step(Step::Next)),
+    (on(SUPER | CTRL, Keysym::j), Action::Step(Step::Next)),
+    (on(SUPER | CTRL, Keysym::l), Action::Step(Step::Next)),
+    (on(SUPER | SHIFT | CTRL, Keysym::Left), Action::Carry(Step::Previous)),
+    (on(SUPER | SHIFT | CTRL, Keysym::Up), Action::Carry(Step::Previous)),
+    (on(SUPER | SHIFT | CTRL, Keysym::h), Action::Carry(Step::Previous)),
+    (on(SUPER | SHIFT | CTRL, Keysym::k), Action::Carry(Step::Previous)),
+    (on(SUPER | SHIFT | CTRL, Keysym::Right), Action::Carry(Step::Next)),
+    (on(SUPER | SHIFT | CTRL, Keysym::Down), Action::Carry(Step::Next)),
+    (on(SUPER | SHIFT | CTRL, Keysym::j), Action::Carry(Step::Next)),
+    (on(SUPER | SHIFT | CTRL, Keysym::l), Action::Carry(Step::Next)),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -226,6 +279,12 @@ impl State {
             Action::Call(call) => self.send_job(Job::Call(call)),
             Action::Run(command) => self.send_job(Job::Run(command)),
             Action::TouchpadToggle => self.toggle_touchpads(),
+            Action::Workspace(n) => self.switch_to(n),
+            Action::LastWorkspace => self.switch_to(0),
+            Action::MoveTo(n) => self.send_focused_to(n),
+            Action::MoveToLast => self.send_focused_to(0),
+            Action::Step(step) => self.step(step),
+            Action::Carry(step) => self.carry(step),
         }
     }
 

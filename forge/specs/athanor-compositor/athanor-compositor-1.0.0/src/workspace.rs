@@ -37,6 +37,13 @@ fn on(window: &Window) -> Option<WorkspaceId> {
     window.user_data().get::<OnWorkspace>().map(|on| on.0.get())
 }
 
+/// A step along an output's workspaces, from the keyboard (OV13).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Step {
+    Previous,
+    Next,
+}
+
 /// The workspaces of an output, in order, and the place of the active one.
 pub struct Strip {
     output: Output,
@@ -307,9 +314,7 @@ impl State {
 
     /// Moves `window` to the workspace `id`: it leaves the space for an inactive one and comes
     /// back for the active one; onto another output it is centred there. A minimised window stays
-    /// minimised. False when no output has `id`, or the window is not placed yet. The workspace
-    /// keys call it (OV13).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// minimised. False when no output has `id`, or the window is not placed yet.
     pub fn move_window_to(&mut self, window: &Window, id: WorkspaceId) -> bool {
         let Some(strip) = self
             .workspaces
@@ -350,6 +355,84 @@ impl State {
         }
         self.workspaces_changed();
         true
+    }
+
+    /// The window with the keyboard focus, if a window has it.
+    fn focused_window(&self) -> Option<Window> {
+        let surface = self.seat.get_keyboard()?.current_focus()?;
+        self.window_for(&surface)
+    }
+
+    /// The workspaces of the output the workspace keys act on: the focused window's, else the
+    /// first output's.
+    fn keyed_strip(&self) -> Option<&Strip> {
+        let output = self
+            .focused_window()
+            .and_then(|window| self.workspace_of(&window))
+            .and_then(|id| self.output_of_workspace(id))
+            .or_else(|| self.space.outputs().next().cloned())?;
+        self.workspaces.iter().find(|strip| strip.output == output)
+    }
+
+    /// The `n`-th workspace, from one, of the output the keys act on; its last when `n` is 0 or
+    /// past it.
+    fn nth_workspace(&self, n: u8) -> Option<WorkspaceId> {
+        let list = &self.keyed_strip()?.list;
+        usize::from(n)
+            .checked_sub(1)
+            .and_then(|index| list.get(index))
+            .or(list.last())
+            .copied()
+    }
+
+    /// The workspace one `step` from the active one of the output the keys act on; none past
+    /// either end.
+    fn stepped(&self, step: Step) -> Option<WorkspaceId> {
+        let strip = self.keyed_strip()?;
+        let to = match step {
+            Step::Previous => strip.active.checked_sub(1)?,
+            Step::Next => strip.active + 1,
+        };
+        strip.list.get(to).copied()
+    }
+
+    /// Super+1 to Super+9 and Super+0: activates the `n`-th workspace (`nth_workspace`).
+    pub(crate) fn switch_to(&mut self, n: u8) {
+        if let Some(id) = self.nth_workspace(n) {
+            self.activate_workspace(id);
+        }
+    }
+
+    /// Super+Shift+1 to Super+Shift+9 and Super+Shift+0: the focused window moves to the `n`-th
+    /// workspace, which is activated with the window on top and the keyboard.
+    pub(crate) fn send_focused_to(&mut self, n: u8) {
+        if let Some(id) = self.nth_workspace(n) {
+            self.carry_to(id);
+        }
+    }
+
+    /// Super+Ctrl and an arrow or h, j, k, l: activates the workspace one `step` away.
+    pub(crate) fn step(&mut self, step: Step) {
+        if let Some(id) = self.stepped(step) {
+            self.activate_workspace(id);
+        }
+    }
+
+    /// Super+Shift+Ctrl and an arrow or h, j, k, l: the focused window is carried one `step`.
+    pub(crate) fn carry(&mut self, step: Step) {
+        if let Some(id) = self.stepped(step) {
+            self.carry_to(id);
+        }
+    }
+
+    /// Moves the focused window to `id` and activates it, the window on top with the keyboard.
+    fn carry_to(&mut self, id: WorkspaceId) {
+        let Some(window) = self.focused_window() else {
+            return;
+        };
+        if self.move_window_to(&window, id) && self.activate_workspace(id) {
+            self.focus(&window);
+        }
     }
 
     /// Takes `windows` out of the space, each keeping its place, bottom to top.
