@@ -485,7 +485,11 @@ const TERMINATION: Duration = Duration::from_secs(2);
 /// Under the user manager the satellite runs in a scope of its own, outside the compositor
 /// service's cgroup, so stopping the service does not end it: the compositor signals it. The
 /// child it spawned is the satellite itself, since `systemd-run --scope` executes the command in
-/// its own process instead of forking it.
+/// its own process instead of forking it. Its Xwayland is not signalled: the satellite is
+/// Xwayland's Wayland server, and Xwayland exits when that connection closes, as a check with
+/// xwayland-satellite 0.8.2 showed, within milliseconds of the satellite's SIGTERM and of its
+/// SIGKILL alike.
+///
 /// Ends the process `pid`, a satellite this compositor started: SIGTERM, then SIGKILL after
 /// `TERMINATION`. The waiter thread reaps it, so that the process is gone once signalling it
 /// fails. ponytail: a pid reused within that window is signalled; the window is the time the
@@ -642,6 +646,22 @@ mod tests {
         drop(display);
         assert!(dir.join(".X0-lock").exists(), "the lock went");
         assert!(dir.join(".X11-unix/X0").exists(), "the socket went");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A socket another server bound under the path, a different file than the one this display
+    /// bound, outlives the display that is dropped.
+    #[test]
+    fn a_socket_another_server_bound_stays() {
+        let dir = dir("rebound");
+        let display = Display::open(&dir).expect("display");
+        let path = dir.join(".X11-unix/X0");
+        std::fs::remove_file(&path).expect("socket");
+        // Bound while the display still holds the old file open: a different inode.
+        let other = UnixListener::bind(&path).expect("another server");
+        drop(display);
+        assert!(path.exists(), "the other server's socket went");
+        drop(other);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
