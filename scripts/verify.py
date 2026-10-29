@@ -3815,7 +3815,8 @@ SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"
 # outlive its reasons, and it covers that finding only: a new divergence of the same unit fails.
 SN3_CITE = "(doc_session.md, SN3)"
 NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
-ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] and no preset enabling it {SN3_CITE}"
+ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
+ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
 SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
 SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
@@ -3919,8 +3920,10 @@ def session_unit_problems(units, enabled):
             fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)")
         if start == "preset" and (wanted_by != {SESSION_TARGET} or unit not in enabled):
             fail(unit, "install", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)")
-        if start == "activated" and (install or unit in enabled):
-            fail(unit, "install", "D-Bus-activated, so no [Install] and no preset enabling it (doc_session.md, SN3)")
+        if start == "activated" and install:
+            fail(unit, "install", ACTIVATED_INSTALL)
+        if start == "activated" and unit in enabled:
+            fail(unit, "install", ACTIVATED_PRESET)
         if start == "target" and unit not in pulled:
             fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
 
@@ -3960,12 +3963,51 @@ def session_exempt_problems(found):
     return problems
 
 
+FILES_END = re.compile(
+    r"^%(?:prep|build|install|check|clean|changelog|description|package|pre|post|preun|postun"
+    r"|pretrans|posttrans|trigger\w*|files)\b"
+)
+# What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
+FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
+USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
+USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))")
+# A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
+USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
+USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir")
+
+
+def spec_user_units(text):
+    """(names, problems): the user units a spec's %files lists, and each %files line that
+    mentions the user unit directory but that this scan cannot classify (a glob, a macro it
+    does not know), which it would otherwise not see."""
+    names, problems, in_files = [], [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        if not in_files or line.startswith("#") or not USER_UNIT_MENTION.search(line):
+            continue
+        path = FILES_DIRECTIVES.sub("", line)
+        path = re.sub(r"^%dir\s+", "", path)
+        unit = USER_UNIT_PATH.fullmatch(path)
+        if unit:
+            names.append(unit.group(1))
+        elif not USER_DROPIN_PATH.fullmatch(path):
+            problems.append(line)
+    return names, problems
+
+
 def shipped_user_units(root):
     """({unit: text}, problems) for every unit a spec under forge/specs installs in
     /usr/lib/systemd/user, read from the one file of that name in the spec's directory."""
     units, problems = {}, []
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
-        for name in re.findall(r"^/usr/lib/systemd/user/([^/\s]+\.(?:service|target|timer|socket))$", read(spec), re.M):
+        names, unclassified = spec_user_units(read(spec))
+        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list it by its path" for line in unclassified]
+        for name in names:
             sources = [p for p in walk(spec.parent, name) if p.name == name and "skel" not in p.parts]
             if len(sources) != 1:
                 problems.append(f"{rel(spec)}: ships {name}, found {len(sources)} source files of that name")
