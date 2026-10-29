@@ -6,6 +6,7 @@
 // one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
 #![deny(unsafe_code)]
 
+mod bindings;
 mod capture;
 mod cursor;
 mod grabs;
@@ -21,6 +22,7 @@ mod lock;
 mod output_management;
 mod output_power;
 mod screen_filter;
+mod session_calls;
 mod state;
 mod toplevel_state;
 mod xkb_config;
