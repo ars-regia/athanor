@@ -1167,12 +1167,13 @@ atspi)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 7: tiling needs zcosmic_workspace_manager_v2, whose private replacement
-        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies.
+        # 5: tiling needs zcosmic_workspace_manager_v2, whose private replacement
+        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies, and
+        # decision 28 of doc_own_stack.md hides workspaces (#835) and applications (#836).
         unit='' widgets=8
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
-            unit=--unit widgets=7
+            unit=--unit widgets=5
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
@@ -1192,9 +1193,9 @@ atspi)
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
-        # Under athanor-compositor 11: as in `bar`, the tiling button is missing.
+        # Under athanor-compositor 9: as in `bar`, tiling, workspaces and applications are missing.
         widgets=12
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=11; fi
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=9; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
         atspi_variant "$out/seed-atspi-bar-modules"
@@ -1209,13 +1210,15 @@ atspi)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
         # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-toolkit's
         # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
+        # Under athanor-compositor 2: decision 28 hides workspaces (#835) and applications (#836).
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
-        transcript=atspi-dock${3:+-$3}.json
+        transcript=atspi-dock${3:+-$3}.json widgets=4
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=2; fi
         seed_bar "$out/seed-atspi-dock" float top visible light
         atspi_variant "$out/seed-atspi-dock"
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
         surface_not_closed atspi dock atspi-dock
