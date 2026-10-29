@@ -543,6 +543,25 @@ class AllowList(unittest.TestCase):
         self.write(verify.SESSION_COMPONENTS, "systemd-run --user --scope --unit=cosmic-idle.scope cosmic-idle\n")
         self.assertEqual(self.problems(idle), [])
 
+    def test_an_upstream_scope_the_supervisor_only_mentions_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/cosmic-idle cosmic-idle.scope zwlr_layer_shell_v1\n")
+        idle = {"/usr/bin/cosmic-idle": "cosmic-idle.scope"}
+        start = "systemd-run --user --scope --unit=cosmic-idle.scope cosmic-idle"
+        for text in (
+            f"# {start}\n",
+            start.replace("scope cosmic", "scope.bak cosmic") + "\n",
+            "echo " + start + "\n",
+        ):
+            self.write(verify.SESSION_COMPONENTS, text)
+            out = self.problems(idle)
+            self.assertEqual(len(out), 1, (text, out))
+            self.assertIn("starts no cosmic-idle.scope", out[0])
+        self.write(verify.SESSION_COMPONENTS, f"    {start} &\n")
+        self.assertEqual(self.problems(idle), [])
+        self.write(verify.SESSION_COMPONENTS, f"{start}\n")
+        self.assertEqual(self.problems(idle), [])
+
     def test_an_upstream_client_a_spec_installs_fails(self):
         self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
         self.write(
