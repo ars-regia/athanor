@@ -2200,6 +2200,18 @@ LAYER_SHELL = "zwlr_layer_shell_v1"
 # step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
 # A line for it, or no spec installing it, ends the exemption with a failure.
 OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# Upstream clients with a line (doc_session.md revision 4, SN12 and SN15): no spec under
+# forge/specs installs them and no crate of the tree builds them, so neither the executable nor
+# its interfaces can be derived here; their interfaces come from SN12's derivation run. Each
+# must keep one line, for the unit it runs in, and a spec that comes to install one ends its
+# exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
+UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
+            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
+            "/usr/bin/cosmic-osd": "cosmic-osd.service"}
+SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
+# The compositor serves those globals and the layers, and enforces the list: no client to check.
+# Its installed path and its bin target both, so that another binary installed there is checked.
+SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
@@ -2469,7 +2481,7 @@ def build_flags(spec, package):
     return set(), True, False
 
 
-def allow_list_problems(root=None, notes=None, outside=None):
+def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
     """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
     a crate of the tree, that asks for the top or overlay layer or names a privileged global
     of data/globals has a line in data/privileged-clients, and each of its lines grants
@@ -2477,10 +2489,12 @@ def allow_list_problems(root=None, notes=None, outside=None):
     names; each line names an executable a spec installs, and only interfaces of the
     privileged and layer-gated rows. A grant beyond those is the maintainer's, never
     derived here. An executable of `outside` (OUTSIDE_THE_LIST by default) is appended to
-    `notes` in place of its problem."""
+    `notes` in place of its problem; one of `upstream` (UPSTREAM by default) has a line and
+    is installed by no spec."""
     root = Path(root or ROOT)
     notes = [] if notes is None else notes
     outside = OUTSIDE_THE_LIST if outside is None else outside
+    upstream = UPSTREAM if upstream is None else upstream
     problems = []
     classes = {}
     for number, line in enumerate(read(root / GLOBALS_FILE).splitlines(), 1):
@@ -2537,6 +2551,8 @@ def allow_list_problems(root=None, notes=None, outside=None):
 
     checked = 0
     for built, executable, spec, spec_path, in_tree in targets:
+        if (built, executable) == SERVER:
+            continue
         if built not in bins:
             # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
             # carries a crate: then no bin target of the tree has the name it installs, or
@@ -2588,8 +2604,23 @@ def allow_list_problems(root=None, notes=None, outside=None):
         problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
                         "builds: the check found no target")
     for executable in lines:
-        if executable not in installed:
+        if executable not in installed and executable not in upstream:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    components = read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
+    for executable, unit in sorted(upstream.items()):
+        if executable not in lines:
+            problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
+                            "remove it from UPSTREAM (doc_session.md SN12)")
+        elif [line[0] for line in lines[executable]] != [unit]:
+            problems.append(f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
+                            "the unit it runs in")
+        started = rf"^[ \t]*systemd-run(?:[ \t]+-\S*)*[ \t]+--unit={re.escape(unit)}(?:[ \t]|$)"
+        if unit.endswith(".scope") and not re.search(started, components, re.MULTILINE):
+            problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
+                            "names: the grant would reach nothing")
+        if executable in installed:
+            problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
+                            "remove it from UPSTREAM, so that its line is derived")
     for executable in sorted(outside):
         if executable in lines:
             problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
@@ -3762,8 +3793,9 @@ def check_services():
 
 # doc_session.md, SN12: every user unit Athanor ships for the session, with its crash class of
 # SN6, whether it connects to the compositor (SN3) and how the session starts it: through a
-# user preset under athanor-session.target, through D-Bus activation, or by name in
-# athanor-session.target itself (the gate through Requires=, the others through Wants=).
+# user preset under athanor-session.target, through D-Bus activation, by name in
+# athanor-session.target itself (the gate through Requires=, the others through Wants=), or by
+# its session's script alone.
 SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
@@ -3782,6 +3814,9 @@ SESSION_UNITS = {
     "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
+    # The own compositor (SN15): athanor-compositor-session starts it and waits on it, and its
+    # ExecStartPost= starts athanor-session.target, so it precedes the gate, which probes it.
+    "athanor-compositor.service": ("compositor", False, "script"),
 }
 SESSION_TARGET = "athanor-session.target"
 # Shipped user units that are not session units, and why.
@@ -3811,6 +3846,8 @@ SESSION_CLASSES = {
     "step": {"Type": "oneshot", "Restart": "no"},
     # COSMIC's units keep their own policy until they leave (SN6, exceptions).
     "cosmic": {"Restart": "on-failure", "RestartSec": 2},
+    # The own compositor has no Restart=: its end ends the session (SN6, exceptions; SN15).
+    "compositor": {"Restart": "no"},
 }
 SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"}
 # Findings the units do not meet yet, each the exact text of the check's finding for that unit,
@@ -3820,6 +3857,10 @@ SN3_CITE = "(doc_session.md, SN3)"
 NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
 ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
 ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
+SCRIPT_STARTED = (
+    f"started by its session's script alone, so no [Install], no user preset and not pulled in by "
+    f"{SESSION_TARGET} (doc_session.md, SN15)"
+)
 SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
 SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
@@ -3929,6 +3970,8 @@ def session_unit_problems(units, enabled):
             fail(unit, "install", ACTIVATED_PRESET)
         if start == "target" and unit not in pulled:
             fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
+        if start == "script" and (install or unit in enabled or unit in pulled):
+            fail(unit, "install", SCRIPT_STARTED)
 
         gate = "athanor-desktop.service"
         edges = (gate in unit_names(head, "After"), gate in unit_names(head, "Requisite"))

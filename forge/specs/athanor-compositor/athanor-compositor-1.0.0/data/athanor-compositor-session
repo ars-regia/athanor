@@ -1,0 +1,281 @@
+#!/usr/bin/bash
+# athanor-compositor-session - the session on Athanor's own compositor, the greeter's default
+# "Athanor" (doc_session.md, SN14 and SN15), started by greetd as the user.
+#
+# The compositor is a user unit, athanor-compositor.service, which starts the desktop
+# through athanor-session.target once it is ready. This script waits on that unit: the
+# session ends when the compositor ends, whatever the cause, and every way out of the script
+# stops what it started and leaves the user manager clean. The sign-in passes to cosmic-comp's
+# session, athanor-session, in three cases: the magnifier or a colour filter is on (step 2),
+# a command that prepares the session fails (steps 3 to 5), or the session fails before
+# athanor-session.target has become active (step 7). Each is logged at warning under this
+# script's name. A compositor that ends after the session started ends the session.
+set -eu
+
+# Output to the journal under this script's name. systemd-cat execs the script again with
+# its output connected, keeping the PID greetd waits on.
+if [ -z "${ATHANOR_COMPOSITOR_SESSION_JOURNAL:-}" ]; then
+    ATHANOR_COMPOSITOR_SESSION_JOURNAL=1 exec systemd-cat -t athanor-compositor-session "$0" "$@"
+fi
+unset ATHANOR_COMPOSITOR_SESSION_JOURNAL
+
+# The supervisor of the locker and the idle daemon, and the stop of their scopes.
+# shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-components
+. /usr/libexec/athanor/session-components
+
+# The reader of SN2's import list, which athanor-desktop sources too, and the user's
+# language, region and cursor, which athanor-session exports too (step 4).
+# shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-import-names
+. /usr/libexec/athanor/session-import-names
+# shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-environment
+. /usr/libexec/athanor/session-environment
+
+# What this session alone sets in the user manager (step 5).
+OWN="ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS"
+# Created by the compositor's unit once athanor-session.target has started (step 7).
+MARKER="$XDG_RUNTIME_DIR/athanor-compositor-session.started"
+
+# log <priority> <message>: one journal entry at <priority>; when systemd-cat cannot write
+# it, the message goes to stderr, which this script's own systemd-cat carries.
+log() {
+    if ! printf '%s\n' "$2" | systemd-cat -t athanor-compositor-session -p "$1"; then
+        printf 'athanor-compositor-session: %s\n' "$2" >&2
+    fi
+}
+
+# Signs in to cosmic-comp's session instead, inside the same greetd session (SN14).
+hand_off_now() {
+    log warning "$1; starting cosmic-comp's session"
+    exec /usr/bin/athanor-session
+}
+
+# 1. What a previous session left: units still active, the component scopes, units failed,
+# and the marker. A failure here ends the script with nothing started, and greetd returns
+# to the greeter.
+systemctl --user stop athanor-session.target athanor-compositor.service
+stop_component_scopes
+systemctl --user reset-failed
+rm -f "$MARKER"
+
+# SN2's import list, the one file athanor-desktop and the readiness gate read, read with
+# step 1, after its cleanup and before the exit handler that needs it. The compositor sets
+# WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end removes
+# all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too (step 3). A list the
+# reader refuses fails as step 1 does, with nothing of this session started, and greetd
+# returns to the greeter: athanor-desktop refuses the same list, so a hand-off could not
+# start either.
+if ! names=$(session_import_names /usr/share/athanor-system-config/session-import); then
+    log err "the import list cannot be used; no session starts"
+    exit 1
+fi
+IMPORTED=
+REMOVED=
+for name in $names; do
+    case $name in
+        WAYLAND_DISPLAY | DISPLAY) ;;
+        *) IMPORTED="$IMPORTED $name" ;;
+    esac
+    case $name in
+        XDG_CURRENT_DESKTOP) ;;
+        *) REMOVED="$REMOVED $name" ;;
+    esac
+done
+
+# 2. The magnifier and the colour filters are cosmic-comp's (doc_own_stack.md decision 28):
+# a user who has either on signs in there, before anything else is set. gsettings prints
+# the default without an error when it cannot read the user's database, so a dconf
+# directory it cannot search, or a database it cannot read, counts as the magnifier on.
+case ",${ATHANOR_A11Y:-}," in
+    *,magnifier,*) hand_off_now "the greeter hands the magnifier to the session" ;;
+esac
+if ! magnifier=$(gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled); then
+    hand_off_now "the magnifier's setting cannot be read"
+fi
+if [ "$magnifier" != false ]; then
+    hand_off_now "the magnifier is on ($magnifier)"
+fi
+dconf="${XDG_CONFIG_HOME:-$HOME/.config}/dconf"
+if [ -e "$dconf" ] && ! [ -x "$dconf" ]; then
+    hand_off_now "$dconf cannot be searched, so the magnifier's setting is unknown"
+fi
+if [ -e "$dconf/user" ] && ! [ -r "$dconf/user" ]; then
+    hand_off_now "$dconf/user cannot be read, so the magnifier's setting is unknown"
+fi
+# 0: no inversion and no filter in cosmic-comp's a11y_screen_filter.ron; 10: one of them.
+# Any other status (a file it cannot read, a binary without the flag) counts as a filter on.
+filter=0
+/usr/bin/athanor-compositor --screen-filter-on || filter=$?
+if [ "$filter" -ne 0 ]; then
+    hand_off_now "a colour filter is on or unknown (athanor-compositor --screen-filter-on exited $filter)"
+fi
+
+# 3. Every way out that is not a hand-off ends the session: the compositor's end once the
+# session has started, a logout, a signal from greetd. Each command of the handler runs as
+# the condition of an `if`, so that one that fails does not end it before the rest; the
+# next sign-in's step 1 clears what it left.
+sup=
+end_session() {
+    trap '' HUP TERM
+    # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated. It is
+    # waited for, so that no job of it starts a scope after the stop below. It logs its own
+    # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM. The wait is bounded: a
+    # supervisor that does not end in 5 s (a job stuck in systemd-run, a trap that never runs)
+    # would keep greetd from showing the greeter, so it is killed with its jobs and the scopes
+    # are stopped below either way. The bound is polled with kill -0, which fails once bash
+    # has reaped the supervisor.
+    if [ -n "$sup" ]; then
+        if ! kill "$sup" && kill -0 "$sup"; then
+            log err "the supervisor of the locker and the idle daemon did not end"
+        fi
+        forced=0
+        waited=0
+        while kill -0 "$sup" 2> /dev/null; do
+            if [ "$waited" -ge 50 ]; then
+                forced=1
+                log err "the supervisor of the locker and the idle daemon did not end within 5 s; killing it and its jobs"
+                # The supervisor leads a process group of its own (step 6): one kill reaches
+                # it, its jobs and their systemd-run, and no job can start a component again.
+                # It failed only if the group is still there.
+                if ! kill -KILL -- "-$sup" && kill -0 -- "-$sup"; then
+                    log err "the supervisor of the locker and the idle daemon could not be killed"
+                fi
+                break
+            fi
+            if ! sleep 0.1; then
+                log err "sleep failed while waiting for the supervisor"
+            fi
+            waited=$((waited + 1))
+        done
+        sup_status=0
+        wait "$sup" || sup_status=$?
+        case $sup_status in
+            0 | 1 | 143) ;;
+            137) if [ "$forced" -eq 0 ]; then log err "the supervisor of the locker and the idle daemon was killed from outside"; fi ;;
+            *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
+        esac
+    fi
+    if ! stop_component_scopes; then
+        log err "a scope of the locker or the idle daemon did not stop"
+    fi
+    # The stop returns once both units are inactive, so the greeter never starts on a GPU the
+    # compositor still holds. graphical-session.target stops in a later transaction, and the
+    # gate with it, whose ExecStop= must not unset the next session's display.
+    if ! systemctl --user stop athanor-session.target athanor-compositor.service; then
+        log err "the session's units did not stop"
+    fi
+    waited=0
+    while systemctl --user is-active --quiet graphical-session.target; do
+        if [ "$waited" -ge 100 ]; then
+            log err "graphical-session.target is still active 10 s after the session's stop"
+            break
+        fi
+        if ! sleep 0.1; then
+            log err "sleep failed while waiting for graphical-session.target"
+        fi
+        waited=$((waited + 1))
+    done
+    # shellcheck disable=SC2086 # word splitting of the lists is intended
+    if ! systemctl --user unset-environment $REMOVED $OWN; then
+        log err "the session's variables were not removed from the user manager"
+    fi
+}
+trap end_session EXIT
+trap 'exit 129' HUP
+trap 'exit 143' TERM
+
+# Ends what was started and signs in to cosmic-comp's session (steps 3 to 5 and 7). exec
+# runs no EXIT trap, and a signal left ignored would stay ignored across it.
+hand_off() {
+    end_session
+    trap - EXIT HUP TERM
+    hand_off_now "$1"
+}
+
+# 4. What athanor-session exports (SN2): the locker and the idle daemon are children of this
+# script through the supervisor, not of the user manager, and need Calmo's defaults.
+export XDG_CURRENT_DESKTOP=Athanor:COSMIC
+export XDG_SESSION_TYPE=wayland
+export GTK_IM_MODULE=simple
+export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# LANG, LANGUAGE and the region's LC_* from the user's settings, and XCURSOR_SIZE and
+# XCURSOR_THEME; a value it cannot read is logged and the system's applies, so it never
+# hands off.
+export_user_environment
+# localsearch's unit starts only with XDG_SESSION_CLASS=user, and greetd hands the session
+# no class: read it from logind, as athanor-desktop does.
+if [ -z "${XDG_SESSION_ID:-}" ] ||
+    ! class=$(loginctl show-session "$XDG_SESSION_ID" --property=Class --value); then
+    hand_off "the session class cannot be read from logind (XDG_SESSION_ID=${XDG_SESSION_ID:-})"
+fi
+export XDG_SESSION_CLASS="$class"
+# The USB policy is relaxed for an unlocked session.
+if ! /usr/bin/athanor-usbguard-hook unlock; then
+    hand_off "athanor-usbguard-hook unlock failed"
+fi
+
+# 5. The discriminator athanor-control-center-shortcut tests (ConditionEnvironment=), and the
+# system's keyboard setting, from which the compositor's keymap reads XKB_DEFAULT_* when the
+# user has no layout of their own: the properties of org.freedesktop.locale1 that localectl
+# sets. Empty, n/a or (unset) is unset, which also removes a value a killed session left.
+if ! systemctl --user set-environment ATHANOR_OWN_COMPOSITOR=1; then
+    hand_off "systemctl --user set-environment ATHANOR_OWN_COMPOSITOR=1 failed"
+fi
+keyboard() {
+    if ! value=$(busctl get-property org.freedesktop.locale1 /org/freedesktop/locale1 org.freedesktop.locale1 "$1"); then
+        hand_off "busctl get-property org.freedesktop.locale1 $1 failed"
+    fi
+    value=${value#s \"}
+    value=${value%\"}
+    case $value in
+        '' | n/a | '(unset)')
+            if ! systemctl --user unset-environment "$2"; then
+                hand_off "systemctl --user unset-environment $2 failed"
+            fi
+            ;;
+        *)
+            if ! systemctl --user set-environment "$2=$value"; then
+                hand_off "systemctl --user set-environment $2 failed"
+            fi
+            ;;
+    esac
+}
+keyboard X11Layout XKB_DEFAULT_LAYOUT
+keyboard X11Variant XKB_DEFAULT_VARIANT
+keyboard X11Options XKB_DEFAULT_OPTIONS
+# A list of the displays alone leaves nothing to import, and systemctl given no name would
+# import the whole environment.
+# shellcheck disable=SC2086 # word splitting of the list is intended
+if [ -n "$IMPORTED" ] && ! systemctl --user import-environment $IMPORTED; then
+    hand_off "systemctl --user import-environment$IMPORTED failed"
+fi
+
+# 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
+# Monitor mode puts the background job in a process group of its own, whose id is its pid,
+# so that the exit handler can end it with its jobs in one kill (step 3); bash gives the job
+# its group without a terminal, where dash does not. Monitor mode no longer closes a
+# background job's input, so it is closed here.
+set -m
+session_components "$$" target < /dev/null &
+sup=$!
+set +m
+
+# 7. The only start of the compositor, and of the session through its ExecStartPost=. The
+# command returns once the unit is inactive again. It runs in the background and is waited
+# for alone, so that a trapped HUP or TERM from greetd ends `wait` at once and the handler
+# runs, and a start that failed reaches the test below rather than ending the script.
+systemctl --user start --wait athanor-compositor.service &
+pid=$!
+status=0
+wait "$pid" || status=$?
+if [ -e "$MARKER" ]; then
+    # The session started, and the compositor has ended: the exit handler ends the rest.
+    exit 0
+fi
+# A session that never started: the compositor exited, crashed or sent no READY=1 within
+# TimeoutStartSec=, or the readiness gate or the target failed.
+if ! result=$(systemctl --user show athanor-compositor.service --property=Result --property=ExecMainStatus); then
+    result="Result= unread"
+fi
+# shellcheck disable=SC2086 # the properties' lines join into one
+result=$(printf '%s ' $result)
+hand_off "the session did not start (systemctl start exited $status; ${result% })"

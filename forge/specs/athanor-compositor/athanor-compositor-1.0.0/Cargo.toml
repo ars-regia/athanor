@@ -7,6 +7,8 @@ license = "GPL-3.0-or-later"
 description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone C1)"
 
 [dependencies]
+# Readiness for the `Type=notify` unit of the preview session (`ready.rs`).
+athanor-unit = { path = "../../../../system/athanor-unit" }
 # The generated code of Athanor's own protocols (`toplevel_state.rs`), and the fixture's
 # client bindings of them: the bitfield enums need bitflags.
 bitflags = { workspace = true }
@@ -22,7 +24,8 @@ libc = { workspace = true }
 calloop = { workspace = true, features = ["signals"] }
 # The watch of `xkb_config` (`xkb_config.rs`).
 nix = { workspace = true, features = ["inotify"] }
-# The lock request to logind (`lock.rs`), a blocking call on its own thread.
+# The lock request to logind (`lock.rs`), a blocking call on its own thread, and
+# WAYLAND_DISPLAY to the user manager (`ready.rs`).
 zbus = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
