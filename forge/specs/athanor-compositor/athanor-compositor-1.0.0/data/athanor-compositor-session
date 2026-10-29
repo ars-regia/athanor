@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/bash
 # athanor-compositor-session - the session on Athanor's own compositor, the greeter's default
 # "Athanor" (doc_session.md, SN14 and SN15), started by greetd as the user.
 #
@@ -251,8 +251,9 @@ fi
 
 # 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
 # Monitor mode puts the background job in a process group of its own, whose id is its pid,
-# so that the exit handler can end it with its jobs in one kill (step 3). Monitor mode no
-# longer closes a background job's input, so it is closed here.
+# so that the exit handler can end it with its jobs in one kill (step 3); bash gives the job
+# its group without a terminal, where dash does not. Monitor mode no longer closes a
+# background job's input, so it is closed here.
 set -m
 session_components "$$" target < /dev/null &
 sup=$!
