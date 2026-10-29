@@ -124,13 +124,18 @@ kill_supervisor_tree() {
     for job in $jobs_of_sup; do
         children="$children $(pgrep -P "$job")"
     done
+    # A job or a child that ended on its own meanwhile (the supervisor's own sleep, for one)
+    # is gone, which is what is wanted; only the supervisor's kill decides the status.
+    for pid in $jobs_of_sup; do
+        if ! kill -KILL "$pid"; then
+            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
+        fi
+    done
     killed=0
-    # shellcheck disable=SC2086 # word splitting of the pid list is intended
-    kill -KILL $jobs_of_sup "$sup" || killed=1
-    # A child that ended on its own meanwhile is gone, which is what is wanted.
-    for child in $children; do
-        if ! kill -KILL "$child"; then
-            printf 'athanor-compositor-session: pid %s had already ended\n' "$child" >&2
+    kill -KILL "$sup" || killed=1
+    for pid in $children; do
+        if ! kill -KILL "$pid"; then
+            printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
         fi
     done
     return "$killed"
