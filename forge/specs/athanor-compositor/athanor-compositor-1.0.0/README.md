@@ -46,8 +46,8 @@ so that every thread inherits the block, and are read once the loop runs. A sign
 when the loop begins, and a start that blocks inside a call (the seat, the DRM device) ends only
 by SIGKILL. The same holds for a loop blocked in a call. Once the loop has returned, the source
 is removed, and a second SIGTERM or Ctrl+C takes the default action and ends a stalled cleanup.
-`doc_session.md` specifies `TimeoutStopSec=5s` for `athanor-compositor.service`, which ships with
-the session unit and not with this crate: systemd then sends SIGKILL after 5 s, and the
+`doc_session.md` specifies `TimeoutStopSec=5s` for `athanor-compositor.service`, which the
+session's change (#704) ships, not this crate: systemd then sends SIGKILL after 5 s, and the
 satellite's two seconds between SIGTERM and SIGKILL stay below it.
 
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
