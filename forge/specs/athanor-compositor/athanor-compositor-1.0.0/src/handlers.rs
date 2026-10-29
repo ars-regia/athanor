@@ -467,7 +467,7 @@ impl XdgShellHandler for State {
                 .to_i32_round::<i32>()
                 .x
                 .saturating_sub(kept.size.w / 2);
-            if let Some(area) = self.window_area() {
+            if let Some(area) = self.window_area_at(start.location) {
                 self.move_window(&window, kept_reachable(area, from, kept.size));
             }
         }
