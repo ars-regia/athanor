@@ -3,7 +3,7 @@
 //! arguments, and asks the user manager to run its commands as transient units, waiting for
 //! each reply there, so the event loop never waits on the bus. The loop hands it requests
 //! through a bounded queue; a full queue drops the request with a warning. A name with a
-//! service file is started by the bus at its first call. The compositor forks nothing.
+//! service file is started by the bus at its first call. A key forks nothing.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};

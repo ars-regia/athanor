@@ -288,8 +288,8 @@ asked before the session locked is dropped, and a press of Super or Super+C repe
 first call waits is sent once.
 
 The mute, microphone-mute and media keys run `wpctl` and `playerctl` as cosmic-comp's session
-does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. The
-compositor forks nothing: the same thread asks the user manager to run each fixed argument
+does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. A key
+forks nothing: the same thread asks the user manager to run each fixed argument
 vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
 `app.slice` with `NoNewPrivileges` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
 the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
