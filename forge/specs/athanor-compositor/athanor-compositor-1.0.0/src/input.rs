@@ -7,8 +7,8 @@
 use crate::bindings;
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, Event, InputBackend,
+    InputEvent, InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
@@ -30,6 +30,13 @@ impl State {
     /// identity Super+Escape took the keyboard from, gives its exclusive surfaces the keyboard
     /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
+        // A click on a surface of a client Ctrl+Alt+Tab suspended ends the suspension.
+        if let Some(client) = self
+            .surface_under(location)
+            .and_then(|(surface, _)| surface.client())
+        {
+            self.lift(&client.id());
+        }
         let under = self.under(location);
         if let Some((Under::Layer(layer), _)) = &under {
             if layer.can_receive_keyboard_focus() {
@@ -85,6 +92,8 @@ impl State {
         let to = keyboard
             .current_focus()
             .and_then(|surface| surface.client());
+        // Read before the filter, which runs with the keyboard held.
+        let inhibited = self.shortcuts_inhibited();
         let filtered = keyboard.input_intercept(
             source,
             self,
@@ -96,14 +105,20 @@ impl State {
                     // input method sends the keys it forwards a second time, as a virtual
                     // keyboard's.
                     // A second Super while one is held is not Super alone either, and nothing
-                    // arms while the session is locked.
+                    // arms while the session is locked or the focused surface inhibits the
+                    // bindings.
                     if source == KeyboardSource::Physical {
                         state.super_tap = (state.super_tap.is_none()
                             && state.lock.is_none()
+                            && !inhibited
                             && bindings::arms_super(modifiers, &handle))
                         .then_some(code);
                     }
-                    match bindings::find(modifiers, &handle, state.lock.is_some()) {
+                    // Under an inhibitor only the user's way out stays the compositor's
+                    // (decision 30).
+                    match bindings::find(modifiers, &handle, state.lock.is_some())
+                        .filter(|action| !inhibited || action.never_inhibited())
+                    {
                         Some(action) => {
                             state.kept_keys.push(code);
                             FilterResult::Intercept(Some(action))
@@ -152,14 +167,17 @@ impl State {
                     KeyState::Released => self.grab_serials.key_release = sent,
                 }
             }
-            Some(Some(action)) => self.fire(action),
+            Some(Some(action)) => self.fire_by_key(action),
             Some(None) => {}
         }
         // Super alone, released: the launcher, after the release has reached the client, which
-        // saw Super pressed (D4). Not while locked (`State::fire`).
+        // saw Super pressed (D4). Not while locked (`State::fire`), nor when an inhibitor became
+        // active while Super was held (decision 30).
         if key_state == KeyState::Released && self.super_tap == Some(code) {
             self.super_tap = None;
-            self.fire(bindings::Action::Call(&crate::session_calls::LAUNCHER));
+            if !self.shortcuts_inhibited() {
+                self.fire(bindings::Action::Call(&crate::session_calls::LAUNCHER));
+            }
         }
     }
 
@@ -179,6 +197,7 @@ impl State {
             },
         );
         pointer.frame(self);
+        self.refresh_constraint();
     }
 
     /// A button pressed or released: a press first focuses what is under the pointer.
@@ -228,18 +247,11 @@ impl State {
                     return;
                 };
                 let location = event.position_transformed(area.size) + area.loc.to_f64();
-                self.pointer_to(location, event.time());
+                self.pointer_moved_to(event.device().id(), location, event.time());
             }
             // A mouse or a touchpad on a console: moved by its delta, kept on the outputs.
             InputEvent::PointerMotion { event, .. } => {
-                let Some(pointer) = self.seat.get_pointer() else {
-                    return;
-                };
-                let outputs = self.output_areas();
-                let from = pointer.current_location();
-                if let Some(location) = confine(&outputs, from, from + event.delta()) {
-                    self.pointer_to(location, event.time());
-                }
+                self.pointer_moved_by(event.delta(), event.delta_unaccel(), event.time());
             }
             InputEvent::PointerButton { event, .. } => {
                 self.button_input(event.button_code(), event.state(), event.time());
@@ -273,6 +285,7 @@ impl State {
             InputEvent::GestureSwipeBegin { .. }
             | InputEvent::GesturePinchBegin { .. }
             | InputEvent::GestureHoldBegin { .. } => self.super_tap = None,
+            InputEvent::DeviceRemoved { device } => self.absolute_device_gone(&device.id()),
             _ => {}
         }
     }
@@ -280,7 +293,7 @@ impl State {
 
 impl State {
     /// Where the outputs are in the space.
-    fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
+    pub(crate) fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
         self.space
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
@@ -523,6 +536,7 @@ impl VirtualPointerHandler for State {
             // drops pointers in a loop does not keep the session awake.
             InputEvent::DeviceAdded { .. } => return,
             InputEvent::DeviceRemoved { device } => {
+                self.absolute_device_gone(&device.id());
                 self.virtual_buttons.remove(device);
                 return;
             }
@@ -588,7 +602,7 @@ impl VirtualPointerHandler for State {
             event.position_transformed(area.size) + area.loc.to_f64(),
         );
         if let Some(location) = confine(&outputs, pointer.current_location(), to) {
-            self.pointer_to(location, event.time());
+            self.pointer_moved_to(event.device().id(), location, event.time());
         }
     }
 }
