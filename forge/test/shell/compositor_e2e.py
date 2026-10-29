@@ -241,11 +241,13 @@ def athanor():
     # with a readable error, never falling back to cosmic-launcher: at once when nothing owns
     # or activates the name (the rig has no activation file for it), and within the call's
     # 5-second bound when the owner never answers, where the bus alone would wait 25 seconds.
+    # "At once" is the bus's own refusal, not the bound's "did not answer": a duration would
+    # also time the unit's start.
     code, lines, took = open_launcher()
     absent = errors_of(lines)
     expect("athanor: without os.athanor.Launcher1 the Launcher opener fails at once, naming it",
-           code == 1 and took < 3 and len(absent) == 1 and "os.athanor.Launcher1" in absent[0],
-           lines + [{"seconds": round(took, 1)}])
+           code == 1 and len(absent) == 1 and "os.athanor.Launcher1" in absent[0]
+           and "did not answer" not in absent[0], lines + [{"seconds": round(took, 1)}])
     for mode in ("answering", "silent"):
         fake = subprocess.Popen(["python3", "-c", FAKE_LAUNCHER, mode], stdout=subprocess.PIPE,
                                 text=True)

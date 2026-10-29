@@ -545,7 +545,9 @@ const APPEAR: Duration = Duration::from_secs(5);
 /// How long athanor-launcher has to answer `Show`, its bus activation included: the same five
 /// seconds a cold component has to appear. Its show time is bounded at 150 ms and measured at
 /// 16 ms through activation (doc_launcher.md, section 5 item 1), so only a launcher that hangs
-/// reaches it, and the press fails then instead of after the bus's default of 25 seconds.
+/// reaches it, and the press fails then instead of after the bus's default of 25 seconds. The
+/// bus still delivers the call: a launcher that answers later shows itself then, and since
+/// `Show` toggles, a press made after the error hides it again.
 const SHOW_BOUND_MS: i32 = 5_000;
 const POLL: Duration = Duration::from_millis(50);
 
