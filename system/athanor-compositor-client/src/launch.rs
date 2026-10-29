@@ -546,7 +546,8 @@ impl Client {
     /// Shows the component, starting it first when it does not run, and leaves it shown
     /// when it already is. A component started cold only takes its name, so it is always
     /// shown through the bus (spike P4). Under the own compositor the Launcher is
-    /// athanor-launcher, which the bus activates, and whose `Show` hides it when shown.
+    /// athanor-launcher instead, which the bus activates; its `Show` (LA8) toggles, so a
+    /// second press hides it.
     pub async fn open(&self, opener: Opener) -> Result<(), LaunchError> {
         self.live()?;
         let bus = gio::bus_get_future(gio::BusType::Session).await?;

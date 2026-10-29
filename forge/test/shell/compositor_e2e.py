@@ -47,11 +47,14 @@ NODE = Gio.DBusNodeInfo.new_for_xml(
 def call(connection, sender, path, interface, method, parameters, invocation):
     print(method, flush=True)
     invocation.return_value(None)
-def acquired(connection, name):
-    connection.register_object("/os/athanor/Launcher1", NODE.interfaces[0], call, None, None)
-    print("ready", flush=True)
-Gio.bus_own_name(Gio.BusType.SESSION, NAME, Gio.BusNameOwnerFlags.NONE, acquired, None,
-                 lambda *_: GLib.MainLoop().quit())
+bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+bus.register_object("/os/athanor/Launcher1", NODE.interfaces[0], call, None, None)
+reply = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                      "RequestName", GLib.Variant("(su)", (NAME, 4)), None,
+                      Gio.DBusCallFlags.NONE, -1, None)
+if reply.unpack()[0] != 1:
+    raise SystemExit(f"{NAME} is owned by another process")
+print("ready", flush=True)
 GLib.MainLoop().run()
 """
 failures = []
