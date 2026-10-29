@@ -805,10 +805,13 @@ impl XdgActivationHandler for State {
             // While the session is locked a token restores nothing (L14).
             if self.lock.is_none() {
                 if let Some(window) = self.window_or_minimised(&surface) {
-                    if let Some(id) = self.workspace_of(&window) {
+                    // `unminimise` activates the workspace of a window it restores; a window on
+                    // an inactive workspace is found there.
+                    if self.is_minimised(&window) {
+                        self.unminimise(&window);
+                    } else if let Some(id) = self.workspace_of(&window) {
                         self.activate_workspace(id);
                     }
-                    self.unminimise(&window);
                 }
             }
             if let Some(window) = self.window_for(&surface) {

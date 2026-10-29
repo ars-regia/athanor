@@ -11,7 +11,8 @@
 
 use crate::identity::Privilege;
 use crate::state::{centred, granted, State};
-use smithay::desktop::Window;
+use smithay::backend::input::InputTime;
+use smithay::desktop::{PopupManager, Window};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1, GroupCapabilities},
@@ -21,7 +22,7 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
 use smithay::reexports::wayland_server::backend::InvalidId;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
-use smithay::utils::{Logical, Point, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::cell::Cell;
 
@@ -442,6 +443,7 @@ impl State {
                 continue;
             };
             self.end_window_grab(window);
+            self.dismiss_popups(window);
             window.set_activated(false);
             if let Some(toplevel) = window.toplevel() {
                 toplevel.send_pending_configure();
@@ -452,6 +454,33 @@ impl State {
         // A button goes to the pointer's focus: a click without a motion must miss the windows.
         self.refresh_pointer();
         self.request_redraw();
+    }
+
+    /// Dismisses the popups of `window` and ends the keyboard and pointer grabs they hold: while
+    /// a popup grab lasts, Smithay keeps the keyboard on the popup whatever focus is set.
+    fn dismiss_popups(&mut self, window: &Window) {
+        let Some(root) = window.toplevel().map(|toplevel| toplevel.wl_surface().clone()) else {
+            return;
+        };
+        for (popup, _) in PopupManager::popups_for_surface(&root) {
+            if let Err(error) = PopupManager::dismiss_popup(&root, &popup) {
+                tracing::warn!(?error, "a popup of a parked window could not be dismissed");
+            }
+        }
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            let rooted = keyboard.with_grab(|_, grab| grab.start_data().focus.as_ref() == Some(&root));
+            if rooted == Some(true) {
+                keyboard.unset_grab(self);
+            }
+        }
+        if let Some(pointer) = self.seat.get_pointer() {
+            let rooted = pointer.with_grab(|_, grab| {
+                grab.start_data().focus.as_ref().map(|(surface, _)| surface) == Some(&root)
+            });
+            if rooted == Some(true) {
+                pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
+            }
+        }
     }
 
     /// Brings back the parked windows `which` takes where they were, in their order, or centred
@@ -563,7 +592,12 @@ impl State {
     /// `window_area` when no output shows that place any more.
     pub fn reachable(&self, window: &Window, at: Point<i32, Logical>) -> Point<i32, Logical> {
         let geometry = window.geometry();
-        let kept = Rectangle::new(at + geometry.loc, geometry.size);
+        // The geometry's offset is the client's: added saturating.
+        let origin = (
+            at.x.saturating_add(geometry.loc.x),
+            at.y.saturating_add(geometry.loc.y),
+        );
+        let kept = Rectangle::new(origin.into(), geometry.size);
         let shown_somewhere = self
             .space
             .outputs()

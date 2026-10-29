@@ -9481,3 +9481,90 @@ fn super_shift_ctrl_carries_the_window() {
     assert_eq!(run.state.workspace_of(&second), Some(list[2]));
     run.stop();
 }
+
+/// Leaving a workspace dismisses the popups of its windows and ends their grab: the keyboard
+/// goes to the workspace shown, not to a menu no one sees.
+#[test]
+fn leaving_a_workspace_ends_its_popup_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(Some(&menu.xdg), &positioner, &qh, ());
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, local.id.clone().expect("an id")));
+    popup.grab(&seat, serial.into());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    local.pump(&mut run, "the popup's grab takes the keyboard", |_, state| {
+        focus(state).is_some_and(|surface| state.popups.find_popup(&surface).is_some())
+    });
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.is_grabbed(), "the popup holds the keyboard");
+
+    assert!(run.state.activate_workspace(list[0]));
+    assert!(!keyboard.is_grabbed(), "the popup's keyboard grab ends");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "the popup's pointer grab ends");
+    let focus = focus(&run.state);
+    assert!(
+        run.state
+            .space
+            .elements()
+            .any(|shown| focus.is_some() && shown.toplevel().map(|t| t.wl_surface()) == focus.as_ref()),
+        "the keyboard is on a window of the workspace shown"
+    );
+    run.stop();
+}
+
+/// A token that names a hidden minimised window on an inactive workspace restores nothing and
+/// switches nothing: the workspace shown stays.
+#[test]
+fn a_token_for_a_hidden_window_keeps_the_workspace() {
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let tray = local.another(&mut run, "tray");
+    let window = local.server_window(&run, &tray.surface);
+    assert!(run.state.minimise(&window));
+    tray.surface.attach(None, 0, 0);
+    tray.surface.commit();
+    local.roundtrip(&mut run);
+    assert!(run.state.activate_workspace(list[0]));
+    let output = output_at(&run, 0);
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut local, serial.into());
+    let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
+    activation.activate(token, &tray.surface);
+    local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window), "still minimised");
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "the workspace shown stays"
+    );
+    run.stop();
+}
