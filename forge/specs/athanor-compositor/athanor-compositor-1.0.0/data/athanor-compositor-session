@@ -251,9 +251,10 @@ fi
 
 # 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
 # Monitor mode puts the background job in a process group of its own, whose id is its pid,
-# so that the exit handler can end it with its jobs in one kill (step 3).
+# so that the exit handler can end it with its jobs in one kill (step 3). Monitor mode no
+# longer closes a background job's input, so it is closed here.
 set -m
-session_components "$$" target &
+session_components "$$" target < /dev/null &
 sup=$!
 set +m
 
