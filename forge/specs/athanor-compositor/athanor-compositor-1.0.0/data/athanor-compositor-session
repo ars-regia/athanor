@@ -114,8 +114,8 @@ fi
 # the condition of an `if`, so that one that fails does not end it before the rest; the
 # next sign-in's step 1 clears what it left.
 sup=
-# Ends the supervisor, the children of its jobs (the systemd-run) and the jobs, in that order,
-# so that no job starts a component again. Run as the condition of an `if`, which keeps
+# Ends the children of the supervisor's jobs (the systemd-run), the jobs and the supervisor,
+# in that order, so that no job starts a component again. Run as the condition of an `if`, which keeps
 # errexit off for the whole of it: a pkill that finds nothing is not a failure.
 kill_supervisor_tree() {
     for job in $(pgrep -P "$sup"); do
@@ -132,7 +132,7 @@ end_session() {
     # supervisor that does not end in 5 s (a job stuck in systemd-run, a trap that never runs)
     # would keep greetd from showing the greeter, so it is killed with its jobs and the scopes
     # are stopped below either way. The bound is polled with kill -0, which fails once bash
-    # has reaped the supervisor; no process of this script outlives it.
+    # has reaped the supervisor.
     if [ -n "$sup" ]; then
         if ! kill "$sup" && kill -0 "$sup"; then
             log err "the supervisor of the locker and the idle daemon did not end"
@@ -148,7 +148,9 @@ end_session() {
                 fi
                 break
             fi
-            sleep 0.1
+            if ! sleep 0.1; then
+                log err "sleep failed while waiting for the supervisor"
+            fi
             waited=$((waited + 1))
         done
         sup_status=0
