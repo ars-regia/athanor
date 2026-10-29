@@ -8290,6 +8290,130 @@ fn super_space_steps_the_layout_group_even_locked() {
     run.stop();
 }
 
+/// A client's surface on the top layer, `anchor`ed along an edge of the first output, 20 high,
+/// with the keyboard interactivity `keyboard`.
+fn top_surface(
+    run: &mut Running,
+    namespace: &str,
+    anchor: zwlr_layer_surface_v1::Anchor,
+    keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+) -> (Local, WlSurface) {
+    let mut local = Local::connect(run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = local.bind(4);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        namespace.into(),
+        &qh,
+        (),
+    );
+    layer.set_anchor(anchor);
+    layer.set_size(0, 20);
+    layer.set_keyboard_interactivity(keyboard);
+    assert!(local.answer(run, &surface), "{namespace} is configured");
+    let (serial, width, _) = local.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let width = i32::try_from(width).expect("a width");
+    let (buffer, _) = local.buffer(&shm, width, 20, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(run);
+    let server = run
+        .state
+        .space
+        .outputs()
+        .find_map(|output| {
+            let map = layer_map_for_output(output);
+            let layer = map.layers().find(|layer| layer.namespace() == namespace)?;
+            Some(layer.wl_surface().clone())
+        })
+        .expect("the layer surface");
+    (local, server)
+}
+
+/// Ctrl+Alt+Tab gives the keyboard to the bar, then the dock, then the window (AX7): the
+/// surfaces that take it on demand, those anchored to the top first; one that takes none is
+/// skipped, an identity Super+Escape took the keyboard from is skipped, and nothing happens
+/// while the session is locked.
+#[test]
+fn ctrl_alt_tab_cycles_the_bar_the_dock_and_the_window() {
+    use crate::bindings::Action;
+    use zwlr_layer_surface_v1::{
+        Anchor,
+        KeyboardInteractivity::{None as NoKeyboard, OnDemand},
+    };
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    // The dock is mapped before the bar, and a surface with no keyboard sits between.
+    let top = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (_dock, dock_surface) = top_surface(
+        &mut run,
+        "dock",
+        Anchor::Bottom | Anchor::Left | Anchor::Right,
+        OnDemand,
+    );
+    let (_ticker, _) = top_surface(&mut run, "ticker", top, NoKeyboard);
+    let (_bar, bar_surface) = top_surface(&mut run, "bar", top, OnDemand);
+    let window_surface = keyboard_focus(&run).expect("the window has the keyboard");
+    let cycle = [KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB];
+
+    // The key moves the keyboard, so the modifiers' releases go to the surface that has it
+    // then; what the chord does is read from `fired` and the focus.
+    let next = |run: &mut Running, expected: &WlSurface, what: &str| {
+        let fired = run.state.fired.len();
+        chord(&mut run.state, &cycle);
+        assert_eq!(run.state.fired[fired..], [Action::FocusCycle], "{what}");
+        assert_eq!(keyboard_focus(run).as_ref(), Some(expected), "{what}");
+    };
+    next(&mut run, &bar_surface, "to the bar");
+    next(&mut run, &dock_surface, "to the dock");
+    next(&mut run, &window_surface, "back to the window");
+    next(&mut run, &bar_surface, "to the bar again");
+    window.roundtrip(&mut run);
+    assert!(
+        !window.client.keys.contains(&KEY_TAB),
+        "no client is sent the Tab"
+    );
+
+    // Super+Escape took the keyboard from this identity, which every client of the fixture
+    // shares: its surfaces are skipped, and the window keeps the keyboard.
+    let identity = bar_surface
+        .client()
+        .and_then(|client| crate::state::identity_of(&client))
+        .expect("the fixture's identity");
+    run.state.escaped.push(identity);
+    next(&mut run, &window_surface, "the escaped are skipped");
+    run.state.escaped.clear();
+
+    // An exclusive surface keeps the keyboard (D10).
+    let (_launcher, exclusive) = top_surface(
+        &mut run,
+        "launcher",
+        top,
+        zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive,
+    );
+    assert_eq!(keyboard_focus(&run).as_ref(), Some(&exclusive));
+    chord(&mut run.state, &cycle);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&exclusive),
+        "an exclusive surface keeps the keyboard"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    let held = keyboard_focus(&run);
+    let fired = run.state.fired.len();
+    reaches(&mut locker, &mut run, &cycle, "Ctrl+Alt+Tab locked");
+    assert_eq!(run.state.fired.len(), fired, "locked, nothing is taken");
+    assert_eq!(keyboard_focus(&run), held, "the lock surface keeps it");
+    run.stop();
+}
+
 /// Super pressed and released alone shows the launcher, after the client was sent both (D4).
 #[test]
 fn super_alone_shows_the_launcher() {

@@ -50,6 +50,9 @@ pub(crate) enum Action {
     Call(&'static Call),
     /// A command, which the user manager runs as a transient unit at the worker's request (D6).
     Run(&'static Command),
+    /// Ctrl+Alt+Tab: the keyboard goes to the next surface of the shell that takes it on demand,
+    /// the bar, then the dock, then back to the window (AX7, gap 8 of SN16).
+    FocusCycle,
     /// The touchpad key: the touchpads stop or start sending events, for the session (D16).
     TouchpadToggle,
 }
@@ -62,7 +65,11 @@ impl Action {
             Self::Vt(_) | Self::Terminate | Self::NextGroup => true,
             Self::Call(call) => call.while_locked,
             Self::Run(command) => command.while_locked,
-            Self::Lock | Self::Reveal | Self::CloseFocused | Self::TouchpadToggle => false,
+            Self::Lock
+            | Self::Reveal
+            | Self::CloseFocused
+            | Self::FocusCycle
+            | Self::TouchpadToggle => false,
         }
     }
 
@@ -94,6 +101,7 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER, Keysym::q), Action::CloseFocused),
     (on(ALT, Keysym::F4), Action::CloseFocused),
     (on(SUPER, Keysym::space), Action::NextGroup),
+    (on(CTRL | ALT, Keysym::Tab), Action::FocusCycle),
     (on(SUPER, Keysym::c), Action::Call(&CONTROL_CENTER)),
     (on(0, Keysym::XF86_AudioMute), Action::Run(&MUTE)),
     (on(0, Keysym::XF86_AudioMicMute), Action::Run(&MIC_MUTE)),
@@ -223,6 +231,7 @@ impl State {
             Action::Reveal => {}
             Action::CloseFocused => self.close_focused(),
             Action::NextGroup => self.next_keyboard_group(),
+            Action::FocusCycle => self.focus_cycle(),
             Action::Call(call) => self.send_job(Job::Call(call)),
             Action::Run(command) => self.send_job(Job::Run(command)),
             Action::TouchpadToggle => self.toggle_touchpads(),
@@ -285,6 +294,7 @@ mod tests {
             Action::Reveal,
             Action::CloseFocused,
             Action::NextGroup,
+            Action::FocusCycle,
             Action::Call(&CONTROL_CENTER),
             Action::Run(&MUTE),
             Action::Run(&LOG_OUT),
