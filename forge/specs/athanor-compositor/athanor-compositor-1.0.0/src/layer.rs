@@ -21,6 +21,7 @@ use smithay::wayland::shell::wlr_layer::{
     WlrLayerShellState,
 };
 use smithay::wayland::shell::xdg::PopupSurface;
+use std::cell::Cell;
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -74,8 +75,8 @@ impl WlrLayerShellHandler for State {
 
 impl State {
     /// A commit of a layer surface: its output's layers are arranged again, a configure goes
-    /// out when its size changed or it has had none, and the keyboard follows its
-    /// interactivity.
+    /// out when its size changed or it has had none, unless the commit unmapped it, and the
+    /// keyboard follows its interactivity.
     pub fn layer_commit(&mut self, surface: &WlSurface) {
         if self.refuse_top_layers(surface) {
             return;
@@ -90,7 +91,16 @@ impl State {
         }) else {
             return;
         };
-        layer.layer_surface().send_pending_configure();
+        // A commit with no buffer, of a surface that showed one, unmaps it: wlr-layer-shell
+        // returns it to its state before its first commit, and the client maps it again with
+        // another commit without a buffer, answered by a configure. One sent now, of the state
+        // it was reset to, would be the first the client reads after that commit, and the
+        // surface would be mapped again at that stale size.
+        let shown = layer.user_data().get_or_insert(Shown::default);
+        let unmapped = shown.0.replace(mapped(surface)) && !mapped(surface);
+        if !unmapped {
+            layer.layer_surface().send_pending_configure();
+        }
         self.fit_maximised();
 
         let Some(keyboard) = self.seat.get_keyboard() else {
@@ -266,6 +276,10 @@ fn holds_exclusively(layer: &LayerSurface) -> bool {
         && matches!(layer.layer(), Layer::Top | Layer::Overlay)
         && mapped(layer.wl_surface())
 }
+
+/// Whether a layer surface showed a buffer at its last commit, kept in its user data.
+#[derive(Default)]
+struct Shown(Cell<bool>);
 
 /// Whether `surface` shows a buffer.
 pub(crate) fn mapped(surface: &WlSurface) -> bool {

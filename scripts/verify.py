@@ -3020,6 +3020,9 @@ COSMIC_ALLOWED = (
     # It reads cosmic-comp's colour filter until cosmic-comp's session leaves the greeter
     # (doc_own_stack.md decision 28).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
+    # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
+    # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 COSMIC_DESKTOP_ID = re.compile(r"com\.system76\.\w+\.desktop\b")
@@ -3781,6 +3784,287 @@ def check_services():
     for ident, why in SERVICE_EXEMPT.items():
         r.note(f"exempt: {ident}: {why}")
     return r
+
+
+# --------------------------------------------------------------------------- #
+# 11b. session-units — the shipped user units follow doc_session.md's rules
+# --------------------------------------------------------------------------- #
+
+# doc_session.md, SN12: every user unit Athanor ships for the session, with its crash class of
+# SN6, whether it connects to the compositor (SN3) and how the session starts it: through a
+# user preset under athanor-session.target, through D-Bus activation, or by name in
+# athanor-session.target itself (the gate through Requires=, the others through Wants=).
+SESSION_UNITS = {
+    "athanor-bar.service": ("surface", True, "preset"),
+    "athanor-dock.service": ("surface", True, "preset"),
+    "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-launcher.service": ("surface", True, "activated"),
+    "athanor-control-center.service": ("surface", True, "activated"),
+    "athanor-update-notify.service": ("surface", False, "preset"),
+    # SN6 names no class for the Super+C oneshot (doc_control_center.md, CC9); it runs once
+    # per login and never restarts, as a session step does.
+    "athanor-control-center-shortcut.service": ("step", False, "preset"),
+    # Its file chooser, dialogs and pickers are windows (doc_portal.md).
+    "xdg-desktop-portal-athanor.service": ("helper", True, "activated"),
+    "athanor-desktop.service": ("step", False, "target"),
+    "athanor-skel-sync.service": ("step", False, "target"),
+    "athanor-appearance-reset.service": ("step", False, "preset"),
+    "cosmic-bg.service": ("cosmic", True, "target"),
+    "cosmic-osd.service": ("cosmic", True, "target"),
+    "cosmic-settings-daemon.service": ("cosmic", True, "target"),
+}
+SESSION_TARGET = "athanor-session.target"
+# Shipped user units that are not session units, and why.
+NOT_SESSION_UNITS = {
+    "athanor-launcher-rates.service": "the launcher's exchange-rate job, started by its timer",
+    "athanor-launcher-rates.timer": "the launcher's exchange-rate timer, under timers.target",
+}
+# SN6's policy per class: each setting's required value, None where the unit must not set it.
+# A time span is compared in seconds. Restart= unset is Restart=no (systemd.service(5)).
+SESSION_CLASSES = {
+    "guard": {
+        "Restart": "always",
+        "RestartSec": 0.1,
+        "RestartSteps": "5",
+        "RestartMaxDelaySec": 30,
+        "StartLimitIntervalSec": 0,
+    },
+    "surface": {
+        "Restart": "on-failure",
+        "RestartSec": 0.1,
+        "RestartSteps": None,
+        "RestartMaxDelaySec": None,
+        "StartLimitBurst": "10",
+        "StartLimitIntervalSec": 600,
+    },
+    "helper": {"Restart": "no"},
+    "step": {"Type": "oneshot", "Restart": "no"},
+    # COSMIC's units keep their own policy until they leave (SN6, exceptions).
+    "cosmic": {"Restart": "on-failure", "RestartSec": 2},
+}
+SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"}
+# Findings the units do not meet yet, each the exact text of the check's finding for that unit,
+# and why. An entry that no longer matches a finding fails the check, so the list cannot
+# outlive its reasons, and it covers that finding only: a new divergence of the same unit fails.
+SN3_CITE = "(doc_session.md, SN3)"
+NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
+ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
+ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
+SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
+SESSION_EXEMPT = {
+    ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
+        "SN13 step 1 does not list it",
+    ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-bg.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("athanor-launcher.service", ACTIVATED_INSTALL):
+        "enabled by hand until the switch (doc_launcher.md, LA12)",
+    ("athanor-control-center.service", ACTIVATED_INSTALL):
+        "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
+    (
+        "athanor-control-center-shortcut.service",
+        f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
+    ): "SN6 names no class for it, and SN3 does not say whether it connects to the compositor",
+    ("athanor-update-notify.service", f"RestartSec=30, {SURFACE_WANTS} 0.1"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitBurst=(unset), {SURFACE_WANTS} 10"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitIntervalSec=(unset), {SURFACE_WANTS} 600"):
+        "SN13 step 1 changes only its [Install]",
+    (
+        "xdg-desktop-portal-athanor.service",
+        f"connects to the compositor, so After= and Requisite=athanor-desktop.service {SN3_CITE}",
+    ): "its dialogs connect to the compositor (doc_portal.md); SN13 step 1 does not list it",
+    ("xdg-desktop-portal-athanor.service", "Restart=on-failure, the helper class of doc_session.md, SN6, wants no"):
+        "until doc_portal.md PT3's next revision (doc_session.md, section 3)",
+}
+
+
+def unit_section(text, section):
+    """(key, value) of every assignment in one section of a unit file."""
+    current, found = None, []
+    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+        elif current == section and "=" in line:
+            key, value = line.split("=", 1)
+            found.append((key.strip(), value.strip()))
+    return found
+
+
+def unit_names(pairs, key):
+    """The unit names every `key=` assignment lists, an empty assignment resetting the list."""
+    names = set()
+    for k, value in pairs:
+        if k == key:
+            names = names | set(value.split()) if value else set()
+    return names
+
+
+def time_span(value):
+    """A systemd time span in seconds (systemd.time(7)); a bare number is seconds."""
+    scale = {"us": 1e-6, "ms": 1e-3, "": 1, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600}
+    parts = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", value)
+    if not parts or "".join(n + u for n, u in parts) != value.replace(" ", ""):
+        return None
+    if any(u not in scale for _, u in parts):
+        return None
+    return sum(float(n) * scale[u] for n, u in parts)
+
+
+def session_unit_problems(units, enabled):
+    """((unit, rule), finding) for every rule of doc_session.md a shipped user unit breaks.
+
+    `units` maps every shipped user unit to its text; `enabled` holds the units a user preset
+    enables. The rules: SN3's binding, `[Install]` and compositor edges, SN4's edges in force
+    and SN6's policy per class."""
+    found = []
+
+    def fail(unit, rule, message):
+        found.append(((unit, rule), message))
+
+    for unit in sorted(units.keys() - SESSION_UNITS.keys() - NOT_SESSION_UNITS.keys() - {SESSION_TARGET}):
+        fail(unit, "class", "a shipped user unit with no entry in SESSION_UNITS (doc_session.md, SN6)")
+    for unit in sorted((SESSION_UNITS.keys() | NOT_SESSION_UNITS.keys() | {SESSION_TARGET}) - units.keys()):
+        fail(unit, "class", "listed in SESSION_UNITS but not shipped; remove the entry")
+
+    target = unit_section(units.get(SESSION_TARGET, ""), "Unit")
+    if "graphical-session.target" not in unit_names(target, "BindsTo"):
+        fail(SESSION_TARGET, "order", "no BindsTo=graphical-session.target (doc_session.md, SN3)")
+    if "xdg-desktop-autostart.target" not in unit_names(target, "Before"):
+        fail(SESSION_TARGET, "order", "not Before=xdg-desktop-autostart.target (doc_session.md, SN4)")
+    pulled = unit_names(target, "Wants") | unit_names(target, "Requires")
+
+    for unit, (cls, graphical, start) in sorted(SESSION_UNITS.items()):
+        if unit not in units:
+            continue
+        head = unit_section(units[unit], "Unit")
+        service = unit_section(units[unit], "Service")
+        install = unit_section(units[unit], "Install")
+        if "graphical-session.target" not in unit_names(head, "PartOf"):
+            fail(unit, "binding", "no PartOf=graphical-session.target (doc_session.md, SN3)")
+
+        wanted_by = unit_names(install, "WantedBy")
+        if wanted_by - {SESSION_TARGET}:
+            fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)")
+        if start == "preset" and (wanted_by != {SESSION_TARGET} or unit not in enabled):
+            fail(unit, "install", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)")
+        if start == "activated" and install:
+            fail(unit, "install", ACTIVATED_INSTALL)
+        if start == "activated" and unit in enabled:
+            fail(unit, "install", ACTIVATED_PRESET)
+        if start == "target" and unit not in pulled:
+            fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
+
+        gate = "athanor-desktop.service"
+        edges = (gate in unit_names(head, "After"), gate in unit_names(head, "Requisite"))
+        if graphical and edges != (True, True):
+            fail(unit, "edge", f"connects to the compositor, so After= and Requisite={gate} (doc_session.md, SN3)")
+        if not graphical and any(edges):
+            fail(unit, "edge", f"headless, so neither After= nor Requisite={gate} (doc_session.md, SN3)")
+
+        # The start limits belong to [Unit], the rest to [Service] (systemd.unit(5), systemd.service(5)).
+        settings = dict(service)
+        settings.update((k, v) for k, v in head if k.startswith("StartLimit"))
+        for key, want in SESSION_CLASSES[cls].items():
+            have = settings.get(key, "no" if key == "Restart" else None)
+            if want is not None and key in SESSION_TIME_KEYS:
+                same = have is not None and time_span(have) == want
+            else:
+                same = have == want
+            if not same:
+                fail(unit, "class", f"{key}={have if have is not None else '(unset)'}, the {cls} class of doc_session.md, SN6, wants {want if want is not None else 'it unset'}")
+
+    bar = unit_section(units.get("athanor-bar.service", ""), "Unit")
+    if not {"athanor-shelld.service"} <= unit_names(bar, "Wants") & unit_names(bar, "After"):
+        fail("athanor-bar.service", "order", "does not want athanor-shelld.service and start after it (doc_session.md, SN4)")
+    return found
+
+
+def session_exempt_problems(found):
+    """The findings SESSION_EXEMPT does not name, and its entries no finding matches."""
+    failing = {(key[0], message) for key, message in found}
+    problems = [f"{unit}: {message}" for unit, message in sorted(failing - SESSION_EXEMPT.keys())]
+    problems += [
+        f"{unit}: exempt in SESSION_EXEMPT from '{finding}' but meets the rule; remove the entry"
+        for unit, finding in sorted(SESSION_EXEMPT.keys() - failing)
+    ]
+    return problems
+
+
+# A line that starts one of these sections ends the %files section; any other %word stays in it.
+FILES_END = re.compile(
+    r"^%(?:prep|build|install|check|clean|conf|changelog|description|package|pre|post|preun|postun"
+    r"|pretrans|posttrans|verifyscript|sepolicy|generate_buildrequires|patchlist|sourcelist"
+    r"|trigger\w*|filetrigger\w*|transfiletrigger\w*)\b"
+)
+# What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
+FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
+USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
+USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))")
+# A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
+USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
+USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
+
+
+def spec_user_units(text):
+    """(names, problems): the user units a spec's %files lists, and each %files line that
+    mentions the user unit directory but that this scan cannot classify (a glob, a macro it
+    does not know), which it would otherwise not see."""
+    names, problems, in_files = [], [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        if not in_files or line.startswith("#") or not USER_UNIT_MENTION.search(line):
+            continue
+        path = FILES_DIRECTIVES.sub("", line)
+        path = re.sub(r"^%dir\s+", "", path)
+        unit = USER_UNIT_PATH.fullmatch(path)
+        if unit:
+            names.append(unit.group(1))
+        elif not USER_DROPIN_PATH.fullmatch(path):
+            problems.append(line)
+    return names, problems
+
+
+def shipped_user_units(root):
+    """({unit: text}, problems) for every unit a spec under forge/specs installs in
+    /usr/lib/systemd/user, read from the one file of that name in the spec's directory."""
+    units, problems = {}, []
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        names, unclassified = spec_user_units(read(spec))
+        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list each unit as a plain path, optionally after %attr(), %config or %verify()" for line in unclassified]
+        for name in names:
+            sources = [p for p in walk(spec.parent, name) if p.name == name and "skel" not in p.parts]
+            if len(sources) != 1:
+                problems.append(f"{rel(spec)}: ships {name}, found {len(sources)} source files of that name")
+                continue
+            units[name] = read(sources[0])
+    return units, problems
+
+
+@check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
+def check_session_units():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    enabled = {unit for verb, unit, _ in preset_lines(ROOT) if verb == "enable"}
+    for problem in session_exempt_problems(session_unit_problems(units, enabled)):
+        r.fail(problem)
+    for (unit, finding), why in SESSION_EXEMPT.items():
+        r.note(f"exempt: {unit}: {finding}: {why}")
+    return r
+
+
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.

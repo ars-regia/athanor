@@ -272,10 +272,38 @@ Started with a monitor plugged in that cannot be set up, and no other, the compo
 an error rather than show nothing; a monitor that cannot be set up later is logged as an error
 and tried again at the next scan of the connectors.
 
-The compositor keeps two kinds of key, which no client sees: Ctrl+Alt+F1 to F12 switch the
-virtual terminal, and **Super+Escape takes the keyboard back and locks the session**
-(`doc_lock_and_prompts.md` LP5), with Super alone: Super+Alt+Escape and Super+Shift+Escape are
-the client's. At the press, whatever follows, the keyboard leaves the exclusive top or overlay
+The compositor keeps the keys of its bindings (`src/bindings.rs`, `doc_own_stack.md` OS13),
+which neither the focused client nor the input method's grab sees, press or release:
+Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compositor, and the
+session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
+with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
+keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
+layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
+the session** (LP5), with Super alone. While the session is locked only the terminal switches,
+Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
+nothing, and every other key goes to the lock surface. Decision 28's six
+keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
+
+Super pressed and released alone shows the launcher (`os.athanor.Launcher1.Show`), and Super+C
+toggles the control center (`os.athanor.ControlCenter1.Toggle`); a key, a button, an axis or a
+gesture while Super is held, or a lock, cancels the launcher. Both press and release of Super
+reach the client. The calls go to the session bus from one thread, `session-calls`
+(`src/session_calls.rs`), through a queue of eight: a full queue drops the call with a warning,
+the loop never waits on the bus, and the bus starts either program at its first call. A call
+asked before the session locked is dropped, and a press of Super or Super+C repeated while its
+first call waits is sent once.
+
+The mute, microphone-mute and media keys run `wpctl` and `playerctl` as cosmic-comp's session
+does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. A key
+forks nothing: the same thread asks the user manager to run each fixed argument
+vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
+`app.slice` with `NoNewPrivileges` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
+the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
+call cosmic-settings-daemon's `VolumeUp`, `VolumeDown`, `IncreaseDisplayBrightness`,
+`DecreaseDisplayBrightness` and `ScreenReader`, as cosmic-comp's session does, from one file,
+`src/bindings/cosmic.rs` (`doc_own_stack.md` decision 29), until athanor-osd and athanor-a11y
+take those keys; a volume or brightness step is never coalesced.
+At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
 its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what `loginctl
