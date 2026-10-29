@@ -2850,6 +2850,21 @@ fn dragging_a_window_reaches_the_second_output() {
         before + (target - at).to_i32_round(),
         "the window follows the pointer onto the second output"
     );
+    // Below the second output, which is shorter than the first, the pointer is on no output:
+    // the second, nearer than the first, still keeps the window.
+    let gap = Point::from((target.x, f64::from(shown.loc.y + shown.size.h) + 100.0));
+    run.state.pointer_to(gap, InputTime::now());
+    let kept = location_of(&run, &id);
+    assert_eq!(
+        kept.x,
+        (before + (gap - at).to_i32_round()).x,
+        "in the gap, the second output keeps the window"
+    );
+    assert!(
+        kept.y < shown.loc.y + shown.size.h,
+        "its top edge stays on the second output"
+    );
+    run.state.pointer_to(target, InputTime::now());
     release(&mut run);
     assert_eq!(
         run.state.workspace_of(&window_of(&run, &id)),
