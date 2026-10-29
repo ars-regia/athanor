@@ -2028,6 +2028,15 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     steps
         .send(Step::UnmapExclusive)
         .expect("the shell's client");
+    // The unmap handled before the client maps the surface again: a configure the compositor
+    // answered the unmap with would be the first the client reads after its new initial commit.
+    run.until("the unmap is handled", |state| {
+        state.space.outputs().any(|output| {
+            layer_map_for_output(output).layers().any(|layer| {
+                layer.namespace() == "exclusive" && !crate::layer::mapped(layer.wl_surface())
+            })
+        })
+    });
     let (done, done_rx) = mpsc::channel();
     steps
         .send(Step::RemapExclusive(done))
