@@ -216,12 +216,12 @@ impl State {
         self.focus_top();
     }
 
-    // ponytail: the first output when a window has the keyboard, and a popup of a layer surface
-    // restarts the cycle; per output and through `find_popup_root_surface` with several.
     /// Ctrl+Alt+Tab: the keyboard goes to the next of the mapped on-demand surfaces of the top
-    /// layer of the output that has it (the first, when a window has it): those anchored to the
-    /// top first, then the others, each group in the order its surfaces were created; after
-    /// the last it goes back to the window
+    /// layer of the output that has it: the layer surface's output, or the focused window's,
+    /// else the output under the pointer, else the first. A popup counts as its root surface,
+    /// so the cycle continues after a layer surface's popup, which closes. Those anchored to
+    /// the top come first, then the others, each group in the order its surfaces were created;
+    /// after the last it goes back to the window
     /// (`focus_top`). The keyboard is not taken from an exclusive surface (D10), and the
     /// surfaces of an identity Super+Escape took the keyboard from are skipped. Not while
     /// locked: `fire` refuses it.
@@ -232,7 +232,12 @@ impl State {
         if self.exclusive_layer().is_some() {
             return;
         }
-        let focus = keyboard.current_focus();
+        let held = keyboard.current_focus();
+        let popup_root = held
+            .as_ref()
+            .and_then(|focus| self.popups.find_popup(focus))
+            .and_then(|popup| find_popup_root_surface(&popup).ok());
+        let focus = popup_root.clone().or(held);
         let on_layer = focus.as_ref().and_then(|focus| {
             self.space.outputs().find(|output| {
                 layer_map_for_output(output)
@@ -240,7 +245,23 @@ impl State {
                     .is_some()
             })
         });
-        let output = on_layer.or_else(|| self.space.outputs().next()).cloned();
+        let pointer_output = || {
+            let at = self.seat.get_pointer()?.current_location();
+            self.space.output_under(at).next().cloned()
+        };
+        // A window across two outputs: the one under the pointer, if the window is on it.
+        let window_output = || {
+            let window = self.window_for(focus.as_ref()?)?;
+            let outputs = self.space.outputs_for_element(&window);
+            pointer_output()
+                .filter(|output| outputs.contains(output))
+                .or_else(|| outputs.into_iter().next())
+        };
+        let output = on_layer
+            .cloned()
+            .or_else(window_output)
+            .or_else(pointer_output)
+            .or_else(|| self.space.outputs().next().cloned());
         let Some(output) = output else {
             return;
         };
@@ -269,6 +290,10 @@ impl State {
         // Nothing to cycle to from a window: leave its input method's grab alone.
         if next.is_none() && on_layer.is_none() {
             return;
+        }
+        // The popup the keyboard leaves closes, with its grabs.
+        if let Some(root) = &popup_root {
+            self.dismiss_popups_of(root);
         }
         if keyboard.is_grabbed() {
             keyboard.unset_grab(self);

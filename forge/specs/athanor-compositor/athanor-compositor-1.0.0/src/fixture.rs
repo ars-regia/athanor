@@ -8759,15 +8759,40 @@ fn top_surface(
     anchor: zwlr_layer_surface_v1::Anchor,
     keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
 ) -> (Local, WlSurface) {
+    let (local, server, _) = top_surface_on(run, namespace, anchor, keyboard, None);
+    (local, server)
+}
+
+/// `top_surface` on the client's `wl_output` number `output` when given, with the client's
+/// layer surface.
+fn top_surface_on(
+    run: &mut Running,
+    namespace: &str,
+    anchor: zwlr_layer_surface_v1::Anchor,
+    keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    output: Option<usize>,
+) -> (Local, WlSurface, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
     let mut local = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
     let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = local.bind(4);
     let qh = local.queue.handle();
+    let output = output.map(|index| {
+        let (name, _, version) = local
+            .client
+            .globals
+            .iter()
+            .filter(|(_, interface, _)| interface == "wl_output")
+            .nth(index)
+            .cloned()
+            .expect("the output");
+        let bound: wl_output::WlOutput = local.registry.bind(name, version.min(4), &qh, ());
+        bound
+    });
     let surface = compositor.create_surface(&qh, ());
     let layer = shell.get_layer_surface(
         &surface,
-        None,
+        output.as_ref(),
         zwlr_layer_shell_v1::Layer::Top,
         namespace.into(),
         &qh,
@@ -8794,7 +8819,7 @@ fn top_surface(
             Some(layer.wl_surface().clone())
         })
         .expect("the layer surface");
-    (local, server)
+    (local, server, layer)
 }
 
 /// Ctrl+Alt+Tab gives the keyboard to the bar, then the dock, then the window (AX7): the
@@ -8872,6 +8897,107 @@ fn ctrl_alt_tab_cycles_the_bar_the_dock_and_the_window() {
     reaches(&mut locker, &mut run, &cycle, "Ctrl+Alt+Tab locked");
     assert_eq!(run.state.fired.len(), fired, "locked, nothing is taken");
     assert_eq!(keyboard_focus(&run), held, "the lock surface keeps it");
+    run.stop();
+}
+
+/// With the window on the second output, Ctrl+Alt+Tab gives the keyboard to that output's
+/// bar, not the first output's (#829).
+#[test]
+fn ctrl_alt_tab_cycles_the_focused_windows_output() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
+    let mut run = Running::start(None);
+    let (_window, window) = focused_window(&mut run);
+    let top = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (_first_bar, _, _) = top_surface_on(&mut run, "bar-1", top, OnDemand, Some(0));
+    let (_second_bar, second_bar, _) = top_surface_on(&mut run, "bar-2", top, OnDemand, Some(1));
+    let second = output_at(&run, 1);
+    assert!(
+        layer_map_for_output(&second)
+            .layer_for_surface(&second_bar, smithay::desktop::WindowSurfaceType::TOPLEVEL)
+            .is_some(),
+        "bar-2 is on the second output"
+    );
+    let at = run.state.space.output_geometry(&second).expect("placed").loc;
+    run.state.space.relocate_element(&window, at);
+    run.state.space.refresh();
+    assert!(keyboard_focus(&run).is_some(), "the window has the keyboard");
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&second_bar),
+        "the bar of the window's output"
+    );
+    run.stop();
+}
+
+/// From a popup of the bar, Ctrl+Alt+Tab continues after the bar, to the dock, instead of
+/// starting again at the bar (#829).
+#[test]
+fn ctrl_alt_tab_from_a_popup_continues_after_its_parent() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let (_dock, dock_surface) = top_surface(
+        &mut run,
+        "dock",
+        Anchor::Bottom | Anchor::Left | Anchor::Right,
+        OnDemand,
+    );
+    let top = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (mut bar, bar_surface, bar_layer) = top_surface_on(&mut run, "bar", top, OnDemand, None);
+    let cycle = [KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB];
+    chord(&mut run.state, &cycle);
+    assert_eq!(keyboard_focus(&run).as_ref(), Some(&bar_surface), "to the bar");
+
+    // A key typed to the bar lets it open a popup that takes the keyboard.
+    let serial = SERIAL_COUNTER.next_serial();
+    let bar_client = bar_surface.client().expect("the bar's client").id();
+    run.state.grab_serials.key_press = Some((serial, bar_client));
+    let compositor: wl_compositor::WlCompositor = bar.bind(4);
+    let shm: wl_shm::WlShm = bar.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = bar.bind(1);
+    let seat: wl_seat::WlSeat = bar.bind(1);
+    let qh = bar.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(None, &positioner, &qh, ());
+    bar_layer.get_popup(&popup);
+    popup.grab(&seat, serial.into());
+    bar.client.configure = None;
+    surface.commit();
+    bar.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(bar.client.configure.expect("a configure"));
+    let (buffer, _) = bar.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    bar.roundtrip(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&bar_surface),
+        "the popup has the keyboard"
+    );
+
+    chord(&mut run.state, &cycle);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "after the bar, the dock"
+    );
+    assert!(
+        smithay::desktop::PopupManager::popups_for_surface(&bar_surface)
+            .next()
+            .is_none(),
+        "the popup is closed"
+    );
+    assert!(
+        !run.state.seat.get_pointer().expect("a pointer").is_grabbed(),
+        "its grab ends with it"
+    );
     run.stop();
 }
 
