@@ -3963,9 +3963,12 @@ def session_exempt_problems(found):
     return problems
 
 
-# A line "%word" ends the %files section unless the word is one that belongs in it.
-FILES_WORDS = {"attr", "config", "verify", "defattr", "dir", "ghost", "exclude", "doc", "license", "lang", "artifact", "caps", "if", "ifarch", "ifnarch", "else", "elif", "endif"}
-FILES_END = re.compile(r"^%(\w+)")
+# A line that starts one of these sections ends the %files section; any other %word stays in it.
+FILES_END = re.compile(
+    r"^%(?:prep|build|install|check|clean|conf|changelog|description|package|pre|post|preun|postun"
+    r"|pretrans|posttrans|verifyscript|sepolicy|generate_buildrequires|patchlist|sourcelist"
+    r"|trigger\w*|filetrigger\w*|transfiletrigger\w*)\b"
+)
 # What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
 FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
 USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
@@ -3985,8 +3988,7 @@ def spec_user_units(text):
         if line.startswith("%files"):
             in_files = True
             continue
-        header = FILES_END.match(line)
-        if header and header.group(1) not in FILES_WORDS:
+        if FILES_END.match(line):
             in_files = False
         if not in_files or line.startswith("#") or not USER_UNIT_MENTION.search(line):
             continue

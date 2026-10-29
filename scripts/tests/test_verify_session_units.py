@@ -267,6 +267,12 @@ class SpecFilesTest(unittest.TestCase):
                 text = f"%files\n/usr/lib/systemd/user/a.service\n{section}\n/usr/lib/systemd/user/c.service\n"
                 self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
 
+    def test_an_unbraced_macro_line_does_not_end_the_files_list(self):
+        for first in ("%_bindir/x", "%docdir /x", "%ifos linux"):
+            with self.subTest(first=first):
+                text = f"%files\n{first}\n/usr/lib/systemd/user/a.service\n"
+                self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
     def test_conditionals_stay_in_the_files_list(self):
         text = "%files\n%if 1\n/usr/lib/systemd/user/a.service\n%endif\n"
         self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
