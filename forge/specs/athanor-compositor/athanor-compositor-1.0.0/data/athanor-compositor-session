@@ -145,7 +145,7 @@ end_session() {
             137) log err "the supervisor of the locker and the idle daemon did not end within 5 s and was killed with its jobs" ;;
             *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
         esac
-        if [ "$sup_status" -ne 137 ] && ! kill -KILL "$dog"; then
+        if ! kill -KILL "$dog"; then
             log err "the watchdog of the supervisor's wait could not be cancelled"
         fi
     fi
