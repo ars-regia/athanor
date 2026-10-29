@@ -1,8 +1,9 @@
 """athanor-desktop publishes the session class and the import list to the user manager
 (python3 -B -m unittest discover -s forge/specs/athanor-system-config/tests -v).
 
-The script runs up to its first import-environment; systemctl and loginctl are stand-ins
-that record their arguments and the environment they were given.
+The script runs up to its first import-environment, with the reader of the import list it
+sources; systemctl and loginctl are stand-ins that record their arguments and the environment
+they were given.
 """
 
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 SOURCES = Path(__file__).resolve().parents[1] / "SOURCES"
 SCRIPT = SOURCES / "usr/bin/athanor-desktop"
 IMPORT_LIST = "/usr/share/athanor-system-config/session-import"
+READER = "/usr/libexec/athanor/session-import-names"
 
 
 class DesktopSession(unittest.TestCase):
@@ -23,6 +25,8 @@ class DesktopSession(unittest.TestCase):
         script = work / "athanor-desktop"
         prologue = "\n".join(lines[: end + 1]) + "\n"
         self.assertIn(IMPORT_LIST, prologue)
+        self.assertIn(f". {READER}\n", prologue)
+        prologue = prologue.replace(READER, str(SOURCES / READER.lstrip("/")))
         names = SOURCES / IMPORT_LIST.lstrip("/")
         if listing is not None:
             names = work / "session-import"

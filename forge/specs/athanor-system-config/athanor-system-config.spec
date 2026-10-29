@@ -62,6 +62,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %attr(0755,root,root) /usr/libexec/athanor-usbguard-internal
 %dir /usr/libexec/athanor
 /usr/libexec/athanor/session-components
+/usr/libexec/athanor/session-import-names
 /usr/lib/systemd/system/athanor-usbguard-internal.service
 %dir /usr/share/athanor-system-config/flatpak-no-triggers
 /usr/lib/systemd/system/athanor-flatpak-triggers.service
@@ -96,6 +97,9 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 - athanor-session stops athanor-compositor.service, where its package is installed, and
   both scopes, and removes ATHANOR_OWN_COMPOSITOR and XKB_DEFAULT_* from the user manager:
   what a session on the own compositor killed before its exit handler leaves (SN15).
+- athanor-desktop reads the import list through the function of
+  /usr/libexec/athanor/session-import-names, which the own compositor's session sources too,
+  so that both sessions parse and refuse the list the same way (doc_session.md, SN2 and SN15).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-73
 - athanor-session exports LANG and LANGUAGE from the user's AccountsService languages,

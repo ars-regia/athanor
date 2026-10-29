@@ -1,0 +1,49 @@
+# shellcheck shell=sh
+# session-import-names - the reader of the session's import list (doc_session.md, SN2),
+# sourced by athanor-desktop (cosmic-comp's session) and by athanor-compositor-session (the own
+# compositor's), so that both read the list the same way. It defines a function and runs
+# nothing.
+
+# session_import_names <list>: prints the names of the import list <list> on one line,
+# separated by spaces, or writes why it cannot to stderr and returns 1.
+#
+# Given no name, systemctl would import the caller's whole environment, so the list is parsed
+# here and not handed to systemctl as it stands: a blank, whitespace-only or comment line (a
+# comment may be indented) is skipped, a CRLF line ending is dropped, each name must be a valid
+# variable name, and a list with no name is refused. Globbing is off, so a `*` stays a
+# character and is refused as an invalid name. The body is a subshell, so neither `set -f` nor
+# its variables reach the caller.
+session_import_names() (
+    list=$1
+    name=${0##*/}
+    if [ ! -r "$list" ]; then
+        echo "$name: cannot read the import list $list" >&2
+        return 1
+    fi
+    cr=$(printf '\r')
+    names=
+    set -f
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%"$cr"}
+        # shellcheck disable=SC2086 # split on blanks, with globbing off
+        set -- $line
+        [ "$#" -gt 0 ] || continue
+        case $1 in '#'*) continue ;; esac
+        if [ "$#" -ne 1 ]; then
+            echo "$name: $list: more than one word on a line: $line" >&2
+            return 1
+        fi
+        case $1 in
+            [!A-Za-z_]* | *[!A-Za-z0-9_]*)
+                echo "$name: $list: not a variable name: $1" >&2
+                return 1
+                ;;
+        esac
+        names="$names $1"
+    done < "$list"
+    if [ -z "$names" ]; then
+        echo "$name: the import list names no variable" >&2
+        return 1
+    fi
+    printf '%s\n' "${names# }"
+)

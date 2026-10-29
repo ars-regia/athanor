@@ -5,7 +5,8 @@ sign-in to cosmic-comp's session (doc_session.md revision 4, SN14 and SN15)
 systemctl, systemd-cat, loginctl, busctl, gsettings, the compositor, the USBGuard hook and
 athanor-session are stand-ins that record their arguments; the script's absolute paths are
 rewritten to them. The supervisor of the locker and the idle daemon is the real one, and
-finds athanor-session.target never active, so it starts nothing.
+finds athanor-session.target never active, so it starts nothing; the reader of the import
+list and the list are the real ones, from athanor-system-config.
 """
 
 import shutil
@@ -24,6 +25,22 @@ SCRIPT = (
 COMPONENTS = (
     SPECS / "athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
 )
+READER = "/usr/libexec/athanor/session-import-names"
+IMPORT_LIST = "/usr/share/athanor-system-config/session-import"
+CONFIG_SOURCES = SPECS / "athanor-system-config/SOURCES"
+# SN2's list, read as the reader reads it, for the shipped file has neither blanks nor CRLF.
+NAMES = [
+    line
+    for line in (CONFIG_SOURCES / IMPORT_LIST.lstrip("/")).read_text().splitlines()
+    if line and not line.startswith("#")
+]
+# What this session alone sets in the user manager (SN15, step 5).
+OWN = [
+    "ATHANOR_OWN_COMPOSITOR",
+    "XKB_DEFAULT_LAYOUT",
+    "XKB_DEFAULT_VARIANT",
+    "XKB_DEFAULT_OPTIONS",
+]
 
 # systemctl: `start --wait` creates the marker as the unit's ExecStartPost= does when $START
 # is "ok", fails at once when it is "fail", and when it is "hold" returns only once the
@@ -77,8 +94,12 @@ class CompositorSession(unittest.TestCase):
         text = SCRIPT.read_text().replace(
             "/usr/libexec/athanor/session-components", str(COMPONENTS)
         )
+        for path in (READER, IMPORT_LIST):
+            self.assertIn(path, text)
+            text = text.replace(path, str(CONFIG_SOURCES / path.lstrip("/")))
         for name in ("athanor-session", "athanor-compositor", "athanor-usbguard-hook"):
             text = text.replace(f"/usr/bin/{name}", str(self.bin / name))
+        self.text = text
         self.script = self.work / "athanor-compositor-session"
         self.script.write_text(text)
         self.script.chmod(0o755)
@@ -132,12 +153,12 @@ class CompositorSession(unittest.TestCase):
         self.assertFalse(any("start --wait" in c for c in self.calls()))
 
     def assert_cleaned_up(self):
-        calls = self.calls()
+        # SN15 step 3 (d): the import list less XDG_CURRENT_DESKTOP, then this session's own.
+        removed = [n for n in NAMES if n != "XDG_CURRENT_DESKTOP"]
+        self.assertIn("WAYLAND_DISPLAY", removed)
         self.assertIn(
-            "systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE"
-            " XDG_SESSION_CLASS ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT"
-            " XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS",
-            calls,
+            " ".join(["systemctl --user unset-environment", *removed, *OWN]),
+            self.calls(),
         )
 
     def test_a_session_that_started_ends_with_the_compositor_and_cleans_up(self):
@@ -149,9 +170,12 @@ class CompositorSession(unittest.TestCase):
             "systemctl --user set-environment ATHANOR_OWN_COMPOSITOR=1",
             "systemctl --user set-environment XKB_DEFAULT_LAYOUT=it",
             "systemctl --user unset-environment XKB_DEFAULT_VARIANT",
-            (
-                "systemctl --user import-environment XDG_CURRENT_DESKTOP XDG_SESSION_TYPE"
-                " XDG_SESSION_CLASS"
+            # SN15 step 5: the import list less the displays the compositor sets.
+            " ".join(
+                [
+                    "systemctl --user import-environment",
+                    *(n for n in NAMES if n not in ("WAYLAND_DISPLAY", "DISPLAY")),
+                ]
             ),
             "athanor-usbguard-hook unlock",
         ):
@@ -167,6 +191,69 @@ class CompositorSession(unittest.TestCase):
         self.assertLess(stops[0], start)
         self.assertGreater(stops[1], start)
         self.assert_cleaned_up()
+
+    def test_the_session_follows_the_import_list(self):
+        listing = self.work / "session-import"
+        listing.write_bytes(
+            b"# c\r\n  # x y\r\n\tWAYLAND_DISPLAY\r\nLANG\r\n\nXDG_CURRENT_DESKTOP\n"
+        )
+        self.script.write_text(
+            self.text.replace(
+                str(CONFIG_SOURCES / IMPORT_LIST.lstrip("/")), str(listing)
+            )
+        )
+        status, stderr = self.run_session()
+        self.assertEqual(status, 0, stderr)
+        calls = self.calls()
+        self.assertIn(
+            "systemctl --user import-environment LANG XDG_CURRENT_DESKTOP", calls
+        )
+        self.assertIn(
+            " ".join(["systemctl --user unset-environment WAYLAND_DISPLAY LANG", *OWN]),
+            calls,
+        )
+
+    def test_a_list_of_the_displays_alone_imports_nothing(self):
+        listing = self.work / "session-import"
+        listing.write_bytes(b"WAYLAND_DISPLAY\nDISPLAY\n")
+        self.script.write_text(
+            self.text.replace(
+                str(CONFIG_SOURCES / IMPORT_LIST.lstrip("/")), str(listing)
+            )
+        )
+        status, stderr = self.run_session()
+        self.assertEqual(status, 0, stderr)
+        self.assertFalse(any("import-environment" in c for c in self.calls()))
+        self.assertTrue(any("start --wait" in c for c in self.calls()))
+
+    def test_a_refused_import_list_starts_nothing_and_hands_nothing_off(self):
+        for listing, reason in (
+            (b"# only a comment\n", "names no variable"),
+            (b"WAYLAND_DISPLAY\n*\n", "not a variable name"),
+            (b"A B\n", "more than one word"),
+            (None, "cannot read the import list"),
+        ):
+            with self.subTest(listing=listing):
+                path = self.work / "session-import"
+                path.unlink(missing_ok=True)
+                (self.work / "calls").unlink(missing_ok=True)
+                (self.work / "journal").unlink(missing_ok=True)
+                if listing is not None:
+                    path.write_bytes(listing)
+                self.script.write_text(
+                    self.text.replace(
+                        str(CONFIG_SOURCES / IMPORT_LIST.lstrip("/")), str(path)
+                    )
+                )
+                status, stderr = self.run_session()
+                self.assertEqual(status, 1, stderr)
+                self.assertIn(reason, stderr + self.journal())
+                self.assertIn("the import list cannot be used", self.journal())
+                self.assertFalse(self.handed_off())
+                self.assertFalse(
+                    (self.work / "calls").exists()
+                    and any(c.startswith("systemctl") for c in self.calls())
+                )
 
     def test_the_magnifier_from_the_greeter_hands_off(self):
         status, stderr = self.run_session(ATHANOR_A11Y="screen-reader,magnifier")

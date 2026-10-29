@@ -23,11 +23,10 @@ unset ATHANOR_COMPOSITOR_SESSION_JOURNAL
 # shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-components
 . /usr/libexec/athanor/session-components
 
-# SN2's import list, today's form (athanor-desktop); it moves to the file of SN13 step 1.
-# The compositor sets WAYLAND_DISPLAY and DISPLAY, so the script imports the rest, and its
-# end removes all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too.
-IMPORTED="XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_CLASS"
-REMOVED="WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS"
+# The reader of SN2's import list, which athanor-desktop sources too.
+# shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-import-names
+. /usr/libexec/athanor/session-import-names
+
 # What this session alone sets in the user manager (step 5).
 OWN="ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS"
 # Created by the compositor's unit once athanor-session.target has started (step 7).
@@ -46,6 +45,28 @@ hand_off_now() {
     log warning "$1; starting cosmic-comp's session"
     exec /usr/bin/athanor-session
 }
+
+# SN2's import list, the one file athanor-desktop and the readiness gate read. The compositor
+# sets WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end
+# removes all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too (step 3). A
+# list the reader refuses ends the script before anything is started, and greetd returns to
+# the greeter: athanor-desktop refuses the same list, so a hand-off could not start either.
+if ! names=$(session_import_names /usr/share/athanor-system-config/session-import); then
+    log err "the import list cannot be used; no session starts"
+    exit 1
+fi
+IMPORTED=
+REMOVED=
+for name in $names; do
+    case $name in
+        WAYLAND_DISPLAY | DISPLAY) ;;
+        *) IMPORTED="$IMPORTED $name" ;;
+    esac
+    case $name in
+        XDG_CURRENT_DESKTOP) ;;
+        *) REMOVED="$REMOVED $name" ;;
+    esac
+done
 
 # 1. What a previous session left: units still active, the component scopes, units failed,
 # and the marker. A failure here ends the script with nothing started, and greetd returns
@@ -186,9 +207,11 @@ keyboard() {
 keyboard X11Layout XKB_DEFAULT_LAYOUT
 keyboard X11Variant XKB_DEFAULT_VARIANT
 keyboard X11Options XKB_DEFAULT_OPTIONS
+# A list of the displays alone leaves nothing to import, and systemctl given no name would
+# import the whole environment.
 # shellcheck disable=SC2086 # word splitting of the list is intended
-if ! systemctl --user import-environment $IMPORTED; then
-    hand_off "systemctl --user import-environment $IMPORTED failed"
+if [ -n "$IMPORTED" ] && ! systemctl --user import-environment $IMPORTED; then
+    hand_off "systemctl --user import-environment$IMPORTED failed"
 fi
 
 # 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
