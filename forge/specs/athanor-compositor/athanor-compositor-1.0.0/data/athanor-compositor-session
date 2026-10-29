@@ -114,22 +114,40 @@ fi
 # the condition of an `if`, so that one that fails does not end it before the rest; the
 # next sign-in's step 1 clears what it left.
 sup=
-# Ends the supervisor, its jobs and the jobs' children (the systemd-run). The pids are read
-# first and the jobs and the supervisor are killed before their children, so that no job
-# starts a component again in between. Run as the condition of an `if`, which keeps errexit
-# off for the whole of it: a pgrep that finds nothing is not a failure.
+# children_of <pid>: sets $pids to the children of <pid>. pgrep exits 1 when there are none;
+# any other status is an error, logged, and the list is then unknown.
+children_of() {
+    pids=
+    if pids=$(pgrep -P "$1"); then
+        return 0
+    else
+        pgrep_status=$?
+    fi
+    if [ "$pgrep_status" -gt 1 ]; then
+        log err "pgrep -P $1 failed with status $pgrep_status"
+    fi
+}
+# Ends the supervisor, its jobs and the jobs' children (the systemd-run): all are stopped and
+# read first, then the jobs and the supervisor are killed before their children, so that no
+# job starts a component again in between. Run as the condition of an `if`, which keeps
+# errexit off for the whole of it.
 kill_supervisor_tree() {
-    jobs_of_sup=$(pgrep -P "$sup")
-    # Stopped first, so that a job cannot fork a new systemd-run between the read of the
-    # children and the kill; a pid that is gone is noted below with the kill.
-    for pid in $jobs_of_sup "$sup"; do
+    # The supervisor is stopped first, then its jobs, so that none starts a new job or a new
+    # systemd-run between the reads of the pids and the kills; a pid that is gone is noted.
+    if ! kill -STOP "$sup"; then
+        printf 'athanor-compositor-session: pid %s had already ended\n' "$sup" >&2
+    fi
+    children_of "$sup"
+    jobs_of_sup=$pids
+    for pid in $jobs_of_sup; do
         if ! kill -STOP "$pid"; then
             printf 'athanor-compositor-session: pid %s had already ended\n' "$pid" >&2
         fi
     done
     children=
     for job in $jobs_of_sup; do
-        children="$children $(pgrep -P "$job")"
+        children_of "$job"
+        children="$children $pids"
     done
     # A job or a child that ended on its own meanwhile (the supervisor's own sleep, for one)
     # is gone, which is what is wanted; only the supervisor's kill decides the status.
