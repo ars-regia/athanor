@@ -468,8 +468,8 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and the windows no output left shows
-    /// are centred on the first one, where the user can reach them.
+    /// An output that goes: its layer surfaces are closed, and its windows join the first
+    /// output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
         self.close_layers(output);

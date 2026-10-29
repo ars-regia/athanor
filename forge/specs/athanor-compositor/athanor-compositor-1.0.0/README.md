@@ -272,8 +272,8 @@ refresh, paced by its vblank, with presentation feedback from the hardware clock
 not draw at all, and a surface no output shows still gets its frame callback once a second. The
 lock is confirmed only once every output has presented a frame drawn locked: a frame that could
 not be drawn, queued or presented is drawn whole again, and a draw with nothing new does not
-count. The frame-time report of task 2 runs here too. A monitor that goes moves the windows only it showed
-onto the first output, centred; the pointer moves across every output and stays on them.
+count. The frame-time report of task 2 runs here too. A monitor that goes moves its windows to the first
+output's active workspace, centred on the first output when it does not show them; the pointer moves across every output and stays on them.
 Started with a monitor plugged in that cannot be set up, and no other, the compositor ends with
 an error rather than show nothing; a monitor that cannot be set up later is logged as an error
 and tried again at the next scan of the connectors.

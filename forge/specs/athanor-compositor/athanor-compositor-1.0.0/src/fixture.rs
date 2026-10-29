@@ -9754,3 +9754,39 @@ fn a_window_fitted_after_a_mode_change_stays_on_its_output() {
     assert_eq!(run.state.workspace_of(&parked), Some(list[1]));
     run.stop();
 }
+
+/// A window of an unplugged output that a third output still shows a strip of joins the first
+/// output's active workspace and comes back on the first output, where that workspace is shown.
+#[test]
+fn a_window_of_an_unplugged_output_comes_back_on_the_first() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let third = crate::state::build_output(
+        "HEADLESS-3",
+        "fixture",
+        (800, 600).into(),
+        60_000,
+        smithay::utils::Transform::Normal,
+        1.0,
+    );
+    run.state.map_output(&third);
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    run.state.space.relocate_element(&window, area.loc);
+    run.state.settle(&window);
+    let straddling = area.loc + Point::from((area.size.w - WIDTH + 10, 0));
+    run.state.space.relocate_element(&window, straddling);
+
+    run.state.remove_output(&second);
+    assert_eq!(
+        run.state.workspace_of(&window),
+        run.state.active_workspace(&first)
+    );
+    let within = run.state.space.output_geometry(&first).expect("placed");
+    let geometry = run.state.space.element_geometry(&window).expect("shown");
+    assert!(within.overlaps(geometry), "on the first output");
+    run.stop();
+}

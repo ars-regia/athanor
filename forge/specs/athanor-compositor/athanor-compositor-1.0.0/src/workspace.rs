@@ -271,36 +271,27 @@ impl State {
         })
     }
 
-    /// The output of `window`'s workspace, while that output is in the space.
+    /// The output of `window`'s workspace while that output is in the space, else the first
+    /// output, whose active workspace `workspaces_changed` gives the window.
     fn home_output(&self, window: &Window) -> Option<Output> {
         self.workspace_of(window)
             .and_then(|id| self.output_of_workspace(id))
             .filter(|output| self.space.output_geometry(output).is_some())
+            .or_else(|| self.space.outputs().next().cloned())
     }
 
-    /// Whether `area` of `window` is shown on its workspace's output, or on any output when that
-    /// output went.
+    /// Whether `area` of `window` is shown on its home output (`home_output`).
     pub fn shown_at_home(&self, window: &Window, area: Rectangle<i32, Logical>) -> bool {
-        match self.home_output(window) {
-            Some(output) => self
-                .space
-                .output_geometry(&output)
-                .is_some_and(|shown| shown.overlaps(area)),
-            None => self
-                .space
-                .outputs()
-                .filter_map(|output| self.space.output_geometry(output))
-                .any(|shown| shown.overlaps(area)),
-        }
+        self.home_output(window)
+            .and_then(|output| self.space.output_geometry(&output))
+            .is_some_and(|shown| shown.overlaps(area))
     }
 
-    /// Where `window` is centred when its place is not shown: what the layer surfaces leave of its
-    /// workspace's output, or of the first output when that output went.
+    /// What the layer surfaces leave of `window`'s home output (`home_output`): where it is
+    /// maximised, and centred when its place is not shown.
     pub fn home_area(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
-        match self.home_output(window) {
-            Some(output) => self.window_area_on(&output),
-            None => self.window_area(),
-        }
+        self.home_output(window)
+            .and_then(|output| self.window_area_on(&output))
     }
 
     /// Whether `window` is on an inactive workspace, out of the space.
