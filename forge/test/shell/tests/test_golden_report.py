@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import time
@@ -10,8 +11,16 @@ import cases
 import golden_report as gr
 
 
-def result(case, differing, allowed=64, closed=False):
-    return gr.Result("bar", case, differing, allowed, closed)
+def result(case, differing, allowed=64, closed=False, surface="launcher"):
+    """A case of the launcher, which draws none of the controls decision 28 hides."""
+    return gr.Result(surface, case, differing, allowed, closed)
+
+
+def hidden_entries(surface, case):
+    return [
+        {"case": case, "cause": cause, "issue": issue}
+        for cause, issue in (gr.HIDDEN[c] for c in gr.hidden(surface, case))
+    ]
 
 
 GOOD = {"case": "a", "cause": "the clear colour", "issue": 591}
@@ -119,6 +128,79 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(problems, [])
         known = {tag for _, tag in gr.expected(gr.surfaces())}
         self.assertLessEqual({e["case"] for e in entries}, known)
+
+
+    def test_the_controls_decision_28_hides_follow_the_presets(self):
+        bar_ws, bar_lib, rows = "bar-workspaces", "bar-library", "bar-a11y-rows"
+        dock = {"dock-workspaces", "dock-library"}
+        self.assertEqual(gr.hidden("bar", "bar-light-1.0-en"), {bar_lib})
+        self.assertEqual(gr.hidden("bar-shield", "bar-shield-dark-1.5-de"), {bar_lib})
+        self.assertEqual(gr.hidden("bar-power", "bar-power-light-1.0-en"), {bar_ws, bar_lib})
+        self.assertEqual(
+            gr.hidden("bar-accessibility", "bar-accessibility-light-1.0-rtl"), {bar_ws, bar_lib, rows}
+        )
+        self.assertEqual(gr.hidden("dock", "dock-light-1.0-en"), dock)
+        self.assertEqual(
+            gr.hidden("layout", "layout-float-top-visible-2o-1.5-land"), {bar_ws, bar_lib} | dock
+        )
+        self.assertEqual(gr.hidden("layout", "layout-float-bottom-auto-hide-1o-1.0-land"), {bar_ws, bar_lib})
+        self.assertEqual(gr.hidden("layout", "layout-minimal-top-none-1o-1.0-port"), {bar_ws, bar_lib})
+        self.assertEqual(gr.hidden("layout", "layout-bar-bottom-1o-1.0-land"), {bar_lib})
+        self.assertEqual(gr.hidden("launcher", "launcher-light-1.0-en"), set())
+        self.assertEqual(gr.hidden("chooser", "chooser-dark-1.5-de"), set())
+        counts = {control: 0 for control in gr.HIDDEN}
+        for surface, tag in gr.expected(gr.surfaces()):
+            for control in gr.hidden(surface, tag):
+                counts[control] += 1
+        # The 12 bar surfaces under float and the 21 float and minimal layout cases; the 14 bar
+        # surfaces and the 27 layout cases; bar-accessibility; dock and the 9 layout cases with a
+        # visible dock.
+        self.assertEqual(
+            counts,
+            {bar_ws: 12 * 12 + 21, bar_lib: 14 * 12 + 27, rows: 12,
+             "dock-workspaces": 12 + 9, "dock-library": 12 + 9},
+        )
+
+    def test_the_bar_surfaces_run_the_presets_rig_sh_gives_them(self):
+        rig = (Path(gr.HERE) / "rig.sh").read_text(encoding="utf-8")
+        body = rig.split("capture_bar() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("preset=float", body.splitlines()[1])
+        bar = set(re.findall(r"^\s+([a-z-]+)\).*\bpreset=bar\b", body, re.MULTILINE))
+        self.assertEqual(bar, set(gr.BAR_PRESET_SURFACES))
+
+    def test_a_differing_case_names_each_control_decision_28_hides(self):
+        tag = "bar-power-light-1.0-en"
+        entries = hidden_entries("bar-power", tag)
+        self.assertEqual(len(entries), 2)
+        r = result(tag, 100, surface="bar-power")
+        self.assertEqual(gr.report([r], entries)[1], [])
+        _, problems = gr.report([r], entries[:1])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("decision 28", problems[0])
+
+    def test_a_decision_28_entry_for_a_control_the_case_does_not_draw_fails(self):
+        tag = "bar-light-1.0-en"
+        stray = {"case": tag, "cause": gr.HIDDEN["bar-workspaces"][0], "issue": gr.HIDDEN["bar-workspaces"][1]}
+        _, problems = gr.report([result(tag, 100, surface="bar")], hidden_entries("bar", tag) + [stray])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("does not draw", problems[0])
+
+    def test_a_decision_28_entry_names_its_controls_issue(self):
+        tag = "dock-light-1.0-en"
+        entries = hidden_entries("dock", tag)
+        entries[0] = dict(entries[0], issue=1)
+        _, problems = gr.report([result(tag, 100, surface="dock")], entries)
+        # The control's own entry is missing, and the entry with #1 names no control drawn.
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("(#1), but" in p for p in problems), problems)
+
+    def test_the_committed_explanations_name_every_hidden_control(self):
+        import tomllib
+
+        entries = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8")).get("difference", [])
+        # Every case differs today (#736): each must name every control it draws and hides.
+        results = [gr.Result(s, t, 10**6, 64, False) for s, t in gr.expected(gr.surfaces())]
+        self.assertEqual(gr.report(results, entries)[1], [])
 
 
 if __name__ == "__main__":

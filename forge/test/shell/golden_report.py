@@ -8,6 +8,8 @@ case the count and the explanation from golden/athanor-differences.toml, or `une
 It fails on a difference without an explanation, on an explanation without a difference (a
 cause that was fixed, or never held), and on an explanation without a cause or an issue, so a
 difference never passes as tolerated noise. A case may have several explanations, one per cause.
+A differing case that draws a control decision 28 hides under the own compositor names it with
+that control's cause and issue (HIDDEN), and no case names a control it does not draw.
 
 `surfaces` prints the surfaces the report runs: every one of cases.SURFACES except the
 toolkit's and the greeter's, and the layout cases.
@@ -33,6 +35,23 @@ EXCLUDED = ("greeter",)
 # What the compositor logs when it closes a layer surface its client has no grant for (src/layer.rs).
 CLOSED = "not granted them was closed"
 
+# doc_own_stack.md, decision 28: the controls the shell hides under the own compositor until their
+# replacement comes, each with the cause its entries name and the issue that tracks its return.
+HIDDEN = {
+    "bar-workspaces": ("decision 28 hides the bar's workspaces module", 835),
+    "bar-library": ("decision 28 hides the bar's application library button", 836),
+    "bar-a11y-rows": (
+        "decision 28 hides the magnifier, inversion and filter rows of the bar's accessibility menu",
+        837,
+    ),
+    "dock-workspaces": ("decision 28 hides the dock's workspaces button", 835),
+    "dock-library": ("decision 28 hides the dock's application library button", 836),
+}
+# rig.sh capture_bar: the bar surfaces that run the bar preset; every other one runs float. The
+# bar surfaces run the bar alone, the dock surface the dock alone.
+BAR_PRESET_SURFACES = ("bar", "bar-shield")
+LAYOUTS = {case.tag: case for case in cases.layout_cases()}
+
 # differing is None when there is no capture to compare.
 Result = namedtuple("Result", "surface case differing allowed closed")
 
@@ -54,6 +73,51 @@ def expected(wanted):
 
 def differs(result):
     return result.differing is not None and not compare.verdict(result.differing, result.allowed)
+
+
+def hidden(surface, case):
+    """The controls of HIDDEN the case draws under cosmic-comp, by the presets of doc_bar.md BR7
+    (workspaces under float and minimal, the application library under all three) and the dock
+    setting of doc_shell.md SH7 (its buttons only on a visible dock)."""
+    if surface == "layout":
+        layout = LAYOUTS.get(case)
+        if layout is None:
+            return set()
+        preset, dock = layout.preset, layout.dock
+    elif surface == "bar" or surface.startswith("bar-"):
+        preset, dock = ("bar" if surface in BAR_PRESET_SURFACES else "float"), "-"
+    elif surface == "dock":
+        preset, dock = None, "visible"
+    else:
+        return set()
+    controls = set()
+    if preset in ("float", "minimal"):
+        controls.add("bar-workspaces")
+    if preset is not None:
+        controls.add("bar-library")
+    if surface == "bar-accessibility":
+        controls.add("bar-a11y-rows")
+    if dock == "visible":
+        controls |= {"dock-workspaces", "dock-library"}
+    return controls
+
+
+def check_hidden(results, by_case):
+    """What is wrong with the entries of the controls decision 28 hides."""
+    problems, issues = [], dict(HIDDEN.values())
+    for r in results:
+        drawn = {HIDDEN[control] for control in hidden(r.surface, r.case)}
+        named = {(e.get("cause"), e.get("issue")) for e in by_case.get(r.case, []) if e.get("cause") in issues}
+        if differs(r):
+            problems += [
+                f'{r.case}: draws a control decision 28 hides, and no entry names "{cause}" (#{issue})'
+                for cause, issue in sorted(drawn - named)
+            ]
+        problems += [
+            f'{r.case}: names "{cause}" (#{issue}), but the case does not draw that control, or its issue is #{issues[cause]}'
+            for cause, issue in sorted(named - drawn, key=str)
+        ]
+    return problems
 
 
 def check_explanations(explanations):
@@ -79,6 +143,7 @@ def check_explanations(explanations):
 def report(results, explanations):
     """The report's text and its problems; pure."""
     by_case, problems = check_explanations(explanations)
+    problems += check_hidden(results, by_case)
     rows, differing, explained = [], 0, 0
     for r in results:
         if r.differing is None:
