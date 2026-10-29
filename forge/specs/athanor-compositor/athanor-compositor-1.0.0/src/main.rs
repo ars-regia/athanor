@@ -8,6 +8,7 @@
 
 mod bindings;
 mod capture;
+mod constraints;
 mod cursor;
 mod grabs;
 mod handlers;

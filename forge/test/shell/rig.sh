@@ -727,6 +727,8 @@ compositor-globals)
     standard=(wl_compositor wl_shm wl_seat wl_output xdg_wm_base wp_viewporter
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1
         wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1)
+    # Decision 30's three.
+    standard+=(zwp_pointer_constraints_v1 zwp_relative_pointer_manager_v1 zwp_keyboard_shortcuts_inhibit_manager_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
