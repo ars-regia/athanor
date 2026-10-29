@@ -29,6 +29,27 @@ It opens one output the size of its window, at the given scale (1 by default), l
 next free `wayland-N` socket and logs that name. In the shell rig, `RIG_COMPOSITOR=athanor`
 runs it in place of cosmic-comp (`forge/test/shell/session.sh`).
 
+SIGTERM, which `systemctl --user stop` sends, and SIGINT, which Ctrl+C sends, end the event loop
+as a closed nested window does (`src/shutdown.rs`). The compositor then stops xwayland-satellite
+and removes the X11 display's lock and socket while they are still its own. It drops the Wayland
+socket, releases the DRM device and the seat through the drops of the state and of the event
+loop's sources, and exits 0. The
+satellite runs in a scope of its own under the user manager, outside the service's cgroup, so
+stopping the service does not end it: the compositor sends SIGTERM to the process it spawned,
+which `systemd-run --scope` executes in place, and SIGKILL after two seconds. Xwayland exits by
+itself when the satellite's connection closes. `tests/sigterm.rs` covers the Wayland socket and
+its lock, and `xwayland.rs` the satellite's termination and the ownership of the X11 files; no
+test covers the release of the DRM device and the seat.
+
+The signals are blocked at the start of `run`, before the display, the backend and any thread,
+so that every thread inherits the block, and are read once the loop runs. A signal sent while the compositor starts is honoured
+when the loop begins, and a start that blocks inside a call (the seat, the DRM device) ends only
+by SIGKILL. The same holds for a loop blocked in a call. Once the loop has returned, the source
+is removed, and a second SIGTERM or Ctrl+C takes the default action and ends a stalled cleanup.
+`doc_session.md` specifies `TimeoutStopSec=5s` for `athanor-compositor.service`, which the
+session's change (#704) ships, not this crate: systemd then sends SIGKILL after 5 s, and the
+satellite's two seconds between SIGTERM and SIGKILL stay below it.
+
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
 off screen.
 
