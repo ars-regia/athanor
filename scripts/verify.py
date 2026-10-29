@@ -2614,7 +2614,7 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         elif [line[0] for line in lines[executable]] != [unit]:
             problems.append(f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
                             "the unit it runs in")
-        started = rf"^\s*systemd-run\s(?:.*\s)?--unit={re.escape(unit)}(?:\s|$)"
+        started = rf"^[ \t]*systemd-run(?:[ \t]+-\S*)*[ \t]+--unit={re.escape(unit)}(?:[ \t]|$)"
         if unit.endswith(".scope") and not re.search(started, components, re.MULTILINE):
             problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
                             "names: the grant would reach nothing")

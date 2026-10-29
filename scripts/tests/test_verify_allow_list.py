@@ -552,6 +552,8 @@ class AllowList(unittest.TestCase):
             f"# {start}\n",
             start.replace("scope cosmic", "scope.bak cosmic") + "\n",
             "echo " + start + "\n",
+            "systemd-run --user --scope cosmic-idle --unit=cosmic-idle.scope\n",
+            "systemd-run\n--unit=cosmic-idle.scope\n",
         ):
             self.write(verify.SESSION_COMPONENTS, text)
             out = self.problems(idle)
