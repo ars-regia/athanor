@@ -35,7 +35,10 @@ of its own under the user manager, outside the service's cgroup, so the composit
 the process it spawned, which `systemd-run --scope` executes in place, then SIGKILL after two
 seconds), removes the X11 display's
 lock and socket while they are still its own, drops the Wayland socket and releases the DRM
-device and the seat, and exits 0.
+device and the seat, and exits 0. Once the loop has returned, a second SIGTERM or Ctrl+C takes the
+default action again and ends the process. A loop blocked inside a call never reads the first
+signal: systemd sends SIGKILL after the unit's 5 s stop timeout, and the satellite's 2 s window
+between SIGTERM and SIGKILL stays below it.
 
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
 off screen.

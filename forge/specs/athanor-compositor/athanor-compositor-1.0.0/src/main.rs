@@ -133,7 +133,7 @@ fn run() -> Result<(), Error> {
     let options = options(std::env::args().skip(1))?;
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     // First, before any thread: see `shutdown::watch`.
-    shutdown::watch(&event_loop)?;
+    let signals = shutdown::watch(&event_loop)?;
     let display: Display<State> = Display::new()?;
     let mut state = match &options {
         Options::Nested { scale } => winit::start(&mut event_loop, display, *scale)?,
@@ -169,7 +169,10 @@ fn run() -> Result<(), Error> {
     };
     // `x11`, the display's number, is what the session's readiness announces as `DISPLAY`.
     tracing::info!(?socket, ?x11, ?options, "listening");
-    event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
+    let ran = event_loop.run(None, &mut state, State::refresh_idle_inhibit);
+    // From here a second SIGTERM or SIGINT takes the default action: see `shutdown::watch`.
+    event_loop.handle().remove(signals);
+    ran?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),
         None => Ok(()),
