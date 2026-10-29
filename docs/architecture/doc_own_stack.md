@@ -851,11 +851,13 @@ compositor and that the own compositor did not yet offer:
       (`doc_accessibility.md` AX4) and the keyboard aids (AX11) are not bindings, and an
       inhibitor leaves them working. Ctrl+Alt+Tab always suspends the inhibitor, a pointer
       lock and a confinement of the focused surface, also when the cycle has no surface of the
-      shell to move the keyboard to. The suspension is kept for that surface until the user
-      clicks it or moves the keyboard to it by a key: an inhibitor or a constraint the client
-      requests meanwhile stays inactive, and a focus a client gives, through xdg-activation or
-      a new surface, does not lift it. A persistent constraint is then active again; a oneshot
-      one has ended, and the client asks for a new one. It is the way out a user always has;
+      shell to move the keyboard to. The suspension is kept for that surface's client until the
+      user clicks one of its surfaces or moves the keyboard to one by a key: an inhibitor or a
+      constraint the client requests meanwhile, on any of its surfaces, stays inactive, and a
+      focus a client gives, through xdg-activation or a new surface, does not lift it. A
+      persistent constraint, and one requested meanwhile, are then active again; a oneshot
+      constraint that was active has ended, and the client asks for a new one. It is the way
+      out a user always has;
     - primary selection, standard, and data control, privileged, as decision 23 set them;
     - tablets, pointer gestures and xdg-foreign, standard;
     - xdg-decoration, standard as decision 23 set it, answering every request with client-side
