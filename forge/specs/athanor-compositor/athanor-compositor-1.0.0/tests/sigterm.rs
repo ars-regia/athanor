@@ -58,16 +58,23 @@ fn stops_cleanly_on(signal: &str) {
         .env_remove("NOTIFY_SOCKET")
         .env_remove("WAYLAND_DISPLAY")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .expect("the compositor starts"));
-    wait_for("the Wayland socket", || {
-        entries(&runtime)
-            .iter()
-            .any(|name| name.starts_with("wayland-") && !name.ends_with(".lock"))
-            .then_some(())
+    // The log line announced right before the loop runs, with the X11 display (if any) up: the
+    // signal reaches a compositor at steady state, not one still starting.
+    let log = child.stdout.take().expect("stdout");
+    let (listening, heard) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(log).lines().map_while(Result::ok) {
+            if line.contains("listening") && listening.send(()).is_err() {
+                break;
+            }
+        }
     });
+    wait_for("the compositor to listen", || heard.try_recv().ok());
     let sent = Command::new("kill")
         .arg(format!("-{signal}"))
         .arg(child.id().to_string())
