@@ -248,6 +248,8 @@ struct Client {
     coordinates: Vec<(ObjectId, Vec<u32>)>,
     /// The workspaces the compositor removed.
     workspaces_removed: Vec<ObjectId>,
+    /// The leave, removed and done events of ext-workspace-v1, in order.
+    workspace_log: Vec<&'static str>,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
     /// The evdev code of each key released while the client had the keyboard.
@@ -817,6 +819,7 @@ impl Dispatch<ext_workspace_manager_v1::ExtWorkspaceManagerV1, ()> for Client {
             Event::Done => {
                 client.workspaces_done = true;
                 client.workspace_dones += 1;
+                client.workspace_log.push("done");
             }
             _ => {}
         }
@@ -848,7 +851,11 @@ impl Dispatch<ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1, ()> for 
         match event {
             Event::OutputEnter { output } => outputs.push(output.id()),
             Event::WorkspaceEnter { workspace } => workspaces.push(workspace.id()),
-            Event::WorkspaceLeave { workspace } => workspaces.retain(|id| *id != workspace.id()),
+            Event::WorkspaceLeave { workspace } => {
+                workspaces.retain(|id| *id != workspace.id());
+                client.workspace_log.push("workspace_leave");
+            }
+            Event::Removed => client.workspace_log.push("group removed"),
             _ => {}
         }
     }
@@ -886,7 +893,10 @@ impl Dispatch<ext_workspace_handle_v1::ExtWorkspaceHandleV1, ()> for Client {
                 client.coordinates.retain(|(id, _)| *id != workspace.id());
                 client.coordinates.push((workspace.id(), values));
             }
-            Event::Removed => client.workspaces_removed.push(workspace.id()),
+            Event::Removed => {
+                client.workspaces_removed.push(workspace.id());
+                client.workspace_log.push("removed");
+            }
             _ => {}
         }
     }
@@ -9657,4 +9667,90 @@ fn a_popup_of_a_hidden_window_grabs_nothing() {
         assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
         run.stop();
     }
+}
+
+/// Unplugging an output with workspaces: its windows, shown and parked, join the first output's
+/// active workspace and come back on the first output, and a client hears each workspace leave
+/// its group and go, then the group go, in one `done`.
+#[test]
+fn unplugging_an_output_rehomes_its_workspaces() {
+    let mut run = Running::start(None);
+    let (mut local, shown) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&shown).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let other = local.another(&mut run, "parked");
+    let parked = local.server_window(&run, &other.surface);
+    for window in [&shown, &parked] {
+        run.state.space.relocate_element(window, area.loc);
+        run.state.settle(window);
+    }
+    let list = workspaces_of(&run, 1);
+    assert_eq!(list.len(), 2);
+    assert!(run.state.move_window_to(&parked, list[1]));
+    assert!(run.state.is_parked(&parked));
+    assert_eq!(workspaces_of(&run, 1).len(), 3);
+
+    let (mut client, _manager) = workspace_client(&mut run);
+    client.client.workspace_log.clear();
+    run.state.remove_output(&second);
+    client.roundtrip(&mut run);
+    let home = run.state.active_workspace(&first);
+    let within = run.state.space.output_geometry(&first).expect("placed");
+    for window in [&shown, &parked] {
+        assert_eq!(run.state.workspace_of(window), home, "on the first output's workspace");
+        let geometry = run.state.space.element_geometry(window).expect("shown");
+        assert!(within.overlaps(geometry), "on the first output");
+    }
+    let mut heard = ["workspace_leave", "removed"].repeat(3);
+    heard.extend(["group removed", "done"]);
+    assert_eq!(client.client.workspace_log, heard);
+    run.stop();
+}
+
+/// An output that changes size moves the others: a window of the second output's workspaces,
+/// shown or parked, whose place its output no longer shows comes back on that output, not the
+/// first, and keeps its workspace.
+#[test]
+fn a_window_fitted_after_a_mode_change_stays_on_its_output() {
+    let mut run = Running::start(None);
+    let (mut local, shown) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&shown).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let other = local.another(&mut run, "parked");
+    let parked = local.server_window(&run, &other.surface);
+    let edge = area.loc + Point::from((area.size.w - 20, area.size.h - 20));
+    for window in [&shown, &parked] {
+        run.state.space.relocate_element(window, area.loc);
+        run.state.settle(window);
+        run.state.space.relocate_element(window, edge);
+    }
+    let list = workspaces_of(&run, 1);
+    assert!(run.state.move_window_to(&parked, list[1]));
+    assert!(run.state.is_parked(&parked));
+
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let on_second = |run: &Running, window: &smithay::desktop::Window| {
+        let area = run.state.space.output_geometry(&second).expect("placed");
+        run.state
+            .space
+            .element_geometry(window)
+            .is_some_and(|geometry| area.overlaps(geometry))
+    };
+    assert!(on_second(&run, &shown), "the shown window is on its output");
+    assert_eq!(run.state.workspace_of(&shown), Some(list[0]));
+    assert!(run.state.activate_workspace(list[1]));
+    assert!(on_second(&run, &parked), "the parked window comes back on its output");
+    assert_eq!(run.state.workspace_of(&parked), Some(list[1]));
+    run.stop();
 }

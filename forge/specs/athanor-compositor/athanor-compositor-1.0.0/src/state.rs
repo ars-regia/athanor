@@ -478,9 +478,10 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// After the outputs changed (one went, or took another size): the windows no output shows
-    /// are centred on the first one, the pointer is brought back onto the outputs and the lock
-    /// surfaces take the size of their output.
+    /// After the outputs changed (one went, or took another size): the windows their workspace's
+    /// output no longer shows are centred on it, on the first output when theirs went, the
+    /// pointer is brought back onto the outputs and the lock surfaces take the size of their
+    /// output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
@@ -493,12 +494,12 @@ impl State {
             .filter(|window| {
                 self.space
                     .element_geometry(window)
-                    .is_some_and(|area| !outputs.iter().any(|output| output.overlaps(area)))
+                    .is_some_and(|area| !self.shown_at_home(window, area))
             })
             .cloned()
             .collect();
-        if let Some(area) = self.window_area() {
-            for window in stranded {
+        for window in stranded {
+            if let Some(area) = self.home_area(&window) {
                 let at = centred(area, window.geometry());
                 self.space.relocate_element(&window, at);
             }

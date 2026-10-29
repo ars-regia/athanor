@@ -271,6 +271,38 @@ impl State {
         })
     }
 
+    /// The output of `window`'s workspace, while that output is in the space.
+    fn home_output(&self, window: &Window) -> Option<Output> {
+        self.workspace_of(window)
+            .and_then(|id| self.output_of_workspace(id))
+            .filter(|output| self.space.output_geometry(output).is_some())
+    }
+
+    /// Whether `area` of `window` is shown on its workspace's output, or on any output when that
+    /// output went.
+    pub fn shown_at_home(&self, window: &Window, area: Rectangle<i32, Logical>) -> bool {
+        match self.home_output(window) {
+            Some(output) => self
+                .space
+                .output_geometry(&output)
+                .is_some_and(|shown| shown.overlaps(area)),
+            None => self
+                .space
+                .outputs()
+                .filter_map(|output| self.space.output_geometry(output))
+                .any(|shown| shown.overlaps(area)),
+        }
+    }
+
+    /// Where `window` is centred when its place is not shown: what the layer surfaces leave of its
+    /// workspace's output, or of the first output when that output went.
+    pub fn home_area(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        match self.home_output(window) {
+            Some(output) => self.window_area_on(&output),
+            None => self.window_area(),
+        }
+    }
+
     /// Whether `window` is on an inactive workspace, out of the space.
     pub fn is_parked(&self, window: &Window) -> bool {
         self.parked.iter().any(|(kept, _)| kept == window)
@@ -518,7 +550,7 @@ impl State {
     }
 
     /// Brings back the parked windows `which` takes where they were, in their order, or centred
-    /// in `window_area` when no output shows that place any more.
+    /// on their workspace's output when it no longer shows that place (`reachable`).
     fn unpark(&mut self, which: impl Fn(&Window) -> bool) {
         let (back, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.parked)
             .into_iter()
@@ -622,8 +654,8 @@ impl State {
         }
     }
 
-    /// Where a parked or minimised window at `at` comes back: there, or centred in
-    /// `window_area` when no output shows that place any more.
+    /// Where a parked or minimised window at `at` comes back: there, or centred on its
+    /// workspace's output when that output no longer shows that place (`home_area`).
     pub fn reachable(&self, window: &Window, at: Point<i32, Logical>) -> Point<i32, Logical> {
         let geometry = window.geometry();
         // The geometry's offset is the client's: added saturating.
@@ -632,13 +664,8 @@ impl State {
             at.y.saturating_add(geometry.loc.y),
         );
         let kept = Rectangle::new(origin.into(), geometry.size);
-        let shown_somewhere = self
-            .space
-            .outputs()
-            .filter_map(|output| self.space.output_geometry(output))
-            .any(|output| output.overlaps(kept));
-        match self.window_area() {
-            Some(area) if !shown_somewhere => centred(area, geometry),
+        match self.home_area(window) {
+            Some(area) if !self.shown_at_home(window, kept) => centred(area, geometry),
             _ => at,
         }
     }
