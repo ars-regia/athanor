@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:71.fc43}
+Release:        %{?autorelease}%{!?autorelease:73.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -77,6 +77,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 /usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
 /usr/share/glib-2.0/schemas/90_athanor-network.gschema.override
 /usr/share/athanor-system-config/greetd.toml
+/usr/share/athanor-system-config/session-import
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/greenboot.conf
 %attr(0755,root,root) /etc/greenboot/check/required.d/10-greetd-running.sh
@@ -84,6 +85,22 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-73
+- athanor-session exports LANG and LANGUAGE from the user's AccountsService languages,
+  the LC_* formats of the GSettings region when it differs from LANG, and XCURSOR_SIZE and
+  XCURSOR_THEME from the GNOME interface keys; the import list carries them into the user
+  manager (doc_session.md SN2 and SN13 step 2; doc_languages.md LN6 and LN7;
+  doc_accessibility.md AX9). Each AccountsService call is bounded to 2 s. LN7's
+  athanor-first-run apply-handoff comes with that command (doc_first_run.md, step 4).
+
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+- The variables athanor-desktop imports into the user manager are listed in one file,
+  /usr/share/athanor-system-config/session-import, which the readiness gate of
+  athanor-system-services reads to unset them at the end of the session
+  (doc_session.md, SN2 and SN13 step 1). The list is unchanged. athanor-desktop skips blank,
+  whitespace-only and indented comment lines, drops a CRLF ending, validates each name and
+  refuses an empty list, so systemctl never imports the whole environment.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
   bwrap's read-only remount of devtmpfs is refused to xdm_t, and the greeter never started

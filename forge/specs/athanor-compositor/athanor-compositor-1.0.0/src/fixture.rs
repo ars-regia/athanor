@@ -1911,8 +1911,8 @@ fn shell_keys(run: &mut Running, steps: &mpsc::Sender<Step>) -> Vec<u32> {
 /// back. A click on a layer surface of the client that takes the keyboard gives it back; one on
 /// its window, or on its bar, which takes none, does not. With no exclusive surface the key asks
 /// for the lock all the same and is not the window's; while the session is locked it is the lock
-/// surface's, and asks for nothing. Super+Shift+Escape is the window's. A lock alone escapes
-/// nobody.
+/// surface's, and asks for nothing. Super+Shift+Escape, the log-out key, asks for no lock. A
+/// lock alone escapes nobody.
 #[test]
 fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     let mut run = Running::start(None);
@@ -1921,7 +1921,6 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         focus(state).is_some()
     });
     let window = focus(&run.state);
-    let window_client = window.as_ref().and_then(|s| s.client()).map(|c| c.id());
 
     let (server_end, client_end) = UnixStream::pair().expect("socket pair");
     let client_state = run.state.client_state(&server_end, None);
@@ -2028,6 +2027,15 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     steps
         .send(Step::UnmapExclusive)
         .expect("the shell's client");
+    // The unmap handled before the client maps the surface again: a configure the compositor
+    // answered the unmap with would be the first the client reads after its new initial commit.
+    run.until("the unmap is handled", |state| {
+        state.space.outputs().any(|output| {
+            layer_map_for_output(output).layers().any(|layer| {
+                layer.namespace() == "exclusive" && !crate::layer::mapped(layer.wl_surface())
+            })
+        })
+    });
     let (done, done_rx) = mpsc::channel();
     steps
         .send(Step::RemapExclusive(done))
@@ -2043,7 +2051,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
     assert_eq!(focus(&run.state), window, "a new surface does not either");
 
     // No exclusive surface holds the keyboard: Super+Escape asks for the lock all the same, and
-    // is not the window's; Super+Shift+Escape is.
+    // is not the window's; Super+Shift+Escape asks for no lock.
     use smithay::backend::input::{InputTime, KeyState};
     use smithay::input::keyboard::Keycode;
     let [logo, escape] = ESCAPE_CHORD.map(|code| Keycode::from(code + 8));
@@ -2070,6 +2078,7 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
         .key_input(logo, KeyState::Pressed, now(), KeyboardSource::Physical);
     run.state
         .key_input(shift, KeyState::Pressed, now(), KeyboardSource::Physical);
+    let shift_sent = run.state.grab_serials.key_press.clone();
     run.state
         .key_input(escape, KeyState::Pressed, now(), KeyboardSource::Physical);
     let escape_sent = run.state.grab_serials.key_press.clone();
@@ -2078,9 +2087,12 @@ fn task8_super_escape_takes_the_keyboard_back_and_asks_for_the_lock() {
             .key_input(key, KeyState::Released, now(), KeyboardSource::Physical);
     }
     assert_eq!(
-        escape_sent.map(|(_, to)| to),
-        window_client,
-        "Super+Shift+Escape is the window's"
+        escape_sent, shift_sent,
+        "Super+Shift+Escape is the log-out key, not the window's"
+    );
+    assert_eq!(
+        run.state.fired.last(),
+        Some(&crate::bindings::Action::Run(&crate::session_calls::LOG_OUT))
     );
     assert_eq!(
         run.state.lock_requests,
@@ -6986,11 +6998,19 @@ impl SimulatedInputMethod {
 
     /// The evdev codes of the keys pressed on its grabs.
     fn keys(&self) -> Vec<u32> {
+        self.key_events()
+            .into_iter()
+            .filter_map(|(key, pressed)| pressed.then_some(key))
+            .collect()
+    }
+
+    /// Every key event of its grabs: the evdev code, and whether it is a press.
+    fn key_events(&self) -> Vec<(u32, bool)> {
         self.grabs
             .iter()
             .flat_map(Raw::events)
             .filter_map(|(name, args)| match (name, &args[..]) {
-                ("key", [_, _, key, state]) if state == "1" => key.parse().ok(),
+                ("key", [_, _, key, state]) => Some((key.parse().ok()?, state == "1")),
                 _ => None,
             })
             .collect()
@@ -7833,6 +7853,751 @@ fn an_unknown_mode_is_a_protocol_error() {
         error.code,
         zwlr_output_power_v1::Error::InvalidMode as u32
     );
+    run.stop();
+}
+
+// The key bindings (doc_own_stack.md OS13, `bindings.rs`), keys as evdev numbers them.
+const KEY_ESC: u32 = 1;
+const KEY_MINUS: u32 = 12;
+const KEY_EQUAL: u32 = 13;
+const KEY_TAB: u32 = 15;
+const KEY_Q: u32 = 16;
+const KEY_W: u32 = 17;
+const KEY_S: u32 = 31;
+const KEY_T: u32 = 20;
+const KEY_LEFTCTRL: u32 = 29;
+const KEY_A: u32 = 30;
+const KEY_LEFTSHIFT: u32 = 42;
+const KEY_X: u32 = 45;
+const KEY_C: u32 = 46;
+const KEY_V: u32 = 47;
+const KEY_N: u32 = 49;
+const KEY_M: u32 = 50;
+const KEY_LEFTALT: u32 = 56;
+const KEY_SPACE: u32 = 57;
+const KEY_F1: u32 = 59;
+const KEY_F4: u32 = 62;
+const KEY_SYSRQ: u32 = 99;
+const KEY_MUTE: u32 = 113;
+const KEY_VOLUMEDOWN: u32 = 114;
+const KEY_VOLUMEUP: u32 = 115;
+const KEY_POWER: u32 = 116;
+/// XF86LaunchA in xkeyboard-config's evdev keycodes.
+const KEY_SCALE: u32 = 120;
+const KEY_BRIGHTNESSDOWN: u32 = 224;
+const KEY_BRIGHTNESSUP: u32 = 225;
+const KEY_LEFTMETA: u32 = 125;
+const KEY_RIGHTMETA: u32 = 126;
+const KEY_NEXTSONG: u32 = 163;
+const KEY_PLAYPAUSE: u32 = 164;
+const KEY_PREVIOUSSONG: u32 = 165;
+const KEY_KBDILLUMTOGGLE: u32 = 228;
+const KEY_KBDILLUMDOWN: u32 = 229;
+const KEY_KBDILLUMUP: u32 = 230;
+const KEY_WLAN: u32 = 238;
+const KEY_RFKILL: u32 = 247;
+const KEY_MICMUTE: u32 = 248;
+const KEY_TOUCHPAD_TOGGLE: u32 = 530;
+
+/// Presses the chord `codes` while `to` holds the keyboard: the presses and the releases `to`
+/// was sent.
+fn sent_to(to: &mut Local, run: &mut Running, codes: &[u32]) -> (Vec<u32>, Vec<u32>) {
+    let (pressed, released) = (to.client.keys.len(), to.client.released.len());
+    chord(&mut run.state, codes);
+    to.roundtrip(run);
+    (
+        to.client.keys[pressed..].to_vec(),
+        to.client.released[released..].to_vec(),
+    )
+}
+
+/// The chord `codes` reaches `to` whole, each press and each release, and the compositor does
+/// nothing with it.
+fn reaches(to: &mut Local, run: &mut Running, codes: &[u32], what: &str) {
+    let fired = run.state.fired.len();
+    let (pressed, released) = sent_to(to, run, codes);
+    assert_eq!(pressed, codes, "{what}: every press reaches the client");
+    let reversed: Vec<u32> = codes.iter().rev().copied().collect();
+    assert_eq!(released, reversed, "{what}: and every release");
+    assert_eq!(run.state.fired.len(), fired, "{what}: and nothing is done");
+}
+
+/// The chord `codes`, whose last key is bound, takes `action`, or none: `to` is sent the
+/// modifiers' presses and releases, never the bound key's.
+fn acts(
+    to: &mut Local,
+    run: &mut Running,
+    codes: &[u32],
+    action: Option<crate::bindings::Action>,
+    what: &str,
+) {
+    let fired = run.state.fired.len();
+    let (pressed, released) = sent_to(to, run, codes);
+    let modifiers = &codes[..codes.len() - 1];
+    assert_eq!(
+        pressed, modifiers,
+        "{what}: the client is sent no bound press"
+    );
+    let reversed: Vec<u32> = modifiers.iter().rev().copied().collect();
+    assert_eq!(released, reversed, "{what}: nor its release");
+    assert_eq!(run.state.fired[fired..], *action.as_slice(), "{what}");
+}
+
+/// Runs the compositor's loop as `main` runs it, the chord `codes` pressed in its first round:
+/// the rounds it ran until it stopped, at most 50.
+fn rounds_until_stopped(run: &mut Running, codes: &[u32]) -> u32 {
+    let mut rounds = 0;
+    run.event_loop
+        .run(Duration::from_millis(1), &mut run.state, |state| {
+            rounds += 1;
+            if rounds == 1 {
+                chord(state, codes);
+            } else if rounds == 50 {
+                state.loop_signal.stop();
+            }
+        })
+        .expect("the loop");
+    rounds
+}
+
+/// Super+Alt+Escape ends the compositor, and the session with it (LP10: the only exit from a
+/// lock that cannot start): the loop stops in the round the key is pressed in, unlocked and
+/// while a lock client holds the lock, and no client is sent the Escape.
+#[test]
+fn super_alt_escape_ends_the_compositor_even_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let terminate = [KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC];
+    assert_eq!(
+        rounds_until_stopped(&mut run, &terminate),
+        1,
+        "the loop stops"
+    );
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_LEFTMETA, KEY_LEFTALT]);
+    assert_eq!(window.client.released, [KEY_LEFTALT, KEY_LEFTMETA]);
+    assert_eq!(run.state.fired, [Action::Terminate]);
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    assert_eq!(
+        rounds_until_stopped(&mut run, &terminate),
+        1,
+        "locked, the loop stops"
+    );
+    locker.roundtrip(&mut run);
+    assert_eq!(locker.client.keys, [KEY_LEFTMETA, KEY_LEFTALT]);
+    assert_eq!(locker.client.released, [KEY_LEFTALT, KEY_LEFTMETA]);
+    assert_eq!(run.state.fired, [Action::Terminate, Action::Terminate]);
+    run.stop();
+}
+
+/// Decision 28's six keys stay unbound until what they open is built: Super+W and XF86LaunchA
+/// (the overview), Super+= and Super+- (the magnifier), Super+A (the application library) and
+/// Super+V (the clipboard history) reach the focused client, and the compositor does nothing.
+#[test]
+fn decision_28_keys_reach_the_client_and_do_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_W][..], "Super+W"),
+        (&[KEY_SCALE], "XF86LaunchA"),
+        (&[KEY_LEFTMETA, KEY_EQUAL], "Super+="),
+        (&[KEY_LEFTMETA, KEY_MINUS], "Super+-"),
+        (&[KEY_LEFTMETA, KEY_A], "Super+A"),
+        (&[KEY_LEFTMETA, KEY_V], "Super+V"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// The keys whose target is not built stay unbound (D12, OD15): Super+N (no
+/// `ToggleNotifications`), Super+Alt+A (no entry point of the bar's accessibility menu), and the
+/// keyboard-light, WLAN and RFKill keys (no `os.athanor.Osd1`).
+#[test]
+fn the_unbuilt_targets_do_nothing() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_N][..], "Super+N"),
+        (&[KEY_LEFTMETA, KEY_LEFTALT, KEY_A], "Super+Alt+A"),
+        (&[KEY_KBDILLUMTOGGLE], "XF86KbdLightOnOff"),
+        (&[KEY_KBDILLUMDOWN], "XF86KbdBrightnessDown"),
+        (&[KEY_KBDILLUMUP], "XF86KbdBrightnessUp"),
+        (&[KEY_WLAN], "XF86WLAN"),
+        (&[KEY_RFKILL], "XF86RFKill"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// COSMIC's defaults that no approved document names stay unbound (OS13, D15), Alt+Tab among
+/// them (gap 8).
+#[test]
+fn the_unnamed_cosmic_keys_reach_the_client() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_M][..], "Super+M"),
+        (&[KEY_LEFTMETA, KEY_T], "Super+T"),
+        (&[KEY_LEFTALT, KEY_TAB], "Alt+Tab"),
+        (&[KEY_SYSRQ], "Print"),
+    ] {
+        reaches(&mut window, &mut run, codes, what);
+    }
+    run.stop();
+}
+
+/// Super+Alt+T, the reveal key of OS4, is kept from every client, unlocked and locked, with no
+/// effect until the border (D11); while locked it acts on nothing (section 1).
+#[test]
+fn the_reveal_key_never_reaches_a_client() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
+    acts(
+        &mut window,
+        &mut run,
+        &reveal,
+        Some(Action::Reveal),
+        "unlocked",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(&mut locker, &mut run, &reveal, None, "locked");
+    run.stop();
+}
+
+/// While locked only doc_lock_and_prompts.md section 1's keys act (D3): the terminal switch and
+/// Super+Alt+Escape; Super+Escape, Super+C and Super+Shift+Escape reach the lock surface.
+#[test]
+fn only_the_lock_list_acts_while_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let requests = run.state.lock_requests;
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_ESC][..], "Super+Escape"),
+        (&[KEY_LEFTMETA, KEY_C], "Super+C"),
+        (
+            &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC],
+            "Super+Shift+Escape",
+        ),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    assert_eq!(run.state.lock_requests, requests, "no lock is asked for");
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_F1],
+        Some(Action::Vt(1)),
+        "Ctrl+Alt+F1",
+    );
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC],
+        Some(Action::Terminate),
+        "Super+Alt+Escape",
+    );
+    run.stop();
+}
+
+/// A bound key reaches neither the focused client nor the input method's grab, which the filter
+/// runs before (D2); an unbound key still goes to the grab.
+#[test]
+fn a_bound_key_never_reaches_the_client_nor_the_input_method() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[KEY_LEFTMETA, KEY_LEFTALT, KEY_T]);
+    ime.roundtrip(&mut run);
+    assert_eq!(
+        method.key_events(),
+        [
+            (KEY_LEFTMETA, true),
+            (KEY_LEFTALT, true),
+            (KEY_LEFTALT, false),
+            (KEY_LEFTMETA, false)
+        ],
+        "the grab is sent the modifiers only, neither the bound key's press nor its release"
+    );
+    assert_eq!(run.state.fired, [Action::Reveal]);
+    chord(&mut run.state, &[KEY_A]);
+    ime.pump(&mut run, "an unbound key reaches the grab", |_, _| {
+        method
+            .key_events()
+            .ends_with(&[(KEY_A, true), (KEY_A, false)])
+    });
+    window.roundtrip(&mut run);
+    assert!(window.client.keys.is_empty(), "the window saw no key");
+    run.stop();
+}
+
+/// Super+Q and Alt+F4 close the window with the keyboard focus (D15), which sees neither key;
+/// with a layer surface holding the keyboard no window is sent `close`; locked, both keys reach
+/// the lock surface.
+#[test]
+fn super_q_and_alt_f4_close_the_focused_window() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_Q][..], "Super+Q"),
+        (&[KEY_LEFTALT, KEY_F4], "Alt+F4"),
+    ] {
+        let closed = window.client.toplevel_closed.len();
+        acts(
+            &mut window,
+            &mut run,
+            codes,
+            Some(Action::CloseFocused),
+            what,
+        );
+        assert_eq!(
+            window.client.toplevel_closed.len(),
+            closed + 1,
+            "{what}: the window is sent close"
+        );
+    }
+
+    // A launcher's exclusive surface holds the keyboard: nothing is closed.
+    let mut launcher = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = launcher.bind(4);
+    let shm: wl_shm::WlShm = launcher.bind(1);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = launcher.bind(4);
+    let seat: wl_seat::WlSeat = launcher.bind(1);
+    let qh = launcher.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "launcher".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    assert!(
+        launcher.answer(&mut run, &surface),
+        "the launcher is configured"
+    );
+    let (serial, width, height) = launcher.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let (buffer, _) = launcher.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    launcher.roundtrip(&mut run);
+    let exclusive = run.state.exclusive_layer().expect("an exclusive layer");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(exclusive),
+        "the launcher has the keyboard"
+    );
+    let closed = window.client.toplevel_closed.len();
+    acts(
+        &mut launcher,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_Q],
+        Some(Action::CloseFocused),
+        "Super+Q on the launcher",
+    );
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.toplevel_closed.len(),
+        closed,
+        "no window is sent close"
+    );
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    let fired = run.state.fired.len();
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_Q][..], "Super+Q"),
+        (&[KEY_LEFTALT, KEY_F4], "Alt+F4"),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.toplevel_closed.len(),
+        closed,
+        "locked, nothing is closed"
+    );
+    assert_eq!(run.state.fired.len(), fired);
+    run.stop();
+}
+
+/// Super+Space steps the seat's layout group, the first after the last, unlocked and locked
+/// (D14): the client sees no Space, and every keyboard group object hears the group; under a
+/// keymap of one layout it changes nothing.
+#[test]
+fn super_space_steps_the_layout_group_even_locked() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let space = [KEY_LEFTMETA, KEY_SPACE];
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "one layout",
+    );
+    assert_eq!(run.state.seat_group(), 0, "one layout: no step");
+    two_layouts(&mut run);
+    window.roundtrip(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "to it",
+    );
+    assert_eq!(run.state.seat_group(), 1);
+    acts(
+        &mut window,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "back to us",
+    );
+    assert_eq!(run.state.seat_group(), 0, "the first after the last");
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(
+        &mut locker,
+        &mut run,
+        &space,
+        Some(Action::NextGroup),
+        "locked",
+    );
+    assert_eq!(run.state.seat_group(), 1, "locked, the group still steps");
+    bar.roundtrip(&mut run);
+    assert_eq!(
+        bar.groups_of(&object),
+        [0, 1, 0, 1],
+        "the bar hears every step"
+    );
+    run.stop();
+}
+
+/// Super pressed and released alone shows the launcher, after the client was sent both (D4).
+#[test]
+fn super_alone_shows_the_launcher() {
+    use crate::bindings::Action;
+    use crate::session_calls::LAUNCHER;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let (pressed, released) = sent_to(&mut window, &mut run, &[KEY_LEFTMETA]);
+    assert_eq!(
+        (pressed, released),
+        (vec![KEY_LEFTMETA], vec![KEY_LEFTMETA])
+    );
+    assert_eq!(run.state.fired, [Action::Call(&LAUNCHER)]);
+    run.stop();
+}
+
+/// Super with another key, with a click, or followed by Ctrl shows nothing on its release (D4).
+#[test]
+fn super_with_a_key_or_a_click_shows_nothing() {
+    use smithay::backend::input::KeyState;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    reaches(&mut window, &mut run, &[KEY_LEFTMETA, KEY_X], "Super+X");
+    reaches(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL],
+        "Super then Ctrl",
+    );
+    let meta = smithay::input::keyboard::Keycode::from(KEY_LEFTMETA + 8);
+    let key = |state: &mut State, key_state| {
+        state.key_input(meta, key_state, InputTime::now(), KeyboardSource::Physical);
+    };
+    key(&mut run.state, KeyState::Pressed);
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+    key(&mut run.state, KeyState::Released);
+    window.roundtrip(&mut run);
+    assert!(run.state.fired.is_empty(), "Super with a click");
+    run.stop();
+}
+
+/// Super+C toggles the control center; the client sees no C (CC9).
+#[test]
+fn super_c_toggles_the_control_center() {
+    use crate::bindings::Action;
+    use crate::session_calls::CONTROL_CENTER;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_C],
+        Some(Action::Call(&CONTROL_CENTER)),
+        "Super+C",
+    );
+    run.stop();
+}
+
+/// While locked, Super alone reaches the lock surface and shows nothing (D4).
+#[test]
+fn super_alone_does_nothing_while_locked() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &[KEY_LEFTMETA], "Super");
+    run.stop();
+}
+
+/// Super held into a lock, or Super pressed on the lock surface, opens nothing after the unlock
+/// when it is released; nor does a second Super pressed while one is held (D4).
+#[test]
+fn super_held_across_a_lock_or_beside_another_super_shows_nothing() {
+    use crate::bindings::Action;
+    use smithay::backend::input::{InputTime, KeyState};
+    let key = |run: &mut Running, code: u32, key_state| {
+        run.state.key_input(
+            (code + 8).into(),
+            key_state,
+            InputTime::now(),
+            KeyboardSource::Physical,
+        );
+    };
+    let launcher = Action::Call(&crate::session_calls::LAUNCHER);
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    for held_into_the_lock in [true, false] {
+        if held_into_the_lock {
+            key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+        }
+        let (mut locker, lock) = lock_session(&mut run);
+        if !held_into_the_lock {
+            key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+        }
+        lock.unlock_and_destroy();
+        locker.pump(&mut run, "the session is unlocked", |_, state| {
+            state.lock.is_none()
+        });
+        key(&mut run, KEY_LEFTMETA, KeyState::Released);
+        assert!(
+            !run.state.fired.contains(&launcher),
+            "held into the lock: {held_into_the_lock}"
+        );
+    }
+    key(&mut run, KEY_LEFTMETA, KeyState::Pressed);
+    key(&mut run, KEY_RIGHTMETA, KeyState::Pressed);
+    key(&mut run, KEY_RIGHTMETA, KeyState::Released);
+    key(&mut run, KEY_LEFTMETA, KeyState::Released);
+    assert!(!run.state.fired.contains(&launcher), "two Supers");
+    run.stop();
+}
+
+/// A call is stamped with the lock epoch it was asked in: a lock moves the epoch on, so the
+/// worker drops a call asked before it; after an unlock a call carries the current one.
+#[test]
+fn a_call_carries_the_current_lock_epoch() {
+    use crate::session_calls::{Job, Request, SessionCalls, CONTROL_CENTER};
+    use std::sync::atomic::Ordering;
+    let mut run = Running::start(None);
+    let (calls, requests) = SessionCalls::detached();
+    run.state.session_calls = Some(calls);
+    let (mut window, _) = focused_window(&mut run);
+    let super_c = [KEY_LEFTMETA, KEY_C];
+    sent_to(&mut window, &mut run, &super_c);
+    let before = Request {
+        job: Job::Call(&CONTROL_CENTER),
+        epoch: 0,
+    };
+    assert_eq!(requests.try_recv().ok(), Some(before));
+    let (mut locker, lock) = lock_session(&mut run);
+    let epoch = run.state.lock_epoch.load(Ordering::SeqCst);
+    assert_eq!(epoch, 1, "the lock moved the epoch on");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    sent_to(&mut window, &mut run, &super_c);
+    let after = Request {
+        job: Job::Call(&CONTROL_CENTER),
+        epoch,
+    };
+    assert_eq!(requests.try_recv().ok(), Some(after), "the current epoch");
+    run.stop();
+}
+
+/// The media keys run their commands as transient units of the user manager (D6): mute,
+/// microphone mute, play and pause, next and previous, each with the table's vector; locked,
+/// only mute acts, and the others reach the lock surface.
+#[test]
+fn the_media_keys_run_their_commands() {
+    use crate::bindings::Action;
+    use crate::session_calls::{MIC_MUTE, MUTE, NEXT, PLAY_PAUSE, PREVIOUS};
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [
+        (KEY_MUTE, &MUTE, "XF86AudioMute"),
+        (KEY_MICMUTE, &MIC_MUTE, "XF86AudioMicMute"),
+        (KEY_PLAYPAUSE, &PLAY_PAUSE, "XF86AudioPlay"),
+        (KEY_NEXTSONG, &NEXT, "XF86AudioNext"),
+        (KEY_PREVIOUSSONG, &PREVIOUS, "XF86AudioPrev"),
+    ];
+    for (code, command, what) in keys {
+        acts(
+            &mut window,
+            &mut run,
+            &[code],
+            Some(Action::Run(command)),
+            what,
+        );
+    }
+    let (mut locker, _lock) = lock_session(&mut run);
+    acts(
+        &mut locker,
+        &mut run,
+        &[KEY_MUTE],
+        Some(Action::Run(&MUTE)),
+        "locked, XF86AudioMute",
+    );
+    for (code, _, what) in &keys[1..] {
+        reaches(&mut locker, &mut run, &[*code], what);
+    }
+    run.stop();
+}
+
+/// Super+Shift+Escape and `XF86PowerOff` run cosmic-osd's log-out and power dialogs (D6);
+/// neither acts while locked.
+#[test]
+fn the_session_keys_run_their_commands() {
+    use crate::bindings::Action;
+    use crate::session_calls::{LOG_OUT, POWER_OFF};
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let log_out = [KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC];
+    acts(
+        &mut window,
+        &mut run,
+        &log_out,
+        Some(Action::Run(&LOG_OUT)),
+        "Super+Shift+Escape",
+    );
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_POWER],
+        Some(Action::Run(&POWER_OFF)),
+        "XF86PowerOff",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &log_out,
+        "locked, Super+Shift+Escape",
+    );
+    reaches(&mut locker, &mut run, &[KEY_POWER], "locked, XF86PowerOff");
+    run.stop();
+}
+
+/// The touchpad key, alone or with Super+Ctrl, toggles the touchpads (D16); headless there are
+/// none, and the device side is checked at the console. Not while locked.
+#[test]
+fn the_touchpad_key_toggles_the_touchpads() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_TOUCHPAD_TOGGLE],
+        Some(Action::TouchpadToggle),
+        "XF86TouchpadToggle",
+    );
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_TOUCHPAD_TOGGLE],
+        Some(Action::TouchpadToggle),
+        "Super+Ctrl+XF86TouchpadToggle",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_TOUCHPAD_TOGGLE],
+        "locked, XF86TouchpadToggle",
+    );
+    run.stop();
+}
+
+/// The volume and brightness keys call cosmic-settings-daemon as cosmic-comp's session does
+/// (D13, decision 29), unlocked and locked (section 1).
+#[test]
+fn the_volume_and_brightness_keys_call_their_daemon() {
+    use crate::bindings::cosmic::{BRIGHTNESS_DOWN, BRIGHTNESS_UP, VOLUME_DOWN, VOLUME_UP};
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [
+        (KEY_VOLUMEUP, &VOLUME_UP, "XF86AudioRaiseVolume"),
+        (KEY_VOLUMEDOWN, &VOLUME_DOWN, "XF86AudioLowerVolume"),
+        (KEY_BRIGHTNESSUP, &BRIGHTNESS_UP, "XF86MonBrightnessUp"),
+        (
+            KEY_BRIGHTNESSDOWN,
+            &BRIGHTNESS_DOWN,
+            "XF86MonBrightnessDown",
+        ),
+    ];
+    for (code, call, what) in keys {
+        acts(
+            &mut window,
+            &mut run,
+            &[code],
+            Some(Action::Call(call)),
+            what,
+        );
+    }
+    let (mut locker, _lock) = lock_session(&mut run);
+    for (code, call, what) in keys {
+        acts(
+            &mut locker,
+            &mut run,
+            &[code],
+            Some(Action::Call(call)),
+            what,
+        );
+    }
+    run.stop();
+}
+
+/// Super+Alt+S toggles the screen reader through cosmic-settings-daemon (D13); not while
+/// locked, where it reaches the lock surface.
+#[test]
+fn super_alt_s_toggles_the_screen_reader() {
+    use crate::bindings::cosmic::SCREEN_READER;
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keys = [KEY_LEFTMETA, KEY_LEFTALT, KEY_S];
+    acts(
+        &mut window,
+        &mut run,
+        &keys,
+        Some(Action::Call(&SCREEN_READER)),
+        "Super+Alt+S",
+    );
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &keys, "locked, Super+Alt+S");
     run.stop();
 }
 
