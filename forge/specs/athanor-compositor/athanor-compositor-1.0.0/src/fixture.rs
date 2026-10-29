@@ -8947,6 +8947,16 @@ fn ctrl_alt_tab_from_a_popup_continues_after_its_parent() {
         Some(&dock_surface),
         "after the bar, the dock"
     );
+    assert!(
+        smithay::desktop::PopupManager::popups_for_surface(&bar_surface)
+            .next()
+            .is_none(),
+        "the popup is closed"
+    );
+    assert!(
+        !run.state.seat.get_pointer().expect("a pointer").is_grabbed(),
+        "its grab ends with it"
+    );
     run.stop();
 }
 

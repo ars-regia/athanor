@@ -20,7 +20,7 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
 };
 use smithay::reexports::wayland_server::backend::InvalidId;
-use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
+use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
@@ -519,12 +519,17 @@ impl State {
     /// window on top (`refocus`, `focus_top`): handing it back to `window`, as Smithay's own end
     /// of a popup grab does, would send an enter to a window about to be hidden.
     pub(crate) fn dismiss_popups(&mut self, window: &Window) {
-        let Some(root) = window.toplevel().map(|toplevel| toplevel.wl_surface().clone()) else {
-            return;
-        };
+        if let Some(root) = window.toplevel().map(|toplevel| toplevel.wl_surface().clone()) {
+            self.dismiss_popups_of(&root);
+        }
+    }
+
+    /// `dismiss_popups` for the popups whose root is the surface `root`.
+    pub(crate) fn dismiss_popups_of(&mut self, root: &WlSurface) {
+        let root = root.clone();
         for (popup, _) in PopupManager::popups_for_surface(&root) {
             if let Err(error) = PopupManager::dismiss_popup(&root, &popup) {
-                tracing::warn!(?error, "a popup of a hidden window could not be dismissed");
+                tracing::warn!(?error, "a popup could not be dismissed");
             }
         }
         if let Some(keyboard) = self.seat.get_keyboard() {
