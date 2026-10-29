@@ -9698,6 +9698,33 @@ fn minimising_a_window_ends_its_popup_grab() {
     run.stop();
 }
 
+/// A popup of a window that draws nothing, one that committed a null buffer, grabs nothing, even
+/// with a key serial of its client's.
+#[test]
+fn a_popup_of_a_window_drawing_nothing_grabs_nothing() {
+    let mut run = Running::start(None);
+    let (mut local, _, _) = three_workspaces(&mut run);
+    let blank = local.another(&mut run, "blank");
+    let window = local.server_window(&run, &blank.surface);
+    run.state.focus(&window);
+    blank.surface.attach(None, 0, 0);
+    blank.surface.commit();
+    local.roundtrip(&mut run);
+    assert!(run.state.space.element_location(&window).is_some(), "still in the space");
+    let focus = keyboard_focus(&run);
+    assert_eq!(
+        focus.as_ref().and_then(|surface| surface.client()).map(|c| c.id()),
+        local.id.clone(),
+        "a window of the popup's client has the keyboard"
+    );
+    grabbing_popup(&mut local, &mut run, &blank.xdg);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(!keyboard.is_grabbed(), "no keyboard grab");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "no pointer grab");
+    run.stop();
+}
+
 /// Unplugging an output with workspaces: its windows, shown and parked, join the first output's
 /// active workspace and come back on the first output, and a client hears each workspace leave
 /// its group and go, then the group go, in one `done`.
