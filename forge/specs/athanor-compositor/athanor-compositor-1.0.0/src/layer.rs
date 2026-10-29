@@ -17,7 +17,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::shell::wlr_layer::{
-    KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
+    Anchor, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
     WlrLayerShellState,
 };
 use smithay::wayland::shell::xdg::PopupSurface;
@@ -214,6 +214,69 @@ impl State {
             }
         }
         self.focus_top();
+    }
+
+    // ponytail: the first output when a window has the keyboard, and a popup of a layer surface
+    // restarts the cycle; per output and through `find_popup_root_surface` with several.
+    /// Ctrl+Alt+Tab: the keyboard goes to the next of the mapped on-demand surfaces of the top
+    /// layer of the output that has it (the first, when a window has it): those anchored to the
+    /// top first, then the others, each group in the order its surfaces were created; after
+    /// the last it goes back to the window
+    /// (`focus_top`). The keyboard is not taken from an exclusive surface (D10), and the
+    /// surfaces of an identity Super+Escape took the keyboard from are skipped. Not while
+    /// locked: `fire` refuses it.
+    pub fn focus_cycle(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if self.exclusive_layer().is_some() {
+            return;
+        }
+        let focus = keyboard.current_focus();
+        let on_layer = focus.as_ref().and_then(|focus| {
+            self.space.outputs().find(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(focus, WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
+        });
+        let output = on_layer.or_else(|| self.space.outputs().next()).cloned();
+        let Some(output) = output else {
+            return;
+        };
+        let mut ring: Vec<(bool, WlSurface)> = layer_map_for_output(&output)
+            .layers_on(Layer::Top)
+            .filter(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::OnDemand
+                    && mapped(layer.wl_surface())
+                    && !self.escaped(layer.wl_surface())
+            })
+            .map(|layer| {
+                (
+                    !layer.cached_state().anchor.contains(Anchor::TOP),
+                    layer.wl_surface().clone(),
+                )
+            })
+            .collect();
+        ring.sort_by_key(|(below, _)| *below);
+        let next = match ring
+            .iter()
+            .position(|(_, surface)| Some(surface) == focus.as_ref())
+        {
+            Some(at) => ring.get(at + 1),
+            None => ring.first(),
+        };
+        // Nothing to cycle to from a window: leave its input method's grab alone.
+        if next.is_none() && on_layer.is_none() {
+            return;
+        }
+        if keyboard.is_grabbed() {
+            keyboard.unset_grab(self);
+        }
+        match next {
+            Some((_, surface)) => self.set_keyboard_focus(Some(surface.clone())),
+            None => self.focus_top(),
+        }
     }
 
     /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
