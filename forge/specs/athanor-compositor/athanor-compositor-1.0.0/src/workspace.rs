@@ -283,6 +283,31 @@ impl State {
         self.workspaces_changed();
     }
 
+    /// Puts `window`, dropped by a move, on the active workspace of the output under its centre
+    /// when that is another output's than its workspace's: it stays where it was dropped.
+    pub fn settle(&mut self, window: &Window) {
+        let (Some(on), Some(bbox)) = (
+            window.user_data().get::<OnWorkspace>(),
+            self.space.element_bbox(window),
+        ) else {
+            return;
+        };
+        let centre = Point::<i32, Logical>::from((
+            bbox.loc.x.saturating_add(bbox.size.w / 2),
+            bbox.loc.y.saturating_add(bbox.size.h / 2),
+        ));
+        let Some(output) = self.space.output_under(centre.to_f64()).next().cloned() else {
+            return;
+        };
+        if self.output_of_workspace(on.0.get()).as_ref() == Some(&output) {
+            return;
+        }
+        if let Some(id) = self.active_workspace(&output) {
+            on.0.set(id);
+            self.workspaces_changed();
+        }
+    }
+
     /// Activates `id` on its output: the windows of the workspace left go out of the space, those
     /// of `id` come back where they were, and the keyboard goes to the top window. False when no
     /// output has `id`.

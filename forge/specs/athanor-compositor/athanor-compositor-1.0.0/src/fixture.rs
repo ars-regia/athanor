@@ -9536,15 +9536,23 @@ fn leaving_a_workspace_ends_its_popup_grab() {
     run.stop();
 }
 
-/// A token that names a hidden minimised window on an inactive workspace restores nothing and
-/// switches nothing: the workspace shown stays.
+/// A token that names a hidden window on an inactive workspace, minimised or not, restores
+/// nothing and switches nothing: the workspace shown stays.
 #[test]
 fn a_token_for_a_hidden_window_keeps_the_workspace() {
+    for minimised in [true, false] {
+        a_token_for_a_hidden_window(minimised);
+    }
+}
+
+fn a_token_for_a_hidden_window(minimised: bool) {
     let mut run = Running::start(None);
     let (mut local, _, list) = three_workspaces(&mut run);
     let tray = local.another(&mut run, "tray");
     let window = local.server_window(&run, &tray.surface);
-    assert!(run.state.minimise(&window));
+    if minimised {
+        assert!(run.state.minimise(&window));
+    }
     tray.surface.attach(None, 0, 0);
     tray.surface.commit();
     local.roundtrip(&mut run);
@@ -9560,11 +9568,46 @@ fn a_token_for_a_hidden_window_keeps_the_workspace() {
     let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
     activation.activate(token, &tray.surface);
     local.roundtrip(&mut run);
-    assert!(run.state.is_minimised(&window), "still minimised");
+    assert_eq!(run.state.is_minimised(&window), minimised, "as it was");
     assert_eq!(
         run.state.active_workspace(&output),
         Some(list[0]),
         "the workspace shown stays"
     );
+    run.stop();
+}
+
+/// A window a move drops with its centre on another output goes to that output's active
+/// workspace, where it was dropped: switching the first output's workspace leaves it shown.
+#[test]
+fn a_window_dropped_on_another_output_takes_its_workspace() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    let first = output_at(&run, 0);
+    let second = output_at(&run, 1);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let area = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("the second output's place");
+    run.state.space.relocate_element(&window, area.loc);
+    run.state.settle(&window);
+    let on_second = run.state.active_workspace(&second);
+    assert!(on_second.is_some());
+    assert_eq!(run.state.workspace_of(&window), on_second);
+    assert_eq!(
+        workspaces_of(&run, 1).len(),
+        2,
+        "an empty workspace follows on the second output"
+    );
+    assert_eq!(run.state.space.element_location(&window), Some(area.loc), "where it was dropped");
+
+    let last = *workspaces_of(&run, 0).last().expect("a workspace");
+    assert!(run.state.activate_workspace(last));
+    assert!(run.state.space.element_location(&window).is_some(), "still shown");
+    assert_eq!(run.state.output_of_workspace(last), Some(first));
     run.stop();
 }

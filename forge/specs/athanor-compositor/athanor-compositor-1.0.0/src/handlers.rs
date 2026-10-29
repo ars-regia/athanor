@@ -809,7 +809,7 @@ impl XdgActivationHandler for State {
                     // an inactive workspace is found there.
                     if self.is_minimised(&window) {
                         self.unminimise(&window);
-                    } else if let Some(id) = self.workspace_of(&window) {
+                    } else if let Some(id) = self.workspace_of(&window).filter(|_| shown(&window)) {
                         self.activate_workspace(id);
                     }
                 }
