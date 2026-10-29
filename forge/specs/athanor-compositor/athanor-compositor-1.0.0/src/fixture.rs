@@ -9669,6 +9669,35 @@ fn a_popup_of_a_hidden_window_grabs_nothing() {
     }
 }
 
+/// Minimising a window dismisses its popups and ends their grab: the keyboard goes to the window
+/// on top, not to a menu no one sees (#831).
+#[test]
+fn minimising_a_window_ends_its_popup_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _, _) = three_workspaces(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.is_grabbed(), "the popup holds the keyboard");
+
+    assert!(run.state.minimise(&window));
+    assert!(!keyboard.is_grabbed(), "the popup's keyboard grab ends");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "the popup's pointer grab ends");
+    let top = run
+        .state
+        .space
+        .elements()
+        .rev()
+        .find(|window| crate::handlers::shown(window))
+        .and_then(|window| window.toplevel().map(|t| t.wl_surface().clone()));
+    assert!(top.is_some(), "a window is shown");
+    assert_eq!(keyboard_focus(&run), top, "the keyboard is on the window on top");
+    run.stop();
+}
+
 /// Unplugging an output with workspaces: its windows, shown and parked, join the first output's
 /// active workspace and come back on the first output, and a client hears each workspace leave
 /// its group and go, then the group go, in one `done`.

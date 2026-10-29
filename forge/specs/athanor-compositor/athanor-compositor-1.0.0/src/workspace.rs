@@ -514,20 +514,24 @@ impl State {
     }
 
     /// Dismisses the popups of `window` and ends the keyboard and pointer grabs they hold: while
-    /// a popup grab lasts, Smithay keeps the keyboard on the popup whatever focus is set.
-    fn dismiss_popups(&mut self, window: &Window) {
+    /// a popup grab lasts, Smithay keeps the keyboard on the popup whatever focus is set. The
+    /// keyboard is left with no focus, not on the popup, and every caller then gives it to the
+    /// window on top (`refocus`, `focus_top`): handing it back to `window`, as Smithay's own end
+    /// of a popup grab does, would send an enter to a window about to be hidden.
+    pub(crate) fn dismiss_popups(&mut self, window: &Window) {
         let Some(root) = window.toplevel().map(|toplevel| toplevel.wl_surface().clone()) else {
             return;
         };
         for (popup, _) in PopupManager::popups_for_surface(&root) {
             if let Err(error) = PopupManager::dismiss_popup(&root, &popup) {
-                tracing::warn!(?error, "a popup of a parked window could not be dismissed");
+                tracing::warn!(?error, "a popup of a hidden window could not be dismissed");
             }
         }
         if let Some(keyboard) = self.seat.get_keyboard() {
             let rooted = keyboard.with_grab(|_, grab| grab.start_data().focus.as_ref() == Some(&root));
             if rooted == Some(true) {
                 keyboard.unset_grab(self);
+                self.set_keyboard_focus(None);
             }
         }
         if let Some(pointer) = self.seat.get_pointer() {

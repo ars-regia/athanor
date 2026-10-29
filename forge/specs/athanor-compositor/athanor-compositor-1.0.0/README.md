@@ -74,7 +74,8 @@ active workspace; the windows of an inactive one leave the space, keeping their 
 back there when it is activated, at once, with no animation. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
 first; an xdg-activation token, which a focused client can make at any time, switches no
-workspace, and a popup of a window on an inactive workspace or minimised grabs nothing. A window
+workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+window on an inactive workspace or minimised grabs nothing. A window
 a move drops with its centre on another output joins that output's active workspace, and a
 window its output no longer shows after the outputs change is centred on that output, on the
 first when its output went, whose active workspace it then joins; a window is maximised to its

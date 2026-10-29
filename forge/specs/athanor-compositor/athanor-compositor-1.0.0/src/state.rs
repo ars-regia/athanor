@@ -633,9 +633,10 @@ impl State {
         Some(kept)
     }
 
-    /// Minimises `window`: it leaves the space, keeping its location, and the keyboard and the
-    /// pointer go to what is under it; it keeps committing until `unminimise`. A window the user
-    /// cannot see, one that has not drawn yet included, is refused: false.
+    /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,
+    /// and the keyboard and the pointer go to what is under it; it keeps committing until
+    /// `unminimise`. A window the user cannot see, one that has not drawn yet included, is
+    /// refused: false.
     pub fn minimise(&mut self, window: &Window) -> bool {
         let Some(at) = self
             .space
@@ -645,6 +646,7 @@ impl State {
             return false;
         };
         self.end_window_grab(window);
+        self.dismiss_popups(window);
         window.set_activated(false);
         if let Some(toplevel) = window.toplevel() {
             toplevel.send_pending_configure();
