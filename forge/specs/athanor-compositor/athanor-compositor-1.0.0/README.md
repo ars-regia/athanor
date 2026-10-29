@@ -32,7 +32,8 @@ runs it in place of cosmic-comp (`forge/test/shell/session.sh`).
 SIGTERM, which `systemctl --user stop` sends, and SIGINT, which Ctrl+C sends, end the event loop
 as a closed nested window does (`src/shutdown.rs`). The compositor then stops xwayland-satellite
 and removes the X11 display's lock and socket while they are still its own. It drops the Wayland
-socket, releases the DRM device and the seat through the drops of the state, and exits 0. The
+socket, releases the DRM device and the seat through the drops of the state and of the event
+loop's sources, and exits 0. The
 satellite runs in a scope of its own under the user manager, outside the service's cgroup, so
 stopping the service does not end it: the compositor sends SIGTERM to the process it spawned,
 which `systemd-run --scope` executes in place, and SIGKILL after two seconds. Xwayland exits by
@@ -40,8 +41,8 @@ itself when the satellite's connection closes. `tests/sigterm.rs` covers the Way
 its lock, and `xwayland.rs` the satellite's termination and the ownership of the X11 files; no
 test covers the release of the DRM device and the seat.
 
-The signals are blocked from the first thing `main` does, so that every thread inherits the
-block, and are read once the loop runs. A signal sent while the compositor starts is honoured
+The signals are blocked at the start of `run`, before the display, the backend and any thread,
+so that every thread inherits the block, and are read once the loop runs. A signal sent while the compositor starts is honoured
 when the loop begins, and a start that blocks inside a call (the seat, the DRM device) ends only
 by SIGKILL. The same holds for a loop blocked in a call. Once the loop has returned, the source
 is removed, and a second SIGTERM or Ctrl+C takes the default action and ends a stalled cleanup.
