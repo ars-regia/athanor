@@ -20,6 +20,118 @@ systemctl --user reset-failed
 export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
 
+# Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
+# /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
+# manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
+# children of this script, not of the user manager, so they need it from here.
+export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+# The user's language, region and cursor (doc_session.md SN2; doc_languages.md LN6 and LN7;
+# doc_accessibility.md AX9), which athanor-desktop imports into the user manager. A value
+# that cannot be read or fails its check is logged and ignored, and the system's applies.
+# LN7's hand-off from first run, athanor-first-run apply-handoff, comes before these reads
+# with the command itself (doc_first_run.md, step 4 of its construction).
+note() {
+    if ! printf '%s\n' "$1" | systemd-cat -p warning -t athanor-session; then
+        printf 'athanor-session: %s\n' "$1" >&2
+    fi
+}
+# A locale name, checked against LN6's characters, as athanor-greeter-session checks those
+# of /etc/locale.conf.
+is_locale() {
+    case $1 in
+    '' | *[!A-Za-z0-9_.@-]*) return 1 ;;
+    esac
+}
+# The value of a GSettings string key, which gsettings prints in single quotes.
+gsetting_string() {
+    value=$(gsettings get "$1" "$2") || return 1
+    case $value in
+    \'*\')
+        value=${value#\'}
+        value=${value%\'}
+        ;;
+    *) return 1 ;;
+    esac
+    case $value in
+    *[\'\\]*) return 1 ;;
+    esac
+    printf '%s\n' "$value"
+}
+
+# LN6: LANG from the first of AccountsService's Languages, LANGUAGE from the list when it
+# has more than one entry. AccountsService names the user's object; busctl prints its
+# type and the path in quotes, then for Languages the variant's type, the array's type,
+# the count and each entry in quotes. Both are method calls, which busctl's --timeout
+# bounds to 2 s, so a stalled AccountsService cannot hold the login; get-property would
+# ignore --timeout and wait the bus's 25 s default (systemd 258).
+if user=$(busctl --timeout=2 --system call org.freedesktop.Accounts /org/freedesktop/Accounts \
+    org.freedesktop.Accounts FindUserById x "$(id -u)") &&
+    case $user in
+    'o "/org/freedesktop/Accounts/'*\") user=${user#o \"} ;;
+    *) false ;;
+    esac &&
+    languages=$(busctl --timeout=2 --system call org.freedesktop.Accounts "${user%\"}" \
+        org.freedesktop.DBus.Properties Get ss org.freedesktop.Accounts.User Languages); then
+    set -f
+    # shellcheck disable=SC2086 # one word per entry
+    set -- $languages
+    set +f
+    list=
+    if [ "$#" -ge 3 ] && [ "$1" = v ] && [ "$2" = as ]; then
+        shift 3
+        for entry do
+            language=${entry#\"}
+            language=${language%\"}
+            if [ "\"$language\"" = "$entry" ] && is_locale "$language"; then
+                list=${list:+$list:}$language
+            else
+                note "ignoring the language $entry of AccountsService"
+            fi
+        done
+    else
+        note "cannot parse the languages AccountsService gave: $languages"
+    fi
+    if [ -n "$list" ]; then
+        export LANG="${list%%:*}"
+        case $list in
+        *:*) export LANGUAGE="$list" ;;
+        esac
+    fi
+else
+    note "cannot read the languages from AccountsService; the system's apply"
+fi
+
+# LN7: the region's formats, when the region is set and differs from LANG, as gnome-session
+# applies them.
+if region=$(gsetting_string org.gnome.system.locale region); then
+    if [ -n "$region" ] && ! is_locale "$region"; then
+        note "ignoring the region $region"
+    elif [ -n "$region" ] && [ "$region" != "${LANG-}" ]; then
+        export LC_NUMERIC="$region" LC_TIME="$region" LC_MONETARY="$region" LC_PAPER="$region"
+        export LC_ADDRESS="$region" LC_TELEPHONE="$region" LC_MEASUREMENT="$region"
+    fi
+else
+    note "cannot read the region from GSettings, or it is not one string; the language's formats apply"
+fi
+
+# AX9: the cursor's size and theme, for the compositor and the applications.
+if size=$(gsettings get org.gnome.desktop.interface cursor-size); then
+    case $size in
+    '' | *[!0-9]*) note "ignoring the cursor size $size" ;;
+    *) export XCURSOR_SIZE="$size" ;;
+    esac
+else
+    note "cannot read the cursor size from GSettings"
+fi
+if theme=$(gsetting_string org.gnome.desktop.interface cursor-theme); then
+    if [ -n "$theme" ]; then
+        export XCURSOR_THEME="$theme"
+    fi
+else
+    note "cannot read the cursor theme from GSettings, or it is not one string"
+fi
+
 # GTK 4.20's wayland input-method module, which GTK 4 picks whenever the compositor
 # offers text-input-v3, composes nothing by itself: with no input method running,
 # dead keys and Compose sequences are dropped (US-International loses every accent).
@@ -27,12 +139,6 @@ export XDG_SESSION_TYPE=wayland
 # engine is enabled, unset when athanor-ime.service runs, since IBus composes then.
 # The user manager reads the same value from 50-athanor-desktop.conf; keep the two equal.
 export GTK_IM_MODULE=simple
-
-# Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
-# /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
-# manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
-# children of this script, not of the user manager, so they need it from here.
-export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
 # The USB policy is relaxed for an unlocked session; the hook does nothing where
 # usbguard is not running.
