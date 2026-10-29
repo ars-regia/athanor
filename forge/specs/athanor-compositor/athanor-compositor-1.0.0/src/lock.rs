@@ -85,6 +85,7 @@ impl SessionLockHandler for State {
         self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
+        self.refresh_tools();
         self.lock_taken();
     }
 
@@ -92,6 +93,7 @@ impl SessionLockHandler for State {
         self.lock = None;
         self.focus_top();
         self.refresh_pointer();
+        self.refresh_tools();
     }
 
     /// Sized to the output, before Smithay sends the first configure; the first lock surface
@@ -115,6 +117,7 @@ impl SessionLockHandler for State {
         lock.surfaces.push((output, surface));
         self.set_keyboard_focus(None);
         self.refresh_pointer();
+        self.refresh_tools();
     }
 }
 

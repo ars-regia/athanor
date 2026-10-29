@@ -10,7 +10,6 @@ use smithay::desktop::{
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
-use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
@@ -44,7 +43,7 @@ use smithay::wayland::selection::data_device::{
 };
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
@@ -433,6 +432,14 @@ impl XdgShellHandler for State {
         &mut self.xdg_shell_state
     }
 
+    fn ack_configure(&mut self, surface: WlSurface, _configure: Configure) {
+        self.decoration_acked(&surface);
+    }
+
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.foreign_parent_set_natively(&surface);
+    }
+
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Mapped now at the bottom of the stack, placed at its first sized commit.
         let window = Window::new_wayland_window(surface);
@@ -450,6 +457,7 @@ impl XdgShellHandler for State {
             self.parked.retain(|(kept, _)| *kept != window);
             self.workspaces_changed();
         }
+        self.foreign_toplevel_destroyed(surface.wl_surface());
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
     }
@@ -690,11 +698,6 @@ impl DataDeviceHandler for State {
 
 // ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
 impl WaylandDndGrabHandler for State {}
-
-// cursor-shape-v1 serves tablet tools too.
-impl TabletSeatHandler for State {
-    type ToolFocus = WlSurface;
-}
 
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {

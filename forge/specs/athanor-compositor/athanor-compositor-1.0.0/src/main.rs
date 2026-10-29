@@ -9,6 +9,9 @@
 mod bindings;
 mod capture;
 mod cursor;
+mod decoration;
+mod foreign;
+mod gestures;
 mod grabs;
 mod handlers;
 mod headless;
@@ -26,6 +29,7 @@ mod screen_filter;
 mod session_calls;
 mod shutdown;
 mod state;
+mod tablet;
 mod toplevel_state;
 mod xkb_config;
 mod udev;
