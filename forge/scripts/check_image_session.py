@@ -6,10 +6,11 @@ Usage: check_image_session.py [IMAGE_ROOT]
 system/check-image-session.sh runs it inside a built image (IMAGE_ROOT defaults to /).
 
 ADR-0115 ships upstream components for 0.9, chosen in docs/spikes/lock-and-polkit-agent-0-9.md:
-cosmic-greeter as the locker and cosmic-idle as the idle trigger, both children of
-athanor-desktop inside the logind session, and cosmic-osd as the polkit agent on polkit 127's
+cosmic-greeter as the locker and cosmic-idle as the idle trigger, both run inside the
+logind session by the supervisor /usr/libexec/athanor/session-components (SN15), which
+athanor-desktop and athanor-compositor-session start, and cosmic-osd as the polkit agent on polkit 127's
 socket-activated helper. Each line below is a way the image has lost one of them without a
-build failure: a package dropped from packages.json, a launcher line removed, the agent's unit
+build failure: a package dropped from packages.json, a supervisor line removed, the agent's unit
 no longer wanted by the session, masked, taken out of NoNewPrivileges or given another ExecStart
 by a drop-in, the helper socket not enabled or enabled without its unit file, the helper setuid
 again (polkit 126), the helper's sandbox read-only over pam_faillock's tally directory (#144,
@@ -35,9 +36,24 @@ from check_image_contacts import enabled_units, is_masked
 
 LAUNCHER = "usr/bin/athanor-desktop"
 BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/cosmic-idle", "usr/bin/cosmic-osd")
-LAUNCHED = (
-    'session_component "$$" cosmic-greeter &',
-    'session_component "$$" cosmic-idle &',
+SUPERVISOR = "usr/libexec/athanor/session-components"
+COMPOSITOR = "usr/bin/athanor-compositor"
+COMPOSITOR_SESSION = "usr/bin/athanor-compositor-session"
+# What each script must hold as a whole active line (doc_session.md SN15): the sessions start
+# the supervisor, which runs the locker and the idle daemon, each in a scope of its own.
+LAUNCHER_LINES = (
+    ". /usr/libexec/athanor/session-components",
+    'session_components "$$" &',
+)
+COMPOSITOR_LINES = (
+    ". /usr/libexec/athanor/session-components",
+    'session_components "$$" target &',
+)
+SUPERVISED = (
+    'session_component "$anchor" cosmic-greeter \\',
+    'session_component "$anchor" cosmic-idle \\',
+    "systemd-run --user --scope --collect --unit=cosmic-greeter-locker.scope cosmic-greeter &",
+    "systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 # Unit directories as an image has them, the lowest priority first (systemd.unit(5), "User Unit
@@ -339,14 +355,25 @@ def portal_problems(root):
     return found
 
 
+def script_problems(root, rel, wanted, required):
+    """One finding per line of `wanted` that is not a whole active line of the script (a
+    commented line does not count); a missing script is a finding only if `required`."""
+    script = root / rel
+    if not script.is_file():
+        return [f"/{rel} is missing"] if required else []
+    lines = {line.strip() for line in script.read_text().splitlines()}
+    return [f"/{rel} does not run `{c}`" for c in wanted if c not in lines]
+
+
 def problems(root):
     found = [f"/{b} is missing" for b in BINARIES if not (root / b).is_file()]
-    launcher = root / LAUNCHER
-    if launcher.is_file():
-        lines = {line.strip() for line in launcher.read_text().splitlines()}
-        found += [f"/{LAUNCHER} does not run `{c}`" for c in LAUNCHED if c not in lines]
-    else:
-        found.append(f"/{LAUNCHER} is missing")
+    found += script_problems(root, LAUNCHER, LAUNCHER_LINES, required=True)
+    found += script_problems(root, SUPERVISOR, SUPERVISED, required=True)
+    # The own compositor's package is not in every image: where its binary is, its session
+    # script is required.
+    found += script_problems(
+        root, COMPOSITOR_SESSION, COMPOSITOR_LINES, (root / COMPOSITOR).is_file()
+    )
     if not any((root / p).is_file() for p in LOCKER_PAM):
         found.append(
             "the locker's PAM service cosmic-greeter is missing: the lock could never open"

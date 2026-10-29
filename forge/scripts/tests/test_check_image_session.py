@@ -23,6 +23,13 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
 SOURCES = ROOT / "forge/specs"
+SUPERVISOR_SOURCE = (
+    SOURCES / "athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
+)
+COMPOSITOR_SESSION_SOURCE = (
+    SOURCES
+    / "athanor-compositor/athanor-compositor-1.0.0/data/athanor-compositor-session"
+)
 LAUNCHER_SOURCE = SOURCES / "athanor-system-config/SOURCES/usr/bin/athanor-desktop"
 USER_UNIT_SOURCES = SOURCES / "athanor-system-services/SOURCES/usr/lib/systemd/user"
 FAILLOCK_DROPIN_SOURCE = (
@@ -33,6 +40,8 @@ PORTAL_SOURCES = (
 )
 
 LAUNCHER = "usr/bin/athanor-desktop"
+SUPERVISOR = "usr/libexec/athanor/session-components"
+COMPOSITOR_SESSION = "usr/bin/athanor-compositor-session"
 AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
 AGENT_LIB_DROPINS = "usr/lib/systemd/user/cosmic-osd.service.d"
 AGENT_ETC_DROPINS = "etc/systemd/user/cosmic-osd.service.d"
@@ -101,6 +110,8 @@ class ImageSession(unittest.TestCase):
         ):
             self.write(b, "")
         self.write(LAUNCHER, LAUNCHER_SOURCE.read_text())
+        self.write(SUPERVISOR, SUPERVISOR_SOURCE.read_text())
+        self.write(COMPOSITOR_SESSION, COMPOSITOR_SESSION_SOURCE.read_text())
         self.write("usr/lib/pam.d/cosmic-greeter", "auth substack system-auth\n")
         self.write(AGENT_UNIT, (USER_UNIT_SOURCES / "cosmic-osd.service").read_text())
         self.write(
@@ -189,17 +200,60 @@ class ImageSession(unittest.TestCase):
         (self.root / LAUNCHER).unlink()
         self.assertProblem("/usr/bin/athanor-desktop is missing")
 
-    def test_a_launcher_without_the_locker_fails(self):
-        self.edit(LAUNCHER, 'session_component "$$" cosmic-greeter &\n', "")
-        self.assertProblem("cosmic-greeter &")
+    def test_a_launcher_that_does_not_start_the_supervisor_fails(self):
+        self.edit(LAUNCHER, 'session_components "$$" &\n', "")
+        self.assertProblem('session_components "$$" &')
+
+    def test_a_launcher_that_does_not_source_the_supervisor_fails(self):
+        self.edit(LAUNCHER, ". /usr/libexec/athanor/session-components\n", "")
+        self.assertProblem(". /usr/libexec/athanor/session-components")
+
+    def test_a_missing_supervisor_fails(self):
+        (self.root / SUPERVISOR).unlink()
+        self.assertProblem("/usr/libexec/athanor/session-components is missing")
+
+    def test_a_supervisor_without_the_locker_scope_fails(self):
+        self.edit(
+            SUPERVISOR, "--unit=cosmic-greeter-locker.scope", "--unit=other.scope"
+        )
+        self.assertProblem("cosmic-greeter-locker.scope")
 
     def test_a_commented_launcher_line_fails(self):
         self.edit(
             LAUNCHER,
-            'session_component "$$" cosmic-idle &',
-            '# session_component "$$" cosmic-idle &',
+            'session_components "$$" &',
+            '# session_components "$$" &',
         )
-        self.assertProblem("cosmic-idle &")
+        self.assertProblem('session_components "$$" &')
+
+    def test_a_commented_supervisor_line_fails(self):
+        self.edit(
+            SUPERVISOR,
+            "systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
+            "# systemd-run --user --scope --collect --unit=cosmic-idle.scope cosmic-idle &",
+        )
+        self.assertProblem("cosmic-idle.scope")
+
+    def test_a_compositor_session_that_does_not_start_the_supervisor_fails(self):
+        self.edit(COMPOSITOR_SESSION, 'session_components "$$" target &\n', "")
+        self.assertProblem('session_components "$$" target &')
+
+    def test_an_image_without_the_compositor_passes(self):
+        (self.root / COMPOSITOR_SESSION).unlink()
+        self.assertEqual(mod.problems(self.root), [])
+
+    def test_an_image_with_the_compositor_but_no_session_script_fails(self):
+        self.write("usr/bin/athanor-compositor", "")
+        (self.root / COMPOSITOR_SESSION).unlink()
+        self.assertProblem("/usr/bin/athanor-compositor-session is missing")
+
+    def test_a_commented_restart_wrapper_fails(self):
+        self.edit(
+            SUPERVISOR,
+            'session_component "$anchor" cosmic-greeter \\',
+            '# session_component "$anchor" cosmic-greeter \\',
+        )
+        self.assertProblem('session_component "$anchor" cosmic-greeter')
 
     def test_a_missing_locker_pam_service_fails(self):
         (self.root / "usr/lib/pam.d/cosmic-greeter").unlink()
