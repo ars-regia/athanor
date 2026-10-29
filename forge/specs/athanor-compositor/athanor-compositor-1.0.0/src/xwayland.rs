@@ -11,10 +11,12 @@ use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{Interest, Mode, PostAction, RegistrationToken};
 use smithay::reexports::rustix;
+use smithay::reexports::rustix::io::Errno;
+use smithay::reexports::rustix::process::{kill_process, test_kill_process, Pid, Signal};
 use smithay::reexports::rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType};
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -36,6 +38,8 @@ pub struct Display {
     pub number: u32,
     lock: PathBuf,
     socket: PathBuf,
+    /// The device and inode of the socket file this display bound.
+    socket_id: (u64, u64),
     listener: UnixListener,
     /// The abstract name of the same path, bound but not listening: libxcb tries it first and
     /// is refused, then uses the socket file, so another server cannot answer under it, and a
@@ -64,10 +68,19 @@ impl Display {
             let socket = sockets.join(format!("X{number}"));
             match listen(&socket) {
                 Ok((listener, reserved)) => {
+                    let socket_id = match std::fs::symlink_metadata(&socket) {
+                        Ok(meta) => (meta.dev(), meta.ino()),
+                        Err(error) => {
+                            remove(&socket);
+                            remove(&lock);
+                            return Err(format!("{}: {error}", socket.display()).into());
+                        }
+                    };
                     return Ok(Self {
                         number,
                         lock,
                         socket,
+                        socket_id,
                         listener,
                         _reserved: reserved,
                     })
@@ -88,10 +101,21 @@ impl Display {
     }
 }
 
+/// Removes the lock and the socket, each only while it is still this display's: a lock that
+/// names another process, or a socket file that is not the one bound, belongs to whoever took
+/// the display over.
 impl Drop for Display {
     fn drop(&mut self) {
-        remove(&self.socket);
-        remove(&self.lock);
+        let ours = std::fs::symlink_metadata(&self.socket)
+            .is_ok_and(|meta| {
+                meta.file_type().is_socket() && (meta.dev(), meta.ino()) == self.socket_id
+            });
+        if ours {
+            remove(&self.socket);
+        }
+        if holder(&self.lock) == Some(std::process::id()) {
+            remove(&self.lock);
+        }
     }
 }
 
@@ -207,6 +231,8 @@ pub struct X11 {
     satellite: RegistrationToken,
     exits: channel::Sender<std::io::Result<ExitStatus>>,
     pub running: bool,
+    /// The running satellite's process, which stopping the compositor ends.
+    pid: Option<u32>,
     /// How many times the satellite was started, and when it was last tried.
     pub starts: u32,
     pub last: Option<Instant>,
@@ -214,6 +240,9 @@ pub struct X11 {
 
 impl Drop for X11 {
     fn drop(&mut self) {
+        if let Some(pid) = self.pid.take() {
+            terminate(pid);
+        }
         remove(&self.wayland);
     }
 }
@@ -302,6 +331,7 @@ pub fn start(
         satellite,
         exits,
         running: false,
+        pid: None,
         starts: 0,
         last: None,
     });
@@ -396,6 +426,7 @@ impl State {
             return false;
         }
         x11.running = true;
+        x11.pid = Some(pid);
         x11.starts += 1;
         tracing::info!(
             display = x11.display.number,
@@ -436,6 +467,7 @@ impl State {
             Err(error) => tracing::error!(%error, "xwayland-satellite could not be waited for"),
         }
         x11.running = false;
+        x11.pid = None;
         let source = x11.source;
         if let Err(error) = self.drop_x11_clients() {
             tracing::error!(%error, "the X11 clients that came meanwhile stay");
@@ -444,6 +476,47 @@ impl State {
         if let Err(error) = self.loop_handle.enable(&source) {
             tracing::error!(%error, "the X11 display stops listening");
         }
+    }
+}
+
+/// How long the satellite has to end on SIGTERM before SIGKILL.
+const TERMINATION: Duration = Duration::from_secs(2);
+
+/// Under the user manager the satellite runs in a scope of its own, outside the compositor
+/// service's cgroup, so stopping the service does not end it: the compositor signals it. The
+/// child it spawned is the satellite itself, since `systemd-run --scope` executes the command in
+/// its own process instead of forking it. Its Xwayland is not signalled: the satellite is
+/// Xwayland's Wayland server, and Xwayland exits when that connection closes, as a check with
+/// xwayland-satellite 0.8.2 showed, within milliseconds of the satellite's SIGTERM and of its
+/// SIGKILL alike.
+///
+/// Ends the process `pid`, a satellite this compositor started: SIGTERM, then SIGKILL after
+/// `TERMINATION`. The waiter thread reaps it, so that the process is gone once signalling it
+/// fails. ponytail: a pid reused within that window is signalled; the window is the time the
+/// loop takes to see an exit, and the satellite is this process's own child.
+fn terminate(pid: u32) {
+    let Some(target) = i32::try_from(pid).ok().and_then(Pid::from_raw) else {
+        return;
+    };
+    let gone = |target| matches!(test_kill_process(target), Err(Errno::SRCH));
+    match kill_process(target, Signal::TERM) {
+        Ok(()) => {}
+        Err(Errno::SRCH) => return,
+        Err(error) => {
+            tracing::warn!(pid, %error, "xwayland-satellite could not be signalled");
+            return;
+        }
+    }
+    let deadline = Instant::now() + TERMINATION;
+    while !gone(target) {
+        if Instant::now() >= deadline {
+            tracing::warn!(pid, "xwayland-satellite does not end: it is killed");
+            if let Err(error) = kill_process(target, Signal::KILL) {
+                tracing::warn!(pid, %error, "xwayland-satellite could not be killed");
+            }
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -558,5 +631,48 @@ mod tests {
         assert_eq!(display.number, 2);
         drop(display);
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A lock another process took over, and a socket file another server bound, outlive the
+    /// display that is dropped.
+    #[test]
+    fn a_lock_or_socket_taken_over_stays() {
+        let dir = dir("takeover");
+        let display = Display::open(&dir).expect("display");
+        assert_eq!(display.number, 0);
+        std::fs::write(dir.join(".X0-lock"), format!("{:>10}\n", 1)).expect("lock");
+        std::fs::remove_file(dir.join(".X11-unix/X0")).expect("socket");
+        std::fs::write(dir.join(".X11-unix/X0"), "").expect("another socket");
+        drop(display);
+        assert!(dir.join(".X0-lock").exists(), "the lock went");
+        assert!(dir.join(".X11-unix/X0").exists(), "the socket went");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A socket another server bound under the path, a different file than the one this display
+    /// bound, outlives the display that is dropped.
+    #[test]
+    fn a_socket_another_server_bound_stays() {
+        let dir = dir("rebound");
+        let display = Display::open(&dir).expect("display");
+        let path = dir.join(".X11-unix/X0");
+        std::fs::remove_file(&path).expect("socket");
+        // Bound while the display still holds the old file open: a different inode.
+        let other = UnixListener::bind(&path).expect("another server");
+        drop(display);
+        assert!(path.exists(), "the other server's socket went");
+        drop(other);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A satellite that ignores nothing ends on SIGTERM, and the call returns once it is reaped.
+    #[test]
+    fn a_satellite_is_terminated() {
+        let mut child = Command::new("sleep").arg("60").spawn().expect("sleep");
+        let pid = child.id();
+        let waiter = std::thread::spawn(move || child.wait().expect("wait"));
+        terminate(pid);
+        let status = waiter.join().expect("waiter");
+        assert_eq!(std::os::unix::process::ExitStatusExt::signal(&status), Some(15));
     }
 }

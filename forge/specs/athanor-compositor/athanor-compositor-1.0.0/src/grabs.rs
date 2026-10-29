@@ -159,6 +159,7 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
+            data.settle(&self.window);
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }

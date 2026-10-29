@@ -12,7 +12,7 @@ use crate::output_power::OutputPower;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
-use crate::workspace::Group;
+use crate::workspace::{Bound, Strip};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::InputTime;
@@ -202,8 +202,14 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
-    /// The workspace groups sent to the clients of ext-workspace-v1.
-    pub workspace_groups: Vec<Group>,
+    /// What the clients of ext-workspace-v1 were sent.
+    pub workspace_clients: Vec<Bound>,
+    /// The workspaces of each output (`workspace`).
+    pub workspaces: Vec<Strip>,
+    /// The number the last workspace made was given.
+    pub next_workspace: u64,
+    /// The windows of the inactive workspaces, out of the space, each with its location.
+    pub parked: Vec<(Window, Point<i32, Logical>)>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -378,7 +384,10 @@ impl State {
             lock: None,
             idle_notifier_state,
             inhibitors: HashMap::new(),
-            workspace_groups: Vec::new(),
+            workspace_clients: Vec::new(),
+            workspaces: Vec::new(),
+            next_workspace: 0,
+            parked: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
@@ -456,20 +465,23 @@ impl State {
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
         self.output_heads_changed();
+        self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and the windows no output left shows
-    /// are centred on the first one, where the user can reach them.
+    /// An output that goes: its layer surfaces are closed, and its windows join the first
+    /// output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
         self.close_layers(output);
         self.space.unmap_output(output);
         self.fit_to_outputs();
+        self.workspaces_changed();
     }
 
-    /// After the outputs changed (one went, or took another size): the windows no output shows
-    /// are centred on the first one, the pointer is brought back onto the outputs and the lock
-    /// surfaces take the size of their output.
+    /// After the outputs changed (one went, or took another size): the windows their home output
+    /// (`State::home_output`) no longer shows are centred on it and the maximised ones fitted to
+    /// it again, the pointer is brought back onto the outputs and the lock surfaces take the size
+    /// of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
@@ -482,16 +494,17 @@ impl State {
             .filter(|window| {
                 self.space
                     .element_geometry(window)
-                    .is_some_and(|area| !outputs.iter().any(|output| output.overlaps(area)))
+                    .is_some_and(|area| !self.shown_at_home(window, area))
             })
             .cloned()
             .collect();
-        if let Some(area) = self.window_area() {
-            for window in stranded {
+        for window in stranded {
+            if let Some(area) = self.home_area(&window) {
                 let at = centred(area, window.geometry());
                 self.space.relocate_element(&window, at);
             }
         }
+        self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -546,7 +559,11 @@ impl State {
     /// What the layer surfaces' exclusive zones leave of the first output: where windows are
     /// placed.
     pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
-        let output = self.space.outputs().next()?;
+        self.window_area_on(self.space.outputs().next()?)
+    }
+
+    /// What the layer surfaces' exclusive zones leave of `output`.
+    pub fn window_area_on(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let area = self.space.output_geometry(output)?;
         // The layer map lays the output out at its logical size rounded, the space at its
         // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
@@ -564,11 +581,11 @@ impl State {
         Some(inset(area, laid_out, zone))
     }
 
-    /// Maximises `window` to `window_area`, or fits a maximised one to it again: a configure
+    /// Maximises `window` to `home_area`, or fits a maximised one to it again: a configure
     /// with the `maximized` state and the area's size, and the window moves into the area at
     /// the commit that answers it. The geometry it had before is kept for `restore`.
     pub fn maximise(&mut self, window: &Window) {
-        let (Some(toplevel), Some(area)) = (window.toplevel(), self.window_area()) else {
+        let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_area(window)) else {
             return;
         };
         let maximised = window.user_data().get_or_insert(Maximised::default);
@@ -589,9 +606,10 @@ impl State {
     }
 
     /// Restores a maximised `window`: a configure without the `maximized` state and with the
-    /// size it had, and the window moves back at the commit that answers it. The geometry it
-    /// had, or `None` when it is not maximised. A window maximised before it had a size picks
-    /// its own and stays where it is.
+    /// size it had, and the window moves back at the commit that answers it, centred in its
+    /// `home_area` when its home output no longer shows that place. The geometry it had, or
+    /// `None` when it is not maximised. A window maximised before it had a size picks its own
+    /// and stays where it is.
     pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let toplevel = window.toplevel()?;
         let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
@@ -603,14 +621,22 @@ impl State {
             .is_initial_configure_sent()
             .then(|| toplevel.send_configure());
         if !kept.is_empty() {
-            relocate(window, kept.loc, serial);
+            let to = match self
+                .home_area(window)
+                .filter(|_| !self.shown_at_home(window, kept))
+            {
+                Some(area) => centred(area, Rectangle::from_size(kept.size)),
+                None => kept.loc,
+            };
+            relocate(window, to, serial);
         }
         Some(kept)
     }
 
-    /// Minimises `window`: it leaves the space, keeping its location, and the keyboard and the
-    /// pointer go to what is under it; it keeps committing until `unminimise`. A window the user
-    /// cannot see, one that has not drawn yet included, is refused: false.
+    /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,
+    /// and the keyboard and the pointer go to what is under it; it keeps committing until
+    /// `unminimise`. A window the user cannot see, one that has not drawn yet included, is
+    /// refused: false.
     pub fn minimise(&mut self, window: &Window) -> bool {
         let Some(at) = self
             .space
@@ -620,6 +646,7 @@ impl State {
             return false;
         };
         self.end_window_grab(window);
+        self.dismiss_popups(window);
         window.set_activated(false);
         if let Some(toplevel) = window.toplevel() {
             toplevel.send_pending_configure();
@@ -635,30 +662,22 @@ impl State {
         true
     }
 
-    /// Restores a minimised `window` where it was, or centred in `window_area` when no output
-    /// shows that place any more, on top and with the keyboard. False when it is not minimised,
-    /// or draws nothing (it committed a null buffer, as an app hiding into the tray does): it
-    /// stays minimised.
+    /// Restores a minimised `window` where it was, or centred in its `home_area` when its output
+    /// no longer shows that place, on top and with the keyboard, its workspace activated first.
+    /// False when it is not minimised, or draws nothing (it committed a null buffer, as an app
+    /// hiding into the tray does): it stays minimised.
     pub fn unminimise(&mut self, window: &Window) -> bool {
+        if !self.is_minimised(window) || !shown(window) {
+            return false;
+        }
+        if let Some(id) = self.workspace_of(window) {
+            self.activate_workspace(id);
+        }
         let Some(index) = self.minimised.iter().position(|(kept, _)| kept == window) else {
             return false;
         };
-        if !shown(window) {
-            return false;
-        }
-        let (window, mut at) = self.minimised.remove(index);
-        let geometry = window.geometry();
-        let kept = Rectangle::new(at + geometry.loc, geometry.size);
-        let reachable = self
-            .space
-            .outputs()
-            .filter_map(|output| self.space.output_geometry(output))
-            .any(|output| output.overlaps(kept));
-        if !reachable {
-            if let Some(area) = self.window_area() {
-                at = centred(area, geometry);
-            }
-        }
+        let (window, at) = self.minimised.remove(index);
+        let at = self.reachable(&window, at);
         self.space.map_element(window.clone(), at, true);
         // A move answered while it was minimised applies now, and a maximised window takes the
         // area of now.
@@ -670,12 +689,9 @@ impl State {
         true
     }
 
-    /// Fits the maximised windows to `window_area` again, after the layer surfaces' exclusive
-    /// zones changed it.
+    /// Fits the maximised windows to their `home_area` again, after the layer surfaces'
+    /// exclusive zones or the outputs changed it.
     pub fn fit_maximised(&mut self) {
-        let Some(area) = self.window_area() else {
-            return;
-        };
         let stale: Vec<Window> = self
             .space
             .elements()
@@ -684,7 +700,8 @@ impl State {
                     .user_data()
                     .get::<Maximised>()
                     .and_then(|maximised| maximised.0.get())
-                    .is_some_and(|kept| kept.area != area)
+                    .zip(self.home_area(window))
+                    .is_some_and(|(kept, area)| kept.area != area)
             })
             .cloned()
             .collect();
@@ -949,11 +966,12 @@ impl State {
         self.minimised.iter().any(|(kept, _)| kept == window)
     }
 
-    /// The mapped windows, then the minimised ones.
-    fn windows(&self) -> impl Iterator<Item = &Window> {
+    /// The mapped windows, then the minimised ones, then those of the inactive workspaces.
+    pub(crate) fn windows(&self) -> impl Iterator<Item = &Window> {
         self.space
             .elements()
             .chain(self.minimised.iter().map(|(window, _)| window))
+            .chain(self.parked.iter().map(|(window, _)| window))
     }
 }
 

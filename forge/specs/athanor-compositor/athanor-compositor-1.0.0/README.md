@@ -31,6 +31,27 @@ It opens one output the size of its window, at the given scale (1 by default), l
 next free `wayland-N` socket and logs that name. In the shell rig, `RIG_COMPOSITOR=athanor`
 runs it in place of cosmic-comp (`forge/test/shell/session.sh`).
 
+SIGTERM, which `systemctl --user stop` sends, and SIGINT, which Ctrl+C sends, end the event loop
+as a closed nested window does (`src/shutdown.rs`). The compositor then stops xwayland-satellite
+and removes the X11 display's lock and socket while they are still its own. It drops the Wayland
+socket, releases the DRM device and the seat through the drops of the state and of the event
+loop's sources, and exits 0. The
+satellite runs in a scope of its own under the user manager, outside the service's cgroup, so
+stopping the service does not end it: the compositor sends SIGTERM to the process it spawned,
+which `systemd-run --scope` executes in place, and SIGKILL after two seconds. Xwayland exits by
+itself when the satellite's connection closes. `tests/sigterm.rs` covers the Wayland socket and
+its lock, and `xwayland.rs` the satellite's termination and the ownership of the X11 files; no
+test covers the release of the DRM device and the seat.
+
+The signals are blocked at the start of `run`, before the display, the backend and any thread,
+so that every thread inherits the block, and are read once the loop runs. A signal sent while the compositor starts is honoured
+when the loop begins, and a start that blocks inside a call (the seat, the DRM device) ends only
+by SIGKILL. The same holds for a loop blocked in a call. Once the loop has returned, the source
+is removed, and a second SIGTERM or Ctrl+C takes the default action and ends a stalled cleanup.
+`doc_session.md` specifies `TimeoutStopSec=5s` for `athanor-compositor.service`, which the
+session's change (#704) ships, not this crate: systemd then sends SIGKILL after 5 s, and the
+satellite's two seconds between SIGTERM and SIGKILL stay below it.
+
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
 off screen.
 
@@ -68,8 +89,23 @@ windows with their title and app id, and `ext-image-copy-capture-v1` copies one 
 through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
-`ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
-output (`src/workspace.rs`). Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
+`ext-idle-notify-v1` follows the input. Each output has its own dynamic workspaces
+(`doc_own_stack.md` OS2, `src/workspace.rs`), as cosmic-comp keeps them: an empty one always
+last, which a window placed on it turns into a new empty one after it, and a workspace emptied
+that is neither the last nor the active one is removed. A window maps on the first output's
+active workspace; the windows of an inactive one leave the space, keeping their place, and come
+back there when it is activated, at once, with no animation. A window on an inactive workspace
+can still be captured, and activating it from the dock, or restoring it, activates its workspace
+first; an xdg-activation token, which a focused client can make at any time, switches no
+workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+window on an inactive workspace, minimised or drawing nothing grabs nothing. A window
+a move drops with its centre on another output joins that output's active workspace, and a
+window its output no longer shows after the outputs change is centred on that output, on the
+first when its output went, whose active workspace it then joins; a window is maximised to its
+workspace's output, fitted to it again when the outputs change, and restored onto it when its
+place there moved off the output. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
+their place as coordinates, the active one's state, and the `activate` capability, applied at the
+manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
 holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
 minimised window, a dead client or the lock lets them run (`src/idle_inhibit.rs`).
 `wp-security-context-v1` tags the clients a sandbox connects: they
@@ -266,8 +302,8 @@ refresh, paced by its vblank, with presentation feedback from the hardware clock
 not draw at all, and a surface no output shows still gets its frame callback once a second. The
 lock is confirmed only once every output has presented a frame drawn locked: a frame that could
 not be drawn, queued or presented is drawn whole again, and a draw with nothing new does not
-count. The frame-time report of task 2 runs here too. A monitor that goes moves the windows only it showed
-onto the first output, centred; the pointer moves across every output and stays on them.
+count. The frame-time report of task 2 runs here too. A monitor that goes moves its windows to the first
+output's active workspace, centred on the first output when it does not show them; the pointer moves across every output and stays on them.
 Started with a monitor plugged in that cannot be set up, and no other, the compositor ends with
 an error rather than show nothing; a monitor that cannot be set up later is logged as an error
 and tried again at the next scan of the connectors.
@@ -278,7 +314,18 @@ Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compos
 session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
 with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
-layout group, the first after the last; and **Super+Escape takes the keyboard back and locks
+layout group, the first after the last; Super+1 to Super+9 activate the n-th workspace of the
+focused window's output (the first output's when no window has the keyboard), its last when n is
+past it, and Super+0 the last; Super+Shift with a digit moves the focused window there and the
+workspace follows; Super+Ctrl with Left, Up, h or k, or Right, Down, j or l, steps one workspace
+back or on, with no wrap, and Super+Shift+Ctrl with the same keys carries the focused window that
+step (OV13); Ctrl+Alt+Tab gives the keyboard to the next surface of
+the top layer that takes it on demand, those anchored to the top edge first and then the
+others, in the order their layer surfaces were created within each group, and after the last to the window, never
+from an exclusive surface or while locked, skipping an identity Super+Escape took the keyboard
+from (a bar along the top comes before a dock along the bottom, but a side dock that hides
+itself is anchored to the top too, and a bottom bar falls in the second group; from a window
+the cycle reads the first output, and a popup of a layer surface restarts it); and **Super+Escape takes the keyboard back and locks
 the session** (LP5), with Super alone. While the session is locked only the terminal switches,
 Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
 nothing, and every other key goes to the lock surface. Decision 28's six

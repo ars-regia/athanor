@@ -24,6 +24,7 @@ mod output_power;
 mod ready;
 mod screen_filter;
 mod session_calls;
+mod shutdown;
 mod state;
 mod toplevel_state;
 mod xkb_config;
@@ -134,6 +135,8 @@ fn options(mut args: impl Iterator<Item = String>) -> Result<Options, Error> {
 fn run() -> Result<(), Error> {
     let options = options(std::env::args().skip(1))?;
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
+    // First, before any thread: see `shutdown::watch`.
+    let signals = shutdown::watch(&event_loop)?;
     let display: Display<State> = Display::new()?;
     let mut state = match &options {
         Options::Nested { scale } => winit::start(&mut event_loop, display, *scale)?,
@@ -169,7 +172,10 @@ fn run() -> Result<(), Error> {
     };
     tracing::info!(?socket, ?x11, ?options, "listening");
     ready::announce(&socket, x11)?;
-    event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
+    let ran = event_loop.run(None, &mut state, State::refresh_idle_inhibit);
+    // From here a second SIGTERM or SIGINT takes the default action: see `shutdown::watch`.
+    event_loop.handle().remove(signals);
+    ran?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),
         None => Ok(()),
