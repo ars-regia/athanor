@@ -12,7 +12,7 @@ use crate::output_power::OutputPower;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
-use crate::workspace::Group;
+use crate::workspace::{Bound, Strip};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::InputTime;
@@ -202,8 +202,14 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
-    /// The workspace groups sent to the clients of ext-workspace-v1.
-    pub workspace_groups: Vec<Group>,
+    /// What the clients of ext-workspace-v1 were sent.
+    pub workspace_clients: Vec<Bound>,
+    /// The workspaces of each output (`workspace`).
+    pub workspaces: Vec<Strip>,
+    /// The number the last workspace made was given.
+    pub next_workspace: u64,
+    /// The windows of the inactive workspaces, out of the space, each with its location.
+    pub parked: Vec<(Window, Point<i32, Logical>)>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -378,7 +384,10 @@ impl State {
             lock: None,
             idle_notifier_state,
             inhibitors: HashMap::new(),
-            workspace_groups: Vec::new(),
+            workspace_clients: Vec::new(),
+            workspaces: Vec::new(),
+            next_workspace: 0,
+            parked: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
@@ -456,6 +465,7 @@ impl State {
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
         self.output_heads_changed();
+        self.workspaces_changed();
     }
 
     /// An output that goes: its layer surfaces are closed, and the windows no output left shows
@@ -465,6 +475,7 @@ impl State {
         self.close_layers(output);
         self.space.unmap_output(output);
         self.fit_to_outputs();
+        self.workspaces_changed();
     }
 
     /// After the outputs changed (one went, or took another size): the windows no output shows
@@ -546,7 +557,11 @@ impl State {
     /// What the layer surfaces' exclusive zones leave of the first output: where windows are
     /// placed.
     pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
-        let output = self.space.outputs().next()?;
+        self.window_area_on(self.space.outputs().next()?)
+    }
+
+    /// What the layer surfaces' exclusive zones leave of `output`.
+    pub fn window_area_on(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let area = self.space.output_geometry(output)?;
         // The layer map lays the output out at its logical size rounded, the space at its
         // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
@@ -636,29 +651,21 @@ impl State {
     }
 
     /// Restores a minimised `window` where it was, or centred in `window_area` when no output
-    /// shows that place any more, on top and with the keyboard. False when it is not minimised,
-    /// or draws nothing (it committed a null buffer, as an app hiding into the tray does): it
-    /// stays minimised.
+    /// shows that place any more, on top and with the keyboard, its workspace activated first.
+    /// False when it is not minimised, or draws nothing (it committed a null buffer, as an app
+    /// hiding into the tray does): it stays minimised.
     pub fn unminimise(&mut self, window: &Window) -> bool {
+        if !self.is_minimised(window) || !shown(window) {
+            return false;
+        }
+        if let Some(id) = self.workspace_of(window) {
+            self.activate_workspace(id);
+        }
         let Some(index) = self.minimised.iter().position(|(kept, _)| kept == window) else {
             return false;
         };
-        if !shown(window) {
-            return false;
-        }
-        let (window, mut at) = self.minimised.remove(index);
-        let geometry = window.geometry();
-        let kept = Rectangle::new(at + geometry.loc, geometry.size);
-        let reachable = self
-            .space
-            .outputs()
-            .filter_map(|output| self.space.output_geometry(output))
-            .any(|output| output.overlaps(kept));
-        if !reachable {
-            if let Some(area) = self.window_area() {
-                at = centred(area, geometry);
-            }
-        }
+        let (window, at) = self.minimised.remove(index);
+        let at = self.reachable(&window, at);
         self.space.map_element(window.clone(), at, true);
         // A move answered while it was minimised applies now, and a maximised window takes the
         // area of now.
@@ -949,11 +956,12 @@ impl State {
         self.minimised.iter().any(|(kept, _)| kept == window)
     }
 
-    /// The mapped windows, then the minimised ones.
-    fn windows(&self) -> impl Iterator<Item = &Window> {
+    /// The mapped windows, then the minimised ones, then those of the inactive workspaces.
+    pub(crate) fn windows(&self) -> impl Iterator<Item = &Window> {
         self.space
             .elements()
             .chain(self.minimised.iter().map(|(window, _)| window))
+            .chain(self.parked.iter().map(|(window, _)| window))
     }
 }
 

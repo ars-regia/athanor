@@ -66,8 +66,16 @@ windows with their title and app id, and `ext-image-copy-capture-v1` copies one 
 through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
-`ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
-output (`src/workspace.rs`). Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
+`ext-idle-notify-v1` follows the input. Each output has its own dynamic workspaces
+(`doc_own_stack.md` OS2, `src/workspace.rs`), as cosmic-comp keeps them: an empty one always
+last, which a window placed on it turns into a new empty one after it, and a workspace emptied
+that is neither the last nor the active one is removed. A window maps on the first output's
+active workspace; the windows of an inactive one leave the space, keeping their place, and come
+back there when it is activated, at once, with no animation. A window on an inactive workspace
+can still be captured, and activating it from the dock, or restoring it, activates its workspace
+first. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
+their place as coordinates, the active one's state, and the `activate` capability, applied at the
+manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
 holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
 minimised window, a dead client or the lock lets them run (`src/idle_inhibit.rs`).
 `wp-security-context-v1` tags the clients a sandbox connects: they

@@ -119,8 +119,9 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
-                // A minimised window is placed and moved when it is restored (`unminimise`).
-                if !self.is_minimised(&window) {
+                // A minimised window, or one on an inactive workspace, is placed and moved when
+                // it comes back (`unminimise`, `activate_workspace`).
+                if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
                     self.relocated(&window);
                     self.anchor_resized(&window);
@@ -296,6 +297,7 @@ impl State {
             // Placed where it stays: at the bottom, under the window being typed into.
             self.space.relocate_element(window, (x, y));
         }
+        self.place_on_workspace(window);
     }
 
     /// The pointer, the start of its grab and the window, when the client of `surface` may
@@ -443,6 +445,8 @@ impl XdgShellHandler for State {
             }
             self.space.unmap_elem(&window);
             self.minimised.retain(|(kept, _)| *kept != window);
+            self.parked.retain(|(kept, _)| *kept != window);
+            self.workspaces_changed();
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
@@ -801,6 +805,9 @@ impl XdgActivationHandler for State {
             // While the session is locked a token restores nothing (L14).
             if self.lock.is_none() {
                 if let Some(window) = self.window_or_minimised(&surface) {
+                    if let Some(id) = self.workspace_of(&window) {
+                        self.activate_workspace(id);
+                    }
                     self.unminimise(&window);
                 }
             }

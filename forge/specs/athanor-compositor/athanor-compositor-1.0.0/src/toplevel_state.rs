@@ -188,6 +188,10 @@ impl Dispatch2<AthanorToplevelActionsV1, State> for ToplevelActions {
                 if state.is_minimised(&window) {
                     state.unminimise(&window);
                 } else {
+                    // A window on an inactive workspace is found there: its workspace comes first.
+                    if let Some(id) = state.workspace_of(&window) {
+                        state.activate_workspace(id);
+                    }
                     state.focus(&window);
                 }
             }
