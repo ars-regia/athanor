@@ -282,6 +282,12 @@ impl Client {
         self.inner.state.borrow().keyboard_group
     }
 
+    /// Whether the compositor is athanor-compositor: `athanor_toplevel_manager_v1`, which only
+    /// it offers and only to the shell, is bound (doc_own_stack.md, decision 28).
+    pub fn own_compositor(&self) -> bool {
+        self.inner.state.borrow().globals.athanor_toplevel.is_some()
+    }
+
     /// `None` when the compositor offers no accessibility protocol.
     pub fn accessibility(&self) -> Option<Accessibility> {
         let state = self.inner.state.borrow();
