@@ -485,6 +485,22 @@ impl Opener {
         }
     }
 
+    /// Whether the button that opens the component is shown. Under the own compositor the
+    /// application library and the workspaces are hidden until athanor-library and
+    /// athanor-overview come: cosmic-app-library and cosmic-workspaces have no line in its
+    /// allow-list (doc_own_stack.md, decision 28).
+    pub fn shown(self, own_compositor: bool) -> bool {
+        !own_compositor || self == Opener::Launcher
+    }
+
+    /// The bus name and path of `athanor-launcher` when it replaces the component: the
+    /// Launcher under the own compositor, whose allow-list has no line for cosmic-launcher
+    /// (doc_own_stack.md, decision 28).
+    fn athanor_launcher(self, own_compositor: bool) -> Option<(&'static str, &'static str)> {
+        (own_compositor && self == Opener::Launcher)
+            .then_some((ATHANOR_LAUNCHER, "/os/athanor/Launcher1"))
+    }
+
     /// The object libcosmic exports its activation interface on.
     fn path(self) -> String {
         format!("/{}", self.app_id().replace('.', "/"))
@@ -513,6 +529,9 @@ impl Opener {
     }
 }
 
+/// athanor-launcher's name and interface (doc_launcher.md, LA8): `Show`, without arguments,
+/// shows the launcher or hides it when shown, and the bus starts its unit when it is down.
+const ATHANOR_LAUNCHER: &str = "os.athanor.Launcher1";
 /// libcosmic's single-instance interface, exported beside the app id's name.
 const ACTIVATION: &str = "org.freedesktop.DbusActivation";
 /// A libcosmic action is the JSON form of the component's subcommand: here `Input` with no
@@ -526,10 +545,25 @@ const POLL: Duration = Duration::from_millis(50);
 impl Client {
     /// Shows the component, starting it first when it does not run, and leaves it shown
     /// when it already is. A component started cold only takes its name, so it is always
-    /// shown through the bus (spike P4).
+    /// shown through the bus (spike P4). Under the own compositor the Launcher is
+    /// athanor-launcher, which the bus activates, and whose `Show` hides it when shown.
     pub async fn open(&self, opener: Opener) -> Result<(), LaunchError> {
         self.live()?;
         let bus = gio::bus_get_future(gio::BusType::Session).await?;
+        if let Some((name, path)) = opener.athanor_launcher(self.own_compositor()) {
+            bus.call_future(
+                Some(name),
+                path,
+                ATHANOR_LAUNCHER,
+                "Show",
+                None,
+                None,
+                gio::DBusCallFlags::NONE,
+                -1,
+            )
+            .await?;
+            return Ok(());
+        }
         let name = opener.app_id();
         let cold = !has_owner(&bus, name).await?;
         if cold {
@@ -819,6 +853,30 @@ mod tests {
         assert_eq!(Opener::Launcher.path(), "/com/system76/CosmicLauncher");
         assert_eq!(Opener::AppLibrary.app_id(), "com.system76.CosmicAppLibrary");
         assert_eq!(Opener::Workspaces.program(), "cosmic-workspaces");
+    }
+
+    #[test]
+    fn only_the_launcher_is_shown_under_the_own_compositor() {
+        for opener in [Opener::Launcher, Opener::AppLibrary, Opener::Workspaces] {
+            assert!(opener.shown(false), "{opener:?} hidden under cosmic-comp");
+        }
+        assert!(Opener::Launcher.shown(true));
+        assert!(!Opener::AppLibrary.shown(true));
+        assert!(!Opener::Workspaces.shown(true));
+    }
+
+    #[test]
+    fn only_the_launcher_under_the_own_compositor_opens_athanor_launcher() {
+        assert_eq!(
+            Opener::Launcher.athanor_launcher(true),
+            Some(("os.athanor.Launcher1", "/os/athanor/Launcher1"))
+        );
+        assert_eq!(Opener::Launcher.athanor_launcher(false), None);
+        for opener in [Opener::AppLibrary, Opener::Workspaces] {
+            for own in [true, false] {
+                assert_eq!(opener.athanor_launcher(own), None);
+            }
+        }
     }
 
     #[test]
