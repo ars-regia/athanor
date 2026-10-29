@@ -262,6 +262,15 @@ impl State {
             .map(|strip| strip.output.clone())
     }
 
+    /// Whether `window` is on the active workspace of its output, or on none yet.
+    pub fn on_active_workspace(&self, window: &Window) -> bool {
+        self.workspace_of(window).is_none_or(|id| {
+            self.output_of_workspace(id)
+                .and_then(|output| self.active_workspace(&output))
+                == Some(id)
+        })
+    }
+
     /// Whether `window` is on an inactive workspace, out of the space.
     pub fn is_parked(&self, window: &Window) -> bool {
         self.parked.iter().any(|(kept, _)| kept == window)

@@ -9514,16 +9514,19 @@ fn leaving_a_workspace_ends_its_popup_grab() {
     run.stop();
 }
 
-/// A token that names a hidden window on an inactive workspace, minimised or not, restores
-/// nothing and switches nothing: the workspace shown stays.
+/// A token, which a focused client can make at any time, that names a window on an inactive
+/// workspace, minimised or not, drawn or hidden, switches nothing and restores nothing: the
+/// workspace shown stays, and the window stays out of the space.
 #[test]
-fn a_token_for_a_hidden_window_keeps_the_workspace() {
+fn a_token_for_a_window_on_an_inactive_workspace_keeps_the_workspace() {
     for minimised in [true, false] {
-        a_token_for_a_hidden_window(minimised);
+        for hidden in [true, false] {
+            a_token_for_a_window_on_an_inactive_workspace(minimised, hidden);
+        }
     }
 }
 
-fn a_token_for_a_hidden_window(minimised: bool) {
+fn a_token_for_a_window_on_an_inactive_workspace(minimised: bool, hidden: bool) {
     let mut run = Running::start(None);
     let (mut local, _, list) = three_workspaces(&mut run);
     let tray = local.another(&mut run, "tray");
@@ -9531,8 +9534,10 @@ fn a_token_for_a_hidden_window(minimised: bool) {
     if minimised {
         assert!(run.state.minimise(&window));
     }
-    tray.surface.attach(None, 0, 0);
-    tray.surface.commit();
+    if hidden {
+        tray.surface.attach(None, 0, 0);
+        tray.surface.commit();
+    }
     local.roundtrip(&mut run);
     assert!(run.state.activate_workspace(list[0]));
     let output = output_at(&run, 0);
@@ -9551,6 +9556,10 @@ fn a_token_for_a_hidden_window(minimised: bool) {
         run.state.active_workspace(&output),
         Some(list[0]),
         "the workspace shown stays"
+    );
+    assert!(
+        run.state.space.element_location(&window).is_none(),
+        "the window stays out of the space"
     );
     run.stop();
 }

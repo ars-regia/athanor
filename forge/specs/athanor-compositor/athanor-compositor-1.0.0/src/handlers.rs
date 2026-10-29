@@ -812,14 +812,13 @@ impl XdgActivationHandler for State {
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
             // While the session is locked a token restores nothing (L14).
             if self.lock.is_none() {
-                if let Some(window) = self.window_or_minimised(&surface) {
-                    // `unminimise` activates the workspace of a window it restores; a window on
-                    // an inactive workspace is found there.
-                    if self.is_minimised(&window) {
-                        self.unminimise(&window);
-                    } else if let Some(id) = self.workspace_of(&window).filter(|_| shown(&window)) {
-                        self.activate_workspace(id);
-                    }
+                // A focused client can make a token at any time: it switches no workspace, and a
+                // window on an inactive one stays there.
+                if let Some(window) = self
+                    .window_or_minimised(&surface)
+                    .filter(|window| self.on_active_workspace(window))
+                {
+                    self.unminimise(&window);
                 }
             }
             if let Some(window) = self.window_for(&surface) {

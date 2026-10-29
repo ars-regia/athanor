@@ -73,7 +73,8 @@ that is neither the last nor the active one is removed. A window maps on the fir
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
 back there when it is activated, at once, with no animation. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
-first; a popup of a window on an inactive workspace or minimised grabs nothing. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
+first; an xdg-activation token, which a focused client can make at any time, switches no
+workspace, and a popup of a window on an inactive workspace or minimised grabs nothing. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
 their place as coordinates, the active one's state, and the `activate` capability, applied at the
 manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
 holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
