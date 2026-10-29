@@ -406,7 +406,13 @@ class CompositorSession(unittest.TestCase):
         self.assertGreaterEqual(time.monotonic() - began, 4.5)
         self.assertLess(time.monotonic() - began, 15)
         self.assertEqual(process.returncode, 129, stderr)
-        self.assertIn("did not end within 5 s and was killed", self.journal())
+        journal = self.journal()
+        self.assertIn("did not end within 5 s; killing it and its jobs", journal)
+        self.assertNotIn("could not be", journal)
+        self.assertNotIn("killed from outside", journal)
+        for leftover in ("sleep 5", "sleep 1000"):
+            found = subprocess.run(["pgrep", "-fx", leftover], capture_output=True)
+            self.assertEqual(found.returncode, 1, (leftover, found.stdout))
         calls = self.calls()
         scope_check = calls.index(
             "systemctl --user is-active --quiet cosmic-idle.scope",

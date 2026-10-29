@@ -114,40 +114,50 @@ fi
 # the condition of an `if`, so that one that fails does not end it before the rest; the
 # next sign-in's step 1 clears what it left.
 sup=
+# Ends the supervisor, the children of its jobs (the systemd-run) and the jobs, in that order,
+# so that no job starts a component again. Run as the condition of an `if`, which keeps
+# errexit off for the whole of it: a pkill that finds nothing is not a failure.
+kill_supervisor_tree() {
+    for job in $(pgrep -P "$sup"); do
+        pkill -KILL -P "$job"
+    done
+    pkill -KILL -P "$sup"
+    kill -KILL "$sup"
+}
 end_session() {
     trap '' HUP TERM
     # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated. It is
     # waited for, so that no job of it starts a scope after the stop below. It logs its own
     # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM. The wait is bounded: a
     # supervisor that does not end in 5 s (a job stuck in systemd-run, a trap that never runs)
-    # would keep greetd from showing the greeter. A watchdog then kills the jobs' children
-    # (the systemd-run), the jobs and the supervisor, and the wait returns 137; the scopes
-    # are stopped below either way. The watchdog is cancelled with KILL (it inherits the
-    # ignored TERM); its sleep has no output, so that it does not hold the journal's pipe.
+    # would keep greetd from showing the greeter, so it is killed with its jobs and the scopes
+    # are stopped below either way. The bound is polled with kill -0, which fails once bash
+    # has reaped the supervisor; no process of this script outlives it.
     if [ -n "$sup" ]; then
         if ! kill "$sup" && kill -0 "$sup"; then
             log err "the supervisor of the locker and the idle daemon did not end"
         fi
-        (
-            set +e
-            sleep 5 > /dev/null 2>&1
-            for job in $(pgrep -P "$sup"); do
-                pkill -KILL -P "$job"
-            done
-            pkill -KILL -P "$sup"
-            kill -KILL "$sup"
-        ) &
-        dog=$!
+        forced=0
+        waited=0
+        while kill -0 "$sup" 2> /dev/null; do
+            if [ "$waited" -ge 50 ]; then
+                forced=1
+                log err "the supervisor of the locker and the idle daemon did not end within 5 s; killing it and its jobs"
+                if ! kill_supervisor_tree; then
+                    log err "the supervisor of the locker and the idle daemon could not be killed"
+                fi
+                break
+            fi
+            sleep 0.1
+            waited=$((waited + 1))
+        done
         sup_status=0
         wait "$sup" || sup_status=$?
         case $sup_status in
             0 | 1 | 143) ;;
-            137) log err "the supervisor of the locker and the idle daemon did not end within 5 s and was killed with its jobs" ;;
+            137) if [ "$forced" -eq 0 ]; then log err "the supervisor of the locker and the idle daemon was killed from outside"; fi ;;
             *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
         esac
-        if ! kill -KILL "$dog"; then
-            log err "the watchdog of the supervisor's wait could not be cancelled"
-        fi
     fi
     if ! stop_component_scopes; then
         log err "a scope of the locker or the idle daemon did not stop"
