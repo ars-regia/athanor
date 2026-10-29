@@ -13,7 +13,8 @@ BuildRequires:  rust cargo gcc pkgconf-pkg-config systemd-devel libxkbcommon-dev
 # the supervisor of the locker and the idle daemon, the reader of the import list and the
 # user's language, region and cursor, reads that list, runs the USBGuard hook and hands the
 # sign-in to athanor-session (athanor-system-config).
-Requires:       systemd glib2 mesa-libEGL mesa-dri-drivers athanor-system-services
+# procps-ng: pkill ends the supervisor's jobs when it does not end within 5 s.
+Requires:       systemd procps-ng glib2 mesa-libEGL mesa-dri-drivers athanor-system-services
 # 74 ships the supervisor, the reader of the import list and the user's environment it sources.
 Requires:       athanor-system-config >= 1.0.0-74
 # The compositor starts xwayland-satellite on the first X11 client (doc_own_stack.md, OS4).

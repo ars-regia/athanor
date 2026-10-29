@@ -379,6 +379,43 @@ class CompositorSession(unittest.TestCase):
         self.assertFalse(self.handed_off())
         self.assert_cleaned_up()
 
+    def test_a_supervisor_that_ignores_term_is_killed_and_the_session_still_ends(self):
+        # The stand-in ignores TERM and loops, as a supervisor stuck in systemd-run would.
+        stuck = self.work / "session-components"
+        stuck.write_text(
+            f". {COMPONENTS}\n"
+            "session_components() {\n"
+            f'    trap "" TERM; : > "{self.work}/stuck-ready"\n'
+            "    while :; do sleep 0.1; done\n"
+            "}\n"
+        )
+        self.script.write_text(self.text.replace(str(COMPONENTS), str(stuck)))
+        process = self.start(start="hold")
+        deadline = time.monotonic() + 10
+        while not (
+            (self.work / "stuck-ready").exists()
+            and any("start --wait" in c for c in self.calls_so_far())
+        ):
+            self.assertLess(time.monotonic(), deadline, "the session never started")
+            time.sleep(0.05)
+        began = time.monotonic()
+        process.send_signal(signal.SIGHUP)
+        # The pipes close only when the supervisor and its sleeps are gone.
+        _, stderr = process.communicate(timeout=30)
+        self.assertLess(time.monotonic() - began, 15)
+        self.assertEqual(process.returncode, 129, stderr)
+        self.assertIn("did not end within 5 s and was killed", self.journal())
+        calls = self.calls()
+        scope_check = calls.index(
+            "systemctl --user is-active --quiet cosmic-idle.scope",
+            calls.index("systemctl --user start --wait athanor-compositor.service"),
+        )
+        unit_stop = (
+            "systemctl --user stop athanor-session.target athanor-compositor.service"
+        )
+        self.assertGreater(len(calls) - calls[::-1].index(unit_stop) - 1, scope_check)
+        self.assert_cleaned_up()
+
     def calls_so_far(self):
         path = self.work / "calls"
         return path.read_text().splitlines() if path.exists() else []

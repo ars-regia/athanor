@@ -118,17 +118,30 @@ end_session() {
     trap '' HUP TERM
     # The supervisor's TERM trap kills both of its jobs; one already gone is tolerated. It is
     # waited for, so that no job of it starts a scope after the stop below. It logs its own
-    # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM.
+    # failures: 1 is a session without WAYLAND_DISPLAY, 143 the TERM. The wait is bounded: a
+    # supervisor that does not end in 5 s (a job stuck in systemd-run, a trap that never runs)
+    # would keep greetd from showing the greeter. A watchdog kills its jobs, then it, and the
+    # wait returns 137; the scopes are stopped below either way. The watchdog's sleep is its
+    # only child, and the kill of the sleep cancels it, as `&&` then skips the kills.
     if [ -n "$sup" ]; then
         if ! kill "$sup" && kill -0 "$sup"; then
             log err "the supervisor of the locker and the idle daemon did not end"
         fi
+        (sleep 5 && {
+            pkill -KILL -P "$sup"
+            kill -KILL "$sup"
+        }) &
+        dog=$!
         sup_status=0
         wait "$sup" || sup_status=$?
         case $sup_status in
             0 | 1 | 143) ;;
+            137) log err "the supervisor of the locker and the idle daemon did not end within 5 s and was killed with its jobs" ;;
             *) log err "the supervisor of the locker and the idle daemon ended with status $sup_status" ;;
         esac
+        if [ "$sup_status" -ne 137 ] && ! pkill -KILL -P "$dog"; then
+            log err "the watchdog of the supervisor's wait had already fired"
+        fi
     fi
     if ! stop_component_scopes; then
         log err "a scope of the locker or the idle daemon did not stop"
