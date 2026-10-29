@@ -51,6 +51,7 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 - athanor-desktop.service, the readiness gate, is PartOf=graphical-session.target and its
   ExecStop= unsets the variables of athanor-system-config's import list, all but
   XDG_CURRENT_DESKTOP, at the end of the session (doc_session.md, SN2, SN3 and SN13 step 1).
+  It skips blank, whitespace-only and indented comment lines of the list.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-30
 - athanor-skel-sync.service: a failed copy of /etc/skel is logged and fails the unit

@@ -6,6 +6,7 @@
 // one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
 #![deny(unsafe_code)]
 
+mod bindings;
 mod capture;
 mod cursor;
 mod grabs;
@@ -21,18 +22,20 @@ mod lock;
 mod output_management;
 mod output_power;
 mod screen_filter;
+mod session_calls;
 mod state;
 mod toplevel_state;
 mod xkb_config;
 mod udev;
 mod winit;
 mod workspace;
+mod xwayland;
 
 use headless::VirtualOutput;
 use smithay::reexports::calloop::EventLoop;
 use smithay::reexports::wayland_server::Display;
 use state::State;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 pub type Error = Box<dyn std::error::Error>;
@@ -141,7 +144,30 @@ fn run() -> Result<(), Error> {
     // The layouts of the file before the first client, which never sees the environment's.
     xkb_config::start(&mut state, &event_loop.handle());
     let socket = state::listen(&event_loop.handle())?;
-    tracing::info!(?socket, ?options, "listening");
+    // Under the user manager, as `athanor-compositor.service` runs it, the satellite gets a
+    // scope of its own (OS4).
+    let managed = std::env::var_os("NOTIFY_SOCKET").is_some();
+    let x11 = if Path::new(xwayland::SATELLITE).exists() {
+        let program = PathBuf::from(xwayland::SATELLITE);
+        let started = std::env::var_os("XDG_RUNTIME_DIR")
+            .ok_or_else(|| Error::from("XDG_RUNTIME_DIR is not set"))
+            .and_then(|runtime| {
+                let (tmp, runtime) = (Path::new("/tmp"), Path::new(&runtime));
+                xwayland::start(&mut state, tmp, runtime, program, managed)
+            });
+        match started {
+            Ok(display) => Some(display),
+            Err(error) => {
+                tracing::warn!(%error, "no X11 display: X11 applications cannot start");
+                None
+            }
+        }
+    } else {
+        tracing::info!("xwayland-satellite is not installed: no X11 display");
+        None
+    };
+    // `x11`, the display's number, is what the session's readiness announces as `DISPLAY`.
+    tracing::info!(?socket, ?x11, ?options, "listening");
     event_loop.run(None, &mut state, State::refresh_idle_inhibit)?;
     match state.fatal.take() {
         Some(reason) => Err(reason.into()),

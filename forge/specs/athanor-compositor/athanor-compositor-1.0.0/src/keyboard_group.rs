@@ -167,15 +167,33 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        let layouts = keyboard.with_xkb_state(self, |context| {
-            let xkb = context.xkb().lock().unwrap_or_else(PoisonError::into_inner);
-            xkb.layouts().count()
-        });
-        if usize::try_from(group).map_or(true, |group| group >= layouts) {
+        if usize::try_from(group).map_or(true, |group| group >= self.layouts()) {
             return;
         }
         keyboard.with_xkb_state(self, |mut context| context.set_layout(Layout(group)));
         self.input_method_modifiers();
         self.send_keyboard_group();
+    }
+
+    /// Super+Space (D14): the seat's next layout group, the first after the last, under the
+    /// seat's own keymap; a keymap of one layout changes nothing.
+    pub(crate) fn next_keyboard_group(&mut self) {
+        self.restore_seat_keymap();
+        let layouts = self.layouts();
+        if layouts > 1 {
+            let next = (self.seat_group() as usize + 1) % layouts;
+            self.set_keyboard_group(next as u32);
+        }
+    }
+
+    /// The layouts of the seat keyboard's current keymap.
+    fn layouts(&mut self) -> usize {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return 0;
+        };
+        keyboard.with_xkb_state(self, |context| {
+            let xkb = context.xkb().lock().unwrap_or_else(PoisonError::into_inner);
+            xkb.layouts().count()
+        })
     }
 }

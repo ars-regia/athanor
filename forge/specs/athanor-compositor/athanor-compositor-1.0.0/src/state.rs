@@ -126,6 +126,17 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
+    /// The actions of the bound keys pressed, in order (`State::fire`); the fixture reads them.
+    #[cfg(test)]
+    pub fired: Vec<crate::bindings::Action>,
+    /// The press of Super, alone, whose release shows the launcher unless another key, a
+    /// button, an axis or a gesture comes first (plan D4).
+    pub super_tap: Option<Keycode>,
+    /// Counts the locks taken: a request for the session bus carries the epoch it was asked
+    /// in, and the worker drops one asked before a lock (`session_calls`).
+    pub lock_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The session-bus worker of the key bindings; none headless.
+    pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
@@ -213,6 +224,8 @@ pub struct State {
     pub allow_list: AllowList,
     /// Where a connecting client's executable and cgroup are read.
     pub process: Box<dyn Process>,
+    /// The X11 display xwayland-satellite serves, when the compositor holds one.
+    pub x11: Option<crate::xwayland::X11>,
 }
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
@@ -326,6 +339,11 @@ impl State {
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
+            #[cfg(test)]
+            fired: Vec::new(),
+            super_tap: None,
+            lock_epoch: std::sync::Arc::default(),
+            session_calls: None,
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
             virtual_keymap: None,
@@ -370,6 +388,7 @@ impl State {
             output_power: OutputPower::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
+            x11: None,
         })
     }
 
@@ -408,9 +427,21 @@ impl State {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
-            security_context: context,
+            confined: context.is_some(),
             grants,
             identity,
+        })
+    }
+
+    /// What the compositor keeps for a client of xwayland-satellite's socket: confined as a
+    /// security context's client is, so granted nothing whatever its identity (OS4).
+    pub fn satellite_state(&self) -> Arc<ClientState> {
+        Arc::new(ClientState {
+            compositor_state: CompositorClientState::default(),
+            gone: self.client_gone.clone(),
+            confined: true,
+            grants: Vec::new(),
+            identity: None,
         })
     }
 
@@ -1131,8 +1162,9 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     gone: channel::Sender<ClientId>,
-    /// The security context the client connected through, if any (a sandboxed application).
-    pub security_context: Option<SecurityContext>,
+    /// Whether it is confined: it connected through a security context, as a sandboxed
+    /// application does, or through xwayland-satellite's socket.
+    confined: bool,
     /// The privileged globals granted when it connected.
     grants: Vec<Privilege>,
     /// What the grants were decided on, when the process could be read.
@@ -1158,7 +1190,7 @@ pub fn granted(client: &Client, privilege: Privilege) -> bool {
 pub fn unconfined(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
-        .is_some_and(|data| data.security_context.is_none())
+        .is_some_and(|data| !data.confined)
 }
 
 impl ClientData for ClientState {

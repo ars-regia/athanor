@@ -1,11 +1,10 @@
 //! Input from the backend to the seat: keys to the focused surface, the pointer to the surface
 //! under it, a click focuses the window it lands on, or the layer surface that asks for the
-//! keyboard on demand. The compositor keeps two kinds of key for itself, which no client sees:
-//! Super+Escape locks the session (C1 task 8, doc_lock_and_prompts.md LP5), and Ctrl+Alt+F1 to
-//! F12 switch to another virtual terminal on a console. A virtual keyboard's keys and a virtual
-//! pointer's motion and buttons, of the clients the allow-list grants them, take the same path
-//! (OS4, OS9 task 6).
+//! keyboard on demand. The compositor keeps the keys of its bindings for itself, which no client
+//! sees (`bindings.rs`). A virtual keyboard's keys and a virtual pointer's motion and buttons, of
+//! the clients the allow-list grants them, take the same path (OS4, OS9 task 6).
 
+use crate::bindings;
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
@@ -13,7 +12,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Keysym, ModifiersState, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
@@ -93,10 +92,21 @@ impl State {
             key_state,
             |state, modifiers, handle| match key_state {
                 KeyState::Pressed => {
-                    match kept(modifiers, handle.modified_sym(), state.lock.is_some()) {
-                        Some(kept) => {
+                    // Any other press disarms Super alone (D4). Only a hardware key counts: the
+                    // input method sends the keys it forwards a second time, as a virtual
+                    // keyboard's.
+                    // A second Super while one is held is not Super alone either, and nothing
+                    // arms while the session is locked.
+                    if source == KeyboardSource::Physical {
+                        state.super_tap = (state.super_tap.is_none()
+                            && state.lock.is_none()
+                            && bindings::arms_super(modifiers, &handle))
+                        .then_some(code);
+                    }
+                    match bindings::find(modifiers, &handle, state.lock.is_some()) {
+                        Some(action) => {
                             state.kept_keys.push(code);
-                            FilterResult::Intercept(Some(kept))
+                            FilterResult::Intercept(Some(action))
                         }
                         None => FilterResult::Forward,
                     }
@@ -142,9 +152,14 @@ impl State {
                     KeyState::Released => self.grab_serials.key_release = sent,
                 }
             }
-            Some(Some(Kept::Lock)) => self.request_lock(),
-            Some(Some(Kept::Vt(vt))) => self.switch_vt(vt),
+            Some(Some(action)) => self.fire(action),
             Some(None) => {}
+        }
+        // Super alone, released: the launcher, after the release has reached the client, which
+        // saw Super pressed (D4). Not while locked (`State::fire`).
+        if key_state == KeyState::Released && self.super_tap == Some(code) {
+            self.super_tap = None;
+            self.fire(bindings::Action::Call(&crate::session_calls::LAUNCHER));
         }
     }
 
@@ -168,6 +183,7 @@ impl State {
 
     /// A button pressed or released: a press first focuses what is under the pointer.
     pub fn button_input(&mut self, button: u32, button_state: ButtonState, time: InputTime) {
+        self.super_tap = None;
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -229,6 +245,7 @@ impl State {
                 self.button_input(event.button_code(), event.state(), event.time());
             }
             InputEvent::PointerAxis { event, .. } => {
+                self.super_tap = None;
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
@@ -252,6 +269,10 @@ impl State {
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }
+            // No gesture is served yet; one still disarms Super alone (D4).
+            InputEvent::GestureSwipeBegin { .. }
+            | InputEvent::GesturePinchBegin { .. }
+            | InputEvent::GestureHoldBegin { .. } => self.super_tap = None,
             _ => {}
         }
     }
@@ -578,30 +599,6 @@ const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
 /// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
 const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
 
-/// A key the compositor keeps for itself.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Kept {
-    /// Super+Escape, alone: lock the session.
-    Lock,
-    /// Ctrl+Alt+F1 to F12, which the keymap turns into XF86Switch_VT_1 to 12.
-    Vt(i32),
-}
-
-/// Whether the compositor keeps `sym`, pressed with `modifiers`. Escape only with Super alone,
-/// and not while `locked`: the lock surface takes it as any key. Super+Alt+Escape (terminate)
-/// and Super+Shift+Escape are the client's.
-fn kept(modifiers: &ModifiersState, sym: Keysym, locked: bool) -> Option<Kept> {
-    if sym == Keysym::Escape {
-        let alone = modifiers.logo && !(modifiers.ctrl || modifiers.alt || modifiers.shift);
-        return (alone && !locked).then_some(Kept::Lock);
-    }
-    if !(modifiers.ctrl && modifiers.alt) {
-        return None;
-    }
-    let vt = sym.raw().checked_sub(Keysym::XF86_Switch_VT_1.raw())?;
-    (vt < 12).then(|| Kept::Vt(vt as i32 + 1))
-}
-
 /// Where a relative motion from `from` to `to` leaves the pointer: at `to` when an output of
 /// `outputs` shows it, else at the edge of the output it is on (the first one when on none),
 /// so that it neither leaves the outputs nor enters a gap between two of different sizes.
@@ -631,72 +628,8 @@ fn clamp_into(area: Rectangle<i32, Logical>, to: Point<f64, Logical>) -> Point<f
 
 #[cfg(test)]
 mod tests {
-    use super::{confine, kept, Kept};
-    use smithay::input::keyboard::{Keysym, ModifiersState};
+    use super::confine;
     use smithay::utils::{Logical, Point, Rectangle};
-
-    #[test]
-    fn the_compositor_keeps_its_escape_and_the_terminal_switches() {
-        let logo = ModifiersState {
-            logo: true,
-            ..ModifiersState::default()
-        };
-        let ctrl_alt = ModifiersState {
-            ctrl: true,
-            alt: true,
-            ..ModifiersState::default()
-        };
-        assert_eq!(kept(&logo, Keysym::Escape, false), Some(Kept::Lock));
-        assert_eq!(
-            kept(&logo, Keysym::Escape, true),
-            None,
-            "locked, it is the lock surface's"
-        );
-        assert_eq!(
-            kept(&ModifiersState::default(), Keysym::Escape, false),
-            None
-        );
-        for (other, what) in [
-            (ModifiersState { alt: true, ..logo }, "Super+Alt+Escape"),
-            (
-                ModifiersState {
-                    shift: true,
-                    ..logo
-                },
-                "Super+Shift+Escape",
-            ),
-            (ModifiersState { ctrl: true, ..logo }, "Super+Ctrl+Escape"),
-            (ctrl_alt, "Ctrl+Alt+Escape"),
-        ] {
-            assert_eq!(
-                kept(&other, Keysym::Escape, false),
-                None,
-                "{what} is the client's"
-            );
-        }
-        assert_eq!(
-            kept(&ctrl_alt, Keysym::XF86_Switch_VT_1, false),
-            Some(Kept::Vt(1))
-        );
-        assert_eq!(
-            kept(&ctrl_alt, Keysym::XF86_Switch_VT_12, true),
-            Some(Kept::Vt(12))
-        );
-        assert_eq!(
-            kept(&ModifiersState::default(), Keysym::XF86_Switch_VT_1, false),
-            None,
-            "a switch the keymap sends without Ctrl+Alt switches nothing"
-        );
-        assert_eq!(
-            kept(
-                &ctrl_alt,
-                Keysym::from(Keysym::XF86_Switch_VT_12.raw() + 1),
-                false
-            ),
-            None
-        );
-        assert_eq!(kept(&ctrl_alt, Keysym::a, false), None);
-    }
 
     #[test]
     fn the_pointer_moves_across_the_outputs_and_stays_on_them() {

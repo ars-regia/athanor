@@ -122,6 +122,33 @@ class SessionUnitsTest(unittest.TestCase):
             [("x-helper.service", "install")],
         )
 
+    def test_a_preset_enabling_an_exempt_activated_unit_still_fails(self):
+        helper = HELPER + "[Install]\nWantedBy=athanor-session.target\n"
+        exempt = {("x-helper.service", verify.ACTIVATED_INSTALL): "why"}
+        for enabled, expected in (((), []), (("x-helper.service",), 1)):
+            with self.subTest(enabled=enabled):
+                with (
+                    mock.patch.dict(verify.SESSION_UNITS, TABLE, clear=True),
+                    mock.patch.dict(verify.NOT_SESSION_UNITS, {}, clear=True),
+                    mock.patch.dict(verify.SESSION_EXEMPT, exempt, clear=True),
+                ):
+                    shipped = {
+                        "athanor-session.target": TARGET,
+                        "athanor-bar.service": BAR,
+                        "athanor-desktop.service": GATE,
+                        "x-helper.service": helper,
+                    }
+                    found = verify.session_exempt_problems(
+                        verify.session_unit_problems(
+                            shipped, {"athanor-bar.service", *enabled}
+                        )
+                    )
+                if expected == []:
+                    self.assertEqual(found, [])
+                else:
+                    self.assertEqual(len(found), expected)
+                    self.assertIn(verify.ACTIVATED_PRESET, found[0])
+
     def test_time_spans_compare_in_seconds(self):
         bar = BAR.replace("StartLimitIntervalSec=10min", "StartLimitIntervalSec=600")
         self.assertEqual(problems({"athanor-bar.service": bar}), [])
@@ -203,6 +230,72 @@ class TimeSpanTest(unittest.TestCase):
 
     def test_an_unknown_unit_is_not_a_span(self):
         self.assertIsNone(verify.time_span("5parsecs"))
+
+
+class SpecFilesTest(unittest.TestCase):
+    def files(self, *lines):
+        return verify.spec_user_units("%files\n" + "\n".join(lines) + "\n%changelog\n")
+
+    def test_the_forms_of_a_listed_unit(self):
+        for line in (
+            "/usr/lib/systemd/user/a.service",
+            "%attr(0644,root,root) /usr/lib/systemd/user/a.service",
+            "%config(noreplace) %attr(0644,root,root) /usr/lib/systemd/user/a.service",
+            "%config /usr/lib/systemd/user/a.service",
+            "%verify(not md5 size mtime) /usr/lib/systemd/user/a.service",
+            "%{_userunitdir}/a.service",
+            "  /usr/lib/systemd/user/a.service  ",
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(self.files(line), (["a.service"], []))
+
+    def test_a_line_it_cannot_classify_is_reported(self):
+        for line in (
+            "/usr/lib/systemd/user/*.service",
+            "%{_userunitdir}/*",
+            "/usr/lib/systemd/user/a.service.bak",
+            "%{?_userunitdir}/a.service",
+            "/usr/lib/systemd/user/sub/a.service",
+        ):
+            with self.subTest(line=line):
+                names, found = self.files(line)
+                self.assertEqual((names, found), ([], [line]))
+
+    def test_any_other_section_ends_the_files_list(self):
+        for section in ("%verifyscript", "%post", "%sepolicy", "%generate_buildrequires"):
+            with self.subTest(section=section):
+                text = f"%files\n/usr/lib/systemd/user/a.service\n{section}\n/usr/lib/systemd/user/c.service\n"
+                self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
+    def test_an_unbraced_macro_line_does_not_end_the_files_list(self):
+        for first in ("%_bindir/x", "%docdir /x", "%ifos linux"):
+            with self.subTest(first=first):
+                text = f"%files\n{first}\n/usr/lib/systemd/user/a.service\n"
+                self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
+    def test_conditionals_stay_in_the_files_list(self):
+        text = "%files\n%if 1\n/usr/lib/systemd/user/a.service\n%endif\n"
+        self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
+
+    def test_another_directory_macro_is_reported(self):
+        self.assertEqual(self.files("%{systemd_user_dir}/a.service"), ([], ["%{systemd_user_dir}/a.service"]))
+
+    def test_what_is_not_a_user_unit_is_left_alone(self):
+        text = (
+            "%install\ninstall -D a /usr/lib/systemd/user/a.service\n"
+            "%files\n/usr/lib/systemd/user-preset/80-a.preset\n"
+            "/usr/lib/systemd/system/b.service\n"
+            "%dir /usr/lib/systemd/user/x.socket.d\n"
+            "/usr/lib/systemd/user/x.socket.d/50-a.conf\n"
+            "# /usr/lib/systemd/user/*.service\n"
+            "%changelog\n- /usr/lib/systemd/user/*.service\n"
+        )
+        self.assertEqual(verify.spec_user_units(text), ([], []))
+
+    def test_an_unclassified_line_fails_the_check(self):
+        with mock.patch.object(verify, "read", return_value="%files\n/usr/lib/systemd/user/*.service\n"):
+            _, found = verify.shipped_user_units(verify.ROOT)
+        self.assertTrue(found and "cannot tell which user unit" in found[0])
 
 
 class ShippedTest(unittest.TestCase):
