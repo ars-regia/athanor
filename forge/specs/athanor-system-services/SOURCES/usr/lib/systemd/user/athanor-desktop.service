@@ -27,8 +27,9 @@ ExecStart=/usr/bin/sh -c 'for _ in $(seq 100); do wayland-info >/dev/null 2>&1 &
 # The end of the session removes what athanor-desktop imported (doc_session.md, SN2), from
 # the same list, so a unit started before the next login never inherits a dead display.
 # XDG_CURRENT_DESKTOP stays: environment.d sets the same value, and a portal activated
-# between two sessions needs it.
-ExecStop=/usr/bin/sh -c 'names=$$(grep -vx -e "#.*" -e XDG_CURRENT_DESKTOP /usr/share/athanor-system-config/session-import) && exec systemctl --user unset-environment $$names'
+# between two sessions needs it. Blank, whitespace-only and indented comment lines are dropped
+# (athanor-desktop parses the same list and refuses anything else), and globbing is off.
+ExecStop=/usr/bin/sh -c 'set -f; names=$$(sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*$$//" -e "/^#/d" -e "/^$$/d" -e "/^XDG_CURRENT_DESKTOP$$/d" /usr/share/athanor-system-config/session-import) && { [ -n "$$names" ] || { echo "athanor-desktop.service: the import list leaves no variable to unset" >&2; exit 1; }; } && exec systemctl --user unset-environment $$names'
 TimeoutStartSec=15
 # The probe needs no privilege, and gains none from a setuid program it might run
 # (docs/architecture/doc_threat_model.md, TM8).

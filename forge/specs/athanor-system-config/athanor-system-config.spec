@@ -89,7 +89,9 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 - The variables athanor-desktop imports into the user manager are listed in one file,
   /usr/share/athanor-system-config/session-import, which the readiness gate of
   athanor-system-services reads to unset them at the end of the session
-  (doc_session.md, SN2 and SN13 step 1). The list is unchanged.
+  (doc_session.md, SN2 and SN13 step 1). The list is unchanged. athanor-desktop skips blank,
+  whitespace-only and indented comment lines, drops a CRLF ending, validates each name and
+  refuses an empty list, so systemctl never imports the whole environment.
 
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
