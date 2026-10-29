@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Offer primary selection to every client, following the keyboard focus, and data control
+  (ext and wlr) to the clients the allow-list grants it, which grants it to none yet
+  (doc_own_stack.md decision 30)
+
 * Thu Oct 22 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - First package (doc_session.md revision 4, SN13 step 6): the compositor, its user unit,
   the session's script, the greeter's default, which hands the sign-in to cosmic-comp's
