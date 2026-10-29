@@ -240,6 +240,16 @@ struct Client {
     /// Each workspace and its last state.
     workspaces: Vec<(ObjectId, Option<ext_workspace_handle_v1::State>)>,
     workspaces_done: bool,
+    /// The `done` events of the workspace manager.
+    workspace_dones: usize,
+    /// Each workspace's handle, as the manager announced it.
+    workspace_handles: Vec<ext_workspace_handle_v1::ExtWorkspaceHandleV1>,
+    /// Each workspace's last coordinates.
+    coordinates: Vec<(ObjectId, Vec<u32>)>,
+    /// The workspaces the compositor removed.
+    workspaces_removed: Vec<ObjectId>,
+    /// The leave, removed and done events of ext-workspace-v1, in order.
+    workspace_log: Vec<&'static str>,
     /// The evdev code of each key pressed while the client had the keyboard.
     keys: Vec<u32>,
     /// The evdev code of each key released while the client had the keyboard.
@@ -802,8 +812,15 @@ impl Dispatch<ext_workspace_manager_v1::ExtWorkspaceManagerV1, ()> for Client {
                     .groups
                     .push((workspace_group.id(), Vec::new(), Vec::new()));
             }
-            Event::Workspace { workspace } => client.workspaces.push((workspace.id(), None)),
-            Event::Done => client.workspaces_done = true,
+            Event::Workspace { workspace } => {
+                client.workspaces.push((workspace.id(), None));
+                client.workspace_handles.push(workspace);
+            }
+            Event::Done => {
+                client.workspaces_done = true;
+                client.workspace_dones += 1;
+                client.workspace_log.push("done");
+            }
             _ => {}
         }
     }
@@ -834,6 +851,11 @@ impl Dispatch<ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1, ()> for 
         match event {
             Event::OutputEnter { output } => outputs.push(output.id()),
             Event::WorkspaceEnter { workspace } => workspaces.push(workspace.id()),
+            Event::WorkspaceLeave { workspace } => {
+                workspaces.retain(|id| *id != workspace.id());
+                client.workspace_log.push("workspace_leave");
+            }
+            Event::Removed => client.workspace_log.push("group removed"),
             _ => {}
         }
     }
@@ -848,17 +870,34 @@ impl Dispatch<ext_workspace_handle_v1::ExtWorkspaceHandleV1, ()> for Client {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        if let ext_workspace_handle_v1::Event::State {
-            state: WEnum::Value(state),
-        } = event
-        {
-            if let Some((_, last)) = client
-                .workspaces
-                .iter_mut()
-                .find(|(id, _)| *id == workspace.id())
-            {
-                *last = Some(state);
+        use ext_workspace_handle_v1::Event;
+        match event {
+            Event::State {
+                state: WEnum::Value(state),
+            } => {
+                if let Some((_, last)) = client
+                    .workspaces
+                    .iter_mut()
+                    .find(|(id, _)| *id == workspace.id())
+                {
+                    *last = Some(state);
+                }
             }
+            Event::Coordinates { coordinates } => {
+                let values = coordinates
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_ne_bytes(*bytes))
+                    .collect();
+                client.coordinates.retain(|(id, _)| *id != workspace.id());
+                client.coordinates.push((workspace.id(), values));
+            }
+            Event::Removed => {
+                client.workspaces_removed.push(workspace.id());
+                client.workspace_log.push("removed");
+            }
+            _ => {}
         }
     }
 }
@@ -3537,7 +3576,7 @@ fn an_idle_inhibitor_yields_to_the_lock_and_leaves_with_its_client() {
     run.stop();
 }
 
-/// Each output is a workspace group with one workspace, active, that the client's own
+/// Each output is a workspace group with one workspace active, that the client's own
 /// `wl_output` of that output has entered.
 #[test]
 fn task4_each_output_has_an_active_workspace() {
@@ -3564,19 +3603,386 @@ fn task4_each_output_has_an_active_workspace() {
     for (_, outputs_in, workspaces_in) in &client.groups {
         assert_eq!(outputs_in.len(), 1, "a group stands for one output");
         entered.extend(outputs_in.iter().cloned());
-        assert_eq!(workspaces_in.len(), 1, "one workspace per group");
-        let state = client
-            .workspaces
+        let active = workspaces_in
             .iter()
-            .find(|(id, _)| *id == workspaces_in[0])
-            .and_then(|(_, state)| *state);
-        assert_eq!(state, Some(ext_workspace_handle_v1::State::Active));
+            .filter(|workspace| {
+                client
+                    .workspaces
+                    .iter()
+                    .find(|(id, _)| id == *workspace)
+                    .and_then(|(_, state)| *state)
+                    == Some(ext_workspace_handle_v1::State::Active)
+            })
+            .count();
+        assert_eq!(active, 1, "one workspace of each group is active");
     }
     let bound: Vec<ObjectId> = outputs.iter().map(Proxy::id).collect();
     assert!(
         bound.iter().all(|id| entered.contains(id)),
         "each output has its group"
     );
+    run.stop();
+}
+
+/// Output `index` of the space.
+fn output_at(run: &Running, index: usize) -> smithay::output::Output {
+    run.state
+        .space
+        .outputs()
+        .nth(index)
+        .expect("the output")
+        .clone()
+}
+
+/// The workspaces of output `index`, in order.
+fn workspaces_of(run: &Running, index: usize) -> Vec<crate::workspace::WorkspaceId> {
+    run.state.workspaces(&output_at(run, index)).to_vec()
+}
+
+/// A client of ext-workspace-v1, as the bar binds it, once it has been sent every workspace.
+fn workspace_client(
+    run: &mut Running,
+) -> (Local, ext_workspace_manager_v1::ExtWorkspaceManagerV1) {
+    let mut local = Local::connect(run, None);
+    let manager = local.bind(1);
+    local.pump(run, "the workspaces are sent", |client, _| {
+        client.workspaces_done
+    });
+    (local, manager)
+}
+
+/// The workspaces of group `group` as the client last heard them, in the order of their
+/// coordinates: each one's id, coordinate and state.
+fn heard(
+    client: &Client,
+    group: usize,
+) -> Vec<(ObjectId, u32, Option<ext_workspace_handle_v1::State>)> {
+    let (_, _, members) = &client.groups[group];
+    let mut heard: Vec<_> = members
+        .iter()
+        .map(|id| {
+            let at = client
+                .coordinates
+                .iter()
+                .find(|(workspace, _)| workspace == id)
+                .and_then(|(_, values)| values.first().copied())
+                .expect("coordinates");
+            let state = client
+                .workspaces
+                .iter()
+                .find(|(workspace, _)| workspace == id)
+                .and_then(|(_, state)| *state);
+            (id.clone(), at, state)
+        })
+        .collect();
+    heard.sort_by_key(|(_, at, _)| *at);
+    heard
+}
+
+/// The client's handle of the workspace `id`.
+fn workspace_handle(
+    client: &Client,
+    id: &ObjectId,
+) -> ext_workspace_handle_v1::ExtWorkspaceHandleV1 {
+    client
+        .workspace_handles
+        .iter()
+        .find(|handle| handle.id() == *id)
+        .cloned()
+        .expect("the workspace's handle")
+}
+
+/// Each output starts with one workspace, empty and active (OS2); the output a window is mapped
+/// on keeps an empty one after the window's.
+#[test]
+fn each_output_starts_with_one_empty_workspace() {
+    let mut event_loop: EventLoop<State> = EventLoop::try_new().expect("event loop");
+    let display: Display<State> = Display::new().expect("display");
+    let state =
+        headless::start(&mut event_loop, display, None, &OUTPUTS).expect("headless backend");
+    assert_eq!(state.space.outputs().count(), OUTPUTS.len());
+    for output in state.space.outputs() {
+        let list = state.workspaces(output);
+        assert_eq!(list.len(), 1, "one workspace");
+        assert_eq!(state.active_workspace(output), Some(list[0]), "active");
+    }
+    drop(state);
+
+    let run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let first = workspaces_of(&run, 0);
+    assert_eq!(first.len(), 2, "the window's workspace, then an empty one");
+    assert_eq!(run.state.workspace_of(&window), Some(first[0]));
+    assert_eq!(
+        run.state.active_workspace(&output_at(&run, 0)),
+        Some(first[0])
+    );
+    assert_eq!(workspaces_of(&run, 1).len(), 1, "the other output's is empty");
+    run.stop();
+}
+
+/// A window maps on the active workspace of its output; on the last, empty one, it adds an
+/// empty one after it, which the clients are sent.
+#[test]
+fn a_window_on_the_last_workspace_adds_an_empty_one() {
+    let mut run = Running::start(None);
+    let (mut local, _manager) = workspace_client(&mut run);
+    let before = workspaces_of(&run, 0);
+    assert_eq!(heard(&local.client, 0).len(), 2);
+    local.another(&mut run, "first");
+    assert_eq!(workspaces_of(&run, 0), before, "the first workspace was not empty");
+
+    assert!(run.state.activate_workspace(before[1]));
+    let second = local.another(&mut run, "second");
+    let window = local.server_window(&run, &second.surface);
+    assert_eq!(
+        run.state.workspace_of(&window),
+        Some(before[1]),
+        "the window is on the active workspace"
+    );
+    let after = workspaces_of(&run, 0);
+    assert_eq!(after.len(), 3, "an empty one is added");
+    assert_eq!(after[..2], before[..]);
+    local.roundtrip(&mut run);
+    assert_eq!(heard(&local.client, 0).len(), 3, "and sent");
+    run.stop();
+}
+
+/// `activate` applies at the manager's `commit`: the windows of the workspace left go out of
+/// the space, those of the one activated come back where they were, and the clients are sent
+/// both states. While the session is locked a commit changes nothing.
+#[test]
+fn activate_and_commit_switch_the_workspace() {
+    use ext_workspace_handle_v1::State as Shown;
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    let (mut local, manager) = workspace_client(&mut run);
+    let first = local.another(&mut run, "first");
+    let window = local.server_window(&run, &first.surface);
+    let at = run.state.space.element_location(&window);
+    assert!(at.is_some());
+    let output = output_at(&run, 0);
+    let list = workspaces_of(&run, 0);
+    let order = heard(&local.client, 0);
+    assert_eq!(order.len(), 2);
+    let (home, empty) = (
+        workspace_handle(&local.client, &order[0].0),
+        workspace_handle(&local.client, &order[1].0),
+    );
+
+    empty.activate();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "nothing before the commit"
+    );
+    let dones = local.client.workspace_dones;
+    manager.commit();
+    local.pump(&mut run, "the switch is sent", |client, _| {
+        client.workspace_dones > dones
+    });
+    assert_eq!(run.state.active_workspace(&output), Some(list[1]));
+    assert_eq!(run.state.space.element_location(&window), None, "left");
+    assert_eq!(run.state.space.element_location(&fixture), None, "left");
+    let now = heard(&local.client, 0);
+    assert_eq!(now[0].2, Some(Shown::empty()), "the first is inactive");
+    assert_eq!(now[1].2, Some(Shown::Active), "the second active");
+
+    home.activate();
+    let dones = local.client.workspace_dones;
+    manager.commit();
+    local.pump(&mut run, "the switch back is sent", |client, _| {
+        client.workspace_dones > dones
+    });
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert_eq!(
+        run.state.space.element_location(&window),
+        at,
+        "back where it was"
+    );
+    assert!(run.state.space.element_location(&fixture).is_some());
+    let now = heard(&local.client, 0);
+    assert_eq!(now[0].2, Some(Shown::Active));
+    assert_eq!(now[1].2, Some(Shown::empty()));
+
+    let (_locker, _lock) = lock_session(&mut run);
+    empty.activate();
+    manager.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "nothing while the session is locked"
+    );
+    run.stop();
+}
+
+/// A workspace emptied that is neither the last nor the active one is removed, and its handle
+/// with it; the active one emptied stays until it is left, as under cosmic-comp.
+#[test]
+fn an_emptied_workspace_that_is_not_last_is_removed() {
+    let mut run = Running::start(None);
+    let (mut watcher, _manager) = workspace_client(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let other = app.another(&mut run, "moved");
+    let window = app.server_window(&run, &other.surface);
+    let list = workspaces_of(&run, 0);
+    assert_eq!(list.len(), 2);
+
+    assert!(run.state.move_window_to(&window, list[1]));
+    let three = workspaces_of(&run, 0);
+    assert_eq!(three.len(), 3, "the last one taken, an empty one is added");
+    assert_eq!(three[..2], list[..]);
+    assert_eq!(
+        run.state.space.element_location(&window),
+        None,
+        "on an inactive workspace the window leaves the space"
+    );
+    watcher.roundtrip(&mut run);
+    let order = heard(&watcher.client, 0);
+    assert_eq!(order.len(), 3);
+
+    assert!(run.state.move_window_to(&window, list[0]));
+    assert_eq!(
+        workspaces_of(&run, 0),
+        [list[0], three[2]],
+        "the emptied second workspace is removed"
+    );
+    assert!(run.state.space.element_location(&window).is_some());
+    watcher.roundtrip(&mut run);
+    assert!(
+        watcher.client.workspaces_removed.contains(&order[1].0),
+        "and its handle"
+    );
+
+    let last = three[2];
+    assert!(run.state.move_window_to(&window, last));
+    assert!(run.state.activate_workspace(last));
+    assert!(run.state.move_window_to(&window, list[0]));
+    let kept = workspaces_of(&run, 0);
+    assert_eq!(kept.len(), 3);
+    assert_eq!(kept[1], last, "the active workspace stays while it is active");
+    assert!(run.state.activate_workspace(list[0]));
+    assert_eq!(
+        workspaces_of(&run, 0),
+        [list[0], kept[2]],
+        "and goes once left"
+    );
+    run.stop();
+}
+
+/// Each workspace's coordinates are its place in its group, sent again when one before it is
+/// removed.
+#[test]
+fn coordinates_follow_the_order() {
+    let mut run = Running::start(None);
+    let (mut watcher, _manager) = workspace_client(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let other = app.another(&mut run, "moved");
+    let window = app.server_window(&run, &other.surface);
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.move_window_to(&window, list[1]));
+    watcher.roundtrip(&mut run);
+    let order = heard(&watcher.client, 0);
+    let at: Vec<u32> = order.iter().map(|(_, at, _)| *at).collect();
+    assert_eq!(at, [0, 1, 2]);
+
+    assert!(run.state.move_window_to(&window, list[0]));
+    watcher.roundtrip(&mut run);
+    let after: Vec<(ObjectId, u32)> = heard(&watcher.client, 0)
+        .into_iter()
+        .map(|(id, at, _)| (id, at))
+        .collect();
+    assert_eq!(
+        after,
+        [(order[0].0.clone(), 0), (order[2].0.clone(), 1)],
+        "the last takes the removed one's place"
+    );
+    let second: Vec<u32> = heard(&watcher.client, 1)
+        .iter()
+        .map(|(_, at, _)| *at)
+        .collect();
+    assert_eq!(second, [0], "the other output's group has its own");
+    run.stop();
+}
+
+/// A window of an inactive workspace keeps its thumbnail, drawn from its last buffer, as a
+/// minimised one does.
+#[test]
+fn a_window_on_an_inactive_workspace_can_be_captured() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let _list: ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1 = local.bind(1);
+    let sources: ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1 =
+        local.bind(1);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = local.bind(1);
+    let thumb = local.another(&mut run, "thumbnail");
+    let handle = local.handle(&mut run, "thumbnail");
+    let qh = local.queue.handle();
+    let source = sources.create_source(&handle, &qh, ());
+    let session = copy.create_session(&source, Options::empty(), &qh, ());
+    local.pump(&mut run, "the session has its constraints", |client, _| {
+        client.capture_size.is_some()
+    });
+    let window = local.server_window(&run, &thumb.surface);
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.activate_workspace(list[1]));
+    assert_eq!(run.state.space.element_location(&window), None);
+
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0x55; 4]);
+    let frame = session.create_frame(&qh, ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, WIDTH, HEIGHT);
+    frame.capture();
+    local.pump(&mut run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(local.client.captured, Some(Ok(())), "the frame is ready");
+    assert_eq!(
+        local.client.capture_size,
+        Some((WIDTH as u32, HEIGHT as u32))
+    );
+    run.stop();
+}
+
+/// The dock finds a window of an inactive workspace by its handle: activating it, or restoring
+/// it minimised, activates its workspace and gives it the keyboard on top.
+#[test]
+fn a_window_on_an_inactive_workspace_is_found_and_activated() {
+    let mut run = Running::start(None);
+    let mut dock = Dock::connect(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let first = app.another(&mut run, "first");
+    let window = app.server_window(&run, &first.surface);
+    let handle = dock.local.handle(&mut run, "first");
+    let output = output_at(&run, 0);
+    let list = workspaces_of(&run, 0);
+
+    assert!(run.state.activate_workspace(list[1]));
+    assert_eq!(run.state.space.element_location(&window), None);
+    dock.actions.activate(&handle, &dock.seat);
+    dock.local.roundtrip(&mut run);
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert_eq!(run.state.space.elements().last(), Some(&window), "raised");
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "with the keyboard"
+    );
+
+    dock.actions.set_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window));
+    assert!(run.state.activate_workspace(list[1]));
+    dock.actions.unset_minimized(&handle);
+    dock.local.roundtrip(&mut run);
+    assert!(!run.state.is_minimised(&window), "restored");
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert_eq!(run.state.space.elements().last(), Some(&window), "on top");
+    assert_eq!(keyboard_focus(&run), Some(surface_of(&window)));
     run.stop();
 }
 
@@ -4402,7 +4808,8 @@ impl Local {
         }
     }
 
-    /// The compositor's window of this client's `surface`, mapped or minimised.
+    /// The compositor's window of this client's `surface`, mapped, minimised or on an inactive
+    /// workspace.
     fn server_window(
         &self,
         run: &Running,
@@ -4414,6 +4821,7 @@ impl Local {
             .space
             .elements()
             .chain(run.state.minimised.iter().map(|(window, _)| window))
+            .chain(run.state.parked.iter().map(|(window, _)| window))
             .find(|window| {
                 owned_by(window, &id)
                     && window
@@ -7898,6 +8306,18 @@ const KEY_WLAN: u32 = 238;
 const KEY_RFKILL: u32 = 247;
 const KEY_MICMUTE: u32 = 248;
 const KEY_TOUCHPAD_TOGGLE: u32 = 530;
+const KEY_1: u32 = 2;
+const KEY_2: u32 = 3;
+const KEY_9: u32 = 10;
+const KEY_0: u32 = 11;
+const KEY_H: u32 = 35;
+const KEY_J: u32 = 36;
+const KEY_K: u32 = 37;
+const KEY_L: u32 = 38;
+const KEY_UP: u32 = 103;
+const KEY_LEFT: u32 = 105;
+const KEY_RIGHT: u32 = 106;
+const KEY_DOWN: u32 = 108;
 
 /// Presses the chord `codes` while `to` holds the keyboard: the presses and the releases `to`
 /// was sent.
@@ -8821,4 +9241,654 @@ fn x11_the_first_client_starts_the_satellite() {
     run.stop();
     assert!(!socket.exists(), "the socket outlives the compositor");
     std::fs::remove_dir_all(&dir).expect("cleanup");
+}
+
+/// Three workspaces on the first output: the first with the fixture's window and the client's
+/// first, the second with the client's second, which is active and holds the keyboard, and the
+/// third empty. The client, its second window and the list.
+fn three_workspaces(
+    run: &mut Running,
+) -> (
+    Local,
+    smithay::desktop::Window,
+    Vec<crate::workspace::WorkspaceId>,
+) {
+    let (mut local, first) = focused_window(run);
+    // `focused_window` returns once the window is mapped, which is before its first buffer
+    // places it on a workspace.
+    local.pump(run, "the first window is placed", |_, state| {
+        state.workspace_of(&first).is_some()
+    });
+    let list = workspaces_of(run, 0);
+    assert_eq!(run.state.workspace_of(&first), Some(list[0]));
+    assert_eq!(list.len(), 2);
+    assert!(run.state.activate_workspace(list[1]));
+    let second = local.another(run, "second");
+    let second = local.server_window(run, &second.surface);
+    let list = workspaces_of(run, 0);
+    assert_eq!(list.len(), 3, "the second workspace took a window");
+    assert!(keyboard_on(run, &second));
+    (local, second, list)
+}
+
+/// Whether `window` holds the keyboard.
+fn keyboard_on(run: &Running, window: &smithay::desktop::Window) -> bool {
+    let focus = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.current_focus());
+    focus.is_some() && focus.as_ref() == window.toplevel().map(|t| t.wl_surface())
+}
+
+/// Presses the chord `codes`: the actions the compositor took.
+fn fires(run: &mut Running, codes: &[u32]) -> Vec<crate::bindings::Action> {
+    let fired = run.state.fired.len();
+    chord(&mut run.state, codes);
+    run.state.fired[fired..].to_vec()
+}
+
+/// Super+1 to Super+9 activate the n-th workspace of the output with the keyboard's focus, its
+/// last when n is past it, and Super+0 the last (OV13); while locked they reach the lock
+/// surface.
+#[test]
+fn super_digit_switches_the_workspace() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_1],
+        Some(Action::Workspace(1)),
+        "Super+1",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_2],
+        Some(Action::Workspace(2)),
+        "Super+2",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[1]));
+    // The last is empty: the keyboard leaves the client before the keys' release.
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_9]), [Action::Workspace(9)]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[2]),
+        "past the last, the last"
+    );
+    assert!(run.state.activate_workspace(list[0]));
+    assert_eq!(fires(&mut run, &[KEY_LEFTMETA, KEY_0]), [Action::LastWorkspace]);
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert_eq!(workspaces_of(&run, 0), list, "switching moves no window");
+
+    assert!(run.state.activate_workspace(list[0]));
+    let (mut locker, _lock) = lock_session(&mut run);
+    for (codes, what) in [
+        (&[KEY_LEFTMETA, KEY_2][..], "Super+2"),
+        (&[KEY_LEFTMETA, KEY_0], "Super+0"),
+    ] {
+        reaches(&mut locker, &mut run, codes, what);
+    }
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    run.stop();
+}
+
+/// Super+Shift+1 to Super+Shift+9 and Super+Shift+0 move the focused window to that workspace,
+/// which is activated with the window holding the keyboard; while locked they move nothing.
+#[test]
+fn super_shift_digit_moves_the_window() {
+    use crate::bindings::Action;
+    let mut run = Running::start(None);
+    let (mut local, second, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_1],
+        Some(Action::MoveTo(1)),
+        "Super+Shift+1",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[0]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert!(keyboard_on(&run, &second), "the window keeps the keyboard");
+    assert!(run.state.space.element_location(&second).is_some());
+    assert_eq!(
+        workspaces_of(&run, 0),
+        [list[0], list[2]],
+        "the emptied second workspace is removed"
+    );
+    acts(
+        &mut local,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_0],
+        Some(Action::MoveToLast),
+        "Super+Shift+0",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0).len(), 3, "an empty one follows");
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_1],
+        "Super+Shift+1",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    run.stop();
+}
+
+/// Super+Ctrl with Left, Up, h or k activates the workspace before the active one, with Right,
+/// Down, j or l the one after it, one step and no wrap at either end; while locked nothing.
+#[test]
+fn super_ctrl_steps_the_workspace() {
+    use crate::bindings::Action;
+    use crate::workspace::Step;
+    let mut run = Running::start(None);
+    let (_local, _, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    for (key, step, to) in [
+        (KEY_LEFT, Step::Previous, list[0]),
+        (KEY_UP, Step::Previous, list[0]),
+        (KEY_H, Step::Previous, list[0]),
+        (KEY_K, Step::Previous, list[0]),
+        (KEY_RIGHT, Step::Next, list[2]),
+        (KEY_DOWN, Step::Next, list[2]),
+        (KEY_J, Step::Next, list[2]),
+        (KEY_L, Step::Next, list[2]),
+    ] {
+        assert!(run.state.activate_workspace(list[1]));
+        assert_eq!(
+            fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, key]),
+            [Action::Step(step)],
+            "key {key}"
+        );
+        assert_eq!(run.state.active_workspace(&output), Some(to), "key {key}");
+    }
+    assert!(run.state.activate_workspace(list[0]));
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFT]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "no wrap at the first"
+    );
+    assert!(run.state.activate_workspace(list[2]));
+    fires(&mut run, &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_RIGHT]);
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[2]),
+        "no wrap at the last"
+    );
+    assert_eq!(workspaces_of(&run, 0), list, "stepping moves no window");
+
+    assert!(run.state.activate_workspace(list[1]));
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(
+        &mut locker,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_LEFTCTRL, KEY_LEFT],
+        "Super+Ctrl+Left",
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[1]));
+    run.stop();
+}
+
+/// Super+Shift+Ctrl with the same keys carries the focused window one workspace, which is
+/// activated with the window holding the keyboard; no wrap; while locked nothing.
+#[test]
+fn super_shift_ctrl_carries_the_window() {
+    use crate::bindings::Action;
+    use crate::workspace::Step;
+    let mut run = Running::start(None);
+    let (mut local, second, list) = three_workspaces(&mut run);
+    let output = output_at(&run, 0);
+    let carry = |key| [KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_LEFTCTRL, key];
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_K),
+        Some(Action::Carry(Step::Previous)),
+        "Super+Shift+Ctrl+k",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[0]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0), [list[0], list[2]]);
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_LEFT),
+        Some(Action::Carry(Step::Previous)),
+        "Super+Shift+Ctrl+Left",
+    );
+    assert_eq!(
+        run.state.workspace_of(&second),
+        Some(list[0]),
+        "no wrap at the first"
+    );
+    assert_eq!(run.state.active_workspace(&output), Some(list[0]));
+    acts(
+        &mut local,
+        &mut run,
+        &carry(KEY_RIGHT),
+        Some(Action::Carry(Step::Next)),
+        "Super+Shift+Ctrl+Right",
+    );
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    assert_eq!(run.state.active_workspace(&output), Some(list[2]));
+    assert!(keyboard_on(&run, &second));
+    assert_eq!(workspaces_of(&run, 0).len(), 3, "an empty one follows");
+
+    let (mut locker, _lock) = lock_session(&mut run);
+    reaches(&mut locker, &mut run, &carry(KEY_H), "Super+Shift+Ctrl+h");
+    assert_eq!(run.state.workspace_of(&second), Some(list[2]));
+    run.stop();
+}
+
+/// Leaving a workspace dismisses the popups of its windows and ends their grab: the keyboard
+/// goes to the workspace shown, not to a menu no one sees.
+#[test]
+fn leaving_a_workspace_ends_its_popup_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    local.pump(&mut run, "the popup's grab takes the keyboard", |_, state| {
+        focus(state).is_some_and(|surface| state.popups.find_popup(&surface).is_some())
+    });
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.is_grabbed(), "the popup holds the keyboard");
+
+    assert!(run.state.activate_workspace(list[0]));
+    assert!(!keyboard.is_grabbed(), "the popup's keyboard grab ends");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "the popup's pointer grab ends");
+    let focus = focus(&run.state);
+    assert!(
+        run.state
+            .space
+            .elements()
+            .any(|shown| focus.is_some() && shown.toplevel().map(|t| t.wl_surface()) == focus.as_ref()),
+        "the keyboard is on a window of the workspace shown"
+    );
+    run.stop();
+}
+
+/// A token, which a focused client can make at any time, that names a window on an inactive
+/// workspace, minimised or not, drawn or hidden, switches nothing and restores nothing: the
+/// workspace shown stays, and the window stays out of the space.
+#[test]
+fn a_token_for_a_window_on_an_inactive_workspace_keeps_the_workspace() {
+    for minimised in [true, false] {
+        for hidden in [true, false] {
+            a_token_for_a_window_on_an_inactive_workspace(minimised, hidden);
+        }
+    }
+}
+
+fn a_token_for_a_window_on_an_inactive_workspace(minimised: bool, hidden: bool) {
+    let mut run = Running::start(None);
+    let (mut local, _, list) = three_workspaces(&mut run);
+    let tray = local.another(&mut run, "tray");
+    let window = local.server_window(&run, &tray.surface);
+    if minimised {
+        assert!(run.state.minimise(&window));
+    }
+    if hidden {
+        tray.surface.attach(None, 0, 0);
+        tray.surface.commit();
+    }
+    local.roundtrip(&mut run);
+    assert!(run.state.activate_workspace(list[0]));
+    let output = output_at(&run, 0);
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut local, serial.into());
+    let activation: xdg_activation_v1::XdgActivationV1 = local.bind(1);
+    activation.activate(token, &tray.surface);
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.is_minimised(&window), minimised, "as it was");
+    assert_eq!(
+        run.state.active_workspace(&output),
+        Some(list[0]),
+        "the workspace shown stays"
+    );
+    assert!(
+        run.state.space.element_location(&window).is_none(),
+        "the window stays out of the space"
+    );
+    run.stop();
+}
+
+/// A window a move drops with its centre on another output goes to that output's active
+/// workspace, where it was dropped: switching the first output's workspace leaves it shown.
+#[test]
+fn a_window_dropped_on_another_output_takes_its_workspace() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    let first = output_at(&run, 0);
+    let second = output_at(&run, 1);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let area = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("the second output's place");
+    run.state.space.relocate_element(&window, area.loc);
+    run.state.settle(&window);
+    let on_second = run.state.active_workspace(&second);
+    assert!(on_second.is_some());
+    assert_eq!(run.state.workspace_of(&window), on_second);
+    assert_eq!(
+        workspaces_of(&run, 1).len(),
+        2,
+        "an empty workspace follows on the second output"
+    );
+    assert_eq!(run.state.space.element_location(&window), Some(area.loc), "where it was dropped");
+
+    let last = *workspaces_of(&run, 0).last().expect("a workspace");
+    assert!(run.state.activate_workspace(last));
+    assert!(run.state.space.element_location(&window).is_some(), "still shown");
+    assert_eq!(run.state.output_of_workspace(last), Some(first));
+    run.stop();
+}
+
+/// Maps a popup of `parent`, a window of `local`, that grabs the seat with a key serial of
+/// `local`'s, as a menu opened from the keyboard does.
+fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::XdgSurface) {
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(Some(parent), &positioner, &qh, ());
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, local.id.clone().expect("an id")));
+    popup.grab(&seat, serial.into());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(run);
+}
+
+/// A popup of a window the user cannot see, on an inactive workspace or minimised, grabs
+/// nothing, even with a key serial of its client's: the keyboard stays where it is.
+#[test]
+fn a_popup_of_a_hidden_window_grabs_nothing() {
+    for minimised in [false, true] {
+        let mut run = Running::start(None);
+        let (mut local, _, list) = three_workspaces(&mut run);
+        let hidden = local.another(&mut run, "hidden");
+        let window = local.server_window(&run, &hidden.surface);
+        if minimised {
+            assert!(run.state.minimise(&window));
+        } else {
+            assert!(run.state.activate_workspace(list[0]));
+            assert!(run.state.is_parked(&window));
+        }
+        let focus = keyboard_focus(&run);
+        assert_eq!(
+            focus.as_ref().and_then(|surface| surface.client()).map(|c| c.id()),
+            local.id.clone(),
+            "a window of the popup's client has the keyboard"
+        );
+        grabbing_popup(&mut local, &mut run, &hidden.xdg);
+        let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+        assert!(!keyboard.is_grabbed(), "no keyboard grab");
+        let pointer = run.state.seat.get_pointer().expect("a pointer");
+        assert!(!pointer.is_grabbed(), "no pointer grab");
+        assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
+        run.stop();
+    }
+}
+
+/// Minimising a window dismisses its popups and ends their grab: the keyboard goes to the window
+/// on top, not to a menu no one sees (#831).
+#[test]
+fn minimising_a_window_ends_its_popup_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _, _) = three_workspaces(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(keyboard.is_grabbed(), "the popup holds the keyboard");
+
+    assert!(run.state.minimise(&window));
+    assert!(!keyboard.is_grabbed(), "the popup's keyboard grab ends");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "the popup's pointer grab ends");
+    let top = run
+        .state
+        .space
+        .elements()
+        .rev()
+        .find(|window| crate::handlers::shown(window))
+        .and_then(|window| window.toplevel().map(|t| t.wl_surface().clone()));
+    assert!(top.is_some(), "a window is shown");
+    assert_eq!(keyboard_focus(&run), top, "the keyboard is on the window on top");
+    run.stop();
+}
+
+/// A popup of a window that draws nothing, one that committed a null buffer, grabs nothing, even
+/// with a key serial of its client's.
+#[test]
+fn a_popup_of_a_window_drawing_nothing_grabs_nothing() {
+    let mut run = Running::start(None);
+    let (mut local, _, _) = three_workspaces(&mut run);
+    let blank = local.another(&mut run, "blank");
+    let window = local.server_window(&run, &blank.surface);
+    run.state.focus(&window);
+    blank.surface.attach(None, 0, 0);
+    blank.surface.commit();
+    local.roundtrip(&mut run);
+    assert!(run.state.space.element_location(&window).is_some(), "still in the space");
+    let focus = keyboard_focus(&run);
+    assert_eq!(
+        focus.as_ref().and_then(|surface| surface.client()).map(|c| c.id()),
+        local.id.clone(),
+        "a window of the popup's client has the keyboard"
+    );
+    grabbing_popup(&mut local, &mut run, &blank.xdg);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    assert!(!keyboard.is_grabbed(), "no keyboard grab");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(!pointer.is_grabbed(), "no pointer grab");
+    run.stop();
+}
+
+/// Unplugging an output with workspaces: its windows, shown and parked, join the first output's
+/// active workspace and come back on the first output, and a client hears each workspace leave
+/// its group and go, then the group go, in one `done`.
+#[test]
+fn unplugging_an_output_rehomes_its_workspaces() {
+    let mut run = Running::start(None);
+    let (mut local, shown) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&shown).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let other = local.another(&mut run, "parked");
+    let parked = local.server_window(&run, &other.surface);
+    for window in [&shown, &parked] {
+        run.state.space.relocate_element(window, area.loc);
+        run.state.settle(window);
+    }
+    let list = workspaces_of(&run, 1);
+    assert_eq!(list.len(), 2);
+    assert!(run.state.move_window_to(&parked, list[1]));
+    assert!(run.state.is_parked(&parked));
+    assert_eq!(workspaces_of(&run, 1).len(), 3);
+
+    let (mut client, _manager) = workspace_client(&mut run);
+    client.client.workspace_log.clear();
+    run.state.remove_output(&second);
+    client.roundtrip(&mut run);
+    let home = run.state.active_workspace(&first);
+    let within = run.state.space.output_geometry(&first).expect("placed");
+    for window in [&shown, &parked] {
+        assert_eq!(run.state.workspace_of(window), home, "on the first output's workspace");
+        let geometry = run.state.space.element_geometry(window).expect("shown");
+        assert!(within.overlaps(geometry), "on the first output");
+    }
+    let mut heard = ["workspace_leave", "removed"].repeat(3);
+    heard.extend(["group removed", "done"]);
+    assert_eq!(client.client.workspace_log, heard);
+    run.stop();
+}
+
+/// An output that changes size moves the others: a window of the second output's workspaces,
+/// shown or parked, whose place its output no longer shows comes back on that output, not the
+/// first, and keeps its workspace.
+#[test]
+fn a_window_fitted_after_a_mode_change_stays_on_its_output() {
+    let mut run = Running::start(None);
+    let (mut local, shown) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&shown).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let other = local.another(&mut run, "parked");
+    let parked = local.server_window(&run, &other.surface);
+    let edge = area.loc + Point::from((area.size.w - 20, area.size.h - 20));
+    for window in [&shown, &parked] {
+        run.state.space.relocate_element(window, area.loc);
+        run.state.settle(window);
+        run.state.space.relocate_element(window, edge);
+    }
+    let list = workspaces_of(&run, 1);
+    assert!(run.state.move_window_to(&parked, list[1]));
+    assert!(run.state.is_parked(&parked));
+
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let on_second = |run: &Running, window: &smithay::desktop::Window| {
+        let area = run.state.space.output_geometry(&second).expect("placed");
+        run.state
+            .space
+            .element_geometry(window)
+            .is_some_and(|geometry| area.overlaps(geometry))
+    };
+    assert!(on_second(&run, &shown), "the shown window is on its output");
+    assert_eq!(run.state.workspace_of(&shown), Some(list[0]));
+    assert!(run.state.activate_workspace(list[1]));
+    assert!(on_second(&run, &parked), "the parked window comes back on its output");
+    assert_eq!(run.state.workspace_of(&parked), Some(list[1]));
+    run.stop();
+}
+
+/// A window of an unplugged output that a third output still shows a strip of joins the first
+/// output's active workspace and comes back on the first output, where that workspace is shown.
+#[test]
+fn a_window_of_an_unplugged_output_comes_back_on_the_first() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    local.pump(&mut run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let third = crate::state::build_output(
+        "HEADLESS-3",
+        "fixture",
+        (800, 600).into(),
+        60_000,
+        smithay::utils::Transform::Normal,
+        1.0,
+    );
+    run.state.map_output(&third);
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    run.state.space.relocate_element(&window, area.loc);
+    run.state.settle(&window);
+    let straddling = area.loc + Point::from((area.size.w - WIDTH + 10, 0));
+    run.state.space.relocate_element(&window, straddling);
+
+    run.state.remove_output(&second);
+    assert_eq!(
+        run.state.workspace_of(&window),
+        run.state.active_workspace(&first)
+    );
+    let within = run.state.space.output_geometry(&first).expect("placed");
+    let geometry = run.state.space.element_geometry(&window).expect("shown");
+    assert!(within.overlaps(geometry), "on the first output");
+    run.stop();
+}
+
+/// A window of the second output's workspace is maximised to the second output's area, fitted
+/// to it again when the outputs move, and restored on that output when its place there moved
+/// off every output.
+#[test]
+fn a_window_is_maximised_on_its_output() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let (first, second) = (output_at(&run, 0), output_at(&run, 1));
+    let at = run.state.space.output_geometry(&second).expect("placed").loc;
+    run.state.space.relocate_element(&window, at);
+    run.state.settle(&window);
+    let list = workspaces_of(&run, 1);
+    assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+    let size = run.state.space.output_geometry(&second).expect("placed").size;
+    let edge = at + Point::from((size.w - 20, size.h - 20));
+    run.state.space.relocate_element(&window, edge);
+
+    toplevel.set_maximized();
+    let area = run.state.window_area_on(&second).expect("an area");
+    let (width, height, _) = local.redraw(&mut run);
+    assert_eq!((width, height), (area.size.w, area.size.h));
+    assert_eq!(location_of(&run, &id), area.loc);
+
+    let small = smithay::output::Mode {
+        size: (200, 150).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let moved = run.state.window_area_on(&second).expect("an area");
+    assert_ne!(moved.loc, area.loc, "the second output moved");
+    local.redraw(&mut run);
+    assert_eq!(location_of(&run, &id), moved.loc);
+    assert_eq!(run.state.workspace_of(&window), Some(list[0]));
+
+    toplevel.unset_maximized();
+    local.redraw(&mut run);
+    let shown = run.state.space.output_geometry(&second).expect("placed");
+    let geometry = run.state.space.element_geometry(&window).expect("shown");
+    assert!(shown.overlaps(geometry), "restored on its output");
+    run.stop();
 }

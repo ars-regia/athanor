@@ -119,8 +119,9 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
-                // A minimised window is placed and moved when it is restored (`unminimise`).
-                if !self.is_minimised(&window) {
+                // A minimised window, or one on an inactive workspace, is placed and moved when
+                // it comes back (`unminimise`, `activate_workspace`).
+                if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
                     self.relocated(&window);
                     self.anchor_resized(&window);
@@ -296,6 +297,7 @@ impl State {
             // Placed where it stays: at the bottom, under the window being typed into.
             self.space.relocate_element(window, (x, y));
         }
+        self.place_on_workspace(window);
     }
 
     /// The pointer, the start of its grab and the window, when the client of `surface` may
@@ -443,6 +445,8 @@ impl XdgShellHandler for State {
             }
             self.space.unmap_elem(&window);
             self.minimised.retain(|(kept, _)| *kept != window);
+            self.parked.retain(|(kept, _)| *kept != window);
+            self.workspaces_changed();
         }
         // The keyboard does not leave a destroyed window by itself.
         self.refocus(surface.wl_surface());
@@ -557,7 +561,9 @@ impl XdgShellHandler for State {
     /// takes the keyboard only when that root can keep it: never for a layer surface whose
     /// interactivity is `none`, a bar, and while a layer surface holds the keyboard
     /// exclusively only for its own popups; any other grab takes the pointer only. A grab
-    /// refused leaves the popup shown without it, as a popover a client opens at start is.
+    /// refused leaves the popup shown without it, as a popover a client opens at start is,
+    /// except one of a window the user cannot see, minimised, on an inactive workspace, not
+    /// placed yet or drawing nothing, whose popup is dismissed.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         // While locked, the keyboard and the pointer stay with the lock surfaces.
         if self.lock.is_some() {
@@ -570,6 +576,17 @@ impl XdgShellHandler for State {
         let Ok(root) = find_popup_root_surface(&popup) else {
             return;
         };
+        // A popup of a window the user cannot see, minimised, on an inactive workspace, not
+        // placed yet or drawing nothing, takes neither the keyboard nor the pointer: it is
+        // dismissed.
+        if self.popup_root_place(&root).is_none()
+            || self.window_for(&root).is_some_and(|window| !shown(&window))
+        {
+            if let PopupKind::Xdg(surface) = &popup {
+                surface.send_popup_done();
+            }
+            return;
+        }
         let (keyboard, pointer) = (seat.get_keyboard(), seat.get_pointer());
         let Some(client) = root.client().map(|client| client.id()) else {
             return;
@@ -800,7 +817,12 @@ impl XdgActivationHandler for State {
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
             // While the session is locked a token restores nothing (L14).
             if self.lock.is_none() {
-                if let Some(window) = self.window_or_minimised(&surface) {
+                // A focused client can make a token at any time: it switches no workspace, and a
+                // window on an inactive one stays there.
+                if let Some(window) = self
+                    .window_or_minimised(&surface)
+                    .filter(|window| self.on_active_workspace(window))
+                {
                     self.unminimise(&window);
                 }
             }
