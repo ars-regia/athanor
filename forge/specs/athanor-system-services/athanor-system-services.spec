@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        30%{?dist}
+Release:        31%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -12,6 +12,8 @@ Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
 Requires:       wayland-utils
+# The readiness gate unsets the import list that athanor-system-config ships (doc_session.md, SN2).
+Requires:       athanor-system-config
 # athanor-appearance-reset reads and resets the GNOME appearance keys.
 Requires:       dconf bash
 
@@ -45,6 +47,12 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.1-31
+- athanor-desktop.service, the readiness gate, is PartOf=graphical-session.target and its
+  ExecStop= unsets the variables of athanor-system-config's import list, all but
+  XDG_CURRENT_DESKTOP, at the end of the session (doc_session.md, SN2, SN3 and SN13 step 1).
+  It skips blank, whitespace-only and indented comment lines of the list.
+
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.0.1-30
 - athanor-skel-sync.service: a failed copy of /etc/skel is logged and fails the unit
   (the `2>/dev/null` that hid it is gone), ReadWritePaths=%h lets it write the home
