@@ -562,6 +562,15 @@ impl State {
         self.window_area_on(self.space.outputs().next()?)
     }
 
+    /// What the zones leave of the output under `point`, or of the first output when no output
+    /// is there: where a window being moved is kept.
+    pub fn window_area_at(&self, point: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        match self.space.output_under(point).next() {
+            Some(output) => self.window_area_on(output),
+            None => self.window_area(),
+        }
+    }
+
     /// What the layer surfaces' exclusive zones leave of `output`.
     pub fn window_area_on(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let area = self.space.output_geometry(output)?;

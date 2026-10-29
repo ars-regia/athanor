@@ -2833,6 +2833,32 @@ fn a_moved_window_keeps_its_top_edge_reachable() {
     run.stop();
 }
 
+/// A window dragged from the first output to the middle of the second follows the pointer
+/// there, unclamped, and the release puts it on the second output's active workspace (#832).
+#[test]
+fn dragging_a_window_reaches_the_second_output() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (id, at) = moved(&mut run, &mut local);
+    let before = location_of(&run, &id);
+    let second = output_at(&run, 1);
+    let shown = run.state.space.output_geometry(&second).expect("placed");
+    let target = (shown.loc + Point::from((shown.size.w / 2, shown.size.h / 2))).to_f64();
+    run.state.pointer_to(target, InputTime::now());
+    assert_eq!(
+        location_of(&run, &id),
+        before + (target - at).to_i32_round(),
+        "the window follows the pointer onto the second output"
+    );
+    release(&mut run);
+    assert_eq!(
+        run.state.workspace_of(&window_of(&run, &id)),
+        run.state.active_workspace(&second),
+        "dropped on the second output's active workspace"
+    );
+    run.stop();
+}
+
 /// The lock ends a move: the pointer goes to the lock, and the window stays (OS12).
 #[test]
 fn the_lock_ends_a_move() {
