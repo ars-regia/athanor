@@ -85,6 +85,8 @@ pub struct A11y {
     pub(crate) focus: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
     /// A button or a pen's tip is being handled: the keyboard moving now is the pointer's doing.
     pub(crate) pointing: bool,
+    /// The renderer cannot draw the colour pass: its shader did not compile.
+    no_pass: bool,
     /// The inversion and the filter, as cosmic-comp stores them.
     pub screen: ScreenFilter,
     /// Where they are stored, once the state root is known.
@@ -102,6 +104,7 @@ impl Default for A11y {
             focal: None,
             focus: None,
             pointing: false,
+            no_pass: false,
             screen: ScreenFilter::default(),
             filter_path: None,
             managers: Vec::new(),
@@ -128,7 +131,7 @@ impl GlobalDispatch2<AthanorA11yManagerV1, State> for A11yManagers {
     ) {
         let manager = data_init.init(resource, A11yManagers);
         send_magnifier(&manager, state.a11y.level);
-        send_screen_filter(&manager, &state.a11y.screen);
+        send_screen_filter(&manager, &state.a11y.shown_filter());
         // No modifier is latched or locked before the aids exist; a manager bound while the
         // session is locked is sent the event when the aids land (#865).
         if state.lock.is_none() {
@@ -311,9 +314,23 @@ impl A11y {
                 pointer
             }
         };
+        let filter = Affine::of(&self.shown_filter());
+        if filter.is_none() {
+            crate::look::release(output);
+        }
         Look {
             zoom: self.zoom_on(output, area, pointer),
-            filter: Affine::of(&self.screen),
+            filter,
+        }
+    }
+
+    /// The inversion and the filter as they are drawn, which is what a manager is told: with no
+    /// pass, none, whatever is stored.
+    fn shown_filter(&self) -> ScreenFilter {
+        if self.no_pass {
+            ScreenFilter::default()
+        } else {
+            self.screen.clone()
         }
     }
 
@@ -476,10 +493,22 @@ impl State {
                 .map(|(_, name)| (*name).to_string());
         }
         self.store_screen_filter();
-        for manager in &self.a11y.managers {
-            send_screen_filter(manager, &self.a11y.screen);
-        }
+        self.send_shown_filter();
         self.request_redraw();
+    }
+
+    /// The renderer cannot draw the colour pass: every manager is told it is off, and it stays
+    /// stored, for the session that can.
+    pub(crate) fn no_filter_pass(&mut self) {
+        self.a11y.no_pass = true;
+        self.send_shown_filter();
+    }
+
+    fn send_shown_filter(&self) {
+        let shown = self.a11y.shown_filter();
+        for manager in &self.a11y.managers {
+            send_screen_filter(manager, &shown);
+        }
     }
 }
 

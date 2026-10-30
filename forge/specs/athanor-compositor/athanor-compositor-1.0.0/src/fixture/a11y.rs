@@ -4,8 +4,11 @@
 
 use super::*;
 use crate::bindings::Action;
+use crate::look::holds_pass;
 use crate::screen_filter::{filter_text, parse_filter, Movement, ScreenFilter};
 use athanor_a11y::athanor_a11y_manager_v1::{self, ActiveState, AthanorA11yManagerV1, Filter};
+use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::pixman::PixmanRenderer;
 
 /// An event of the manager, its enums as numbers.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -599,6 +602,125 @@ fn the_filters_are_drawn_on_the_output() {
     bar.roundtrip(&mut run);
     let frame = run.state.capture(0).expect("frame of output 0");
     assert_eq!(pixel(&frame, w, red.0, red.1), RED, "off");
+    run.stop();
+}
+
+/// Each channel of `got` within rounding of `expected`: a GPU blends in floats.
+fn near(got: [u8; 4], expected: [u8; 4]) -> bool {
+    got.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2)
+}
+
+/// The pass on a GPU, where it is a shader: `ATHANOR_RENDER_NODE=/dev/dri/renderD128 cargo test
+/// -- --ignored`. It compiles, each filter draws, the frame is the right way up, also magnified,
+/// and off, the offscreen frame goes.
+#[test]
+#[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
+fn the_filters_on_a_render_node() {
+    let node = PathBuf::from(
+        std::env::var_os("ATHANOR_RENDER_NODE").expect("ATHANOR_RENDER_NODE names a render node"),
+    );
+    let mut run = Running::start(Some(&node));
+    let mut bar = Local::connect(&mut run, None);
+    let (manager, log) = manager(&mut bar, &mut run);
+    taken(&log);
+    let middle = window_middle(&run);
+    let w = OUTPUTS[0].width;
+    let quarter = HEIGHT / 4;
+    let (above, below) = ((middle.x, middle.y - quarter), (middle.x, middle.y + quarter));
+    run.state.pointer_to(middle.to_f64(), InputTime::now());
+    let shown = |run: &mut Running, what: &str| {
+        let frame = run.state.capture(0).expect("frame of output 0");
+        let (top, bottom) = (
+            pixel(&frame, w, above.0, above.1),
+            pixel(&frame, w, below.0, below.1),
+        );
+        let [red, blue] = match crate::a11y::Affine::of(&run.state.a11y.screen) {
+            Some(affine) => [affine.apply(RED), affine.apply(BLUE)],
+            None => [RED, BLUE],
+        };
+        assert!(near(top, red), "{what}, above: {top:?} for {red:?}");
+        assert!(near(bottom, blue), "{what}, below: {bottom:?} for {blue:?}");
+    };
+
+    shown(&mut run, "off");
+    manager.set_screen_filter(ActiveState::Enabled, Filter::None);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Filter(1, 0)], "the shader compiled");
+    shown(&mut run, "inverted");
+    manager.set_screen_filter(ActiveState::Disabled, Filter::Greyscale);
+    bar.roundtrip(&mut run);
+    shown(&mut run, "greyscale");
+    manager.set_screen_filter(ActiveState::Disabled, Filter::Protanopia);
+    bar.roundtrip(&mut run);
+    shown(&mut run, "protanopia");
+    manager.zoom_in();
+    manager.zoom_in();
+    bar.roundtrip(&mut run);
+    shown(&mut run, "magnified");
+    let held = |run: &Running| {
+        let mut outputs = run.state.space.outputs();
+        outputs.any(holds_pass::<GlesRenderer>)
+    };
+    assert!(held(&run), "the offscreen frame is kept while the filter is on");
+
+    manager.set_screen_filter(ActiveState::Disabled, Filter::None);
+    bar.roundtrip(&mut run);
+    shown(&mut run, "off again");
+    assert!(!held(&run), "the offscreen frame goes with the filter");
+    run.stop();
+}
+
+/// A renderer whose pass does not compile cannot draw a filter: no manager is told one is on,
+/// not even one that asks for it or binds later, and the frame has no pass.
+#[test]
+fn a_filter_that_cannot_be_drawn_is_reported_off() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (manager_of_bar, log) = manager(&mut bar, &mut run);
+    let middle = window_middle(&run);
+    let w = OUTPUTS[0].width;
+    let red = (middle.x, middle.y - HEIGHT / 4);
+    manager_of_bar.set_screen_filter(ActiveState::Enabled, Filter::None);
+    bar.roundtrip(&mut run);
+    taken(&log);
+
+    run.state.no_filter_pass();
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Filter(0, 0)], "told it is off");
+    let frame = run.state.capture(0).expect("frame of output 0");
+    assert_eq!(pixel(&frame, w, red.0, red.1), RED, "no pass");
+
+    manager_of_bar.set_screen_filter(ActiveState::Enabled, Filter::Greyscale);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Filter(0, 0)], "asked for one");
+    let stored = &run.state.a11y.screen;
+    assert!(stored.inverted && stored.filter.is_some(), "kept for a session that can");
+
+    let (_later, log) = manager(&mut bar, &mut run);
+    assert!(taken(&log).contains(&Seen::Filter(0, 0)), "bound later");
+    run.stop();
+}
+
+/// The offscreen frame of the pass is kept from frame to frame while a filter is on, and let go
+/// when it goes off: a whole output's memory, for nothing.
+#[test]
+fn the_offscreen_frame_goes_with_the_filter() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (manager, _log) = manager(&mut bar, &mut run);
+    let held = |run: &Running| {
+        let mut outputs = run.state.space.outputs();
+        outputs.any(holds_pass::<PixmanRenderer>)
+    };
+    manager.set_screen_filter(ActiveState::Enabled, Filter::None);
+    bar.roundtrip(&mut run);
+    run.state.capture(0).expect("frame of output 0");
+    run.state.capture(0).expect("frame of output 0");
+    assert!(held(&run), "kept");
+    manager.set_screen_filter(ActiveState::Disabled, Filter::None);
+    bar.roundtrip(&mut run);
+    run.state.capture(0).expect("frame of output 0");
+    assert!(!held(&run), "let go");
     run.stop();
 }
 

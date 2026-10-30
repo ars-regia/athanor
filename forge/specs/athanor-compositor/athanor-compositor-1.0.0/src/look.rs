@@ -186,6 +186,33 @@ where
     Ok((element, states))
 }
 
+fn kept<R: Filters>(output: &Output) -> Option<&RefCell<Option<Pass<R::Offscreen, R::TextureId>>>>
+where
+    R::TextureId: 'static,
+{
+    output.user_data().get()
+}
+
+/// Lets go of `output`'s offscreen frame, drawn with either renderer: with no pass on, it only
+/// holds memory.
+pub fn release(output: &Output) {
+    if let Some(cell) = kept::<GlesRenderer>(output) {
+        cell.borrow_mut().take();
+    }
+    if let Some(cell) = kept::<PixmanRenderer>(output) {
+        cell.borrow_mut().take();
+    }
+}
+
+/// Whether `output` holds an offscreen frame drawn with `R`.
+#[cfg(test)]
+pub fn holds_pass<R: Filters>(output: &Output) -> bool
+where
+    R::TextureId: 'static,
+{
+    kept::<R>(output).is_some_and(|cell| cell.borrow().is_some())
+}
+
 /// An output's frame, drawn offscreen, shown through the colour pass.
 pub struct FilterElement<T> {
     id: Id,
@@ -260,9 +287,35 @@ void main() {
 }
 "#;
 
-/// The compiled shader, kept with the EGL context; none when it did not compile, which was
-/// logged once, and the frame is then shown without the pass.
+/// The compiled shader, kept with the EGL context; none when it did not compile.
 struct FilterProgram(Option<GlesTexProgram>);
+
+/// Compiles the pass's shader for `renderer`, once; false, logged, when it does not compile.
+/// The caller says so through `State::no_filter_pass`: the pass is then not asked of `draw`.
+pub fn prepare(renderer: &mut GlesRenderer) -> bool {
+    let user_data = renderer.egl_context().user_data();
+    if let Some(kept) = user_data.get::<FilterProgram>() {
+        return kept.0.is_some();
+    }
+    let compiled = renderer.compile_custom_texture_shader(
+        SHADER,
+        &[
+            UniformName::new("filter_matrix", UniformType::Matrix3x3),
+            UniformName::new("filter_offset", UniformType::_1f),
+        ],
+    );
+    let program = compiled
+        .inspect_err(|error| {
+            tracing::error!(%error, "the colour filter's shader did not compile: no filter is drawn")
+        })
+        .ok();
+    let ready = program.is_some();
+    renderer
+        .egl_context()
+        .user_data()
+        .insert_if_missing(|| FilterProgram(program));
+    ready
+}
 
 impl Filters for GlesRenderer {
     type Offscreen = GlesTexture;
@@ -284,28 +337,6 @@ impl Filters for GlesRenderer {
         _size: Size<i32, Physical>,
         _affine: &Affine,
     ) -> Result<GlesTexture, GlesError> {
-        if self
-            .egl_context()
-            .user_data()
-            .get::<FilterProgram>()
-            .is_none()
-        {
-            let compiled = self.compile_custom_texture_shader(
-                SHADER,
-                &[
-                    UniformName::new("filter_matrix", UniformType::Matrix3x3),
-                    UniformName::new("filter_offset", UniformType::_1f),
-                ],
-            );
-            let program = compiled
-                .inspect_err(|error| {
-                    tracing::error!(%error, "the colour filter's shader did not compile: no filter is drawn")
-                })
-                .ok();
-            self.egl_context()
-                .user_data()
-                .insert_if_missing(|| FilterProgram(program));
-        }
         Ok(offscreen.clone())
     }
 }

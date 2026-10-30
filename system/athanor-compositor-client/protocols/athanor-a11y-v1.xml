@@ -157,6 +157,8 @@
     <event name="screen_filter">
       <description summary="the state of the colour inversion and filter">
         A filter in the stored state that this version does not name is sent as unknown.
+        This is what is drawn: a compositor that cannot draw the pass sends disabled and none,
+        whatever is stored.
       </description>
       <arg name="inverted" type="uint" enum="active_state"/>
       <arg name="filter" type="uint" enum="filter"/>

@@ -267,6 +267,7 @@ pub fn start(
     let renderer = gles(&mut gpus, &render_node)?;
     let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
     let dmabuf_formats = renderer.dmabuf_formats();
+    let pass = crate::look::prepare(renderer);
     let heads = DrmOutputManager::new(
         device,
         GbmAllocator::new(
@@ -303,6 +304,9 @@ pub fn start(
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
+    if !pass {
+        state.no_filter_pass();
+    }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");

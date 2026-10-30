@@ -49,6 +49,7 @@ pub fn start(
         scale,
     );
     let formats = backend.renderer().dmabuf_formats();
+    let pass = crate::look::prepare(backend.renderer());
     let nested = Nested {
         backend,
         output: output.clone(),
@@ -56,6 +57,9 @@ pub fn start(
         frame_scheduled: false,
     };
     let mut state = State::new(event_loop, display, Backend::Nested(Box::new(nested)))?;
+    if !pass {
+        state.no_filter_pass();
+    }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     state.map_output(&output);

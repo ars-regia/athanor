@@ -128,8 +128,13 @@ pub fn start(
             let Gpu::Gbm { manager, node, .. } = &mut headless.gpu else {
                 return Err("the headless backend lost its render node".into());
             };
-            let formats = gles(manager, node)?.dmabuf_formats();
+            let renderer = gles(manager, node)?;
+            let formats = renderer.dmabuf_formats();
+            let pass = crate::look::prepare(renderer);
             let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
+            if !pass {
+                state.no_filter_pass();
+            }
             state
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(&dh, &feedback);
