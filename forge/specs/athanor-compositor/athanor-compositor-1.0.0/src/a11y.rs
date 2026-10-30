@@ -393,23 +393,35 @@ impl State {
         })
     }
 
-    /// The point of the space a device that points at the screen names at `location`: the
-    /// inverse of the magnification on the output last drawn magnified, when `location` is on
-    /// it; elsewhere, or with the magnifier off, `location` itself.
+    /// The point of the space a device that points at the screen names at `location`. A view
+    /// that follows the pointer at every motion moves with that point, so the point is
+    /// `location` itself: continuously it is then shown there, and any other answer would
+    /// drift while the device stays still. A view that moves at its edge stays put, so the point
+    /// is the one shown at `location` now: the view of the next frame on the pointer's output.
     pub(crate) fn unzoomed(&self, location: Point<f64, Logical>) -> Point<f64, Logical> {
-        let Some((output, focal, level)) = &self.a11y.focal else {
+        let level = self.a11y.level;
+        if level <= 1.0 || self.a11y.zoom.moves != Movement::OnEdge {
+            return location;
+        }
+        let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
             return location;
         };
-        if *level != self.a11y.level || *level <= 1.0 {
+        let on = self.space.outputs().find_map(|output| {
+            let area = self.space.output_geometry(output)?.to_f64();
+            area.contains(pointer).then_some((output, area))
+        });
+        let Some((output, area)) = on.filter(|(_, area)| area.contains(location)) else {
             return location;
-        }
-        match self.space.output_geometry(output) {
-            Some(area) if area.to_f64().contains(location) => {
-                let origin = area.loc.to_f64();
-                origin + *focal + (location - origin - *focal).downscale(*level)
-            }
-            _ => location,
-        }
+        };
+        let last = self
+            .a11y
+            .focal
+            .as_ref()
+            .filter(|(on, _, at)| on == output && *at == level)
+            .map(|(_, at, _)| *at);
+        let origin = area.loc;
+        let at = focal(Movement::OnEdge, level, area.size, pointer - origin, last);
+        origin + at + (location - origin - at).downscale(level)
     }
 
     /// Turns the magnifier on, at its last level in this session or one step, or off.

@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::bindings::Action;
-use crate::screen_filter::{filter_text, parse_filter, ScreenFilter};
+use crate::screen_filter::{filter_text, parse_filter, Movement, ScreenFilter};
 use athanor_a11y::athanor_a11y_manager_v1::{self, ActiveState, AthanorA11yManagerV1, Filter};
 
 /// An event of the manager, its enums as numbers.
@@ -502,8 +502,10 @@ fn a_click_outside_a_grabbing_popup_with_the_magnifier_on() {
     run.stop();
 }
 
-/// A device that points at the screen names, while the magnifier is on, the point shown under
-/// it: an absolute motion 90 pixels right of the pointer at level 2.25 moves it 40.
+/// A device that points at the screen names the point shown under it. A view that moves at its
+/// edge stays, so a motion 90 pixels right of the pointer at level 2.25 moves it 40, the same
+/// event again moves nothing, and a level not drawn yet counts. A view that follows the pointer
+/// goes with it, so the pointer is where the device points, however often it says so.
 #[test]
 fn an_absolute_motion_points_through_the_magnifier() {
     let mut run = Running::start(None);
@@ -533,16 +535,29 @@ fn an_absolute_motion_points_through_the_magnifier() {
     let right = middle + Point::from((90, 0));
     assert_eq!(point(&mut run, right), right.to_f64(), "at level 1");
 
+    run.state.a11y.zoom.moves = Movement::OnEdge;
     run.state.pointer_to(middle.to_f64(), InputTime::now());
     run.state.zoom_step(true);
     run.state.zoom_step(true);
-    // Drawn, so that the view follows the pointer.
+    // Drawn, so that the view is around the pointer.
     run.state.capture(0).expect("frame of output 0");
+    let shown = (middle + Point::from((40, 0))).to_f64();
+    for _ in 0..3 {
+        assert_eq!(point(&mut run, right), shown, "at level 2.25");
+    }
+
+    run.state.zoom_step(true);
     assert_eq!(
         point(&mut run, right),
-        (middle + Point::from((40, 0))).to_f64(),
-        "at level 2.25"
+        shown + (right.to_f64() - shown).downscale(3.375),
+        "before the new level is drawn"
     );
+
+    run.state.a11y.zoom.moves = Movement::Continuously;
+    for _ in 0..3 {
+        assert_eq!(point(&mut run, right), right.to_f64(), "followed");
+        run.state.capture(0).expect("frame of output 0");
+    }
     run.stop();
 }
 
