@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,13 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- Pointer constraints, relative pointer motion and keyboard-shortcuts inhibitors for
+  every client, under doc_own_stack.md decision 30: a lock or a confinement holds only
+  while its surface has the keyboard, the user's way out stays the compositor's under an
+  inhibitor, and Ctrl+Alt+Tab suspends the focused client's until a click or a key gives
+  it the keyboard back.
+
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Offer primary selection to every client, following the keyboard focus, and data control
   (ext and wlr) to the clients the allow-list grants it, which grants it to none yet

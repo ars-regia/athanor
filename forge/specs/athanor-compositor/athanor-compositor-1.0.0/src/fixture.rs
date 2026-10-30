@@ -5074,6 +5074,10 @@ impl Local {
     }
 }
 
+// Decision 30: pointer constraints, relative motion and shortcut inhibitors.
+#[cfg(test)]
+mod constraints;
+
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
     run.state
