@@ -6,16 +6,16 @@
 # above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
 %global fedora_release 2.fc43
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
-%global commit 41497b42d9744d9963c4c6d17e8add49489b45ee
+%global commit 8cb1802caada438bb5cc7670dfabdaca5fad0502
 %global cosmic_minver 1.8.0
 
 Name:           cosmic-comp
-Version:        1.10.0
-Release:        %{fedora_release}.athanor3
+Version:        1.11.0
+Release:        %{fedora_release}.athanor1
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
-License:        (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSD-2-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause) AND (Apache-2.0 OR CC0-1.0 OR MIT) AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR LGPL-2.1-or-later OR MIT) AND (Apache-2.0 OR MIT OR Unlicense) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (LGPL-3.0-or-later OR MIT) AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND GPL-3.0-only AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0 AND Zlib
+License:        (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSD-2-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause) AND (Apache-2.0 OR CC0-1.0 OR MIT) AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR LGPL-2.1-or-later OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (LGPL-3.0-or-later OR MIT) AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND GPL-3.0-only AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0 AND Zlib
 URL:            https://github.com/pop-os/cosmic-comp
 Source0:        https://github.com/pop-os/cosmic-comp/archive/epoch-%{version}/cosmic-comp-%{version}.tar.gz
 # Patch0 and Patch1 are submitted upstream; drop each when a release carries it.
@@ -66,6 +66,9 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc43.athanor1
+- Fedora's cosmic-comp 1.11.0-2.fc43.
+
 * Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor3
 - Focus the lock surface when the session locks with no window and no keyboard focus: the
   locker's password field took no keys until a click (pop-os/cosmic-greeter#474).
