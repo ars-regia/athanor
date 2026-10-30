@@ -186,7 +186,10 @@ where
     Ok((element, states))
 }
 
-fn kept<R: Filters>(output: &Output) -> Option<&RefCell<Option<Pass<R::Offscreen, R::TextureId>>>>
+/// What an output keeps of the pass between frames.
+type Kept<O, T> = RefCell<Option<Pass<O, T>>>;
+
+fn kept<R: Filters>(output: &Output) -> Option<&Kept<R::Offscreen, R::TextureId>>
 where
     R::TextureId: 'static,
 {
