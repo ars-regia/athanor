@@ -362,6 +362,7 @@ fn a_tablet_tools_proximity_and_motion_reach_the_surface_under_it() {
     };
     run.state.tablet_added(&tablet);
     run.state.tool_proximity(
+        "pen".into(),
         &tablet,
         &tool,
         at,
@@ -370,6 +371,7 @@ fn a_tablet_tools_proximity_and_motion_reach_the_surface_under_it() {
         InputTime::now(),
     );
     run.state.tool_motion(
+        "pen".into(),
         &tool,
         at + Point::from((5.0, 5.0)),
         AxisFrame::default(),
@@ -448,7 +450,7 @@ fn an_imported_surface_is_the_parent_until_the_exported_one_is_destroyed() {
 
 /// A pen in range over the window of `local`: its tablet, tool and position, once the client has
 /// the tool entered.
-fn pen_over_window(
+pub(super) fn pen_over_window(
     run: &mut Running,
     local: &mut Local,
 ) -> (
@@ -457,6 +459,19 @@ fn pen_over_window(
     Point<f64, Logical>,
 ) {
     let at = under_the_pointer(run, local);
+    pen_at(run, local, at)
+}
+
+/// A pen in range at `at`, where the pointer of `local` already is.
+pub(super) fn pen_at(
+    run: &mut Running,
+    local: &mut Local,
+    at: Point<f64, Logical>,
+) -> (
+    TabletDescriptor,
+    smithay::backend::input::TabletToolDescriptor,
+    Point<f64, Logical>,
+) {
     let seat = local.seat.clone().expect("a seat");
     let manager: zwp_tablet_manager_v2::ZwpTabletManagerV2 = local.bind(1);
     let _tablets = manager.get_tablet_seat(&seat, &local.queue.handle(), ());
@@ -474,6 +489,7 @@ fn pen_over_window(
     };
     run.state.tablet_added(&tablet);
     run.state.tool_proximity(
+        "pen".into(),
         &tablet,
         &tool,
         at,
@@ -487,7 +503,7 @@ fn pen_over_window(
     (tablet, tool, at)
 }
 
-fn pressure() -> AxisFrame {
+pub(super) fn pressure() -> AxisFrame {
     AxisFrame {
         pressure: Some(0.5),
         ..AxisFrame::default()
@@ -502,6 +518,7 @@ fn a_tool_moving_off_a_surface_sends_it_no_axes() {
     let mut local = Local::connect(&mut run, None);
     let (_, tool, _) = pen_over_window(&mut run, &mut local);
     run.state.tool_motion(
+        "pen".into(),
         &tool,
         Point::from((-4000.0, -4000.0)),
         pressure(),
@@ -553,7 +570,7 @@ fn a_lock_takes_a_tool_in_range_from_the_window_under_it() {
     run.state
         .tool_tip(&tool, TabletToolTipState::Down, InputTime::now());
     run.state
-        .tool_motion(&tool, at, pressure(), InputTime::now());
+        .tool_motion("pen".into(), &tool, at, pressure(), InputTime::now());
     locker.roundtrip(&mut run);
     local.roundtrip(&mut run);
     let seen = &local.client.devices;
@@ -576,6 +593,7 @@ fn a_lock_ends_the_stroke_in_a_window() {
         client.devices.tool_downs == 1
     });
     run.state.tool_motion(
+        "pen".into(),
         &tool,
         at + Point::from((2.0, 2.0)),
         pressure(),
@@ -594,6 +612,7 @@ fn a_lock_ends_the_stroke_in_a_window() {
     let moves = local.client.devices.tool_motion.len();
     let pressures = local.client.devices.tool_pressures;
     run.state.tool_motion(
+        "pen".into(),
         &tool,
         at + Point::from((9.0, 9.0)),
         pressure(),
@@ -1072,6 +1091,7 @@ fn a_press_over_an_output_without_a_lock_surface_is_not_kept() {
     let away = (second.loc + Point::from((10, 10))).to_f64();
     for (location, proximity) in [(at, ProximityState::Out), (away, ProximityState::In)] {
         run.state.tool_proximity(
+            "pen".into(),
             &tablet,
             &tool,
             location,
@@ -1086,7 +1106,7 @@ fn a_press_over_an_output_without_a_lock_surface_is_not_kept() {
     assert!(run.state.surface_under(at).is_some(), "a lock surface here");
     hold(&mut run, &tool);
     run.state
-        .tool_motion(&tool, at, pressure(), InputTime::now());
+        .tool_motion("pen".into(), &tool, at, pressure(), InputTime::now());
     locker.roundtrip(&mut run);
     local.roundtrip(&mut run);
     assert!(
@@ -1112,6 +1132,7 @@ fn a_button_held_through_a_proximity_out_is_released_unseen() {
     });
     for proximity in [ProximityState::Out, ProximityState::In] {
         run.state.tool_proximity(
+            "pen".into(),
             &tablet,
             &tool,
             at,
@@ -1156,8 +1177,9 @@ fn a_button_held_through_a_move_off_and_a_proximity_in_is_released_unseen() {
         client.devices.tool_buttons == 1
     });
     run.state
-        .tool_motion(&tool, away, pressure(), InputTime::now());
+        .tool_motion("pen".into(), &tool, away, pressure(), InputTime::now());
     run.state.tool_proximity(
+        "pen".into(),
         &tablet,
         &tool,
         at,
@@ -1200,9 +1222,9 @@ fn a_button_held_through_a_move_off_and_back_is_released_once() {
         client.devices.tool_buttons == 1
     });
     run.state
-        .tool_motion(&tool, away, pressure(), InputTime::now());
+        .tool_motion("pen".into(), &tool, away, pressure(), InputTime::now());
     run.state
-        .tool_motion(&tool, at, pressure(), InputTime::now());
+        .tool_motion("pen".into(), &tool, at, pressure(), InputTime::now());
     local.roundtrip(&mut run);
     let released = local.client.devices.tool_releases;
     assert_eq!(local.client.devices.tool_buttons, 2, "the press replayed");

@@ -98,8 +98,11 @@ impl State {
     }
 
     /// `tool` of `tablet` came into or left the range of the tablet, at `location` in the space.
+    /// `device` is the libinput device's id, the key of its last position under a pointer lock.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn tool_proximity(
         &mut self,
+        device: String,
         tablet: &TabletDescriptor,
         tool: &TabletToolDescriptor,
         location: Point<f64, Logical>,
@@ -115,7 +118,7 @@ impl State {
             // A tool that was never in range has none to leave.
             (None, ProximityState::Out) => return,
         };
-        self.pointer_to(location, time);
+        self.pointer_moved_to(device, location, time);
         match proximity {
             ProximityState::In => {
                 // A tool of a tablet no device event announced has nothing to enter.
@@ -158,12 +161,13 @@ impl State {
     /// `tool` moved to `location` in the space, its axes changed as `axes` says.
     pub(crate) fn tool_motion(
         &mut self,
+        device: String,
         tool: &TabletToolDescriptor,
         location: Point<f64, Logical>,
         axes: AxisFrame,
         time: InputTime,
     ) {
-        self.pointer_to(location, time);
+        self.pointer_moved_to(device, location, time);
         let Some(handle) = self.seat.tablet_seat().get_tool(tool) else {
             return;
         };
@@ -339,12 +343,19 @@ impl State {
             }
             InputEvent::TabletToolAxis { event } => {
                 if let Some(location) = self.tablet_location(&event) {
-                    self.tool_motion(&event.tool(), location, axes(&event), event.time());
+                    self.tool_motion(
+                        event.device().id(),
+                        &event.tool(),
+                        location,
+                        axes(&event),
+                        event.time(),
+                    );
                 }
             }
             InputEvent::TabletToolProximity { event } => {
                 if let Some(location) = self.tablet_location(&event) {
                     self.tool_proximity(
+                        event.device().id(),
                         &TabletDescriptor::from(&event.device()),
                         &event.tool(),
                         location,

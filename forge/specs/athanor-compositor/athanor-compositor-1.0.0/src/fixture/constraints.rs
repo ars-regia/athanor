@@ -1029,3 +1029,48 @@ fn a_session_unlock_keeps_a_suspension() {
     game.wait(&mut run, &log, &lifted, "the click lifts it");
     run.stop();
 }
+
+/// A pen moves the pointer as any absolute device does: under a lock the pointer stays.
+#[test]
+fn a_pens_motion_keeps_a_lock() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let (_lock, log) = game.lock(Lifetime::Persistent);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    let before = Game::location(&run);
+    run.state.tool_motion(
+        "pen".into(),
+        &tool,
+        at + Point::from((30.0, 0.0)),
+        super::devices::pressure(),
+        InputTime::now(),
+    );
+    game.settle(&mut run);
+    assert_eq!(Game::location(&run), before, "a locked pointer stays");
+    run.stop();
+}
+
+/// A pen moves the pointer as any absolute device does: a confined pointer stays in its region.
+#[test]
+fn a_pens_motion_keeps_a_confinement() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let region = middle(&mut game.local);
+    let (_confined, log) = game.confine(Some(&region), Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    let inside = at + Point::from((5.0, 5.0));
+    for (to, stays) in [(inside, inside), (at + Point::from((60.0, 5.0)), inside)] {
+        run.state.tool_motion(
+            "pen".into(),
+            &tool,
+            to,
+            super::devices::pressure(),
+            InputTime::now(),
+        );
+        game.settle(&mut run);
+        assert_eq!(Game::location(&run), stays, "inside the region");
+    }
+    run.stop();
+}
