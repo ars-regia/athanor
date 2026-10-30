@@ -87,6 +87,8 @@ impl Origin {
 #[derive(Debug)]
 struct Withheld {
     origin: Origin,
+    /// When the key was pressed: modifiers let through together keep the order they came in.
+    pressed: Instant,
     /// The modifier the key is, 0 for none.
     modifier: u32,
     /// Slow keys' timer, which lets the press through; none for a dropped press.
@@ -342,9 +344,10 @@ impl State {
                         && held.modifier != 0
                         && (held.slow.is_some() || (!pending && held.bounced))
                 })
-                .map(|(key, _)| *key)
+                .map(|(key, held)| (held.pressed, *key))
                 .collect();
-            for key in held {
+            held.sort_unstable_by_key(|(pressed, _)| *pressed);
+            for (_, key) in held {
                 if let Some(Withheld {
                     slow: Some(timer), ..
                 }) = self.aids.withheld.remove(&key)
@@ -364,6 +367,7 @@ impl State {
             {
                 let withheld = Withheld {
                     origin,
+                    pressed: now,
                     modifier,
                     slow: None,
                     bounced: true,
@@ -381,6 +385,7 @@ impl State {
                 Ok(timer) => {
                     let withheld = Withheld {
                         origin,
+                        pressed: now,
                         modifier,
                         slow: Some(timer),
                         bounced: false,
