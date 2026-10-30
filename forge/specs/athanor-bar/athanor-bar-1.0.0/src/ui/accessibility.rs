@@ -2,10 +2,14 @@
 //! function, read back by the bar's appearance watch. The screen reader through the AT-SPI bus's status.
 //! The magnifier, inverted colours and the colour filter through the compositor. Each row
 //! shows only when its source answers; with none, the button is hidden (SH1).
+//! The magnifier's GNOME key decides whether it is on for a session (doc_accessibility.md AX10):
+//! the bar turns it on at its start when the key is true and sends each change, and the
+//! magnifier row writes the key, tells the compositor and shows the state the compositor sends.
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 
+use athanor_bar::magnifier::{self, KEY as MAGNIFIER_KEY, SCHEMA as MAGNIFIER_SCHEMA};
 use athanor_compositor_client::{theme, ScreenFilter};
 use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
@@ -39,6 +43,33 @@ fn filter_label(filter: ScreenFilter) -> String {
         ScreenFilter::Tritanopia => tr("Blue-yellow (tritanopia)"),
         ScreenFilter::None | ScreenFilter::Unknown => tr("No colour filter"),
     }
+}
+
+/// The magnifier's key, watched once per process whichever surfaces build the module: at the
+/// first build, true turns the magnifier on, and each change is sent to the compositor. `None`
+/// without the schema.
+fn magnifier_key(bar: &Rc<Bar>) -> Option<gio::Settings> {
+    thread_local!(static KEY: OnceCell<Option<gio::Settings>> = const { OnceCell::new() });
+    KEY.with(|key| key.get_or_init(|| watch_magnifier(bar)).clone())
+}
+
+fn watch_magnifier(bar: &Rc<Bar>) -> Option<gio::Settings> {
+    let schema = gio::SettingsSchemaSource::default()?.lookup(MAGNIFIER_SCHEMA, true);
+    if !schema.is_some_and(|schema| schema.has_key(MAGNIFIER_KEY)) {
+        tracing::warn!("{MAGNIFIER_SCHEMA} has no {MAGNIFIER_KEY}; the magnifier row switches the compositor alone");
+        return None;
+    }
+    let settings = gio::Settings::new(MAGNIFIER_SCHEMA);
+    let weak = Rc::downgrade(bar);
+    magnifier::follow(&settings, move |enabled| {
+        let Some(bar) = weak.upgrade() else {
+            return;
+        };
+        if let Some(Err(err)) = bar.client().map(|client| client.set_magnifier(enabled)) {
+            tracing::info!(error = %err, enabled, "the magnifier's key cannot reach the compositor");
+        }
+    });
+    Some(settings)
 }
 
 async fn a11y_call(method: &str, args: glib::Variant) -> Result<glib::Variant, glib::Error> {
@@ -236,12 +267,29 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         }
         glib::Propagation::Proceed
     });
+    // athanor-compositor's manager is bound at the first watch, before the key is sent.
+    if let Some(Err(err)) = bar.client().map(|client| client.watch_accessibility()) {
+        tracing::warn!(error = %err, "cannot watch the compositor's accessibility state");
+    }
+    let key = magnifier_key(bar);
     let (weak_bar, weak_inner) = (Rc::downgrade(bar), Rc::downgrade(&inner));
     inner.magnifier.connect_state_set(move |_, enabled| {
         if let (Some(bar), Some(inner)) = (weak_bar.upgrade(), weak_inner.upgrade()) {
             if !inner.updating.get() {
-                if let Some(Err(err)) = bar.client().map(|client| client.set_magnifier(enabled)) {
+                let sent = magnifier::switch(key.as_ref(), enabled, |enabled| {
+                    bar.client()
+                        .map_or(Ok(()), |client| client.set_magnifier(enabled))
+                        .map_err(|err| err.to_string())
+                });
+                if let Err(err) = sent {
                     tracing::error!(error = %err, "cannot switch the magnifier");
+                    // Show the compositor's state again, once this handler has returned.
+                    let weak_bar = weak_bar.clone();
+                    glib::idle_add_local_once(move || {
+                        if let Some(bar) = weak_bar.upgrade() {
+                            bar.refresh(Changed::Accessibility);
+                        }
+                    });
                 }
             }
         }

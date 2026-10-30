@@ -211,7 +211,9 @@ impl State {
                 }
                 if let Some(pointer) = self.seat.get_pointer() {
                     if !pointer.is_grabbed() {
+                        self.a11y.set_pointing(true);
                         self.click_focus(pointer.current_location());
+                        self.a11y.set_pointing(false);
                     }
                 }
                 let serial = SERIAL_COUNTER.next_serial();
@@ -329,7 +331,7 @@ impl State {
         event: &impl AbsolutePositionEvent<I>,
     ) -> Option<Point<f64, Logical>> {
         let area = self.output_area()?;
-        Some(event.position_transformed(area.size) + area.loc.to_f64())
+        Some(self.unzoomed(event.position_transformed(area.size) + area.loc.to_f64()))
     }
 
     /// Reads a device or tablet event of the backend. Other events are not a tablet's and are

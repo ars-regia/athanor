@@ -4,13 +4,15 @@
 //! scale 1, an output as it draws itself, and either is copied into the client's wl_shm buffer at
 //! the next frame of the outputs. Nothing is captured while the session is locked (spike Q7).
 
+use crate::a11y::Look;
+use crate::look::{FilterElement, Filters};
 use crate::state::{draw_view, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::AsRenderElements;
+use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::GlesTexture;
-use smithay::backend::renderer::{Bind, ExportMem, ImportAll, Offscreen, Renderer, Texture};
+use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Texture};
 use smithay::desktop::{Space, Window};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm};
@@ -233,16 +235,18 @@ impl State {
 }
 
 /// Draws `what` off screen and reads its pixels back, `READ_FORMAT`, row by row from the top: a
-/// window at scale 1, an output as it draws `space`, whole.
+/// window at scale 1, an output as it draws `space`, whole, without the magnifier and the
+/// colour filters, which are the user's view and not the screen's contents (AX10).
 pub fn read_back<R, T>(
     renderer: &mut R,
     what: &Target,
     space: &Space<Window>,
 ) -> Result<Vec<u8>, Error>
 where
-    R: Renderer + ImportAll + ExportMem + Offscreen<T> + Bind<T>,
+    R: Filters + ExportMem + Offscreen<T> + Bind<T>,
     R::TextureId: Clone + Texture + 'static,
     R::Error: 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
     let (width, height) = what.size().ok_or("nothing of a size to capture")?;
     let size = Size::<i32, Buffer>::from((width, height));
@@ -266,7 +270,8 @@ where
             let mut tracker = OutputDamageTracker::from_output(output);
             // ponytail: without the input method's popups; pass them in when a capture needs them.
             let view = View::Space(space, &[]);
-            let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker)
+            let look = Look::default();
+            let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker, look)
                 .map_err(|error| format!("{error:?}"))?;
             result.sync.wait()?;
         }

@@ -11,7 +11,7 @@ use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify, WatchDescriptor};
 use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
-use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt;
 use std::fs::OpenOptions;
 use std::io::{self, Read};
@@ -277,9 +277,10 @@ pub(crate) fn read(path: &Path) -> Result<Option<String>, Refused> {
 /// directory does not exist, and of the parent of the directory watched; the compositor
 /// creates nothing.
 pub struct Watch {
-    inotify: Inotify,
-    /// The directory that holds the file.
+    pub(crate) inotify: Inotify,
+    /// The directory that holds the file, and the file's name in it.
     dir: PathBuf,
+    name: OsString,
     /// The directory watched and its descriptor.
     watched: Option<(PathBuf, WatchDescriptor)>,
     /// The parent of the directory watched, for the directory's name. A removed directory
@@ -324,10 +325,12 @@ impl Watch {
     /// Watches the directory of `file`, or its nearest existing ancestor.
     pub fn new(file: &Path) -> nix::Result<Self> {
         let dir = file.parent().ok_or(Errno::EINVAL)?.to_path_buf();
+        let name = file.file_name().ok_or(Errno::EINVAL)?.to_os_string();
         let inotify = Inotify::init(InitFlags::IN_NONBLOCK | InitFlags::IN_CLOEXEC)?;
         let mut watch = Self {
             inotify,
             dir,
+            name,
             watched: None,
             parent: None,
         };
@@ -438,7 +441,7 @@ impl Watch {
                     | AddWatchFlags::IN_MOVE_SELF;
                 if event.mask.intersects(gone) || *path != self.dir {
                     rearm = true;
-                } else if event.name.as_deref() == Some(OsStr::new("xkb_config")) {
+                } else if event.name.as_deref() == Some(self.name.as_os_str()) {
                     reload = true;
                 }
             }

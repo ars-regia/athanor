@@ -59,6 +59,10 @@ off screen.
 athanor-compositor --headless --render-node /dev/dri/renderD128 --output 1920x1080 --output 1280x800@1.5
 ```
 
+A manual `--headless` run, like the shell rig's, also asks the session bus for the name
+`org.freedesktop.a11y.Manager`, which Orca's keyboard commands need; if the session already has an
+owner, the compositor logs it and runs without Orca's commands.
+
 On a render node it draws through GBM and GLES and offers `linux-dmabuf` (version 4, with
 feedback naming the node) and, when the node can wait on a syncobj, `linux-drm-syncobj-v1`.
 Without `--render-node` Pixman draws on the CPU and clients use `wl_shm`. Every 10 seconds it
@@ -140,7 +144,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -162,11 +166,23 @@ keymap under both compositors. The seat keeps its group, clamped to the new layo
 Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
 most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
 keymap is the environment's and the repeat 25 per second after 200 ms.
-`athanor-compositor --screen-filter-on` answers athanor-compositor-session, which starts
-cosmic-comp's session in its place while cosmic-comp's colour inversion or filter is on
-(`doc_own_stack.md` decision 28): it reads `cosmic-comp/a11y_screen_filter.ron` under the state
-root, writes nothing and starts no display, and exits 0 when the file is absent or holds neither,
-10 when it holds either, and 1 when it cannot tell.
+`athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-compositor-client) switches the
+magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
+granted it. The inversion and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron`
+under the state root, read at start and written atomically, in cosmic-comp's format, at each
+change; a file that cannot be read changes nothing and is written over only at the next change,
+and a filter this compositor does not name is kept, sent as `unknown` and not drawn. The
+magnifier's increment, how the view follows the pointer and the mouse zoom shortcuts are
+cosmic-comp's `accessibility_zoom` under the configuration root, read at start and after each
+change as `xkb_config` is. A step multiplies or divides the level by one plus the increment,
+between 1 and 256; Super+= and Super+- step it, under a shortcut inhibitor too and never while
+the session is locked, and so does Super with the scroll wheel when the mouse shortcuts are on.
+The view follows the pointer, and the middle of the window or layer surface the keyboard goes
+to until the pointer next moves. The output under the point followed is drawn scaled about the
+view, the inversion and the filter as one
+pass over each output's final frame; captures and screencopy get neither. While a pass is on,
+nothing is scanned out directly. `src/screen_filter.rs` is the only reader and writer of these
+two files.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
 takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
 keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
@@ -284,8 +300,9 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
   client is forgotten; the journal names a refusal at most once a minute. When Orca's name
   changes owner, or a connection comes or goes, every admitted client is admitted again, and
   one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
-  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer; the
-  image's bus and Orca itself are not yet observed. Changes of names queue one wake-up at most,
+  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer, and the
+  reference laptop's bus returned it on 2026-10-30 (#863, with Orca running); the rig's bus is
+  not observed. Changes of names queue one wake-up at most,
   so that a connection that comes and goes in a loop leaves room for Orca's call.
 - In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
   the bindings, and the input method's forwarded keys are not sent twice. A protected key, one

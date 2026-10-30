@@ -6,9 +6,8 @@
 # through athanor-session.target once it is ready. This script waits on that unit: the
 # session ends when the compositor ends, whatever the cause, and every way out of the script
 # stops what it started and leaves the user manager clean. The sign-in passes to cosmic-comp's
-# session, athanor-session, in three cases: the magnifier or a colour filter is on (step 2),
-# a command that prepares the session fails (steps 3 to 5), or the session fails before
-# athanor-session.target has become active (step 7). Each is logged at warning under this
+# session, athanor-session, in two cases: a command that prepares the session fails (steps 3
+# to 5), or the session fails before athanor-session.target has become active (step 7). Each is logged at warning under this
 # script's name. A compositor that ends after the session started ends the session.
 set -eu
 
@@ -81,33 +80,9 @@ for name in $names; do
     esac
 done
 
-# 2. The magnifier and the colour filters are cosmic-comp's (doc_own_stack.md decision 28):
-# a user who has either on signs in there, before anything else is set. gsettings prints
-# the default without an error when it cannot read the user's database, so a dconf
-# directory it cannot search, or a database it cannot read, counts as the magnifier on.
-case ",${ATHANOR_A11Y:-}," in
-    *,magnifier,*) hand_off_now "the greeter hands the magnifier to the session" ;;
-esac
-if ! magnifier=$(gsettings get org.gnome.desktop.a11y.applications screen-magnifier-enabled); then
-    hand_off_now "the magnifier's setting cannot be read"
-fi
-if [ "$magnifier" != false ]; then
-    hand_off_now "the magnifier is on ($magnifier)"
-fi
-dconf="${XDG_CONFIG_HOME:-$HOME/.config}/dconf"
-if [ -e "$dconf" ] && ! [ -x "$dconf" ]; then
-    hand_off_now "$dconf cannot be searched, so the magnifier's setting is unknown"
-fi
-if [ -e "$dconf/user" ] && ! [ -r "$dconf/user" ]; then
-    hand_off_now "$dconf/user cannot be read, so the magnifier's setting is unknown"
-fi
-# 0: no inversion and no filter in cosmic-comp's a11y_screen_filter.ron; 10: one of them.
-# Any other status (a file it cannot read, a binary without the flag) counts as a filter on.
-filter=0
-/usr/bin/athanor-compositor --screen-filter-on || filter=$?
-if [ "$filter" -ne 0 ]; then
-    hand_off_now "a colour filter is on or unknown (athanor-compositor --screen-filter-on exited $filter)"
-fi
+# 2. Nothing: the magnifier and the colour filters are the compositor's own
+# (doc_accessibility.md AX10, #864), so neither hands the sign-in off. The steps keep SN15's
+# numbers.
 
 # 3. Every way out that is not a hand-off ends the session: the compositor's end once the
 # session has started, a logout, a signal from greetd. Each command of the handler runs as

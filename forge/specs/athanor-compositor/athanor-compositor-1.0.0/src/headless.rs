@@ -6,6 +6,8 @@
 use crate::capture::Target;
 use crate::lock::Lock;
 use crate::input_method::PlacedPopup;
+use crate::a11y::Look;
+use crate::look::{FilterElement, Filters};
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -13,14 +15,12 @@ use smithay::backend::allocator::gbm::GbmDevice;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::{DrmDeviceFd, DrmNode};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::RenderElementStates;
+use smithay::backend::renderer::element::{RenderElement, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{ApiDevice, GpuManager};
 use smithay::backend::renderer::pixman::PixmanRenderer;
-use smithay::backend::renderer::{
-    Bind, ExportMem, ImportAll, ImportDma, Offscreen, Renderer, Texture,
-};
+use smithay::backend::renderer::{Bind, ExportMem, ImportDma, Offscreen, Texture};
 use smithay::desktop::{Space, Window};
 use smithay::output::Output;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -128,8 +128,13 @@ pub fn start(
             let Gpu::Gbm { manager, node, .. } = &mut headless.gpu else {
                 return Err("the headless backend lost its render node".into());
             };
-            let formats = gles(manager, node)?.dmabuf_formats();
+            let renderer = gles(manager, node)?;
+            let formats = renderer.dmabuf_formats();
+            let pass = crate::look::prepare(renderer);
             let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
+            if !pass {
+                state.no_filter_pass();
+            }
             state
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(&dh, &feedback);
@@ -253,7 +258,12 @@ impl State {
             let started = Instant::now();
             let output = headless.outputs[index].output.clone();
             let popups = self.composing.popups_on(&self.space, &output);
-            match headless.draw(index, &self.space, self.lock.as_ref(), &popups, false) {
+            let pointer = self.seat.get_pointer().map(|p| p.current_location());
+            let look = self
+                .a11y
+                .look(&output, self.space.output_geometry(&output), pointer);
+            let view = (&self.space, self.lock.as_ref(), &popups[..], look);
+            match headless.draw(index, view, false) {
                 Ok(drawn) => {
                     frames.push((headless.outputs[index].output.clone(), drawn));
                     if let Some(stats) = &mut self.frame_stats {
@@ -308,15 +318,9 @@ impl Headless {
         }
     }
 
-    /// Draws output `index`, and reads its pixels back when `read`.
-    fn draw(
-        &mut self,
-        index: usize,
-        space: &Space<Window>,
-        lock: Option<&Lock>,
-        popups: &[PlacedPopup],
-        read: bool,
-    ) -> Result<Drawn, Error> {
+    /// Draws output `index` as `view` holds it: the space, the lock, the input method's popups
+    /// and the magnifier and filters; and reads its pixels back when `read`.
+    fn draw(&mut self, index: usize, view: Shown<'_>, read: bool) -> Result<Drawn, Error> {
         let virt = self
             .outputs
             .get_mut(index)
@@ -329,11 +333,11 @@ impl Headless {
                 buffers,
             } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(gles(manager, node)?, buffer, virt, space, lock, popups, read)
+                draw(gles(manager, node)?, buffer, virt, view, read)
             }
             Gpu::Pixman { renderer, buffers } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(renderer, buffer, virt, space, lock, popups, read)
+                draw(renderer, buffer, virt, view, read)
             }
         };
         // The tracker counts a failed frame as drawn: a new one draws the next frame whole, so
@@ -346,21 +350,24 @@ impl Headless {
     }
 }
 
-/// Draws the space on `virt` into `buffer`, or only its lock surface while `lock` holds the
+/// What an output is drawn from: the space, the lock, the input method's popups, and what the
+/// magnifier and the filters do to it.
+type Shown<'a> = (&'a Space<Window>, Option<&'a Lock>, &'a [PlacedPopup], Look);
+
+/// Draws the space on `virt` into `buffer`, or only its lock surface while the lock holds the
 /// session, and reads the frame back when `read`.
 fn draw<R, T>(
     renderer: &mut R,
     buffer: &mut T,
     virt: &mut Virtual,
-    space: &Space<Window>,
-    lock: Option<&Lock>,
-    popups: &[PlacedPopup],
+    (space, lock, popups, look): Shown<'_>,
     read: bool,
 ) -> Result<Drawn, Error>
 where
-    R: Renderer + ImportAll + ExportMem + Bind<T>,
+    R: Filters + ExportMem + Bind<T>,
     R::TextureId: Clone + Texture + 'static,
     R::Error: 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
     let age = usize::from(virt.drawn);
     let mut target = renderer.bind(buffer)?;
@@ -372,6 +379,7 @@ where
         age,
         view,
         &mut virt.damage_tracker,
+        look,
     )
     .map_err(|error| format!("{error:?}"))?;
     // Smithay releases a client's buffer when the renderer drops its texture, not when the GPU
@@ -505,12 +513,20 @@ impl State {
         let Backend::Headless(headless) = &mut self.backend else {
             return Err("only the headless backend reads frames back".into());
         };
-        let popups = match headless.outputs.get(index) {
-            Some(virt) => self.composing.popups_on(&self.space, &virt.output),
-            None => Vec::new(),
+        let (popups, look) = match headless.outputs.get(index) {
+            Some(virt) => {
+                let pointer = self.seat.get_pointer().map(|p| p.current_location());
+                let area = self.space.output_geometry(&virt.output);
+                (
+                    self.composing.popups_on(&self.space, &virt.output),
+                    self.a11y.look(&virt.output, area, pointer),
+                )
+            }
+            None => (Vec::new(), Look::default()),
         };
+        let view = (&self.space, self.lock.as_ref(), &popups[..], look);
         headless
-            .draw(index, &self.space, self.lock.as_ref(), &popups, true)?
+            .draw(index, view, true)?
             .pixels
             .ok_or_else(|| "the frame was not read back".into())
     }

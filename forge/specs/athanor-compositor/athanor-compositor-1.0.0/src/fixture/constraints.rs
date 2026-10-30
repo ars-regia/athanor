@@ -376,6 +376,8 @@ fn an_inhibitor_keeps_the_way_out() {
             Action::Reveal,
             "Super+Alt+T",
         ),
+        (&[KEY_LEFTMETA, KEY_EQUAL], Action::ZoomIn, "Super+="),
+        (&[KEY_LEFTMETA, KEY_MINUS], Action::ZoomOut, "Super+-"),
         (&[KEY_LEFTMETA, KEY_ESC], Action::Lock, "Super+Escape"),
         (
             &[KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC],

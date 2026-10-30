@@ -44,6 +44,9 @@ pub enum Privilege {
     ToplevelActions,
     /// `athanor_keyboard_group_manager_v1`: the keyboard's layout group, followed and switched.
     KeyboardGroup,
+    /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
+    /// keyboard aids configured (doc_accessibility.md AX10, AX11).
+    A11y,
     /// `ext_data_control_manager_v1`: the clipboard and the primary selection, read and set
     /// without the keyboard focus, a clipboard manager's.
     ExtDataControl,
@@ -79,6 +82,7 @@ impl Privilege {
         (Self::ToplevelState, "athanor_toplevel_manager_v1"),
         (Self::ToplevelActions, "athanor_toplevel_actions_v1"),
         (Self::KeyboardGroup, "athanor_keyboard_group_manager_v1"),
+        (Self::A11y, "athanor_a11y_manager_v1"),
         (Self::ExtDataControl, "ext_data_control_manager_v1"),
         (Self::WlrDataControl, "zwlr_data_control_manager_v1"),
         (Self::TrustedPrompt, MARK),
@@ -548,10 +552,11 @@ mod tests {
         }
     }
 
-    /// The shipped allow-list lets the bar alone follow and switch the keyboard group: the
-    /// dock, the launcher and the control center never call `watch_keyboard_group`.
+    /// The shipped allow-list lets the bar alone follow and switch the keyboard group and the
+    /// accessibility features: the dock, the launcher and the control center never call
+    /// `watch_keyboard_group`, `set_magnifier` or `set_screen_filter`.
     #[test]
-    fn only_the_bar_follows_the_keyboard_group() {
+    fn only_the_bar_follows_the_keyboard_group_and_the_a11y_manager() {
         /// Every path is the file of every process.
         struct Any;
         impl Process for Any {
@@ -585,6 +590,11 @@ mod tests {
                 granted.contains(&Privilege::KeyboardGroup),
                 follows,
                 "{name} follows the keyboard group"
+            );
+            assert_eq!(
+                granted.contains(&Privilege::A11y),
+                follows,
+                "{name} binds the accessibility manager"
             );
         }
     }
@@ -748,6 +758,7 @@ mod tests {
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
                 "athanor_keyboard_group_manager_v1",
+                "athanor_a11y_manager_v1",
             ],
         ),
         (

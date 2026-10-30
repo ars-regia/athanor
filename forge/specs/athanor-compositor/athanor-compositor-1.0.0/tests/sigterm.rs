@@ -52,16 +52,20 @@ fn stops_cleanly_on(signal: &str) {
     let runtime =
         std::env::temp_dir().join(format!("athanor-sigterm-{}-{signal}", std::process::id()));
     std::fs::create_dir_all(&runtime).expect("runtime dir");
-    let mut child = Killed(Command::new(env!("CARGO_BIN_EXE_athanor-compositor"))
-        .arg("--headless")
-        .env("XDG_RUNTIME_DIR", &runtime)
-        .env_remove("NOTIFY_SOCKET")
-        .env_remove("WAYLAND_DISPLAY")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("the compositor starts"));
+    let mut child = Killed(
+        Command::new(env!("CARGO_BIN_EXE_athanor-compositor"))
+            .arg("--headless")
+            .env("XDG_RUNTIME_DIR", &runtime)
+            .env_remove("NOTIFY_SOCKET")
+            // The headless backend serves Orca's keyboard monitor: it must not reach a developer's bus.
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("WAYLAND_DISPLAY")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("the compositor starts"),
+    );
     // The log line announced right before the loop runs, with the X11 display (if any) up: the
     // signal reaches a compositor at steady state, not one still starting.
     let log = child.stdout.take().expect("stdout");

@@ -7,7 +7,9 @@
 //! at all while idle.
 
 use crate::capture::Target;
+use crate::a11y::Look;
 use crate::cursor::{pointer_elements, Cursor, PointerElement};
+use crate::look::FilterElement;
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -29,6 +31,7 @@ use smithay::backend::renderer::damage::Error as DamageError;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
+use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Kind, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
@@ -83,6 +86,14 @@ smithay::backend::renderer::element::render_elements! {
     Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Pointer=PointerElement<GlesRenderer>,
+}
+
+// The frame as the magnifier and the colour filters show it: the elements scaled, or the whole
+// frame drawn offscreen and shown through the colour pass (`look.rs`).
+smithay::backend::renderer::element::render_elements! {
+    Frame<=GlesRenderer>;
+    Zoomed=RescaleRenderElement<Element>,
+    Filtered=FilterElement<GlesTexture>,
 }
 
 /// The session, the GPU and its monitors, and the input devices.
@@ -256,6 +267,7 @@ pub fn start(
     let renderer = gles(&mut gpus, &render_node)?;
     let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
     let dmabuf_formats = renderer.dmabuf_formats();
+    let pass = crate::look::prepare(renderer);
     let heads = DrmOutputManager::new(
         device,
         GbmAllocator::new(
@@ -292,6 +304,9 @@ pub fn start(
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
+    if !pass {
+        state.no_filter_pass();
+    }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
@@ -1105,6 +1120,10 @@ impl State {
             .get_pointer()
             .map(|pointer| (pointer.current_location(), status));
         let popups = self.composing.popups_on(&self.space, &output);
+        let area = self.space.output_geometry(&output);
+        let look = self
+            .a11y
+            .look(&output, area, pointer.as_ref().map(|(at, _)| *at));
         let drawn = match gles(&mut drm.gpus, &drm.render_node) {
             Ok(renderer) => render(
                 renderer,
@@ -1114,6 +1133,7 @@ impl State {
                 &popups,
                 pointer.as_ref(),
                 &mut drm.cursor,
+                look,
             ),
             Err(error) => {
                 tracing::error!(%error, "no renderer: the output draws again in a second");
@@ -1336,8 +1356,10 @@ fn pacing(
 }
 
 /// Draws the frame of `head`: the space, or the lock surface while `lock` holds the session,
-/// with the pointer on top, the cursor its status names, when it is over the output. Whether there was anything new to
-/// show, and the elements' states.
+/// with the pointer on top, the cursor its status names, when it is over the output, as `look`
+/// says of the magnifier and the colour filters. Whether there was anything new to show, and
+/// the elements' states.
+#[allow(clippy::too_many_arguments)]
 fn render(
     renderer: &mut GlesRenderer,
     head: &mut Head,
@@ -1349,6 +1371,7 @@ fn render(
         smithay::input::pointer::CursorImageStatus,
     )>,
     cursor: &mut Cursor,
+    look: Look,
 ) -> Result<(bool, RenderElementStates), SwapBuffersError> {
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
@@ -1400,9 +1423,23 @@ fn render(
             elements.extend(space_elements.into_iter().map(Element::Space));
         }
     }
+    let zoomed = crate::look::zoomed(elements, look.zoom);
+    let (frame, filtered) = match look.filter {
+        Some(affine) => {
+            let (element, states) = crate::look::filtered(renderer, output, &zoomed, affine)
+                .map_err(|error| match error {
+                    DamageError::Rendering(error) => SwapBuffersError::from(error),
+                    DamageError::OutputNoMode(error) => {
+                        SwapBuffersError::TemporaryFailure(Box::new(error))
+                    }
+                })?;
+            (vec![Frame::Filtered(element)], Some(states))
+        }
+        None => (zoomed.into_iter().map(Frame::Zoomed).collect(), None),
+    };
     let result = head
         .drm_output
-        .render_frame(renderer, &elements, BACKGROUND, FrameFlags::DEFAULT)
+        .render_frame(renderer, &frame, BACKGROUND, FrameFlags::DEFAULT)
         .map_err(|error| match error {
             RenderFrameError::PrepareFrame(error) => SwapBuffersError::from(error),
             RenderFrameError::RenderFrame(DamageError::Rendering(error)) => {
@@ -1423,7 +1460,8 @@ fn render(
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
         }
     }
-    Ok((!result.is_empty, result.states))
+    // Under the colour pass the frame is one element: the states are those of what it shows.
+    Ok((!result.is_empty, filtered.unwrap_or(result.states)))
 }
 
 /// Withdraws the global of `output`, which clients bound to it see go.

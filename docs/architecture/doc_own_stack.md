@@ -209,8 +209,11 @@ is a barrier against it.
   unconfined code. It
   is written in the compositor over zbus; milestone C1 estimated about 500 lines for the monitor,
   the key filter and AX4's admission (C1 results, section 10, item 6). Whether the image's session
-  bus returns `ProcessFD` is AX4's open doubt 9, answered before the acceptance. Until the
-  monitor exists, Orca's own commands do not reach Orca under the own compositor (SN16, gap 3).
+  bus returns `ProcessFD` was AX4's open doubt 9: the reference laptop's bus, the image's
+  dbus-broker 37, returns it (checked on 2026-10-30, #863; the shell rig's bus is not observed).
+  The monitor landed in #870 and was checked on the laptop in the development session, not yet
+  in the image's default session, which #863 and item 3 of OS19 own (SN16, gap 3; amended on
+  2026-10-30, #863); before it, Orca's own commands did not reach Orca under the own compositor.
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
   by identity as above. An output is captured through `ext_output_image_capture_source_manager_v1`,
@@ -226,7 +229,11 @@ is a barrier against it.
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
 and row 4 (the reduced-motion switch, AX9) are behaviour the own compositor ships from its first
-version. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
+version, with one difference from cosmic-comp that the switch's pull request lists
+(`doc_session.md` SN13, step 6) beside those of decision 29: a layer surface with on-demand
+interactivity takes the keyboard on a click or on Ctrl+Alt+Tab (AX7), not when it maps as under
+cosmic-comp (#614), so the dock says nothing to Orca until Ctrl+Alt+Tab (the shell rig's Orca
+walk of the dock starts with that key, #841); the behaviour is not changed. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
 three-finger swipe) follows decision 4 of `doc_overview.md`. Row 8's behaviour, an input method's
 grab dropped while locked, is a requirement tested in the fixture of OS6 (#750). Row 9, the special
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
@@ -273,7 +280,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   polkit prompt and gcr-prompter's keyring prompt have no mark, and `athanor-polkit-agent`, which
   gets its own with its line, is not built (proposed with revision 3 of `doc_accessibility.md` and
   approved with it, AX11; amended on 2026-10-30, #865);
-- the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
+- the magnifier and the colour filters, the compositor's since #864 (`doc_accessibility.md` AX10)
+  (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
   is replaced in 1.0 by `athanor-overview` (decision 28).
@@ -325,10 +333,10 @@ as their interface (OS5, `doc_settings.md`). While the session is locked only th
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, Super+= and Super+- until the own compositor has the magnifier, and Super+V until
+overview comes, and Super+V until
 a client of data control collects (Super+A, which it left unbound until the application library
 ships, is bound as said above, amended on 2026-10-30, #865); until then a fixture test shows each doing nothing, and
-their own fixture tests come with them. Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
+their own fixture tests come with them. Super+= and Super+- are bound since the own compositor has the magnifier (amended on 2026-10-30, #864). Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
 (`doc_accessibility.md` AX3) exist, the volume and display brightness keys and Super+Alt+S call
 cosmic-settings-daemon, as cosmic-comp's session does, from one source file of the compositor,
 `src/bindings/cosmic.rs` (decision 29).
@@ -726,18 +734,22 @@ amendment's audit:
       (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* revision 4 of
       `doc_session.md` (#811) recorded gap 3 and the keyboard aids of gap 4 as closed at the
       switch, in error: the own compositor had neither the keyboard monitor nor the aids. Gap 3
-      is open, accepted by the maintainer by number on 2026-10-30, until the monitor lands
-      (#863), and the aids' part of gap 4 until the aids land (#865), under gap 4's acceptance);
+      was open, accepted by the maintainer by number on 2026-10-30, until the monitor landed
+      (#870), and is closed only in the development session on tty3, where it was checked the
+      same day on the reference laptop: the default session's check stays with #863 and this
+      item (amended on 2026-10-30, #863). The aids' part of gap 4
+      is open until the aids land (#865), under gap 4's acceptance);
     - item 1 for every difference that hides, moves or changes a control or a text, by any
-      amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
-      the workspaces and applications buttons of the bar and of the dock, the clipboard
-      history's switch), and the move of the neighbouring controls their absence causes:
+      amount, but the controls this decision hides (the
+      workspaces and applications buttons of the bar and of the dock, the clipboard
+      history's switch; the magnifier, inversion and filter rows left this list and the
+      `bar-accessibility` difference with #864, amended on 2026-10-30), and the move of the
+      neighbouring controls their absence causes:
       where a case of `cases.py` draws the control under the preset and the dock setting it
       runs with (`doc_bar.md` BR7, the presets' table and the dock, `doc_shell.md` SH7, and
       the surfaces `rig.sh` draws: the bar's workspaces module in the bar's surfaces and
       layout cases under the `float` and `minimal` presets; its application library button
-      there and under the `bar` preset; the magnifier, inversion and filter rows in
-      `bar-accessibility` only; the dock's buttons in `dock` and in the layout cases whose
+      there and under the `bar` preset; the dock's buttons in `dock` and in the layout cases whose
       dock is visible, not auto-hidden or none), one entry per case and hidden control, covering its absence and the move it
       causes, is recorded in `athanor-differences.toml` with a cause that names this decision
       and the control, such as "decision 28 hides the workspaces module", and the issue that
@@ -785,15 +797,18 @@ amendment's audit:
       state and the exception stays one path; it writes nothing else in the user's configuration, and the
       exception, so widened, keeps its path and leaves as before. The hand-off above and the
       hidden controls below, for the magnifier and the filters, leave when the own compositor
-      has them (#864). Not taken: a state file of the
+      has them (#864). *Done in #864 (2026-10-30):* the hand-off and
+      `athanor-compositor --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
+      these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
+      Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
-      for colour filters. Under the
-      own compositor the magnifier, inversion and filter controls of the bar are hidden, and
+      for colour filters. Until #864 the
+      own compositor hid the bar's magnifier, inversion and filter controls and left
       Super+= and Super+- unbound (OS13); those of Settings, the upstream cosmic-settings, stay
       shown and switched off, since the compositor does not offer `cosmic_a11y_manager_v1`, until
-      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29). A user who zooms only with those keys,
-      which persist nothing, is not detected: they pick cosmic-comp's session at the greeter,
-      whose entry says that it has the magnifier (revision 4 of `doc_session.md`);
+      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29, and on 2026-10-30, #864). A user who zoomed only with those keys,
+      which persisted nothing, was not detected: they picked cosmic-comp's session at the greeter,
+      whose entry said that it has the magnifier (revision 4 of `doc_session.md`);
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
       hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
       8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back;
