@@ -40,8 +40,10 @@ FILES = ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"]
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 TIMEOUT = 300  # seconds for one external command
 # How long the API's record of the build may lag the jobs that requested this release. Seen: 6.3 min.
-SETTLE = 600  # seconds; RELEASE_CANDIDATE_SETTLE replaces it in the tests
+SETTLE = 600  # seconds
 SETTLE_PAUSE = 15  # seconds between two reads
+# What no later read will change, unlike a 5xx or a 403 of the rate limit.
+PERMANENT = re.compile(r"\(HTTP 40[14]\)")
 CREATED = "org.opencontainers.image.created"
 REVISION = "org.opencontainers.image.revision"
 
@@ -100,12 +102,12 @@ def settled(repo, run_id, attempt):
     run as queued for minutes, and one read of it would end the release of this build. The
     checks that follow stay as strict: a run that stays behind is refused by them, and one at
     another attempt than the request's will never catch up, so it is not waited for."""
-    deadline = time.monotonic() + float(os.environ.get("RELEASE_CANDIDATE_SETTLE", SETTLE))
+    deadline = time.monotonic() + SETTLE
     while True:
         try:
             run, jobs = build_record(repo, run_id)
-        except Refused:
-            if time.monotonic() >= deadline:
+        except Refused as error:
+            if PERMANENT.search(str(error)) or time.monotonic() >= deadline:
                 raise
         else:
             if (

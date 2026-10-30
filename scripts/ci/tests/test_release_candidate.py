@@ -16,6 +16,8 @@ import schema  # noqa: E402
 from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
+# The check, without its wait for a record that a test leaves behind for good.
+NO_WAIT = "import sys, release_candidate as r; r.SETTLE = 0; sys.exit(r.main(sys.argv[1:]))"
 R = "ars-regia/athanor"
 REG = "ghcr.io/owner"
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
@@ -175,7 +177,8 @@ class Candidate(Tool):
             [
                 sys.executable,
                 "-B",
-                str(SCRIPT),
+                "-c",
+                NO_WAIT,
                 "check",
                 "--out",
                 str(self.dir / "out"),
@@ -187,7 +190,7 @@ class Candidate(Tool):
                 **self.env,
                 "BUILD_RUN_ID": run_id,
                 "GITHUB_REF": ref,
-                "RELEASE_CANDIDATE_SETTLE": "0",
+                "PYTHONPATH": str(SCRIPT.parent),
                 **extra,
             },
         )
@@ -324,7 +327,7 @@ class Candidate(Tool):
         self.github(run=run_object(event="pull_request"))
         self.refused("event pull_request")
 
-    def settle(self, *reads, attempt=1):
+    def settle(self, *reads, attempt=1, wait=60):
         """settled() over the given API answers, an exception being raised: (run, jobs, reads
         left)."""
         import release_candidate as module
@@ -338,7 +341,7 @@ class Candidate(Tool):
             return answer
 
         saved = module.api, module.SETTLE, module.SETTLE_PAUSE
-        module.api, module.SETTLE, module.SETTLE_PAUSE = api, 60, 0
+        module.api, module.SETTLE, module.SETTLE_PAUSE = api, wait, 0
         try:
             run, found = module.settled(R, "412", attempt)
         finally:
@@ -363,6 +366,18 @@ class Candidate(Tool):
 
         _, found, left = self.settle(module.Refused("502"), run_object(), jobs())
         self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_a_read_that_keeps_failing_refuses_at_the_end_of_the_wait(self):
+        import release_candidate as module
+
+        with self.assertRaisesRegex(module.Refused, "502"):
+            self.settle(module.Refused("gh: Bad Gateway (HTTP 502)"), wait=0)
+
+    def test_a_permanent_error_is_not_waited_for(self):
+        import release_candidate as module
+
+        with self.assertRaisesRegex(module.Refused, "404"):
+            self.settle(module.Refused("gh: Not Found (HTTP 404)"), run_object(), jobs())
 
     def test_a_run_at_another_attempt_is_not_waited_for(self):
         spare = (run_object(), jobs())
