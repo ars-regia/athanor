@@ -50,6 +50,7 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -308,12 +309,16 @@ impl State {
     /// parent, so the dialog opened for it is where the typing goes on. The surface is compared,
     /// not the client, so a handle for one window does not take the keyboard from a prompt of
     /// the same client; a client's own dialogs are covered by the rule of `place`. A re-parent
-    /// of a placed window moves and stacks it and never takes the keyboard, so a client holding
-    /// an exported handle cannot take it back by importing it again. The parent is the client's
-    /// own (`xdg_toplevel.set_parent`) or the one an exported handle names (xdg-foreign), the
-    /// exporter's grant of this much. A parent on an inactive workspace is hidden: the window
-    /// follows it there, is hidden with it, and takes no keyboard; one that is minimised leaves
-    /// the window where it is, beneath, with no keyboard.
+    /// of a placed window moves and stacks it and never takes the keyboard.
+    ///
+    /// What this accepts: an exported handle is the exporter's grant, so its holder may keep a
+    /// dialog above the exporter's window for as long as the handle lives, and a new window
+    /// parented through it takes the keyboard from the parent's surface at its first placement,
+    /// which is what a portal's file chooser needs. A holder that opens new windows repeatedly
+    /// can therefore take the keyboard from the exporter's window each time one is placed; that
+    /// is not closed here. A parent on an inactive workspace is hidden: the window follows it
+    /// there, is hidden with it, and takes no keyboard; one that is minimised leaves the window
+    /// where it is, beneath, with none.
     fn follow_parent(&mut self, window: &Window, grant: bool) {
         let Some(parent) = self.parent_window(window) else {
             return;
@@ -340,14 +345,20 @@ impl State {
         // Just above the parent and its dialogs, under what is above them now; the window's
         // own dialogs go with it.
         let order: Vec<Window> = self.space.elements().cloned().collect();
-        let own = self.subtree(window);
-        let anchor = order
-            .iter()
-            .rposition(|kept| {
-                kept != window
-                    && !own.contains(kept)
-                    && (*kept == parent || self.descends(kept, &parent))
-            });
+        let children = self.children();
+        let surface = |kept: &Window| kept.toplevel().map(|t| t.wl_surface().clone());
+        let (Some(window_surface), Some(parent_surface)) = (surface(window), surface(&parent))
+        else {
+            return;
+        };
+        let own = Self::descendants(&children, &window_surface);
+        let family = Self::descendants(&children, &parent_surface);
+        let is_own = |kept: &Window| surface(kept).is_some_and(|s| own.contains(&s));
+        let anchor = order.iter().rposition(|kept| {
+            kept != window
+                && !is_own(kept)
+                && (*kept == parent || surface(kept).is_some_and(|s| family.contains(&s)))
+        });
         let (Some(anchor), Some(at_window)) =
             (anchor, order.iter().position(|kept| kept == window))
         else {
@@ -355,13 +366,13 @@ impl State {
         };
         if at_window < anchor {
             self.space.raise_element(window, false);
-            for kept in &own {
+            for kept in order.iter().filter(|kept| is_own(kept)) {
                 self.space.raise_element(kept, false);
             }
             for above in order
                 .iter()
                 .skip(anchor + 1)
-                .filter(|kept| *kept != window && !own.contains(kept))
+                .filter(|kept| *kept != window && !is_own(kept))
             {
                 self.space.raise_element(above, false);
             }
@@ -374,27 +385,55 @@ impl State {
         self.window_or_minimised(&parent)
     }
 
-    /// Whether `root` is an ancestor of `window` through the parents.
-    fn descends(&self, window: &Window, root: &Window) -> bool {
-        let mut at = window.clone();
-        // A parent chain has no loop (`is_valid_parent`); the bound is the windows there are.
-        for _ in 0..self.windows().count() {
-            let Some(parent) = self.parent_window(&at) else {
-                return false;
-            };
-            if parent == *root {
-                return true;
+    /// The children of each toplevel surface, in one pass over the windows; empty when no
+    /// window has a parent, the common case.
+    fn children(&self) -> HashMap<WlSurface, Vec<WlSurface>> {
+        let mut children: HashMap<WlSurface, Vec<WlSurface>> = HashMap::new();
+        for toplevel in self.windows().filter_map(|window| window.toplevel()) {
+            if let Some(parent) = toplevel.parent() {
+                children
+                    .entry(parent)
+                    .or_default()
+                    .push(toplevel.wl_surface().clone());
             }
-            at = parent;
         }
-        false
+        children
+    }
+
+    /// The surfaces that descend from `root` through `children`, each visited once, so that a
+    /// chain of any length costs one pass and a loop ends.
+    fn descendants(
+        children: &HashMap<WlSurface, Vec<WlSurface>>,
+        root: &WlSurface,
+    ) -> HashSet<WlSurface> {
+        let mut found = HashSet::new();
+        let mut pending = vec![root];
+        while let Some(at) = pending.pop() {
+            for child in children.get(at).into_iter().flatten() {
+                if found.insert(child.clone()) {
+                    pending.push(child);
+                }
+            }
+        }
+        found
     }
 
     /// The mapped windows that descend from `root`, bottom to top.
     fn subtree(&self, root: &Window) -> Vec<Window> {
+        let children = self.children();
+        let Some(root) = root.toplevel().map(|t| t.wl_surface()) else {
+            return Vec::new();
+        };
+        if children.is_empty() {
+            return Vec::new();
+        }
+        let found = Self::descendants(&children, root);
         self.space
             .elements()
-            .filter(|kept| *kept != root && self.descends(kept, root))
+            .filter(|kept| {
+                kept.toplevel()
+                    .is_some_and(|t| found.contains(t.wl_surface()))
+            })
             .cloned()
             .collect()
     }

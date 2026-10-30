@@ -54,7 +54,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - Stack a toplevel with a parent, set through xdg-foreign or xdg_toplevel.set_parent, above
   that parent and its other dialogs on its workspace, and give it the keyboard at its first
-  placement when the parent's own surface holds it (#872)
+  placement when the parent's own surface holds it (#872). The exported handle is the
+  exporter's grant: its holder may keep a dialog above the exporter's window while the handle
+  lives, and a new window parented through it takes the keyboard from the parent's surface when
+  it is placed, which the portal's file chooser needs. Every focus now raises the focused
+  window's dialogs with it, on all focus paths.
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its

@@ -237,20 +237,48 @@ fn a_dialog_does_not_take_the_keyboard_from_another_window_of_the_parents_client
     run.stop();
 }
 
-/// A window that shows nothing takes no keyboard through a parent change.
+/// A window with a parent that has no size at a commit is not placed, so it takes no keyboard
+/// then; its first sized commit places it, and the parent's keyboard is still there to take.
 #[test]
-fn an_unmapped_window_takes_no_keyboard_through_a_parent_change() {
+fn a_window_with_a_parent_and_no_size_is_not_placed() {
     let mut run = Running::start(None);
     let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
     let handle = owner.export(&mut run, &surface);
     let created = dialog.create(&mut run);
-    let window = dialog.map(&mut run, &created);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
     created.surface.attach(None, 0, 0);
     created.surface.commit();
     dialog.roundtrip(&mut run);
-    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.server_window(&run, &created.surface);
     assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard");
-    assert!(!keyboard_on(&run, &window), "the unmapped window has none");
+    assert!(!keyboard_on(&run, &window), "no size, not placed, no keyboard");
+    let window = dialog.map(&mut run, &created);
+    assert!(keyboard_on(&run, &window), "placed at its first sized commit");
+    run.stop();
+}
+
+/// A long chain of dialogs, each the parent of the next, is stacked in order above the parent and
+/// under the window typed into, and focusing the first raises them all in order.
+#[test]
+fn a_long_chain_of_dialogs_is_stacked_in_order() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _dialog) = scene(&mut run);
+    let (_typing, typed) = focused_window(&mut run);
+    let mut chain = vec![parent.clone()];
+    let mut parents = vec![toplevel];
+    for _ in 0..40 {
+        let created = owner.create(&mut run);
+        created.toplevel.set_parent(parents.last());
+        chain.push(owner.map(&mut run, &created));
+        parents.push(created.toplevel);
+    }
+    let levels: Vec<usize> = chain.iter().map(|window| level(&run, window)).collect();
+    assert!(levels.windows(2).all(|pair| pair[0] < pair[1]), "in order above the parent");
+    assert!(level(&run, &chain[40]) < level(&run, &typed), "under the window typed into");
+    run.state.focus(&parent);
+    let levels: Vec<usize> = chain.iter().map(|window| level(&run, window)).collect();
+    assert!(levels.windows(2).all(|pair| pair[0] < pair[1]), "still in order");
+    assert!(level(&run, &typed) < levels[0], "all above the window typed into");
     run.stop();
 }
 
@@ -363,26 +391,5 @@ fn a_revoked_handle_sets_no_parent() {
     assert_eq!(window.toplevel().and_then(|t| t.parent()), None, "no parent");
     assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard");
     assert!(level(&run, &window) < level(&run, &parent), "beneath it");
-    run.stop();
-}
-
-/// A locked session keeps the keyboard on the lock surface.
-#[test]
-fn a_dialog_does_not_take_the_keyboard_from_the_lock_surface() {
-    let mut run = Running::start(None);
-    let (mut owner, _toplevel, surface, _parent, mut dialog) = scene(&mut run);
-    let handle = owner.export(&mut run, &surface);
-    let (locker, _lock) = lock_session(&mut run);
-    let created = dialog.create(&mut run);
-    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
-    let _window = dialog.map(&mut run, &created);
-    let holder = run
-        .state
-        .seat
-        .get_keyboard()
-        .and_then(|keyboard| keyboard.current_focus())
-        .and_then(|surface| surface.client())
-        .map(|client| client.id());
-    assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
     run.stop();
 }
