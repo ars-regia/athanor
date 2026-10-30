@@ -10384,3 +10384,6 @@ mod devices;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod parented;
