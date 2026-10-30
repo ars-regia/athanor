@@ -666,6 +666,8 @@ fn the_filters_on_a_render_node() {
     manager.set_screen_filter(ActiveState::Disabled, Filter::None);
     bar.roundtrip(&mut run);
     shown(&mut run, "off again");
+    // The event loop may have drawn the other output with the filter on.
+    run.state.capture(1).expect("frame of output 1");
     assert!(!held(&run), "the offscreen frame goes with the filter");
     run.stop();
 }
@@ -720,6 +722,8 @@ fn the_offscreen_frame_goes_with_the_filter() {
     manager.set_screen_filter(ActiveState::Disabled, Filter::None);
     bar.roundtrip(&mut run);
     run.state.capture(0).expect("frame of output 0");
+    // The event loop may have drawn the other output with the filter on.
+    run.state.capture(1).expect("frame of output 1");
     assert!(!held(&run), "let go");
     run.stop();
 }
