@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), awaiting the maintainer's approval with it (ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is corrected: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch (#704) in error, close with #863 and #865. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), awaiting the maintainer's approval with it (ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -41,6 +41,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-10-28: decision 27; decision 28, with OS5, OS13, OS19's lead-in and items 1 to 5, decision 10
   and section 6, step 4; decision 29, with OS13.
 - Amended on 2026-10-29: decision 30, with OS3, OS13 and OS17.
+- Amended on 2026-10-30 (#862): OS5 and decision 28, with revision 3 of `doc_accessibility.md`,
+  awaiting the maintainer's approval.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -256,13 +258,15 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   (OS4), and its description is in the repository, versioned, before its first client.
   *Amended on 2026-10-30 (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* `athanor_a11y_v1` is
   described in `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`, one privileged
-  global, `athanor_a11y_manager_v1`, granted to the bar alone, whose requests turn the magnifier on
+  global, `athanor_a11y_manager_v1`, granted to the bar and, once it exists, to `athanor-a11y watch`,
+  each by its line, whose requests turn the magnifier on
   and off, zoom in and out, set the colour inversion and one of the four filters of
   `cosmic_a11y_manager_v1` version 3 (greyscale, protanopia, deuteranopia, tritanopia) or none,
   and set the keyboard aids of `doc_accessibility.md` AX11 (sticky keys with two-key-off, slow keys
-  and bounce keys with their delays, and the switch of the Shift gestures), and whose events send
-  the magnifier's and the filters' state, the latched and locked modifiers, a key the aids
-  rejected, never which key, and a Shift gesture (AX10, AX11);
+  and bounce keys with their delays of at most 2000 ms, and the switch of the Shift gestures), and
+  whose events send the magnifier's state and level and the filters' state, the latched and
+  locked modifiers, a key the aids rejected, never which key, and a Shift gesture, none of these
+  three while the session is locked, and an aid the compositor turned off itself (AX10, AX11);
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
@@ -708,10 +712,11 @@ amendment's audit:
       is built (amended on 2026-10-29), a loss the switch's pull request names.
       Gap 3, Orca's keyboard monitor, and the keyboard aids of gap 4 close through item 3
       below, and gap 5, the identity check's limits, through item 2 (*amended on 2026-10-30
-      (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* the switch's pull request,
-      #704, recorded gap 3 as closed, and `doc_session.md` SN16 the keyboard aids of gap 4, in
-      error: the own compositor had neither the keyboard monitor nor the aids. Gap 3 stays open
-      until the monitor lands (#863), and the aids' part of gap 4 until the aids land (#865));
+      (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* revision 4 of
+      `doc_session.md` (#811) recorded gap 3 and the keyboard aids of gap 4 as closed at the
+      switch, in error: the own compositor had neither the keyboard monitor nor the aids. Gap 3
+      is open, accepted by the maintainer by number on 2026-10-30, until the monitor lands
+      (#863), and the aids' part of gap 4 until the aids land (#865), under gap 4's acceptance);
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
