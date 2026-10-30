@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- Take a window's place as its geometry's top left in restore, re-centring and reachability,
+  so that a client-side shadow is not applied a second time and a restored window no longer
+  drifts by the shadow (#853)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its
   unit and executable, so that Orca's own commands reach it, and send it every key but the
