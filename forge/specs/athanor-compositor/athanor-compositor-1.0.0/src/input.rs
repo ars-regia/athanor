@@ -64,7 +64,7 @@ impl State {
         time: InputTime,
         source: KeyboardSource,
     ) {
-        self.aided(code, key_state, time, Origin::Seat(source));
+        self.aided(code, key_state, time, source);
         self.send_keyboard_group();
     }
 
@@ -601,12 +601,11 @@ impl VirtualKeyboardHandler for State {
                 // The input method's forwarded keys went through the keyboard aids as the
                 // hardware's.
                 let past_grab = forwarded || self.holds_keyboard_grab(device.client());
-                let origin = Origin::Virtual(device.clone());
                 self.with_keymap_of(&device, |state| {
                     if past_grab {
                         state.typed(code, key_state, time, device.source(), true)
                     } else {
-                        state.aided(code, key_state, time, origin)
+                        state.aided(code, key_state, time, device.source())
                     }
                 });
                 // A code outside evdev's keys is not kept: its release takes the grab's way.

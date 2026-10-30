@@ -443,29 +443,32 @@ fn ax11_the_aids_work_under_a_shortcuts_inhibitor() {
     run.stop();
 }
 
-/// A virtual keyboard's keys go through the aids as the hardware's do.
+/// Slow and bounce keys read the hardware keyboard only, and sticky keys a virtual keyboard's
+/// keys too: its key repeated at once is neither held back nor dropped, its Shift tapped latches,
+/// and the hardware's key is still rejected beside it.
 #[test]
-fn ax11_a_virtual_keyboard_goes_through_the_aids() {
+fn ax11_a_virtual_keyboard_goes_through_sticky_keys_alone() {
     let mut run = Running::start(None);
     let (mut window, _) = focused_window(&mut run);
     let mut typist = Local::connect(&mut run, None);
     let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
-    run.state.set_slow_keys(true, 200).expect("in bounds");
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    run.state.set_bounce_keys(true, 2000).expect("in bounds");
+    run.state.set_sticky_keys(true, false);
+    keyboard.chord(&mut typist, &mut run, &[KEY_A]);
     keyboard.chord(&mut typist, &mut run, &[KEY_A]);
     window.roundtrip(&mut run);
-    assert_eq!(window.client.keys, [], "a short press types nothing");
+    assert_eq!(window.client.keys, [KEY_A, KEY_A], "no aid filters them");
+    assert_eq!(told(&mut run), [], "and none is told");
+
+    keyboard.modifiers(&mut typist, &mut run, 0);
+    keyboard.chord(&mut typist, &mut run, &[KEY_LEFTSHIFT]);
+    assert_eq!(told(&mut run), [modifiers(SHIFT, 0)], "sticky keys latch");
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.modifier_latches.last(), Some(&XKB_SHIFT));
+
+    tap(&mut run, KEY_Q);
     assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
-    keyboard.key(&mut typist, &mut run, KEY_A, true);
-    wait(&mut run, 250);
-    window.roundtrip(&mut run);
-    assert_eq!(
-        window.client.keys,
-        [KEY_A],
-        "held for the delay, it is pressed"
-    );
-    keyboard.key(&mut typist, &mut run, KEY_A, false);
-    window.roundtrip(&mut run);
-    assert_eq!(window.client.released, [KEY_A]);
     run.stop();
 }
 
@@ -827,21 +830,6 @@ fn ax11_a_latch_comes_back_with_the_seat_keymap() {
     run.stop();
 }
 
-/// A modifier held back on one keyboard does not make another keyboard's key protected.
-#[test]
-fn ax11_a_protected_key_reads_its_own_keyboard_held_back() {
-    let mut run = Running::start(None);
-    let _window = focused_window(&mut run);
-    let mut typist = Local::connect(&mut run, None);
-    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
-    run.state.set_slow_keys(true, 2000).expect("in bounds");
-    key(&mut run.state, KEY_LEFTCTRL, true);
-    key(&mut run.state, KEY_LEFTALT, true);
-    keyboard.chord(&mut typist, &mut run, &[KEY_F1]);
-    assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
-    run.stop();
-}
-
 /// A latch a key under a virtual keyboard's own keymap uses up does not come back with the
 /// seat's keymap, before the next hardware key.
 #[test]
@@ -1026,20 +1014,18 @@ fn ax11_a_bounced_release_restarts_the_delay() {
     run.stop();
 }
 
-/// A second press of a key held back, which a virtual keyboard may send, starts no timer of its
+/// A second press of a key held back, which a second keyboard sends, starts no timer of its
 /// own: the release cancels the one that runs, and a later press waits its whole delay.
 #[test]
 fn ax11_a_second_press_keeps_the_timer_of_the_first() {
     let mut run = Running::start(None);
     let (mut window, _) = focused_window(&mut run);
-    let mut typist = Local::connect(&mut run, None);
-    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
     run.state.set_slow_keys(true, 2000).expect("in bounds");
-    keyboard.key(&mut typist, &mut run, KEY_A, true);
-    keyboard.key(&mut typist, &mut run, KEY_A, true);
-    keyboard.key(&mut typist, &mut run, KEY_A, false);
+    key(&mut run.state, KEY_A, true);
+    key(&mut run.state, KEY_A, true);
+    key(&mut run.state, KEY_A, false);
     wait(&mut run, 500);
-    keyboard.key(&mut typist, &mut run, KEY_A, true);
+    key(&mut run.state, KEY_A, true);
     wait(&mut run, 1600);
     window.roundtrip(&mut run);
     assert_eq!(window.client.keys, [], "the first timer was cancelled");

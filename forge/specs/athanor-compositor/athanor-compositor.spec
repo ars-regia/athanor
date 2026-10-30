@@ -54,8 +54,9 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 %changelog
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Apply sticky, slow and bounce keys in front of every key's reader, the bindings, the
-  focused client, the keyboard monitor and a virtual keyboard's keys alike; the protected
-  keys pass slow and bounce keys, and nothing is told while the session is locked or a
+  focused client and the keyboard monitor, slow and bounce keys to the hardware keyboards
+  only and sticky keys to a virtual keyboard's keys too; the protected keys pass slow and
+  bounce keys, and nothing is told while the session is locked or a
   trusted prompt has the keyboard (doc_accessibility.md AX11, #865). athanor_a11y_v1 sets
   them and tells the modifiers held, a key rejected, a gesture and an aid turned off
 - Bind Super+A to the launcher until athanor-library exists, so that Super then A opens it

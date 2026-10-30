@@ -2,12 +2,13 @@
 //! compositor's input path before the bindings, the keyboard monitor and the clients (OS4,
 //! decision 30). A key of the hardware keyboard or of a virtual one enters `State::aided`; what
 //! the aids let through goes on to `State::typed`, so a binding, Orca and a client see the same
-//! keys. Bounce keys drop a press within their delay of the same key's release; slow keys hold a
-//! press back until the key has been held for their delay; sticky keys latch a modifier pressed
-//! and released alone, lock it when it is pressed again, and let it go at the third press. The
-//! protected keys of decision 30 pass slow and bounce keys unfiltered. The settings come from
-//! `athanor_a11y_v1`; the compositor keeps them for the session only, and every aid is
-//! off until a client sets it.
+//! keys. Slow and bounce keys are for a hand on a key, so they read the hardware keyboard only:
+//! the on-screen keyboard, dictation and wtype go through sticky keys alone. Bounce keys drop a
+//! press within their delay of the same key's release; slow keys hold a press back until the
+//! key has been held for their delay; sticky keys latch a modifier pressed and released alone,
+//! lock it when it is pressed again, and let it go at the third press. The protected keys of
+//! decision 30 pass slow and bounce keys unfiltered. The settings come from `athanor_a11y_v1`;
+//! the compositor keeps them for the session only, and every aid is off until a client sets it.
 
 use crate::bindings;
 use crate::identity::Privilege;
@@ -19,7 +20,6 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Resource;
-use smithay::wayland::virtual_keyboard::VirtualKeyboardDevice;
 use std::collections::HashMap;
 use std::sync::PoisonError;
 use std::time::{Duration, Instant};
@@ -64,28 +64,10 @@ pub enum Notice {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidDelay(pub u32);
 
-/// Where a key came from: a keyboard read under the keymap the seat has when it arrives, or a
-/// virtual keyboard, read under its own (`State::with_keymap_of`).
-#[derive(Clone, Debug)]
-pub enum Origin {
-    Seat(KeyboardSource),
-    Virtual(VirtualKeyboardDevice),
-}
-
-impl Origin {
-    fn source(&self) -> KeyboardSource {
-        match self {
-            Self::Seat(source) => *source,
-            Self::Virtual(device) => device.source(),
-        }
-    }
-}
-
 /// A press the aids hold back, and its release with it. With no timer the press is dropped,
 /// and the entry is what swallows its release.
 #[derive(Debug)]
 struct Withheld {
-    origin: Origin,
     /// When the key was pressed: modifiers let through together keep the order they came in.
     pressed: Instant,
     /// The modifier the key is, 0 for none.
@@ -121,11 +103,11 @@ pub struct Aids {
     /// them: they take back only their own.
     set: (u32, u32),
     held: Vec<Held>,
-    withheld: HashMap<(KeyboardSource, Keycode), Withheld>,
+    withheld: HashMap<Keycode, Withheld>,
     /// The client the keyboard last went to.
     focus: Option<ClientId>,
     /// When each key was last released, for bounce keys.
-    released: HashMap<(KeyboardSource, Keycode), Instant>,
+    released: HashMap<Keycode, Instant>,
     shift_presses: u8,
     shift_hold: Option<RegistrationToken>,
     /// Whether the last notice found the session locked or a trusted prompt focused.
@@ -276,33 +258,30 @@ impl State {
         })
     }
 
-    /// A key from `origin`, through bounce, slow and sticky keys, on to `typed`. A key of a
-    /// virtual keyboard arrives with that keyboard's keymap loaded.
+    /// A key from `source`, on to `typed`: a hardware key through bounce, slow and sticky keys,
+    /// a virtual keyboard's through sticky keys alone, with that keyboard's keymap loaded.
     pub(crate) fn aided(
         &mut self,
         code: Keycode,
         key_state: KeyState,
         time: InputTime,
-        origin: Origin,
+        source: KeyboardSource,
     ) {
-        let source = origin.source();
+        if source != KeyboardSource::Physical {
+            return self.sticky_typed(code, key_state, time, source);
+        }
         // A key still held back comes here for its release, though the last aid went off.
         if !self.aids.any() && self.aids.withheld.is_empty() {
             return self.typed(code, key_state, time, source, false);
         }
-        if source == KeyboardSource::Physical {
-            self.restore_seat_keymap();
-        }
+        self.restore_seat_keymap();
         let syms = self.raw_syms(code);
         let pressed = key_state == KeyState::Pressed;
-        // Only the hardware keyboard's: a client's keys must not offer the user an aid.
-        if source == KeyboardSource::Physical {
-            self.shift_gestures(&syms, pressed);
-        }
-        let key = (source, code);
+        // A client's keys never come here: they must not offer the user an aid.
+        self.shift_gestures(&syms, pressed);
         let now = Instant::now();
         if !pressed {
-            let withheld = self.aids.withheld.remove(&key);
+            let withheld = self.aids.withheld.remove(&code);
             // A press the aids rejected for another reason was never typed, and bounced nothing.
             if self.aids.bounce.is_some() && withheld.as_ref().is_none_or(|held| held.bounced) {
                 // Every release restarts the delay, a bounced press's too.
@@ -310,7 +289,7 @@ impl State {
                 self.aids
                     .released
                     .retain(|_, at| now.duration_since(*at) < max);
-                self.aids.released.insert(key, now);
+                self.aids.released.insert(code, now);
             }
             if let Some(withheld) = withheld {
                 if let Some(timer) = withheld.slow {
@@ -321,14 +300,14 @@ impl State {
             }
             return self.sticky_typed(code, key_state, time, source);
         }
-        // A press of a key already held back, which only a virtual keyboard sends, changes
-        // nothing: the timer running is the one its release cancels.
-        if self.aids.withheld.contains_key(&key) {
+        // A press of a key already held back, which a second keyboard sends, changes nothing:
+        // the timer running is the one its release cancels.
+        if self.aids.withheld.contains_key(&code) {
             return;
         }
         let modifier = modifier(&syms);
-        let pending = self.protected(&syms, source, false);
-        if pending || self.protected(&syms, source, true) {
+        let pending = self.protected(&syms, false);
+        if pending || self.protected(&syms, true) {
             // The modifiers slow keys hold back with it are let through first, so that the key
             // reads as the chord it is. One bounce keys rejected goes too only when the chord
             // needs it, since a protected key passes them; one dropped stays dropped.
@@ -336,22 +315,20 @@ impl State {
                 .aids
                 .withheld
                 .iter()
-                .filter(|((from, _), held)| {
-                    *from == source
-                        && held.modifier != 0
-                        && (held.slow.is_some() || (!pending && held.bounced))
+                .filter(|(_, held)| {
+                    held.modifier != 0 && (held.slow.is_some() || (!pending && held.bounced))
                 })
-                .map(|(key, held)| (held.pressed, *key))
+                .map(|(code, held)| (held.pressed, *code))
                 .collect();
             held.sort_unstable_by_key(|(pressed, _)| *pressed);
-            for (_, key) in held {
+            for (_, code) in held {
                 if let Some(Withheld {
                     slow: Some(timer), ..
-                }) = self.aids.withheld.remove(&key)
+                }) = self.aids.withheld.remove(&code)
                 {
                     self.loop_handle.remove(timer);
                 }
-                self.sticky_typed(key.1, KeyState::Pressed, time, source);
+                self.sticky_typed(code, KeyState::Pressed, time, source);
             }
             return self.sticky_typed(code, key_state, time, source);
         }
@@ -359,35 +336,33 @@ impl State {
             if self
                 .aids
                 .released
-                .get(&key)
+                .get(&code)
                 .is_some_and(|at| now.duration_since(*at) < delay)
             {
                 let withheld = Withheld {
-                    origin,
                     pressed: now,
                     modifier,
                     slow: None,
                     bounced: true,
                 };
-                self.aids.withheld.insert(key, withheld);
+                self.aids.withheld.insert(code, withheld);
                 return self.aid_notice(Notice::Rejected(Aid::Bounce));
             }
         }
         if let Some(delay) = self.aids.slow.filter(|delay| !delay.is_zero()) {
             let timer = Timer::from_duration(delay);
             match self.loop_handle.insert_source(timer, move |_, _, state| {
-                state.slow_accepted(key, time);
+                state.slow_accepted(code, time);
                 TimeoutAction::Drop
             }) {
                 Ok(timer) => {
                     let withheld = Withheld {
-                        origin,
                         pressed: now,
                         modifier,
                         slow: Some(timer),
                         bounced: false,
                     };
-                    self.aids.withheld.insert(key, withheld);
+                    self.aids.withheld.insert(code, withheld);
                     return;
                 }
                 Err(error) => {
@@ -398,30 +373,14 @@ impl State {
         self.sticky_typed(code, key_state, time, source);
     }
 
-    /// The press of `key`, held for slow keys' delay: it goes through, under the keymap of
-    /// the keyboard it came from.
-    fn slow_accepted(&mut self, key: (KeyboardSource, Keycode), time: InputTime) {
-        let Some(withheld) = self.aids.withheld.remove(&key) else {
+    /// The press of `code`, held for slow keys' delay: it goes through, under the seat's keymap.
+    fn slow_accepted(&mut self, code: Keycode, time: InputTime) {
+        if self.aids.withheld.remove(&code).is_none() {
             return;
-        };
-        let (source, code) = key;
-        match withheld.origin {
-            Origin::Seat(_) => {
-                if source == KeyboardSource::Physical {
-                    self.restore_seat_keymap();
-                }
-                self.sticky_typed(code, KeyState::Pressed, time, source);
-                self.send_keyboard_group();
-            }
-            Origin::Virtual(device) => {
-                // While locked a virtual keyboard's press is dropped (`drops_key`).
-                if !self.drops_virtual_input() {
-                    self.with_keymap_of(&device, |state| {
-                        state.sticky_typed(code, KeyState::Pressed, time, source)
-                    });
-                }
-            }
         }
+        self.restore_seat_keymap();
+        self.sticky_typed(code, KeyState::Pressed, time, KeyboardSource::Physical);
+        self.send_keyboard_group();
     }
 
     /// Sticky keys around `typed`: a modifier pressed and released alone is latched, then
@@ -446,7 +405,7 @@ impl State {
         if key_state == KeyState::Pressed {
             let chord = source == KeyboardSource::Physical
                 && self.aids.held.iter().any(|held| held.key.0 == source);
-            if two_key_off && chord && modifier == 0 && !self.protected(&syms, source, false) {
+            if two_key_off && chord && modifier == 0 && !self.protected(&syms, false) {
                 self.sticky_released();
                 self.aid_notice(Notice::AidOff(Aid::Sticky));
                 return self.typed(code, key_state, time, source, false);
@@ -567,22 +526,19 @@ impl State {
         }
     }
 
-    /// Whether a key of `source` of first-level syms `syms`, pressed now, is protected
-    /// (decision 30), with the modifiers held, latched or locked and those slow keys hold back
-    /// on the same keyboard, and if `rejected` those bounce keys rejected; a modifier dropped
-    /// counts for nothing.
-    fn protected(&self, syms: &[Keysym], source: KeyboardSource, rejected: bool) -> bool {
+    /// Whether a hardware key of first-level syms `syms`, pressed now, is protected
+    /// (decision 30), with the modifiers held, latched or locked and those slow keys hold back,
+    /// and if `rejected` those bounce keys rejected; a modifier dropped counts for nothing.
+    fn protected(&self, syms: &[Keysym], rejected: bool) -> bool {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
         let held_back = self
             .aids
             .withheld
-            .iter()
-            .filter(|((from, _), withheld)| {
-                *from == source && (withheld.slow.is_some() || (rejected && withheld.bounced))
-            })
-            .fold(0, |bits, (_, withheld)| bits | withheld.modifier);
+            .values()
+            .filter(|withheld| withheld.slow.is_some() || (rejected && withheld.bounced))
+            .fold(0, |bits, withheld| bits | withheld.modifier);
         let mods = bindings::mask(&keyboard.modifier_state()) | binding_mask(held_back);
         bindings::protected(mods, syms)
     }
