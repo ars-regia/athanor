@@ -336,7 +336,7 @@ def sway():
     refusals = {
         ("tiling", "on"): "no active workspace",
         ("group", "1"): "does not offer athanor_keyboard_group_manager_v1",
-        ("magnifier", "on"): "does not offer cosmic_a11y_manager_v1",
+        ("magnifier", "on"): "does not offer an accessibility manager",
     }
     windows = state.get("windows", [])
     if windows:
