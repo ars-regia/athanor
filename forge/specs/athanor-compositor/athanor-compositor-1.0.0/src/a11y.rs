@@ -15,7 +15,9 @@ use crate::state::{granted, State};
 use protocol::athanor_a11y_manager_v1::{
     self, ActiveState, AthanorA11yManagerV1, Error, Filter, Modifier,
 };
+use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource, WEnum};
 use smithay::utils::{Logical, Physical, Point, Rectangle, Size};
@@ -78,6 +80,9 @@ pub struct A11y {
     /// The output the view is magnified on, the point of it (logical, from its origin) that
     /// stays in place, and the level it was placed at.
     focal: Option<(Output, Point<f64, Logical>, f64)>,
+    /// The middle of the surface the keyboard last went to, and where the pointer was then:
+    /// the view follows that point in place of the pointer until the pointer moves.
+    focus: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
     /// The inversion and the filter, as cosmic-comp stores them.
     pub screen: ScreenFilter,
     /// Where they are stored, once the state root is known.
@@ -93,6 +98,7 @@ impl Default for A11y {
             last_level: None,
             zoom: Zoom::default(),
             focal: None,
+            focus: None,
             screen: ScreenFilter::default(),
             filter_path: None,
             managers: Vec::new(),
@@ -286,14 +292,22 @@ pub struct Look {
 }
 
 impl A11y {
-    /// What `output`, at `area` of the space, shows with the pointer at `pointer`. Only the
-    /// output under the pointer is magnified, at the one level.
+    /// What `output`, at `area` of the space, shows with the pointer at `pointer`. The view
+    /// follows the pointer, or the keyboard's focus while the pointer has not moved since the
+    /// focus did; only the output under the point followed is magnified, at the one level.
     pub fn look(
         &mut self,
         output: &Output,
         area: Option<Rectangle<i32, Logical>>,
         pointer: Option<Point<f64, Logical>>,
     ) -> Look {
+        let pointer = match (self.focus, pointer) {
+            (Some((focus, since)), Some(now)) if now == since => Some(focus),
+            _ => {
+                self.focus = None;
+                pointer
+            }
+        };
         Look {
             zoom: self.zoom_on(output, area, pointer),
             filter: Affine::of(&self.screen),
@@ -333,6 +347,40 @@ impl A11y {
 }
 
 impl State {
+    /// The keyboard went to `surface`: with the magnifier on, the view follows the middle of
+    /// its window or layer surface as `view_moves` says it follows the pointer, until the
+    /// pointer moves (`doc_accessibility.md` section 5, item 8).
+    // ponytail: the middle of the surface, not the text caret; the caret when a client reports
+    // it through text-input or AT-SPI and a user needs it.
+    pub(crate) fn zoom_to_focus(&mut self, surface: &WlSurface) {
+        if self.a11y.level <= 1.0 {
+            return;
+        }
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let Some(area) = self.surface_area(surface) else {
+            return;
+        };
+        let middle = (area.loc + area.size.downscale(2)).to_f64();
+        self.a11y.focus = Some((middle, pointer.current_location()));
+        self.request_redraw();
+    }
+
+    /// Where `surface`, a window's or a layer surface's, is in the space.
+    fn surface_area(&self, surface: &WlSurface) -> Option<Rectangle<i32, Logical>> {
+        if let Some(window) = self.window_for(surface) {
+            return self.space.element_geometry(&window);
+        }
+        self.space.outputs().find_map(|output| {
+            let origin = self.space.output_geometry(output)?.loc;
+            let map = layer_map_for_output(output);
+            let layer = map.layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)?;
+            let area = map.layer_geometry(layer)?;
+            Some(Rectangle::new(area.loc + origin, area.size))
+        })
+    }
+
     /// The point of the space a device that points at the screen names at `location`: the
     /// inverse of the magnification on the output last drawn magnified, when `location` is on
     /// it; elsewhere, or with the magnifier off, `location` itself.

@@ -173,7 +173,9 @@ cosmic-comp's `accessibility_zoom` under the configuration root, read at start a
 change as `xkb_config` is. A step multiplies or divides the level by one plus the increment,
 between 1 and 256; Super+= and Super+- step it, under a shortcut inhibitor too and never while
 the session is locked, and so does Super with the scroll wheel when the mouse shortcuts are on.
-The output under the pointer is drawn scaled about the view, the inversion and the filter as one
+The view follows the pointer, and the middle of the window or layer surface the keyboard goes
+to until the pointer next moves. The output under the point followed is drawn scaled about the
+view, the inversion and the filter as one
 pass over each output's final frame; captures and screencopy get neither. While a pass is on,
 nothing is scanned out directly. `src/screen_filter.rs` is the only reader and writer of these
 two files.

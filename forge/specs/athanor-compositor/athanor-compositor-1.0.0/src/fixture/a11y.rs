@@ -303,6 +303,36 @@ fn the_magnifier_scales_the_frame_about_the_pointer() {
     run.stop();
 }
 
+/// The view follows the keyboard's focus (`doc_accessibility.md` section 5, item 8): with the
+/// pointer in a corner, the keyboard going to the window brings its middle into view, as
+/// `view_moves` brings the pointer; the next motion of the pointer takes the view back.
+#[test]
+fn the_magnifier_follows_the_keyboard_focus() {
+    let mut run = Running::start(None);
+    let middle = window_middle(&run);
+    let w = OUTPUTS[0].width;
+    let (above, below) = ((middle.x, middle.y - 80), (middle.x, middle.y + 80));
+    run.state
+        .pointer_to(Point::from((1.0, 1.0)), InputTime::now());
+    run.state.zoom_step(true);
+    run.state.zoom_step(true);
+    let frame = run.state.capture(0).expect("frame of output 0");
+    assert_ne!(pixel(&frame, w, above.0, above.1), RED, "the corner is magnified");
+
+    let (window, _) = fixture_window(&run);
+    run.state.set_keyboard_focus(None);
+    run.state.focus(&window);
+    let frame = run.state.capture(0).expect("frame of output 0");
+    assert_eq!(pixel(&frame, w, above.0, above.1), RED, "above, the focus magnified");
+    assert_eq!(pixel(&frame, w, below.0, below.1), BLUE, "below, the focus magnified");
+
+    run.state
+        .pointer_to(Point::from((2.0, 2.0)), InputTime::now());
+    let frame = run.state.capture(0).expect("frame of output 0");
+    assert_ne!(pixel(&frame, w, above.0, above.1), RED, "the pointer followed again");
+    run.stop();
+}
+
 /// A device that points at the screen names, while the magnifier is on, the point shown under
 /// it: an absolute motion 90 pixels right of the pointer at level 2.25 moves it 40.
 #[test]

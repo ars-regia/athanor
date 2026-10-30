@@ -684,6 +684,9 @@ impl SeatHandler for State {
         set_primary_focus(&self.display_handle, seat, client.clone());
         set_data_device_focus(&self.display_handle, seat, client);
         self.text_input_focus(focused.cloned());
+        if let Some(surface) = focused {
+            self.zoom_to_focus(surface);
+        }
         // A lock or a confinement follows the keyboard (decision 30). Once the dispatch is
         // done: a popup's grab moves the keyboard while it holds the pointer.
         self.loop_handle.insert_idle(|state| state.refresh_constraint());
