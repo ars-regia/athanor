@@ -353,7 +353,10 @@ impl State {
     // ponytail: the middle of the surface, not the text caret; the caret when a client reports
     // it through text-input or AT-SPI and a user needs it.
     pub(crate) fn zoom_to_focus(&mut self, surface: &WlSurface) {
-        if self.a11y.level <= 1.0 {
+        // Called once the dispatch that moved the keyboard is done: by then the surface may be
+        // gone, or the keyboard elsewhere.
+        let focused = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        if self.a11y.level <= 1.0 || !surface.alive() || focused.as_ref() != Some(surface) {
             return;
         }
         let Some(pointer) = self.seat.get_pointer() else {

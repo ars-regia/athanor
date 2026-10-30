@@ -322,6 +322,10 @@ fn the_magnifier_follows_the_keyboard_focus() {
     let (window, _) = fixture_window(&run);
     run.state.set_keyboard_focus(None);
     run.state.focus(&window);
+    // The view moves once the dispatch that moved the keyboard is done.
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
     let frame = run.state.capture(0).expect("frame of output 0");
     assert_eq!(pixel(&frame, w, above.0, above.1), RED, "above, the focus magnified");
     assert_eq!(pixel(&frame, w, below.0, below.1), BLUE, "below, the focus magnified");
@@ -330,6 +334,76 @@ fn the_magnifier_follows_the_keyboard_focus() {
         .pointer_to(Point::from((2.0, 2.0)), InputTime::now());
     let frame = run.state.capture(0).expect("frame of output 0");
     assert_ne!(pixel(&frame, w, above.0, above.1), RED, "the pointer followed again");
+    run.stop();
+}
+
+/// A click outside a popup that grabs the seat, with the magnifier on, ends the grab and gives
+/// the keyboard back to the popup's root: Smithay moves the keyboard from inside the pointer's
+/// button, and the magnifier reads the pointer's location only once that is done. Read inside,
+/// it would lock the pointer the button holds, and the compositor would hang.
+#[test]
+fn a_click_outside_a_grabbing_popup_with_the_magnifier_on() {
+    let mut run = Running::start(None);
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    let exclusive = focus(&run.state).expect("the exclusive surface");
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.key_press = Some((serial, shell_id.clone()));
+    steps
+        .send(Step::Popup(serial.into()))
+        .expect("the shell's client");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    run.until("the popup's grab takes the pointer", |_| {
+        pointer.is_grabbed()
+    });
+
+    run.state.zoom_step(true);
+    let corner = Point::from((
+        f64::from(OUTPUTS[0].width - 2),
+        f64::from(OUTPUTS[0].height - 2),
+    ));
+    run.state.pointer_to(corner, InputTime::now());
+    // A hang is no failure the harness sees: the test ends the process if the click does not
+    // come back.
+    let (back, watch) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        if watch.recv_timeout(TIMEOUT) == Err(mpsc::RecvTimeoutError::Timeout) {
+            eprintln!("a_click_outside_a_grabbing_popup_with_the_magnifier_on: the click hung");
+            std::process::exit(101);
+        }
+    });
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+    drop(back);
+    release(&mut run);
+    run.until("the keyboard is back on the popup's root", |state| {
+        focus(state).as_ref() == Some(&exclusive)
+    });
+    assert!(!pointer.is_grabbed(), "the click ends the grab");
+
+    drop(steps);
+    run.until("the shell's client is done", |_| shell.is_finished());
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
     run.stop();
 }
 
