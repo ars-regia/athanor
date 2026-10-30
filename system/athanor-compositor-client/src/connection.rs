@@ -49,8 +49,8 @@ use wayland_protocols::wp::security_context::v1::client::{
 
 use crate::keymap::{self, MAX_KEYMAP};
 use crate::model::{
-    Accessibility, Change, Event, ScreenFilter, Table, Tiling, Window, WindowId, WindowState,
-    Workspace, WorkspaceId,
+    Accessibility, Change, Event, KeyboardAids, ScreenFilter, Table, Tiling, Window, WindowId,
+    WindowState, Workspace, WorkspaceId,
 };
 use crate::protocols::keyboard_layout::client::{
     zcosmic_keyboard_layout_manager_v1::ZcosmicKeyboardLayoutManagerV1,
@@ -342,6 +342,14 @@ impl Client {
         }
         let state = self.inner.live_state()?;
         state.a11y()?.set_screen_filter(inverted, filter);
+        drop(state);
+        self.flush()
+    }
+
+    /// The keyboard aids (doc_accessibility.md AX11), which only athanor-compositor has.
+    pub fn set_keyboard_aids(&self, aids: KeyboardAids) -> Result<(), Error> {
+        let state = self.inner.live_state()?;
+        state.a11y()?.set_keyboard_aids(aids)?;
         drop(state);
         self.flush()
     }

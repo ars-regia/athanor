@@ -96,6 +96,57 @@ pub struct Accessibility {
     pub magnifier: bool,
     pub inverted: bool,
     pub filter: ScreenFilter,
+    /// What sticky keys hold for the next key, as a mask of `Modifier`.
+    pub latched: u32,
+    /// What sticky keys hold until the modifier is pressed again, as a mask of `Modifier`.
+    pub locked: u32,
+}
+
+/// A modifier sticky keys hold, its value the bit of `athanor_a11y_v1`'s mask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Modifier {
+    Shift = 1,
+    Control = 2,
+    Alt = 4,
+    Super = 8,
+    AltGr = 16,
+}
+
+impl Modifier {
+    pub const ALL: [Self; 5] = [
+        Self::Shift,
+        Self::Control,
+        Self::Alt,
+        Self::Super,
+        Self::AltGr,
+    ];
+
+    pub fn is_in(self, mask: u32) -> bool {
+        mask & self as u32 != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyboardAid {
+    Sticky,
+    Slow,
+    Bounce,
+}
+
+/// The longest delay of slow and bounce keys, in ms (doc_accessibility.md AX11).
+pub const MAX_AID_DELAY: u32 = 2000;
+
+/// The settings of the keyboard aids, which the compositor keeps for the session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyboardAids {
+    pub sticky: bool,
+    pub two_key_off: bool,
+    pub slow: bool,
+    pub slow_delay: u32,
+    pub bounce: bool,
+    pub bounce_delay: u32,
+    /// Whether the compositor tells the Shift gestures.
+    pub gestures: bool,
 }
 
 /// A change, delivered after the compositor finished describing it.
@@ -112,6 +163,12 @@ pub enum Event {
     /// The index of the active layout in [`Event::KeyboardLayouts`].
     KeyboardGroup(u32),
     Accessibility(Accessibility),
+    /// Slow or bounce keys rejected a key; which key is never told.
+    AidRejected(KeyboardAid),
+    /// A Shift gesture asked for the aid.
+    AidGesture(KeyboardAid),
+    /// The compositor turned the aid off itself.
+    AidOff(KeyboardAid),
 }
 
 #[derive(Debug, PartialEq, Eq)]
