@@ -211,9 +211,9 @@ pub fn parse_zoom(text: &str) -> Result<Zoom, Refused> {
                 if !value.bytes().all(|byte| byte.is_ascii_digit()) {
                     return Err(Refused::Syntax(start));
                 }
-                let value = value
-                    .parse::<i32>()
-                    .map_err(|_| Refused::Range("increment"))?;
+                // Digits alone can only be too large, and the step then ends at the highest
+                // level as a large one does.
+                let value = value.parse::<i32>().unwrap_or(i32::MAX);
                 once(&mut increment, value.unsigned_abs(), name)?
             }
             "view_moves" => {
@@ -404,6 +404,16 @@ mod tests {
         }
     }
 
+    /// An increment too large for a number stops at the largest, and the rest of the record
+    /// still counts.
+    #[test]
+    fn a_huge_increment_is_the_largest() {
+        for digits in ["2147483648", "4294967296", "340282366920938463463374607431768211456"] {
+            let zoom = parse_zoom(&PRETTY_ZOOM.replace("50", digits)).expect("the record");
+            assert_eq!(zoom.increment, i32::MAX as u32, "{digits}");
+        }
+    }
+
     #[test]
     fn the_zoom_record_is_read() {
         assert_eq!(parse_zoom(PRETTY_ZOOM).expect("defaults"), Zoom::default());
@@ -422,7 +432,6 @@ mod tests {
             "(increment: 50)".into(),
             PRETTY_ZOOM.replace("Continuously", "Sideways"),
             PRETTY_ZOOM.replace("50", "-1"),
-            PRETTY_ZOOM.replace("50", "4294967296"),
             PRETTY_ZOOM.replace("show_overlay", "overlay"),
         ] {
             assert!(parse_zoom(&broken).is_err(), "{broken:?}");
