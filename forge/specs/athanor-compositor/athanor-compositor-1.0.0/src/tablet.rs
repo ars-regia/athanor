@@ -118,6 +118,11 @@ impl State {
             // A tool that was never in range has none to leave.
             (None, ProximityState::Out) => return,
         };
+        // A tool landing starts afresh: under a lock, its first sample moves nothing, and no
+        // jump from where an earlier tool or lift left off.
+        if proximity == ProximityState::In {
+            self.absolute_device_gone(&device);
+        }
         self.pointer_moved_to(device, location, time);
         match proximity {
             ProximityState::In => {

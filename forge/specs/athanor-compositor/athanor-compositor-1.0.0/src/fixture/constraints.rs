@@ -1074,3 +1074,45 @@ fn a_pens_motion_keeps_a_confinement() {
     }
     run.stop();
 }
+
+/// A pen put down elsewhere under a lock moves nothing for the landing: the locking client is
+/// sent the small move that follows, not the jump from where the pen was lifted.
+#[test]
+fn a_pen_landing_under_a_lock_sends_no_jump() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let relative: ZwpRelativePointerManagerV1 = game.local.bind(1);
+    let motions = Motions::default();
+    let _relative =
+        relative.get_relative_pointer(&game.pointer, &game.local.queue.handle(), motions.clone());
+    let (_lock, log) = game.lock(Lifetime::Persistent);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    let (tablet, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let before = Game::location(&run);
+    let far = at + Point::from((100.0, 0.0));
+    for (to, proximity) in [(at, smithay::backend::input::ProximityState::Out), (far, smithay::backend::input::ProximityState::In)] {
+        run.state.tool_proximity(
+            "pen".into(),
+            &tablet,
+            &tool,
+            to,
+            proximity,
+            smithay::input::tablet::tool::AxisFrame::default(),
+            InputTime::now(),
+        );
+    }
+    run.state.tool_motion(
+        "pen".into(),
+        &tool,
+        far + Point::from((3.0, 0.0)),
+        super::devices::pressure(),
+        InputTime::now(),
+    );
+    game.settle(&mut run);
+    let mut sent = std::mem::take(&mut *motions.lock().expect("the motions"));
+    // The sample of the lift repeats the last position: a move of nothing.
+    sent.retain(|motion| *motion != [0.0; 4]);
+    assert_eq!(sent, [[3.0, 0.0, 3.0, 0.0]], "only the small move");
+    assert_eq!(Game::location(&run), before, "the pointer stays");
+    run.stop();
+}
