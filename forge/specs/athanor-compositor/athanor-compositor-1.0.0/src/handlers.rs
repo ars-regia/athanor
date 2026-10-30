@@ -299,21 +299,23 @@ impl State {
             self.space.relocate_element(window, (x, y));
         }
         self.place_on_workspace(window);
-        self.follow_parent(window);
+        self.follow_parent(window, true);
     }
 
-    /// A window with a parent is stacked above it, on its workspace, and takes the keyboard
-    /// when the parent's client holds it, as a dialog does: the parent is the window the user is
-    /// typing into, so the dialog opened for it is where the typing goes on. The parent is
-    /// either the client's own (`xdg_toplevel.set_parent`) or the one an exported handle names
-    /// (xdg-foreign), which is the exporter's grant of this much. A parent that is minimised or
-    /// on an inactive workspace is not shown: the window follows it there and takes nothing.
-    fn follow_parent(&mut self, window: &Window) {
-        let Some(parent) = window
-            .toplevel()
-            .and_then(|toplevel| toplevel.parent())
-            .and_then(|parent| self.window_or_minimised(&parent))
-        else {
+    /// A window with a parent is stacked above it and above the parent's other dialogs, on the
+    /// parent's workspace. With `grant`, which only `place` passes, it also takes the keyboard
+    /// when the parent's own surface holds it, as a dialog does: the user is typing into the
+    /// parent, so the dialog opened for it is where the typing goes on. The surface is compared,
+    /// not the client, so a handle for one window does not take the keyboard from a prompt of
+    /// the same client; a client's own dialogs are covered by the rule of `place`. A re-parent
+    /// of a placed window moves and stacks it and never takes the keyboard, so a client holding
+    /// an exported handle cannot take it back by importing it again. The parent is the client's
+    /// own (`xdg_toplevel.set_parent`) or the one an exported handle names (xdg-foreign), the
+    /// exporter's grant of this much. A parent on an inactive workspace is hidden: the window
+    /// follows it there, is hidden with it, and takes no keyboard; one that is minimised leaves
+    /// the window where it is, beneath, with no keyboard.
+    fn follow_parent(&mut self, window: &Window, grant: bool) {
+        let Some(parent) = self.parent_window(window) else {
             return;
         };
         if let Some(id) = self.workspace_of(&parent) {
@@ -328,30 +330,73 @@ impl State {
             .seat
             .get_keyboard()
             .and_then(|keyboard| keyboard.current_focus());
-        let client = |surface: &WlSurface| surface.client().map(|client| client.id());
-        let parent_client = parent.toplevel().and_then(|t| client(t.wl_surface()));
-        let focused = window.toplevel().map(|t| t.wl_surface()) == held.as_ref();
-        if focused {
+        if held.as_ref() == window.toplevel().map(|t| t.wl_surface()) {
             return;
         }
-        if parent_client.is_some() && held.as_ref().and_then(client) == parent_client {
+        if grant && held.as_ref() == parent.toplevel().map(|t| t.wl_surface()) {
             self.focus(window);
             return;
         }
-        // Just above the parent, under what is above it now.
+        // Just above the parent and its dialogs, under what is above them now; the window's
+        // own dialogs go with it.
         let order: Vec<Window> = self.space.elements().cloned().collect();
-        let (Some(at_parent), Some(at_window)) = (
-            order.iter().position(|kept| *kept == parent),
-            order.iter().position(|kept| kept == window),
-        ) else {
+        let own = self.subtree(window);
+        let anchor = order
+            .iter()
+            .rposition(|kept| {
+                kept != window
+                    && !own.contains(kept)
+                    && (*kept == parent || self.descends(kept, &parent))
+            });
+        let (Some(anchor), Some(at_window)) =
+            (anchor, order.iter().position(|kept| kept == window))
+        else {
             return;
         };
-        if at_window < at_parent {
+        if at_window < anchor {
             self.space.raise_element(window, false);
-            for above in order.iter().skip(at_parent + 1).filter(|w| *w != window) {
+            for kept in &own {
+                self.space.raise_element(kept, false);
+            }
+            for above in order
+                .iter()
+                .skip(anchor + 1)
+                .filter(|kept| *kept != window && !own.contains(kept))
+            {
                 self.space.raise_element(above, false);
             }
         }
+    }
+
+    /// The window of `window`'s parent, mapped, minimised or on an inactive workspace.
+    fn parent_window(&self, window: &Window) -> Option<Window> {
+        let parent = window.toplevel()?.parent()?;
+        self.window_or_minimised(&parent)
+    }
+
+    /// Whether `root` is an ancestor of `window` through the parents.
+    fn descends(&self, window: &Window, root: &Window) -> bool {
+        let mut at = window.clone();
+        // A parent chain has no loop (`is_valid_parent`); the bound is the windows there are.
+        for _ in 0..self.windows().count() {
+            let Some(parent) = self.parent_window(&at) else {
+                return false;
+            };
+            if parent == *root {
+                return true;
+            }
+            at = parent;
+        }
+        false
+    }
+
+    /// The mapped windows that descend from `root`, bottom to top.
+    fn subtree(&self, root: &Window) -> Vec<Window> {
+        self.space
+            .elements()
+            .filter(|kept| *kept != root && self.descends(kept, root))
+            .cloned()
+            .collect()
     }
 
     /// The pointer, the start of its grab and the window, when the client of `surface` may
@@ -381,6 +426,10 @@ impl State {
     /// the keyboard exclusively; the others are deactivated.
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
+        // The window's own dialogs stay above it.
+        for dialog in self.subtree(window) {
+            self.space.raise_element(&dialog, false);
+        }
         for other in self.space.elements() {
             other.set_activated(other == window);
             if let Some(toplevel) = other.toplevel() {
@@ -492,10 +541,10 @@ impl XdgShellHandler for State {
 
     fn parent_changed(&mut self, surface: ToplevelSurface) {
         self.foreign_parent_set_natively(&surface);
-        // Before its first placement the window is placed under its parent by `place`.
+        // Before its first placement `place` stacks the window; a re-parent never gives it the keyboard.
         if let Some(window) = self.window_for(surface.wl_surface()) {
             if window.user_data().get::<Placed>().is_some() {
-                self.follow_parent(&window);
+                self.follow_parent(&window, false);
             }
         }
     }

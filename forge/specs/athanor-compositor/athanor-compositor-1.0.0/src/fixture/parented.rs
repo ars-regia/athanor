@@ -117,25 +117,27 @@ fn a_dialog_parented_through_xdg_foreign_takes_the_keyboard_of_its_parent() {
     run.stop();
 }
 
-/// A parent imported after the dialog is placed: it was beneath, and moves above with the keyboard.
+/// A parent imported after the dialog is placed stacks it above the parent and never gives it the
+/// keyboard, however often the client imports the handle again: only `place` grants it.
 #[test]
-fn a_parent_imported_after_the_dialog_is_placed_raises_it() {
+fn a_reparent_stacks_a_placed_dialog_and_never_gives_it_the_keyboard() {
     let mut run = Running::start(None);
     let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
     let handle = owner.export(&mut run, &surface);
     let created = dialog.create(&mut run);
     let window = dialog.map(&mut run, &created);
     assert!(!keyboard_on(&run, &window), "no parent, no keyboard");
-    assert!(
-        level(&run, &window) < level(&run, &parent),
-        "beneath the parent"
-    );
-    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
-    assert!(keyboard_on(&run, &window), "the dialog has the keyboard");
-    assert!(
-        level(&run, &window) > level(&run, &parent),
-        "above the parent"
-    );
+    assert!(level(&run, &window) < level(&run, &parent), "beneath the parent");
+    for round in 0..3 {
+        let imported = dialog.import_parent(&mut run, handle.clone(), &created.surface);
+        assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard, round {round}");
+        assert!(level(&run, &window) > level(&run, &parent), "above the parent");
+        // The user clicks the parent again; the client takes the parent off and sets it anew.
+        run.state.focus(&parent);
+        imported.destroy();
+        dialog.roundtrip(&mut run);
+        assert!(keyboard_on(&run, &parent), "still the parent's, round {round}");
+    }
     run.stop();
 }
 
@@ -214,5 +216,173 @@ fn a_dialog_of_a_minimised_parent_takes_nothing() {
     let window = dialog.map(&mut run, &created);
     assert!(keyboard_on(&run, &other), "the keyboard stays");
     assert_eq!(level(&run, &window), 0, "beneath everything");
+    run.stop();
+}
+
+/// The keyboard on another window of the parent's client is not the parent's: a handle for one
+/// window does not take it from a prompt of the same client.
+#[test]
+fn a_dialog_does_not_take_the_keyboard_from_another_window_of_the_parents_client() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let prompt = owner.another(&mut run, "prompt");
+    let prompt = owner.server_window(&run, &prompt.surface);
+    assert!(keyboard_on(&run, &prompt), "the prompt has the keyboard");
+    let handle = owner.export(&mut run, &surface);
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.map(&mut run, &created);
+    assert!(keyboard_on(&run, &prompt), "the keyboard stays on the prompt");
+    assert!(level(&run, &window) > level(&run, &parent), "above its parent");
+    run.stop();
+}
+
+/// A window that shows nothing takes no keyboard through a parent change.
+#[test]
+fn an_unmapped_window_takes_no_keyboard_through_a_parent_change() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let created = dialog.create(&mut run);
+    let window = dialog.map(&mut run, &created);
+    created.surface.attach(None, 0, 0);
+    created.surface.commit();
+    dialog.roundtrip(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard");
+    assert!(!keyboard_on(&run, &window), "the unmapped window has none");
+    run.stop();
+}
+
+/// A newer dialog of a parent is above the older ones, not beneath them.
+#[test]
+fn a_newer_dialog_is_above_the_older_dialogs_of_its_parent() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let (_typing, typed) = focused_window(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let first = dialog.create(&mut run);
+    let _one = dialog.import_parent(&mut run, handle.clone(), &first.surface);
+    let first = dialog.map(&mut run, &first);
+    let second = dialog.create(&mut run);
+    let _two = dialog.import_parent(&mut run, handle, &second.surface);
+    let second = dialog.map(&mut run, &second);
+    assert!(
+        level(&run, &parent) < level(&run, &first)
+            && level(&run, &first) < level(&run, &second)
+            && level(&run, &second) < level(&run, &typed),
+        "parent, older dialog, newer dialog, then the window typed into"
+    );
+    run.stop();
+}
+
+/// Raising a window raises its dialogs with it.
+#[test]
+fn raising_a_window_keeps_its_dialogs_above_it() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let (_typing, typed) = focused_window(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.map(&mut run, &created);
+    assert!(level(&run, &window) < level(&run, &typed), "under the window typed into");
+    run.state.focus(&parent);
+    assert!(
+        level(&run, &typed) < level(&run, &parent) && level(&run, &parent) < level(&run, &window),
+        "the parent is on top with its dialog above it"
+    );
+    run.stop();
+}
+
+/// A native parent whose surface holds the keyboard gives it to the child.
+#[test]
+fn a_native_child_takes_the_keyboard_of_its_parent() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _dialog) = scene(&mut run);
+    let created = owner.create(&mut run);
+    created.toplevel.set_parent(Some(&toplevel));
+    let window = owner.map(&mut run, &created);
+    assert!(keyboard_on(&run, &window), "the child has the keyboard");
+    assert!(level(&run, &window) > level(&run, &parent), "above the parent");
+    run.stop();
+}
+
+/// A parent on an inactive workspace: the dialog follows it there, hidden, with no keyboard.
+#[test]
+fn a_dialog_follows_a_parent_on_an_inactive_workspace() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.move_window_to(&parent, list[1]), "the parent leaves");
+    assert!(run.state.is_parked(&parent), "hidden");
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.map(&mut run, &created);
+    assert_eq!(run.state.workspace_of(&window), Some(list[1]), "on the parent's workspace");
+    assert!(run.state.is_parked(&window), "hidden with it");
+    assert!(!keyboard_on(&run, &window), "no keyboard");
+    run.stop();
+}
+
+/// A parent on the second output: the dialog is placed there.
+#[test]
+fn a_dialog_follows_a_parent_on_another_output() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let there = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&parent, there), "the parent moves");
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.map(&mut run, &created);
+    assert_eq!(run.state.workspace_of(&window), Some(there), "on the parent's workspace");
+    assert_eq!(
+        run.state.output_of_workspace(there),
+        Some(output_at(&run, 1)),
+        "on the second output"
+    );
+    run.stop();
+}
+
+/// A handle whose exported toplevel is gone sets no parent.
+#[test]
+fn a_revoked_handle_sets_no_parent() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, parent, mut dialog) = scene(&mut run);
+    let exporter: zxdg_exporter_v2::ZxdgExporterV2 = owner.bind(1);
+    let exported = exporter.export_toplevel(&surface, &owner.queue.handle(), ());
+    owner.pump(&mut run, "a handle", |client, _| client.devices.handle.is_some());
+    let handle = owner.client.devices.handle.clone().expect("a handle");
+    exported.destroy();
+    owner.roundtrip(&mut run);
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let window = dialog.map(&mut run, &created);
+    assert_eq!(window.toplevel().and_then(|t| t.parent()), None, "no parent");
+    assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard");
+    assert!(level(&run, &window) < level(&run, &parent), "beneath it");
+    run.stop();
+}
+
+/// A locked session keeps the keyboard on the lock surface.
+#[test]
+fn a_dialog_does_not_take_the_keyboard_from_the_lock_surface() {
+    let mut run = Running::start(None);
+    let (mut owner, _toplevel, surface, _parent, mut dialog) = scene(&mut run);
+    let handle = owner.export(&mut run, &surface);
+    let (locker, _lock) = lock_session(&mut run);
+    let created = dialog.create(&mut run);
+    let _imported = dialog.import_parent(&mut run, handle, &created.surface);
+    let _window = dialog.map(&mut run, &created);
+    let holder = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.current_focus())
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
     run.stop();
 }

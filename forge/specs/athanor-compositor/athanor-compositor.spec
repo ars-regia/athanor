@@ -53,8 +53,8 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 %changelog
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - Stack a toplevel with a parent, set through xdg-foreign or xdg_toplevel.set_parent, above
-  that parent on its workspace, and give it the keyboard when the parent's client holds it
-  (#872)
+  that parent and its other dialogs on its workspace, and give it the keyboard at its first
+  placement when the parent's own surface holds it (#872)
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its
