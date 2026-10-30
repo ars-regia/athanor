@@ -552,6 +552,25 @@ fn a_tip_down_focuses_the_window_under_the_tool() {
     run.stop();
 }
 
+/// A tip down that gives a window the keyboard is the pointer's doing, as a click is: the
+/// magnified view stays with the pen.
+#[test]
+fn a_tip_down_does_not_move_the_magnified_view() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (_, tool, _) = pen_over_window(&mut run, &mut local);
+    run.state.zoom_step(true);
+    run.state.set_keyboard_focus(None);
+    run.state
+        .tool_tip(&tool, TabletToolTipState::Down, InputTime::now());
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    assert!(keyboard_focus(&run).is_some(), "the window has the keyboard");
+    assert_eq!(run.state.a11y.focus, None, "the focus is not followed");
+    run.stop();
+}
+
 /// A pen in range over a window when the session locks reaches the window with no press, no
 /// tip, and no axis, as the pointer reaches it with no click; before the lock it does.
 #[test]

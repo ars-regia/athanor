@@ -55,8 +55,8 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - The magnifier and the colour filters (doc_accessibility.md AX10, revision 3): the
   privileged athanor_a11y_manager_v1 for the bar, Super+= and Super+- to zoom, Super with
-  the scroll wheel when accessibility_zoom allows it, a view that follows the pointer and the
-  keyboard focus, the colour inversion and filters on
+  the scroll wheel when accessibility_zoom allows it, a view that follows the pointer and any
+  keyboard focus the pointer did not move, the colour inversion and filters on
   each output's frame, and cosmic-comp's a11y_screen_filter.ron read at start and written
   at each change, so both sessions show the same state. athanor-compositor-session no longer
   starts cosmic-comp's session for the magnifier or a filter, and --screen-filter-on is gone.

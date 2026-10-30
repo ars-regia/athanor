@@ -272,6 +272,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
+        self.a11y.set_pointing(true);
         if button_state == ButtonState::Pressed && !pointer.is_grabbed() {
             self.click_focus(pointer.current_location());
         }
@@ -293,6 +294,7 @@ impl State {
             },
         );
         pointer.frame(self);
+        self.a11y.set_pointing(false);
     }
 
     /// Input from the backend; it may change what is on screen, the pointer or the stacking.

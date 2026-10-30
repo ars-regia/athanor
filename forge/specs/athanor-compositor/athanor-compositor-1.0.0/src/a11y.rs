@@ -81,8 +81,10 @@ pub struct A11y {
     /// stays in place, and the level it was placed at.
     focal: Option<(Output, Point<f64, Logical>, f64)>,
     /// The middle of the surface the keyboard last went to, and where the pointer was then:
-    /// the view follows that point in place of the pointer until the pointer moves.
-    focus: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
+    /// the view follows that point in place of the pointer until the pointer moves or acts.
+    pub(crate) focus: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
+    /// A button or a pen's tip is being handled: the keyboard moving now is the pointer's doing.
+    pub(crate) pointing: bool,
     /// The inversion and the filter, as cosmic-comp stores them.
     pub screen: ScreenFilter,
     /// Where they are stored, once the state root is known.
@@ -99,6 +101,7 @@ impl Default for A11y {
             zoom: Zoom::default(),
             focal: None,
             focus: None,
+            pointing: false,
             screen: ScreenFilter::default(),
             filter_path: None,
             managers: Vec::new(),
@@ -126,8 +129,8 @@ impl GlobalDispatch2<AthanorA11yManagerV1, State> for A11yManagers {
         let manager = data_init.init(resource, A11yManagers);
         send_magnifier(&manager, state.a11y.level);
         send_screen_filter(&manager, &state.a11y.screen);
-        // ponytail: no modifier is latched or locked before the aids exist; a manager bound
-        // while the session is locked is sent the event when the aids land (#865).
+        // No modifier is latched or locked before the aids exist; a manager bound while the
+        // session is locked is sent the event when the aids land (#865).
         if state.lock.is_none() {
             manager.modifiers(Modifier::empty(), Modifier::empty());
         }
@@ -314,6 +317,13 @@ impl A11y {
         }
     }
 
+    /// A button or a pen's tip started or finished acting at the pointer: the view goes back
+    /// to the pointer, and meanwhile what the keyboard does is not followed.
+    pub(crate) fn set_pointing(&mut self, acting: bool) {
+        self.pointing = acting;
+        self.focus = None;
+    }
+
     fn zoom_on(
         &mut self,
         output: &Output,
@@ -347,11 +357,10 @@ impl A11y {
 }
 
 impl State {
-    /// The keyboard went to `surface`: with the magnifier on, the view follows the middle of
-    /// its window or layer surface as `view_moves` says it follows the pointer, until the
-    /// pointer moves (`doc_accessibility.md` section 5, item 8).
-    // ponytail: the middle of the surface, not the text caret; the caret when a client reports
-    // it through text-input or AT-SPI and a user needs it.
+    /// The keyboard went to `surface`, by no doing of the pointer: with the magnifier on, the
+    /// view follows the middle of its window or layer surface as `view_moves` says it follows
+    /// the pointer, until the pointer moves (`doc_accessibility.md` section 5, item 8). The
+    /// middle, not the text caret, which the compositor is not told of (AX10).
     pub(crate) fn zoom_to_focus(&mut self, surface: &WlSurface) {
         // Called once the dispatch that moved the keyboard is done: by then the surface may be
         // gone, or the keyboard elsewhere.

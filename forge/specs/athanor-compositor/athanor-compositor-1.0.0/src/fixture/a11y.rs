@@ -337,6 +337,101 @@ fn the_magnifier_follows_the_keyboard_focus() {
     run.stop();
 }
 
+/// The view follows the keys that move the keyboard, as it follows anything else that is not
+/// the pointer.
+#[test]
+fn the_magnifier_follows_the_focus_keys() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity};
+    let mut run = Running::start(None);
+    let anchor = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (_bar, bar_surface) = top_surface(&mut run, "bar", anchor, KeyboardInteractivity::OnDemand);
+    run.state.zoom_step(true);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    assert_eq!(keyboard_focus(&run), Some(bar_surface), "the keyboard moved");
+    assert!(run.state.a11y.focus.is_some(), "the view follows it");
+    run.stop();
+}
+
+/// The focus followed is the middle of what a window shows, its shadow left out: a window's
+/// place in the space is its geometry's top left (#873).
+#[test]
+fn the_focus_followed_is_the_middle_of_the_geometry() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let geometry = shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let corner = location_of(&run, &id).to_f64();
+    run.state.zoom_step(true);
+    run.state.set_keyboard_focus(None);
+    run.state.focus(&window);
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    let half = geometry.size.to_f64().downscale(2.0);
+    assert_eq!(
+        run.state.a11y.focus.map(|(at, _)| at),
+        Some(corner + Point::from((half.w, half.h)))
+    );
+    run.stop();
+}
+
+/// A click at the edge of a window that does not have the keyboard gives it the keyboard and
+/// leaves the view where the pointer has it: followed, the view would jump to the window's
+/// middle and the pointer out of it until the mouse moves.
+#[test]
+fn a_click_does_not_move_the_magnified_view() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let area = run.state.space.element_geometry(&window).expect("mapped");
+    let edge = (area.loc + Point::from((2, 2))).to_f64();
+    run.state.set_keyboard_focus(None);
+    run.state.pointer_to(edge, InputTime::now());
+    run.state.zoom_step(true);
+    run.state.zoom_step(true);
+    let before = run.state.capture(0).expect("frame of output 0");
+    press(&mut run, edge);
+    release(&mut run);
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    let focused = keyboard_focus(&run).expect("the click focuses the window");
+    assert_eq!(&focused, window.toplevel().expect("a toplevel").wl_surface());
+    assert_eq!(run.state.a11y.focus, None, "the focus is not followed");
+    let after = run.state.capture(0).expect("frame of output 0");
+    assert!(before == after, "the view stayed");
+    run.stop();
+}
+
+/// A click after the focus was followed gives the view back to the pointer, which the user sees
+/// is where the click went.
+#[test]
+fn a_click_ends_the_following_of_the_focus() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    run.state.zoom_step(true);
+    run.state.set_keyboard_focus(None);
+    run.state.focus(&window);
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    assert!(run.state.a11y.focus.is_some(), "followed");
+    let at = run
+        .state
+        .seat
+        .get_pointer()
+        .expect("a pointer")
+        .current_location();
+    press(&mut run, at);
+    release(&mut run);
+    assert_eq!(run.state.a11y.focus, None, "back to the pointer");
+    run.stop();
+}
+
 /// A click outside a popup that grabs the seat, with the magnifier on, ends the grab and gives
 /// the keyboard back to the popup's root: Smithay moves the keyboard from inside the pointer's
 /// button, and the magnifier reads the pointer's location only once that is done. Read inside,

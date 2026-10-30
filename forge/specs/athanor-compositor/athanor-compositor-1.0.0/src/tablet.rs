@@ -210,7 +210,9 @@ impl State {
                 }
                 if let Some(pointer) = self.seat.get_pointer() {
                     if !pointer.is_grabbed() {
+                        self.a11y.set_pointing(true);
                         self.click_focus(pointer.current_location());
+                        self.a11y.set_pointing(false);
                     }
                 }
                 let serial = SERIAL_COUNTER.next_serial();
