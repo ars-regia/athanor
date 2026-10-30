@@ -183,7 +183,13 @@ class Candidate(Tool):
             capture_output=True,
             text=True,
             cwd=ROOT,
-            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref, **extra},
+            env={
+                **self.env,
+                "BUILD_RUN_ID": run_id,
+                "GITHUB_REF": ref,
+                "RELEASE_CANDIDATE_SETTLE": "0",
+                **extra,
+            },
         )
 
     def order(self):
@@ -317,6 +323,25 @@ class Candidate(Tool):
     def test_a_pull_request_event_refuses(self):
         self.github(run=run_object(event="pull_request"))
         self.refused("event pull_request")
+
+    def test_the_check_waits_for_the_record_to_catch_up_with_the_jobs(self):
+        import release_candidate as module
+
+        stale = [run_object(status="queued"), jobs({"name": "late", "conclusion": None})]
+        fresh = [run_object(), jobs()]
+        reads = iter(stale + fresh)
+        saved = module.api, module.SETTLE, module.SETTLE_PAUSE
+        module.api, module.SETTLE, module.SETTLE_PAUSE = lambda *_: next(reads), 60, 0
+        try:
+            run, found = module.settled(R, "412")
+        finally:
+            module.api, module.SETTLE, module.SETTLE_PAUSE = saved
+        self.assertEqual(run["status"], "in_progress")
+        self.assertEqual(found, fresh[1][0]["jobs"])
+
+    def test_a_record_that_stays_behind_is_refused(self):
+        self.github(pages=jobs({"name": "late", "conclusion": None}))
+        self.refused("job late None")
 
     def test_a_queued_build_refuses(self):
         self.github(run=run_object(status="queued"))

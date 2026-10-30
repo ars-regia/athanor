@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import release_class
 import schema
@@ -38,6 +39,9 @@ ARTIFACTS = ["release-request", "image-digests", "kernel-digests"]
 FILES = ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"]
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 TIMEOUT = 300  # seconds for one external command
+# How long the API's record of the build may lag the jobs that requested this release. Seen: 6.3 min.
+SETTLE = int(os.environ.get("RELEASE_CANDIDATE_SETTLE", "600"))  # seconds
+SETTLE_PAUSE = 15  # seconds between two reads
 CREATED = "org.opencontainers.image.created"
 REVISION = "org.opencontainers.image.revision"
 
@@ -68,6 +72,28 @@ def tool(*args):
 
 def api(path, *flags):
     return json.loads(tool("gh", "api", *flags, path))
+
+
+def settled(repo, run_id):
+    """The build run and its jobs, once the API's record has caught up with request-release, or
+    as they stand after SETTLE seconds. The record can show a finished job as unfinished and the
+    run as queued for minutes, and one read of it would end the release of this build. The
+    checks that follow stay as strict: a run that stays behind is refused by them."""
+    deadline = time.monotonic() + SETTLE
+    while True:
+        run = api(f"/repos/{repo}/actions/runs/{run_id}")
+        pages = api(
+            f"/repos/{repo}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100",
+            "--paginate",
+            "--slurp",
+        )
+        jobs = [j for page in pages for j in page["jobs"]]
+        behind = run["status"] == "queued" or any(
+            j["name"] != REQUEST_JOB and j["conclusion"] is None for j in jobs
+        )
+        if not behind or time.monotonic() >= deadline:
+            return run, jobs
+        time.sleep(SETTLE_PAUSE)
 
 
 def compare(repo, base, head):
@@ -241,7 +267,7 @@ def check(out):
             schema.validate(request, schema.load("release-request"))
         except ValueError as error:
             raise Refused(f"release-request.json: {error}") from None
-        run = api(f"/repos/{repo}/actions/runs/{run_id}")
+        run, jobs = settled(repo, run_id)
         why = []
         if request["build_run_id"] != int(run_id):
             why.append(f"request names run id {request['build_run_id']}, not {run_id}")
@@ -260,12 +286,6 @@ def check(out):
         for name in FILES:
             if sha256(tmp / name) != request["sha256"][name]:
                 why.append(f"{name} differs from the hash of the request")
-        pages = api(
-            f"/repos/{repo}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100",
-            "--paginate",
-            "--slurp",
-        )
-        jobs = [j for page in pages for j in page["jobs"]]
         why += [
             f"job {j['name']} {j['conclusion']}"
             for j in jobs
