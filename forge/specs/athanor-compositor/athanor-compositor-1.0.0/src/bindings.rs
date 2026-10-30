@@ -99,14 +99,16 @@ impl Action {
     }
 
     /// Whether the action stays the compositor's under a client's keyboard-shortcuts inhibitor:
-    /// the user's way out and the trusted path (OS4). No inhibitor is served yet; the protocol's
-    /// change reads this set.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// the user's way out and the trusted path (OS4, decision 30): the lock, the terminal
+    /// switch, Super+Alt+Escape, the reveal key, Ctrl+Alt+Tab and the screen reader's key.
     pub(crate) fn never_inhibited(&self) -> bool {
-        matches!(
-            self,
-            Self::Lock | Self::Vt(_) | Self::Terminate | Self::Reveal
-        )
+        match self {
+            Self::Lock | Self::Vt(_) | Self::Terminate | Self::Reveal | Self::FocusCycle => true,
+            Self::Call(call) => **call == cosmic::SCREEN_READER,
+            Self::CloseFocused | Self::NextGroup | Self::Run(_) | Self::TouchpadToggle => false,
+            Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
+            Self::Step(_) | Self::Carry(_) => false,
+        }
     }
 }
 
@@ -285,7 +287,11 @@ impl State {
             Action::Reveal => {}
             Action::CloseFocused => self.close_focused(),
             Action::NextGroup => self.next_keyboard_group(),
-            Action::FocusCycle => self.focus_cycle(),
+            // The suspension does not wait on the cycle, which may have nowhere to go.
+            Action::FocusCycle => {
+                self.suspend_focused();
+                self.focus_cycle();
+            }
             Action::Call(call) => self.send_job(Job::Call(call)),
             Action::Run(command) => self.send_job(Job::Run(command)),
             Action::TouchpadToggle => self.toggle_touchpads(),
@@ -395,9 +401,12 @@ mod tests {
             Action::Vt(3),
             Action::Terminate,
             Action::Reveal,
+            Action::FocusCycle,
+            Action::Call(&cosmic::SCREEN_READER),
         ] {
             assert!(action.never_inhibited(), "{action:?}");
         }
+        assert!(!Action::Call(&cosmic::VOLUME_UP).never_inhibited());
         assert!(!Action::CloseFocused.never_inhibited());
         assert!(!Action::NextGroup.never_inhibited());
         assert!(!Action::Call(&CONTROL_CENTER).never_inhibited());

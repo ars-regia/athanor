@@ -35,7 +35,6 @@ use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::security_context::{
     SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
 };
@@ -677,6 +676,9 @@ impl SeatHandler for State {
         set_primary_focus(&self.display_handle, seat, client.clone());
         set_data_device_focus(&self.display_handle, seat, client);
         self.text_input_focus(focused.cloned());
+        // A lock or a confinement follows the keyboard (decision 30). Once the dispatch is
+        // done: a popup's grab moves the keyboard while it holds the pointer.
+        self.loop_handle.insert_idle(|state| state.refresh_constraint());
     }
 }
 
@@ -729,9 +731,6 @@ impl IdleNotifierHandler for State {
         &mut self.idle_notifier_state
     }
 }
-
-// A pointer target needs it; no client gets a lock or a confinement yet.
-impl PointerConstraintsHandler for State {}
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {

@@ -206,6 +206,8 @@ pub struct State {
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
+    /// The keyboard-shortcuts inhibitors and the clients Ctrl+Alt+Tab suspended (`constraints`).
+    pub input_hold: crate::constraints::Held,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -291,6 +293,7 @@ impl State {
         // a solid colour on every renderer.
         SinglePixelBufferState::new::<Self>(&dh);
         IdleInhibitManagerState::new::<Self>(&dh);
+        let input_hold = crate::constraints::Held::new(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
@@ -391,6 +394,7 @@ impl State {
             lock: None,
             idle_notifier_state,
             inhibitors: HashMap::new(),
+            input_hold,
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
