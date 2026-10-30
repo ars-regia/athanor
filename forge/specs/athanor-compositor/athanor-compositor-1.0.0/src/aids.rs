@@ -12,7 +12,6 @@
 
 use crate::bindings;
 use crate::identity::Privilege;
-use crate::input::keymap_text;
 use crate::state::{granted, State};
 use smithay::backend::input::{InputTime, KeyState};
 use smithay::input::keyboard::{xkb, KeyboardHandle, KeyboardSource, Keycode, Keysym};
@@ -147,23 +146,11 @@ fn modifier(syms: &[Keysym]) -> u32 {
 /// `Notice::Modifiers`: Shift, Control, Mod1, Mod4 and Mod5, as xkeyboard-config's keymaps map them.
 const USUAL_MASKS: [u32; 5] = [0x01, 0x04, 0x08, 0x40, 0x80];
 
-/// The xkb mask each modifier sets under the keymap `text`, by the bit's position in
-/// `Notice::Modifiers`: read from the keys, since a virtual keyboard's keymap may put a modifier
-/// where it likes. The keymap is compiled again here, so `State::modifier_masks` asks only while
-/// a modifier is latched or locked.
-fn keymap_masks(text: String) -> [u32; 5] {
+/// The xkb mask each modifier sets under `keymap`, by the bit's position in `Notice::Modifiers`:
+/// read from the keys, since a virtual keyboard's keymap may put a modifier where it likes.
+fn keymap_masks(keymap: &xkb::Keymap) -> [u32; 5] {
     let mut masks = [0; 5];
-    let context = xkb::Context::new(xkb::CONTEXT_NO_DEFAULT_INCLUDES);
-    let Some(keymap) = xkb::Keymap::new_from_string(
-        &context,
-        text,
-        xkb::KEYMAP_FORMAT_TEXT_V1,
-        xkb::KEYMAP_COMPILE_NO_FLAGS,
-    ) else {
-        tracing::error!("the seat's keymap did not compile again: the usual modifier masks");
-        return USUAL_MASKS;
-    };
-    let mut state = xkb::State::new(&keymap);
+    let mut state = xkb::State::new(keymap);
     for layout in 0..keymap.num_layouts() {
         state.update_mask(0, 0, 0, 0, 0, layout);
         for code in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
@@ -602,12 +589,18 @@ impl State {
     /// The xkb mask of each modifier under the keymap the seat has now, the seat's own or a
     /// virtual keyboard's, whose client reads the modifiers by it. None is needed while sticky
     /// keys hold no modifier.
+    #[allow(unsafe_code)]
     fn modifier_masks(&mut self) -> [u32; 5] {
         let (latched, locked) = self.aids.set;
         let keyboard = self.seat.get_keyboard();
         match keyboard {
             Some(keyboard) if latched | locked | self.aids.latched | self.aids.locked != 0 => {
-                keymap_masks(keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())))
+                keyboard.with_xkb_state(self, |context| {
+                    let xkb = context.xkb().lock().unwrap_or_else(PoisonError::into_inner);
+                    // SAFETY: the one ref-count `keymap_masks` takes, in the xkb state it makes,
+                    // ends when it returns, and `xkb` outlives it.
+                    keymap_masks(unsafe { xkb.keymap() })
+                })
             }
             _ => [0; 5],
         }
