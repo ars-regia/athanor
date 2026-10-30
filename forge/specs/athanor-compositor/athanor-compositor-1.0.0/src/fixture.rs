@@ -209,6 +209,8 @@ const GLOBALS: [&str; 16] = [
 
 #[derive(Default)]
 struct Client {
+    /// What the tablet, gesture, decoration and foreign globals sent (`fixture_devices.rs`).
+    devices: devices::Seen,
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
@@ -10198,3 +10200,5 @@ fn a_window_is_maximised_on_its_output() {
 
 #[cfg(test)]
 mod clipboard;
+#[cfg(test)]
+mod devices;

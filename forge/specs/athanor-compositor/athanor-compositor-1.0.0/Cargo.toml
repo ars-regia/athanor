@@ -34,5 +34,6 @@ xcursor = { workspace = true }
 
 [dev-dependencies]
 wayland-client = { workspace = true }
-wayland-protocols = { workspace = true }
+# The fixture binds the unstable protocols: tablet, pointer gestures, decoration, foreign.
+wayland-protocols = { workspace = true, features = ["unstable"] }
 wayland-protocols-wlr = { workspace = true }
