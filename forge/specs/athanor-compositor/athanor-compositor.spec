@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,12 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- Apply sticky, slow and bounce keys in front of every key's reader, the bindings, the
+  focused client, the keyboard monitor and a virtual keyboard's keys alike; the protected
+  keys pass slow and bounce keys, and nothing is told while the session is locked or a
+  trusted prompt has the keyboard (doc_accessibility.md AX11, #865)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its
   unit and executable, so that Orca's own commands reach it, and send it every key but the

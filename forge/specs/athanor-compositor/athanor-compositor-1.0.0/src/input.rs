@@ -4,6 +4,7 @@
 //! sees (`bindings.rs`). A virtual keyboard's keys and a virtual pointer's motion and buttons, of
 //! the clients the allow-list grants them, take the same path (OS4, OS9 task 6).
 
+use crate::aids::Origin;
 use crate::bindings;
 use crate::keyboard_monitor::Taken;
 use crate::state::{identity_of, State, Under};
@@ -53,8 +54,9 @@ impl State {
         }
     }
 
-    /// A key pressed or released, from the hardware keyboard or a virtual one (`source`): to
-    /// the focused surface, unless the compositor keeps it or drops it (`drops_key`).
+    /// A key pressed or released, from the hardware keyboard or a virtual one (`source`):
+    /// through the keyboard aids (`aids.rs`) to the focused surface, unless the compositor keeps
+    /// it or drops it (`drops_key`).
     pub fn key_input(
         &mut self,
         code: Keycode,
@@ -62,13 +64,14 @@ impl State {
         time: InputTime,
         source: KeyboardSource,
     ) {
-        self.typed(code, key_state, time, source, false);
+        self.aided(code, key_state, time, Origin::Seat(source));
         self.send_keyboard_group();
     }
 
-    /// As `key_input`, and a key `past_grab` goes to the focused surface past the keyboard's
-    /// grab: the input method's, which forwards it through its own virtual keyboard.
-    fn typed(
+    /// A key the keyboard aids let through, to the focused surface, unless the compositor keeps
+    /// it or drops it; a key `past_grab` goes to the focused surface past the keyboard's grab:
+    /// the input method's, which forwards it through its own virtual keyboard.
+    pub(crate) fn typed(
         &mut self,
         code: Keycode,
         key_state: KeyState,
@@ -106,8 +109,8 @@ impl State {
                     KeyState::Pressed => bindings::find(modifiers, &handle, state.lock.is_some()),
                     KeyState::Released => None,
                 };
-                // The keyboard aids of AX11 take their place here, before the monitor (#865).
-                // Orca is sent every key once: the input method's forwarded keys are the
+                // The keyboard aids of AX11 came before (`aids.rs`): Orca is sent the keys they
+                // let through. Orca is sent every key once: the input method's forwarded keys are the
                 // hardware's it was sent already. The monitor is not a binding: an inhibitor
                 // leaves it working (decision 30). A protected key is the compositor's alone,
                 // Orca's too (OS4; the maintainer's decision of 2026-10-30, #863), locked or not:
@@ -393,7 +396,7 @@ impl State {
     /// pressed with; what a virtual keyboard uploads never reads a hardware key. A virtual
     /// keyboard with no keymap of its own types under the seat's, and its modifiers apply to its
     /// own keys only, the seat's coming back after each.
-    fn with_keymap_of(&mut self, device: &VirtualKeyboardDevice, input: impl FnOnce(&mut Self)) {
+    pub(crate) fn with_keymap_of(&mut self, device: &VirtualKeyboardDevice, input: impl FnOnce(&mut Self)) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -422,7 +425,7 @@ impl State {
     /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
     /// with no key: the focused surface is sent them when they change, and so is the input
     /// method's grab, which a key would otherwise have carried them to.
-    fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
+    pub(crate) fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
         let [depressed, latched, locked, group] = mask;
         let before = keyboard.modifier_state().serialized;
         keyboard.with_xkb_state(self, |mut context| {
@@ -560,9 +563,16 @@ impl VirtualKeyboardHandler for State {
                 }
                 self.activity();
                 self.request_redraw();
+                // The input method's forwarded keys went through the keyboard aids as the
+                // hardware's.
                 let past_grab = forwarded || self.holds_keyboard_grab(device.client());
+                let origin = Origin::Virtual(device.clone());
                 self.with_keymap_of(&device, |state| {
-                    state.typed(code, key_state, time, device.source(), past_grab)
+                    if past_grab {
+                        state.typed(code, key_state, time, device.source(), true)
+                    } else {
+                        state.aided(code, key_state, time, origin)
+                    }
                 });
                 // A code outside evdev's keys is not kept: its release takes the grab's way.
                 if past_grab && key_state == KeyState::Pressed && KEYS.contains(&code.raw()) {

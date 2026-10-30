@@ -840,3 +840,40 @@ fn ax4_on_the_bus_the_monitor_serves_orca_alone() {
     let ended = server.join().expect("the monitor's thread");
     assert!(ended.is_err(), "and the monitor stops: {ended:?}");
 }
+
+/// The keyboard aids come before the monitor (AX11, AX17): Orca hears the key the latched Shift
+/// of sticky keys types, as the window reads it, and never a key slow keys rejected.
+#[test]
+fn ax11_the_monitor_hears_the_keys_the_aids_let_through() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let queued = listen(&mut run);
+    assert!(call(
+        &mut run,
+        ORCA,
+        ORCA,
+        &ORCA_PROCESS,
+        Change::Watch(true)
+    ));
+    run.state.set_sticky_keys(true, false);
+    sent_to(&mut window, &mut run, &[KEY_LEFTSHIFT]);
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
+    assert_eq!(presses, [KEY_A]);
+    assert_eq!(
+        heard(&queued),
+        [
+            (false, Keysym::Shift_L),
+            (true, Keysym::Shift_L),
+            (false, Keysym::A),
+            (true, Keysym::a),
+        ],
+        "Orca hears the capital the latched Shift types"
+    );
+
+    run.state.set_sticky_keys(false, false);
+    run.state.set_slow_keys(true, 200).expect("in bounds");
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
+    assert_eq!(presses, [], "a short press reaches no window");
+    assert_eq!(heard(&queued), [], "nor Orca");
+    run.stop();
+}

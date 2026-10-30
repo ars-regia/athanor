@@ -91,6 +91,7 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.aids_quiet_changed();
         self.focus_top();
         self.refresh_pointer();
         self.refresh_tools();

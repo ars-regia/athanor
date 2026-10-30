@@ -18,10 +18,10 @@ use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
 use std::sync::atomic::Ordering;
 
 /// The modifiers of a trigger, as a mask of these bits; Caps Lock and Num Lock are not read.
-const SUPER: u8 = 1;
-const CTRL: u8 = 2;
-const ALT: u8 = 4;
-const SHIFT: u8 = 8;
+pub(crate) const SUPER: u8 = 1;
+pub(crate) const CTRL: u8 = 2;
+pub(crate) const ALT: u8 = 4;
+pub(crate) const SHIFT: u8 = 8;
 
 /// A key with the exact set of Super, Ctrl, Alt and Shift held.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -198,7 +198,7 @@ const fn on(mods: u8, sym: Keysym) -> Trigger {
 }
 
 /// The modifiers of `modifiers` a trigger names.
-fn mask(modifiers: &ModifiersState) -> u8 {
+pub(crate) fn mask(modifiers: &ModifiersState) -> u8 {
     [
         (modifiers.logo, SUPER),
         (modifiers.ctrl, CTRL),
@@ -256,6 +256,22 @@ fn matching(
             .map(|(_, action)| *action)
     })?;
     (!locked || action.kept_while_locked()).then_some(action)
+}
+
+/// Whether a key whose first-level syms are `syms`, pressed with the modifiers `mods`, is
+/// protected (decision 30): the action of a binding no inhibitor takes, Super+Alt+A, which AX14
+/// gives the accessibility menu and no binding serves yet, or Ctrl+Alt with F1 to F12, the
+/// switch to a text console. The keyboard aids never hold one back (AX11).
+pub(crate) fn protected(mods: u8, syms: &[Keysym]) -> bool {
+    let console = mods & (CTRL | ALT) == CTRL | ALT
+        && syms
+            .iter()
+            .any(|sym| (Keysym::F1.raw()..=Keysym::F12.raw()).contains(&sym.raw()));
+    console
+        || (mods == SUPER | ALT && syms.contains(&Keysym::a))
+        || DEFAULTS.iter().any(|(trigger, action)| {
+            action.never_inhibited() && trigger.mods == mods && syms.contains(&trigger.sym)
+        })
 }
 
 /// Ctrl+Alt+F1 to F12, which the keymap turns into XF86Switch_VT_1 to 12; a switch the keymap

@@ -188,6 +188,11 @@ class AllowList(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("/usr/bin/grim", out[0])
 
+    def test_a_line_may_mark_a_trusted_prompt(self):
+        self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/athanor-dock athanor-dock.service trusted-prompt\n")
+        self.assertEqual(self.problems(), [])
+
     def test_a_test_module_asking_for_the_top_layer_is_ignored(self):
         self.package(
             "athanor-bar",

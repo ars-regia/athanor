@@ -271,6 +271,8 @@ struct Client {
     modifier_groups: Vec<u32>,
     /// The locked modifiers of each `wl_keyboard.modifiers` the client was sent.
     modifier_locks: Vec<u32>,
+    /// The latched modifiers of each `wl_keyboard.modifiers` the client was sent.
+    modifier_latches: Vec<u32>,
     /// The heads of wlr-output-management, as the client has seen them.
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
@@ -613,10 +615,12 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             }
             wl_keyboard::Event::Modifiers {
                 mods_depressed,
+                mods_latched,
                 mods_locked,
                 group,
                 ..
             } => {
+                client.modifier_latches.push(mods_latched);
                 client.modifiers.push(mods_depressed);
                 client.modifier_groups.push(group);
                 client.modifier_locks.push(mods_locked);
@@ -10209,3 +10213,6 @@ mod devices;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod aids;

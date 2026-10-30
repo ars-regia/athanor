@@ -150,6 +150,8 @@ pub struct State {
     pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
     pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
+    pub aids: crate::aids::Aids,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
@@ -378,6 +380,7 @@ impl State {
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            aids: Default::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
             virtual_keymap: None,
