@@ -2207,7 +2207,8 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
 UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
             "/usr/bin/cosmic-idle": "cosmic-idle.scope",
-            "/usr/bin/cosmic-osd": "cosmic-osd.service"}
+            "/usr/bin/cosmic-osd": "cosmic-osd.service",
+            "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
 # The compositor serves those globals and the layers, and enforces the list: no client to check.
 # Its installed path and its bin target both, so that another binary installed there is checked.

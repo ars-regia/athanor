@@ -533,14 +533,15 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
         self.assertIn("installed by no spec", out[0])
 
-    def test_the_upstream_clients_are_the_locker_the_idle_daemon_and_the_osd(self):
-        # doc_session.md revision 4, SN12 and SN15.
+    def test_the_upstream_clients_are_the_locker_idle_daemon_osd_and_randr(self):
+        # doc_session.md revision 4, SN12 and SN15; cosmic-randr, doc_own_stack.md OS4.
         self.assertEqual(
             verify.UPSTREAM,
             {
                 "/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
                 "/usr/bin/cosmic-idle": "cosmic-idle.scope",
                 "/usr/bin/cosmic-osd": "cosmic-osd.service",
+                "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service",
             },
         )
 
