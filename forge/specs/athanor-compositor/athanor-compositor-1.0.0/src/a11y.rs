@@ -489,8 +489,13 @@ impl State {
     }
 
     /// Sets the inversion and the filter, `Filter::Unknown` keeping the current one, stores
-    /// them as cosmic-comp does, and sends them to every manager.
+    /// them as cosmic-comp does, and sends them to every manager. A renderer that cannot draw
+    /// the pass changes nothing: what cannot be shown is not stored.
     fn set_screen_filter(&mut self, inverted: bool, filter: Filter) {
+        if self.a11y.no_pass {
+            self.send_shown_filter();
+            return;
+        }
         self.a11y.screen.inverted = inverted;
         if filter != Filter::Unknown {
             self.a11y.screen.filter = FILTERS
@@ -503,8 +508,8 @@ impl State {
         self.request_redraw();
     }
 
-    /// The renderer cannot draw the colour pass: every manager is told it is off, and it stays
-    /// stored, for the session that can.
+    /// The renderer cannot draw the colour pass: every manager is told it is off, and what is
+    /// stored stays as it is, for a session that can.
     pub(crate) fn no_filter_pass(&mut self) {
         self.a11y.no_pass = true;
         self.send_shown_filter();

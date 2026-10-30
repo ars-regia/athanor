@@ -747,11 +747,16 @@ fn a_filter_that_cannot_be_drawn_is_reported_off() {
     let frame = run.state.capture(0).expect("frame of output 0");
     assert_eq!(pixel(&frame, w, red.0, red.1), RED, "no pass");
 
+    let stored = run.state.a11y.screen.clone();
+    assert!(stored.inverted, "stored before the pass failed");
     manager_of_bar.set_screen_filter(ActiveState::Enabled, Filter::Greyscale);
     bar.roundtrip(&mut run);
     assert_eq!(taken(&log), [Seen::Filter(0, 0)], "asked for one");
-    let stored = &run.state.a11y.screen;
-    assert!(stored.inverted && stored.filter.is_some(), "kept for a session that can");
+    assert_eq!(run.state.a11y.screen, stored, "what cannot be shown is not stored");
+    manager_of_bar.set_screen_filter(ActiveState::Disabled, Filter::None);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Filter(0, 0)], "asked for none");
+    assert_eq!(run.state.a11y.screen, stored, "nor lowered, by a user who sees it off");
 
     let (_later, log) = manager(&mut bar, &mut run);
     assert!(taken(&log).contains(&Seen::Filter(0, 0)), "bound later");
