@@ -3,18 +3,24 @@
 //! `check` with the bus's credentials of this test's own process, read as whatever executable
 //! and cgroup the test sets; the signals are read from the queue the loop sends them to.
 
-use super::{focused_window, lock_session, sent_to, Running, VirtualKeyboard};
+use super::{
+    focused_window, lock_session, sent_to, Local, Running, VirtualKeyboard,
+};
 use crate::identity::{pidfd_open, FileId, Process};
 use crate::keyboard_monitor::{check, Change, KeyEvent, Update};
 use smithay::input::keyboard::Keysym;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::{Arc, Mutex};
+use wayland_client::protocol::wl_seat;
+use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use zbus::fdo::ConnectionCredentials;
 
 const KEY_T: u32 = 20;
 const KEY_LEFTALT: u32 = 56;
 const KEY_LEFTMETA: u32 = 125;
 const KEY_A: u32 = 30;
+const KEY_C: u32 = 46;
 const KEY_S: u32 = 31;
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_CAPSLOCK: u32 = 58;
@@ -378,5 +384,74 @@ fn ax4_while_locked_a_grab_takes_no_key_from_the_lock_surface() {
         assert_eq!(releases, reversed);
     }
     assert_eq!(heard(&queued).len(), 8, "and Orca hears them");
+    run.stop();
+}
+
+/// Under an active shortcuts inhibitor Orca is still sent every key: a binding the inhibitor
+/// hands the window, a protected one the compositor keeps, and the others; and Orca's grab still
+/// takes its key, which is not a binding (doc_own_stack.md decision 30).
+#[test]
+fn ax4_an_inhibitor_leaves_the_monitor_working() {
+    let mut run = Running::start(None);
+    let mut window = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = window.bind(1);
+    let _keyboard = seat.get_keyboard(&window.queue.handle(), ());
+    window.toplevel(&mut run);
+    let (surface, _) = window.window.clone().expect("a window");
+    window.pump(&mut run, "the window has the keyboard", |client, state| {
+        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
+        client.keymaps > 0 && focus.is_some()
+    });
+    let inhibit: ZwpKeyboardShortcutsInhibitManagerV1 = window.bind(1);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let _inhibitor =
+        inhibit.inhibit_shortcuts(&surface, &seat, &window.queue.handle(), log.clone());
+    window.pump(&mut run, "the inhibitor is active", move |_, _| {
+        *log.lock().expect("the log") == ["active"]
+    });
+
+    let queued = listen(&mut run);
+    let grabs = Change::KeyGrabs(vec![], vec![(Keysym::a.raw(), 0)]);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, grabs));
+    assert!(call(
+        &mut run,
+        ORCA,
+        ORCA,
+        &ORCA_PROCESS,
+        Change::Watch(true)
+    ));
+
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_LEFTMETA, KEY_C]);
+    assert_eq!(
+        presses,
+        [KEY_LEFTMETA, KEY_C],
+        "the inhibitor hands the window Super+C"
+    );
+    assert_eq!(
+        heard(&queued),
+        [
+            (false, Keysym::Super_L),
+            (false, Keysym::c),
+            (true, Keysym::c),
+            (true, Keysym::Super_L),
+        ],
+        "and Orca hears it"
+    );
+
+    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
+    let (presses, _) = sent_to(&mut window, &mut run, &reveal);
+    assert_eq!(
+        presses,
+        [KEY_LEFTMETA, KEY_LEFTALT],
+        "the compositor keeps Super+Alt+T"
+    );
+    assert_eq!(heard(&queued).len(), 6, "and Orca hears it");
+
+    assert_eq!(
+        sent_to(&mut window, &mut run, &[KEY_A]),
+        (vec![], vec![]),
+        "Orca's grab takes A"
+    );
+    assert_eq!(heard(&queued), pressed(Keysym::a), "and Orca hears it");
     run.stop();
 }

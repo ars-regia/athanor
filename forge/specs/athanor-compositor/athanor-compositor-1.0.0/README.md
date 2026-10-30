@@ -283,13 +283,17 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
 - In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
   the bindings, and the input method's forwarded keys are not sent twice. After the bindings a
   key Orca grabs, its virtual modifiers (Insert, Caps Lock) or the whole keyboard is kept from
-  the focused client. While the session is locked no grab takes a key from the lock surface,
-  and a watcher is still sent every key, so that Orca speaks at the lock. Caps Lock as Orca's
-  modifier leaves no lock behind.
+  the focused client. The monitor is not a binding: under a shortcuts inhibitor a watcher is
+  still sent every key and a grab still takes its key (`doc_own_stack.md` decision 30). While
+  the session is locked a watcher is still sent every key, the lock surface's included, as
+  cosmic-comp does, so that Orca speaks during the unlock, and no grab or virtual modifier takes
+  a key: the maintainer's decision of 2026-10-30 (#863), not an oversight. Caps Lock as Orca's
+  modifier leaves no lock behind. `KeyEvent` is declared in the interface, so its
+  introspection lists it.
 - The fixture tests (`src/fixture/keyboard_monitor.rs`) cover the watcher, the grabs, the
-  refused callers, the virtual keyboard and the lock. Not yet covered: the keys under a
-  shortcuts inhibitor, which this branch does not have; `rig.sh orca` testing an Orca command
-  under `RIG_COMPOSITOR=athanor`; and a check on the laptop with Orca itself.
+  refused callers, the virtual keyboard, the shortcuts inhibitor and the lock. Not yet
+  covered: `rig.sh orca` testing an Orca command under `RIG_COMPOSITOR=athanor`, and a check on
+  the laptop with Orca itself.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected

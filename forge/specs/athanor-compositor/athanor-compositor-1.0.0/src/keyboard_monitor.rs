@@ -33,6 +33,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use zbus::blocking::fdo::DBusProxy;
 use zbus::fdo::ConnectionCredentials;
 use zbus::message::Header;
+use zbus::object_server::SignalEmitter;
 
 const PATH: &str = "/org/freedesktop/a11y/Manager";
 const NAME: &str = "org.freedesktop.a11y.Manager";
@@ -331,6 +332,21 @@ impl Interface {
     ) {
         self.ask(&header, Change::KeyGrabs(virtual_mods, keystrokes));
     }
+
+    /// A key pressed or released, sent to the one client it is for. Declared so that the
+    /// interface's introspection lists it; `keyboard-monitor-signals` sends it through the
+    /// blocking connection with the same member and arguments (`emit_signal`), so this
+    /// asynchronous form goes unused.
+    #[allow(dead_code)]
+    #[zbus(signal)]
+    async fn key_event(
+        emitter: &SignalEmitter<'_>,
+        released: bool,
+        state: u32,
+        keysym: u32,
+        unichar: u32,
+        keycode: u16,
+    ) -> zbus::Result<()>;
 }
 
 /// Starts the monitor: the queue the event loop sends its signals to, or `None`, logged, when
@@ -475,4 +491,46 @@ fn serve(updates: &channel::Sender<Update>, queued: Receiver<KeyEvent>) -> Resul
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The introspection lists the five methods and the `KeyEvent` signal with its arguments.
+    #[test]
+    fn introspection_lists_the_signal() {
+        let (jobs, _) = sync_channel(1);
+        let mut xml = String::new();
+        zbus::object_server::Interface::introspect_to_writer(&Interface { jobs }, &mut xml, 0);
+        for method in [
+            "GrabKeyboard",
+            "UngrabKeyboard",
+            "WatchKeyboard",
+            "UnwatchKeyboard",
+            "SetKeyGrabs",
+        ] {
+            assert!(xml.contains(&format!("<method name=\"{method}\"")), "{method}: {xml}");
+        }
+        assert!(xml.contains("<signal name=\"KeyEvent\">"), "{xml}");
+        for (name, kind) in [
+            ("released", "b"),
+            ("state", "u"),
+            ("keysym", "u"),
+            ("unichar", "u"),
+            ("keycode", "q"),
+        ] {
+            let arg = format!("<arg name=\"{name}\" type=\"{kind}\"/>");
+            assert!(xml.contains(&arg), "{arg}: {xml}");
+        }
+    }
+
+    /// Bit 15 and up of a grab's modifiers name the virtual modifiers, in order; the bits below
+    /// are the real modifiers.
+    #[test]
+    fn a_grab_reads_its_virtual_modifiers() {
+        let grab = KeyGrab::new(&[0xff63, 0xffe5], 0x61, (1 << 16) | 4);
+        assert_eq!(grab.mods, 4);
+        assert_eq!(grab.virtual_mods, BTreeSet::from([0xffe5]));
+    }
 }
