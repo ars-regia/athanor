@@ -1365,12 +1365,12 @@ orca)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
         # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
-        # through `own`). Tab skips Input source (#751), so the
+        # through `own`). Under cosmic-comp Tab skips Input source (#751), so the
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
         # Red under athanor-compositor (#876): Orca receives the keys and speaks the Clock
         # button after Ctrl+Alt+Tab, but the seven Tabs then only echo and Accessibility, Tiling,
-        # Power and the Shield are not spoken; the cause is not known (a person's Tab or the
-        # walk's counts), see the issue.
+        # Power and the Shield are not spoken: each Tab moves the focus to Input source and it
+        # returns to the Clock, so the counts are not the cause; the rest is in the issue.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
