@@ -59,6 +59,10 @@ off screen.
 athanor-compositor --headless --render-node /dev/dri/renderD128 --output 1920x1080 --output 1280x800@1.5
 ```
 
+A manual `--headless` run, like the shell rig's, also asks the session bus for the name
+`org.freedesktop.a11y.Manager`, which Orca's keyboard commands need; if the session already has an
+owner, the compositor logs it and runs without Orca's commands.
+
 On a render node it draws through GBM and GLES and offers `linux-dmabuf` (version 4, with
 feedback naming the node) and, when the node can wait on a syncobj, `linux-drm-syncobj-v1`.
 Without `--render-node` Pixman draws on the CPU and clients use `wl_shm`. Every 10 seconds it

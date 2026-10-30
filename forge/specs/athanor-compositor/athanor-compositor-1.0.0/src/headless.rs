@@ -116,8 +116,6 @@ pub fn start(
         outputs: Vec::new(),
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
-    // The rig's scenes run Orca beside this backend: its own commands reach it through the monitor.
-    state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     for (index, spec) in outputs.iter().enumerate() {
         state.add_virtual_output(index, *spec)?;
     }

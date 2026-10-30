@@ -52,8 +52,8 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 
 %changelog
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
-- Serve the keyboard monitor in the headless backend too, so that Orca's own commands reach
-  Orca in the shell rig's scenes (#841, #863)
+- Serve the keyboard monitor in a `--headless` run of the binary too, so that Orca's own
+  commands reach Orca in the shell rig's scenes (#841, #863)
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Stack a toplevel with a parent, set through xdg-foreign or xdg_toplevel.set_parent, above
