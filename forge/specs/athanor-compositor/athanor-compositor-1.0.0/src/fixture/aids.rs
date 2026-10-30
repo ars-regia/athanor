@@ -257,6 +257,8 @@ fn ax11_a_binding_sees_what_the_client_sees() {
 #[test]
 fn ax11_the_shift_gestures_are_told_only_while_on() {
     let mut run = Running::start(None);
+    // An aid on, one that filters nothing, so that the keys take the aids' path.
+    run.state.set_bounce_keys(true, 0).expect("in bounds");
     for _ in 0..5 {
         tap(&mut run, KEY_LEFTSHIFT);
     }
