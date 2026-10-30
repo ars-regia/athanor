@@ -20,7 +20,7 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource, WEnum};
-use smithay::utils::{Logical, Physical, Point, Rectangle, Size};
+use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Size};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::path::PathBuf;
 
