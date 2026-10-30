@@ -263,7 +263,8 @@ impl State {
     /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
     /// windows after it are not cascaded as cosmic-comp's are yet (#738). It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
-    /// user's input, so a client cannot take the focus from another by opening one.
+    /// user's input, so a client cannot take the focus from another by opening one; a window
+    /// with a parent follows it (`follow_parent`).
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
@@ -298,6 +299,59 @@ impl State {
             self.space.relocate_element(window, (x, y));
         }
         self.place_on_workspace(window);
+        self.follow_parent(window);
+    }
+
+    /// A window with a parent is stacked above it, on its workspace, and takes the keyboard
+    /// when the parent's client holds it, as a dialog does: the parent is the window the user is
+    /// typing into, so the dialog opened for it is where the typing goes on. The parent is
+    /// either the client's own (`xdg_toplevel.set_parent`) or the one an exported handle names
+    /// (xdg-foreign), which is the exporter's grant of this much. A parent that is minimised or
+    /// on an inactive workspace is not shown: the window follows it there and takes nothing.
+    fn follow_parent(&mut self, window: &Window) {
+        let Some(parent) = window
+            .toplevel()
+            .and_then(|toplevel| toplevel.parent())
+            .and_then(|parent| self.window_or_minimised(&parent))
+        else {
+            return;
+        };
+        if let Some(id) = self.workspace_of(&parent) {
+            self.move_window_to(window, id);
+        }
+        if self.space.element_location(&parent).is_none()
+            || self.space.element_location(window).is_none()
+        {
+            return;
+        }
+        let held = self
+            .seat
+            .get_keyboard()
+            .and_then(|keyboard| keyboard.current_focus());
+        let client = |surface: &WlSurface| surface.client().map(|client| client.id());
+        let parent_client = parent.toplevel().and_then(|t| client(t.wl_surface()));
+        let focused = window.toplevel().map(|t| t.wl_surface()) == held.as_ref();
+        if focused {
+            return;
+        }
+        if parent_client.is_some() && held.as_ref().and_then(client) == parent_client {
+            self.focus(window);
+            return;
+        }
+        // Just above the parent, under what is above it now.
+        let order: Vec<Window> = self.space.elements().cloned().collect();
+        let (Some(at_parent), Some(at_window)) = (
+            order.iter().position(|kept| *kept == parent),
+            order.iter().position(|kept| kept == window),
+        ) else {
+            return;
+        };
+        if at_window < at_parent {
+            self.space.raise_element(window, false);
+            for above in order.iter().skip(at_parent + 1).filter(|w| *w != window) {
+                self.space.raise_element(above, false);
+            }
+        }
     }
 
     /// The pointer, the start of its grab and the window, when the client of `surface` may
@@ -438,6 +492,12 @@ impl XdgShellHandler for State {
 
     fn parent_changed(&mut self, surface: ToplevelSurface) {
         self.foreign_parent_set_natively(&surface);
+        // Before its first placement the window is placed under its parent by `place`.
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            if window.user_data().get::<Placed>().is_some() {
+                self.follow_parent(&window);
+            }
+        }
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
