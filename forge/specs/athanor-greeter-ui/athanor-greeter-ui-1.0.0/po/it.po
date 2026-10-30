@@ -13,27 +13,27 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr "Il servizio di accesso ha inviato una risposta di {size} byte, troppo grande da leggere"
 
-#: src/auth.rs:305
+#: src/auth.rs:310
 msgid "Checking your credentials…"
 msgstr "Verifica delle credenziali…"
 
-#: src/auth.rs:339
+#: src/auth.rs:344
 msgid "The login service gave an unexpected answer."
 msgstr "Il servizio di accesso ha dato una risposta inattesa."
 
-#: src/auth.rs:349
+#: src/auth.rs:354
 msgid "Too many authentication steps."
 msgstr "Troppi passaggi di autenticazione."
 
-#: src/auth.rs:359
+#: src/auth.rs:364
 msgid "Wrong password"
 msgstr "Password errata"
 
-#: src/auth.rs:361
+#: src/auth.rs:366
 msgid "The login service refused the sign-in."
 msgstr "Il servizio di accesso ha rifiutato l'accesso."
 
-#: src/auth.rs:375
+#: src/auth.rs:380
 msgid "The login service cannot be reached."
 msgstr "Il servizio di accesso non è raggiungibile."
 
@@ -121,7 +121,7 @@ msgstr "Nessun controllo degli aggiornamenti è riuscito negli ultimi 14 giorni"
 msgid "Signed with a key of the policy in force"
 msgstr "Firmata con una chiave della policy in vigore"
 
-#: src/ui.rs:190 src/ui.rs:890 src/ui.rs:932
+#: src/ui.rs:190 src/ui.rs:892 src/ui.rs:934
 msgid "Other user"
 msgstr "Altro utente"
 
@@ -143,71 +143,71 @@ msgid "Athanor on cosmic-comp"
 msgstr "Athanor su cosmic-comp"
 
 #: src/ui.rs:327
-msgid "Magnifier, colour filters, workspace overview and Alt+Tab"
-msgstr "Lente di ingrandimento, filtri colore, panoramica degli spazi di lavoro e Alt+Tab"
+msgid "Workspace overview and Alt+Tab"
+msgstr "Panoramica degli spazi di lavoro e Alt+Tab"
 
-#: src/ui.rs:670
+#: src/ui.rs:671
 msgid "%A %-d %B"
 msgstr "%A %-d %B"
 
-#: src/ui.rs:704
+#: src/ui.rs:705
 msgid "Password"
 msgstr "Password"
 
-#: src/ui.rs:713 src/ui.rs:718 src/ui.rs:719
+#: src/ui.rs:714 src/ui.rs:719 src/ui.rs:720
 msgid "User name"
 msgstr "Nome utente"
 
-#: src/ui.rs:732 src/ui.rs:735
+#: src/ui.rs:733 src/ui.rs:736
 msgid "Back to the list"
 msgstr "Torna all'elenco"
 
-#: src/ui.rs:741
+#: src/ui.rs:742
 msgid "Sign in"
 msgstr "Accedi"
 
-#: src/ui.rs:744 src/ui.rs:748
+#: src/ui.rs:745 src/ui.rs:749
 msgid "Cancel"
 msgstr "Annulla"
 
-#: src/ui.rs:884
+#: src/ui.rs:886
 #, rust-format
 msgid "Password for {name}"
 msgstr "Password di {name}"
 
-#: src/ui.rs:908
+#: src/ui.rs:910
 msgid "Accounts"
 msgstr "Account"
 
-#: src/ui.rs:1068
+#: src/ui.rs:1070
 msgid "Enter a user name of at most 256 bytes, without control characters."
 msgstr "Inserisci un nome utente di al massimo 256 byte, senza caratteri di controllo."
 
-#: src/ui.rs:1084
+#: src/ui.rs:1086
 msgid "Signing in…"
 msgstr "Accesso in corso…"
 
-#: src/ui.rs:1099
+#: src/ui.rs:1101
 msgid "Sign-in was cancelled."
 msgstr "Accesso annullato."
 
-#: src/ui.rs:1107
+#: src/ui.rs:1109
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr "Accesso non riuscito: {reason}"
 
-#: src/ui.rs:1143 src/ui.rs:1144
+#: src/ui.rs:1145 src/ui.rs:1146
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui.rs:1164
+#: src/ui.rs:1166
 msgid "Suspend"
 msgstr "Sospendi"
 
-#: src/ui.rs:1170
+#: src/ui.rs:1172
 msgid "Restart"
 msgstr "Riavvia"
 
-#: src/ui.rs:1176
+#: src/ui.rs:1178
 msgid "Shut down"
 msgstr "Spegni"
