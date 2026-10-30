@@ -530,7 +530,7 @@ impl State {
             .collect();
         for window in stranded {
             if let Some(area) = self.home_area(&window) {
-                let at = centred(area, window.geometry());
+                let at = centred(area, window.geometry().size);
                 self.space.relocate_element(&window, at);
             }
         }
@@ -683,7 +683,7 @@ impl State {
                 .home_area(window)
                 .filter(|_| !self.shown_at_home(window, kept))
             {
-                Some(area) => centred(area, Rectangle::from_size(kept.size)),
+                Some(area) => centred(area, kept.size),
                 None => kept.loc,
             };
             relocate(window, to, serial);
@@ -795,8 +795,7 @@ impl State {
             }
         }
         relocate.0.set(None);
-        self.space
-            .relocate_element(window, to - window.geometry().loc);
+        self.space.relocate_element(window, to);
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -1282,8 +1281,9 @@ impl ClientData for ClientState {
     }
 }
 
-/// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
-/// Where a window's geometry goes, at the commit that answers the configure of the serial, or
+/// Where a window's geometry goes (its top left, the space's location of the element: the
+/// space draws the buffer at it less the geometry's offset, so that offset is never added or
+/// taken off here), at the commit that answers the configure of the serial, or
 /// at its next commit without one (`State::relocated`).
 #[derive(Default)]
 pub struct Relocate(Cell<Option<Destination>>);
@@ -1320,12 +1320,11 @@ struct Kept {
     area: Rectangle<i32, Logical>,
 }
 
-pub fn centred(
-    area: Rectangle<i32, Logical>,
-    geometry: Rectangle<i32, Logical>,
-) -> Point<i32, Logical> {
-    let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
-    let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
+/// Where the geometry's top left goes for a window of `size` to be centred in `area`: a space
+/// location, to which the geometry's offset in the buffer does not belong.
+pub fn centred(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+    let x = area.loc.x + ((area.size.w - size.w) / 2).max(0);
+    let y = area.loc.y + ((area.size.h - size.h) / 2).max(0);
     (x, y).into()
 }
 
