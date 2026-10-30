@@ -1281,7 +1281,6 @@ impl ClientData for ClientState {
     }
 }
 
-/// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
 /// Where a window's geometry goes (its top left, the space's location of the element: the
 /// space draws the buffer at it less the geometry's offset, so that offset is never added or
 /// taken off here), at the commit that answers the configure of the serial, or
