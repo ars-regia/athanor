@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its
+  unit and executable, so that Orca's own commands reach it, and send it every key but the
+  protected ones (doc_accessibility.md AX4, #863)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Tablets, pointer gestures, xdg-decoration and xdg-foreign (decision 30): drawing tablets,
   their tools and their cursors; swipe, pinch and hold to the focused surface; every window

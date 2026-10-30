@@ -148,6 +148,8 @@ pub struct State {
     pub lock_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// The session-bus worker of the key bindings; none headless.
     pub session_calls: Option<crate::session_calls::SessionCalls>,
+    /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
+    pub keyboard_monitor: crate::keyboard_monitor::Monitor,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
     /// (`with_keymap_of`).
     pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
@@ -375,6 +377,7 @@ impl State {
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
+            keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
             virtual_keymap: None,
