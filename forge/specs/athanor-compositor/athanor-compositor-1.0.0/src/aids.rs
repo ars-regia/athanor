@@ -11,9 +11,10 @@
 
 use crate::bindings;
 use crate::identity::Privilege;
+use crate::input::keymap_text;
 use crate::state::{granted, State};
 use smithay::backend::input::{InputTime, KeyState};
-use smithay::input::keyboard::{KeyboardHandle, KeyboardSource, Keycode, Keysym};
+use smithay::input::keyboard::{xkb, KeyboardHandle, KeyboardSource, Keycode, Keysym};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::RegistrationToken;
 use smithay::reexports::wayland_server::backend::ClientId;
@@ -90,6 +91,9 @@ struct Withheld {
     modifier: u32,
     /// Slow keys' timer, which lets the press through; none for a dropped press.
     slow: Option<RegistrationToken>,
+    /// Whether bounce keys dropped it: its release restarts their delay, as a delivered
+    /// press's does, and that of a press never delivered otherwise does not.
+    bounced: bool,
 }
 
 /// A modifier key sticky keys saw pressed and not yet released.
@@ -112,9 +116,8 @@ pub struct Aids {
     /// The modifiers sticky keys latched and locked, as `Notice::Modifiers` numbers them.
     latched: u32,
     locked: u32,
-    /// The xkb mask each modifier's key sets, by the bit's position, read at its press.
-    masks: [u32; 5],
-    /// The latched and locked xkb masks the aids set last: they take back only their own.
+    /// The modifiers the aids set last, latched and locked, as `Notice::Modifiers` numbers
+    /// them: they take back only their own.
     set: (u32, u32),
     held: Vec<Held>,
     withheld: HashMap<(KeyboardSource, Keycode), Withheld>,
@@ -137,13 +140,6 @@ impl Aids {
     fn any(&self) -> bool {
         self.sticky.is_some() || self.slow.is_some() || self.bounce.is_some() || self.gestures
     }
-
-    /// The xkb mask of the modifiers `bits`.
-    fn xkb(&self, bits: u32) -> u32 {
-        (0..5)
-            .filter(|bit| bits & (1 << bit) != 0)
-            .fold(0, |mask, bit| mask | self.masks[bit])
-    }
 }
 
 /// The modifier a key of first-level syms `syms` is, as `Notice::Modifiers` numbers it.
@@ -162,6 +158,56 @@ fn modifier(syms: &[Keysym]) -> u32 {
     .into_iter()
     .filter(|(_, names)| is(names))
     .fold(0, |bits, (bit, _)| bits | bit)
+}
+
+/// What each modifier sets under a keymap with no key for it, by the bit's position in
+/// `Notice::Modifiers`: Shift, Control, Mod1, Mod4 and Mod5, as xkeyboard-config's keymaps map them.
+const USUAL_MASKS: [u32; 5] = [0x01, 0x04, 0x08, 0x40, 0x80];
+
+/// The xkb mask each modifier sets under the keymap `text`, by the bit's position in
+/// `Notice::Modifiers`: read from the keys, since a virtual keyboard's keymap may put a modifier
+/// where it likes. The keymap is compiled again here, so `State::modifier_masks` asks only while
+/// a modifier is latched or locked.
+fn keymap_masks(text: String) -> [u32; 5] {
+    let mut masks = [0; 5];
+    let context = xkb::Context::new(xkb::CONTEXT_NO_DEFAULT_INCLUDES);
+    let Some(keymap) = xkb::Keymap::new_from_string(
+        &context,
+        text,
+        xkb::KEYMAP_FORMAT_TEXT_V1,
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    ) else {
+        tracing::error!("the seat's keymap did not compile again: the usual modifier masks");
+        return USUAL_MASKS;
+    };
+    let mut state = xkb::State::new(&keymap);
+    for layout in 0..keymap.num_layouts() {
+        state.update_mask(0, 0, 0, 0, 0, layout);
+        for code in keymap.min_keycode().raw()..=keymap.max_keycode().raw() {
+            let code = Keycode::new(code);
+            let bits = modifier(keymap.key_get_syms_by_level(code, layout, 0));
+            if bits == 0 {
+                continue;
+            }
+            state.update_key(code, xkb::KeyDirection::Down);
+            let set = state.serialize_mods(xkb::STATE_MODS_DEPRESSED);
+            state.update_key(code, xkb::KeyDirection::Up);
+            for bit in (0..5).filter(|bit| bits & (1 << bit) != 0) {
+                masks[bit] |= set;
+            }
+        }
+    }
+    std::array::from_fn(|bit| match masks[bit] {
+        0 => USUAL_MASKS[bit],
+        mask => mask,
+    })
+}
+
+/// The xkb mask of the modifiers `bits`, under `masks`.
+fn xkb_mask(masks: &[u32; 5], bits: u32) -> u32 {
+    (0..5)
+        .filter(|bit| bits & (1 << bit) != 0)
+        .fold(0, |mask, bit| mask | masks[bit])
 }
 
 /// `bits` as the bindings' mask names them; AltGr is no modifier of a binding.
@@ -257,7 +303,9 @@ impl State {
         let key = (source, code);
         let now = Instant::now();
         if !pressed {
-            if self.aids.bounce.is_some() {
+            let withheld = self.aids.withheld.remove(&key);
+            // A press the aids rejected for another reason was never typed, and bounced nothing.
+            if self.aids.bounce.is_some() && withheld.as_ref().is_none_or(|held| held.bounced) {
                 // Every release restarts the delay, a bounced press's too.
                 let max = Duration::from_millis(MAX_DELAY.into());
                 self.aids
@@ -265,7 +313,7 @@ impl State {
                     .retain(|_, at| now.duration_since(*at) < max);
                 self.aids.released.insert(key, now);
             }
-            if let Some(withheld) = self.aids.withheld.remove(&key) {
+            if let Some(withheld) = withheld {
                 if let Some(timer) = withheld.slow {
                     self.loop_handle.remove(timer);
                     self.aid_notice(Notice::Rejected(Aid::Slow));
@@ -274,16 +322,26 @@ impl State {
             }
             return self.sticky_typed(code, key_state, time, source);
         }
+        // A press of a key already held back, which only a virtual keyboard sends, changes
+        // nothing: the timer running is the one its release cancels.
+        if self.aids.withheld.contains_key(&key) {
+            return;
+        }
         let modifier = modifier(&syms);
-        let filtering = self.aids.slow.is_some() || self.aids.bounce.is_some();
-        if filtering && self.protected(&syms, source) {
-            // The modifiers held back with it are let through first, so that the key reads
-            // as the chord it is.
+        let pending = self.protected(&syms, source, false);
+        if pending || self.protected(&syms, source, true) {
+            // The modifiers slow keys hold back with it are let through first, so that the key
+            // reads as the chord it is. One bounce keys rejected goes too only when the chord
+            // needs it, since a protected key passes them; one dropped stays dropped.
             let held: Vec<_> = self
                 .aids
                 .withheld
                 .iter()
-                .filter(|((from, _), withheld)| *from == source && withheld.modifier != 0)
+                .filter(|((from, _), held)| {
+                    *from == source
+                        && held.modifier != 0
+                        && (held.slow.is_some() || (!pending && held.bounced))
+                })
                 .map(|(key, _)| *key)
                 .collect();
             for key in held {
@@ -308,6 +366,7 @@ impl State {
                     origin,
                     modifier,
                     slow: None,
+                    bounced: true,
                 };
                 self.aids.withheld.insert(key, withheld);
                 return self.aid_notice(Notice::Rejected(Aid::Bounce));
@@ -324,6 +383,7 @@ impl State {
                         origin,
                         modifier,
                         slow: Some(timer),
+                        bounced: false,
                     };
                     self.aids.withheld.insert(key, withheld);
                     return;
@@ -364,9 +424,10 @@ impl State {
 
     /// Sticky keys around `typed`: a modifier pressed and released alone is latched, then
     /// locked, then let go; a key pressed with the modifiers latched lets them go once it is
-    /// read with them. With two-key-off, a key pressed while a modifier of its keyboard is held
-    /// turns sticky keys off, unless it is another modifier or a protected key, so that
-    /// Ctrl+Alt+Tab does not (the maintainer's decision of 2026-10-30, AX11).
+    /// read with them. With two-key-off, a key of the hardware keyboard pressed while one of its
+    /// modifiers is held turns sticky keys off, unless it is another modifier or a protected key,
+    /// so that Ctrl+Alt+Tab does not (the maintainer's decision of 2026-10-30, AX11); a client's
+    /// chord on a virtual keyboard turns off nothing of the seat's.
     fn sticky_typed(
         &mut self,
         code: Keycode,
@@ -374,16 +435,16 @@ impl State {
         time: InputTime,
         source: KeyboardSource,
     ) {
-        let (Some(two_key_off), Some(keyboard)) = (self.aids.sticky, self.seat.get_keyboard())
-        else {
+        let Some(two_key_off) = self.aids.sticky else {
             return self.typed(code, key_state, time, source, false);
         };
         let syms = self.raw_syms(code);
         let modifier = modifier(&syms);
         let key = (source, code);
         if key_state == KeyState::Pressed {
-            let chord = self.aids.held.iter().any(|held| held.key.0 == source);
-            if two_key_off && chord && modifier == 0 && !self.protected(&syms, source) {
+            let chord = source == KeyboardSource::Physical
+                && self.aids.held.iter().any(|held| held.key.0 == source);
+            if two_key_off && chord && modifier == 0 && !self.protected(&syms, source, false) {
                 self.sticky_released();
                 self.aid_notice(Notice::AidOff(Aid::Sticky));
                 return self.typed(code, key_state, time, source, false);
@@ -391,15 +452,8 @@ impl State {
             for held in self.aids.held.iter_mut().filter(|h| h.key.0 == source) {
                 held.chorded = true;
             }
-            let before = keyboard.modifier_state().serialized.depressed;
             self.typed(code, key_state, time, source, false);
             if modifier != 0 {
-                let set = keyboard.modifier_state().serialized.depressed & !before;
-                if set != 0 {
-                    for bit in (0..5).filter(|bit| modifier & (1 << bit) != 0) {
-                        self.aids.masks[bit] = set;
-                    }
-                }
                 let chorded = false;
                 self.aids.held.push(Held {
                     key,
@@ -456,15 +510,14 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
+        let masks = self.modifier_masks();
         let current = keyboard.modifier_state().serialized;
-        let (latches, locks) = (
-            self.aids.xkb(self.aids.latched),
-            self.aids.xkb(self.aids.locked),
-        );
-        let (set_latches, set_locks) = self.aids.set;
-        let latched = (current.latched & !set_latches) | latches;
-        let locked = (current.locked & !set_locks) | locks;
-        self.aids.set = (latches, locks);
+        let (set_latched, set_locked) = self.aids.set;
+        let latched = (current.latched & !xkb_mask(&masks, set_latched))
+            | xkb_mask(&masks, self.aids.latched);
+        let locked = (current.locked & !xkb_mask(&masks, set_locked))
+            | xkb_mask(&masks, self.aids.locked);
+        self.aids.set = (self.aids.latched, self.aids.locked);
         let mask = [current.depressed, latched, locked, current.layout_effective];
         self.set_modifiers(&keyboard, mask);
         self.aid_notice(Notice::Modifiers {
@@ -513,9 +566,10 @@ impl State {
     }
 
     /// Whether a key of `source` of first-level syms `syms`, pressed now, is protected
-    /// (decision 30), with the modifiers held, latched or locked and those the aids hold back
-    /// on the same keyboard.
-    fn protected(&self, syms: &[Keysym], source: KeyboardSource) -> bool {
+    /// (decision 30), with the modifiers held, latched or locked and those slow keys hold back
+    /// on the same keyboard, and if `rejected` those bounce keys rejected; a modifier dropped
+    /// counts for nothing.
+    fn protected(&self, syms: &[Keysym], source: KeyboardSource, rejected: bool) -> bool {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
@@ -523,7 +577,9 @@ impl State {
             .aids
             .withheld
             .iter()
-            .filter(|((from, _), _)| *from == source)
+            .filter(|((from, _), withheld)| {
+                *from == source && (withheld.slow.is_some() || (rejected && withheld.bounced))
+            })
             .fold(0, |bits, (_, withheld)| bits | withheld.modifier);
         let mods = bindings::mask(&keyboard.modifier_state()) | binding_mask(held_back);
         bindings::protected(mods, syms)
@@ -545,8 +601,8 @@ impl State {
         })
     }
 
-    /// A pointer button pressed: it breaks a run of Shift presses, as any other key does (the
-    /// maintainer's decision of 2026-10-30, AX11).
+    /// A pointer button or a tablet's tip pressed: it breaks a run of Shift presses, as any
+    /// other key does (the maintainer's decision of 2026-10-30, AX11).
     pub(crate) fn aids_pointer_pressed(&mut self) {
         self.aids.shift_presses = 0;
     }
@@ -554,21 +610,45 @@ impl State {
     /// `keyboard`'s modifiers as `[depressed, latched, locked, group]`, without those sticky
     /// keys set: what is saved across a virtual keyboard's keys and keymap, since sticky keys
     /// may change theirs meanwhile.
-    pub(crate) fn seat_modifiers(&self, keyboard: &KeyboardHandle<Self>) -> [u32; 4] {
+    pub(crate) fn seat_modifiers(&mut self, keyboard: &KeyboardHandle<Self>) -> [u32; 4] {
+        let masks = self.modifier_masks();
         let mods = keyboard.modifier_state().serialized;
-        let (latches, locks) = self.aids.set;
+        let (latched, locked) = self.aids.set;
         [
             mods.depressed,
-            mods.latched & !latches,
-            mods.locked & !locks,
+            mods.latched & !xkb_mask(&masks, latched),
+            mods.locked & !xkb_mask(&masks, locked),
             mods.layout_effective,
         ]
     }
 
     /// `mask`, `[depressed, latched, locked, group]`, with the modifiers sticky keys set.
-    pub(crate) fn with_sticky(&self, [depressed, latched, locked, group]: [u32; 4]) -> [u32; 4] {
+    pub(crate) fn with_sticky(
+        &mut self,
+        [depressed, latched, locked, group]: [u32; 4],
+    ) -> [u32; 4] {
+        let masks = self.modifier_masks();
         let (latches, locks) = self.aids.set;
-        [depressed, latched | latches, locked | locks, group]
+        [
+            depressed,
+            latched | xkb_mask(&masks, latches),
+            locked | xkb_mask(&masks, locks),
+            group,
+        ]
+    }
+
+    /// The xkb mask of each modifier under the keymap the seat has now, the seat's own or a
+    /// virtual keyboard's, whose client reads the modifiers by it. None is needed while sticky
+    /// keys hold no modifier.
+    fn modifier_masks(&mut self) -> [u32; 5] {
+        let (latched, locked) = self.aids.set;
+        let keyboard = self.seat.get_keyboard();
+        match keyboard {
+            Some(keyboard) if latched | locked | self.aids.latched | self.aids.locked != 0 => {
+                keymap_masks(keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())))
+            }
+            _ => [0; 5],
+        }
     }
 
     /// Drops the presses slow keys hold back, and so their releases: rejecting a key is safe,
@@ -586,6 +666,17 @@ impl State {
         for timer in timers {
             self.loop_handle.remove(timer);
         }
+    }
+
+    /// The session paused: the keys held are released on the other terminal, if at all, so
+    /// what the aids keep of them goes, or it would swallow the key's next press or turn sticky
+    /// keys off at the next key. Latched and locked modifiers stay, as Caps Lock does.
+    pub(crate) fn aids_paused(&mut self) {
+        self.aids_drop_pending();
+        self.aids.withheld.clear();
+        self.aids.held.clear();
+        self.aids.shift_presses = 0;
+        self.stop_shift_hold();
     }
 
     /// The keyboard went to `client`: a press held back for another client is dropped.

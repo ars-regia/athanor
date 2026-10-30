@@ -485,6 +485,7 @@ impl State {
         // would swallow the next release of that key (`key_input`).
         self.kept_keys.clear();
         self.super_tap = None;
+        self.aids_paused();
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning

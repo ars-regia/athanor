@@ -205,6 +205,7 @@ impl State {
         };
         match tip {
             TabletToolTipState::Down => {
+                self.aids_pointer_pressed();
                 if self.tool_refused(&handle) {
                     return;
                 }

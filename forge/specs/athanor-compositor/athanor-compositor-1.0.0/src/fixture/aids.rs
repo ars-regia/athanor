@@ -3,14 +3,15 @@
 //! them, and what the aids tell (`aids.rs`). The aids are set as `athanor_a11y_v1`'s requests
 //! set them; what they tell is read from `Aids::sent`.
 
+use super::devices::pen_over_window;
 use super::{
-    chord, focused_window, key, lock_session, sent_to, Local, Running, VirtualKeyboard,
-    FIXTURE_ALLOW_LIST, SWAPPED_KEYMAP,
+    chord, focused_window, key, lock_session, sent_to, write_xkb, xkb_file, Local, Running,
+    VirtualKeyboard, FIXTURE_ALLOW_LIST, SWAPPED_KEYMAP,
 };
 use crate::aids::{Aid, InvalidDelay, Notice, SHIFT};
 use crate::bindings::Action;
 use crate::identity::AllowList;
-use smithay::backend::input::{ButtonState, InputTime};
+use smithay::backend::input::{ButtonState, InputTime, TabletToolTipState};
 use smithay::reexports::wayland_server::Resource;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -30,8 +31,10 @@ const BTN_LEFT: u32 = 0x110;
 const KEY_F1: u32 = 59;
 const KEY_LEFTMETA: u32 = 125;
 
-/// Shift in xkb's masks.
+/// Shift, Control and Mod3 in xkb's masks.
 const XKB_SHIFT: u32 = 1;
+const XKB_CTRL: u32 = 4;
+const XKB_MOD3: u32 = 0x20;
 
 /// What the aids told since the last read.
 fn told(run: &mut Running) -> Vec<Notice> {
@@ -834,5 +837,331 @@ fn ax11_a_latch_used_under_a_virtual_keymap_does_not_come_back() {
     let seat = run.state.seat.get_keyboard().expect("a keyboard");
     assert_eq!(seat.modifier_state().serialized.latched, 0);
     assert_eq!(window.client.modifier_latches.last(), Some(&0));
+    run.stop();
+}
+
+/// A chord on a virtual keyboard is a client's, and turns off nothing of the seat's.
+#[test]
+fn ax11_two_key_off_counts_the_hardware_keyboard_only() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_sticky_keys(true, true);
+    keyboard.chord(&mut typist, &mut run, &[KEY_LEFTCTRL, KEY_A]);
+    assert_eq!(told(&mut run), [], "the aid stays on");
+    tap(&mut run, KEY_LEFTSHIFT);
+    assert_eq!(
+        told(&mut run),
+        [modifiers(SHIFT, 0)],
+        "and it still latches"
+    );
+    run.stop();
+}
+
+/// A protected key takes the modifiers still pending though the last aid went off: with slow
+/// keys off, Ctrl+Alt held back and F1 switch to a text console.
+#[test]
+fn ax11_a_protected_key_lets_pending_modifiers_through_after_the_aid_is_off() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    key(&mut run.state, KEY_LEFTALT, true);
+    run.state.set_slow_keys(false, 0).expect("in bounds");
+    key(&mut run.state, KEY_F1, true);
+    assert_eq!(run.state.fired, [Action::Vt(1)]);
+    run.stop();
+}
+
+/// A protected key lets through only the modifiers still pending: Shift, dropped by a change of
+/// focus, stays dropped when Ctrl+Alt+F1 switches to a text console.
+#[test]
+fn ax11_a_protected_key_leaves_a_dropped_modifier_dropped() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    run.state.aids_drop_pending();
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    key(&mut run.state, KEY_LEFTALT, true);
+    key(&mut run.state, KEY_F1, true);
+    window.roundtrip(&mut run);
+    assert_eq!(run.state.fired, [Action::Vt(1)]);
+    assert_eq!(window.client.keys, [KEY_LEFTCTRL, KEY_LEFTALT]);
+    run.stop();
+}
+
+/// The same for a modifier bounce keys rejected: Shift's second press stays rejected.
+#[test]
+fn ax11_a_protected_key_leaves_a_bounced_modifier_rejected() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_bounce_keys(true, 2000).expect("in bounds");
+    tap(&mut run, KEY_LEFTSHIFT);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    key(&mut run.state, KEY_LEFTALT, true);
+    key(&mut run.state, KEY_F1, true);
+    window.roundtrip(&mut run);
+    assert_eq!(run.state.fired, [Action::Vt(1)]);
+    assert_eq!(
+        window.client.keys,
+        [KEY_LEFTSHIFT, KEY_LEFTCTRL, KEY_LEFTALT]
+    );
+    run.stop();
+}
+
+/// A modifier dropped counts for nothing: Alt pending and F1, with Ctrl dropped, are no switch
+/// to a text console, and nothing is let through.
+#[test]
+fn ax11_a_dropped_modifier_does_not_make_a_key_protected() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    run.state.aids_drop_pending();
+    key(&mut run.state, KEY_LEFTALT, true);
+    key(&mut run.state, KEY_F1, true);
+    window.roundtrip(&mut run);
+    assert_eq!(run.state.fired, []);
+    assert_eq!(window.client.keys, []);
+    run.stop();
+}
+
+/// A tablet's tip pressed starts the count of Shift presses again, as a pointer button does.
+#[test]
+fn ax11_a_tip_down_starts_the_shift_count_again() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let (_, tool, _) = pen_over_window(&mut run, &mut local);
+    run.state.set_aid_gestures(true);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+        run.state
+            .tool_tip(&tool, TabletToolTipState::Down, InputTime::now());
+        run.state
+            .tool_tip(&tool, TabletToolTipState::Up, InputTime::now());
+    }
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// The release of a press slow keys rejected is no release bounce keys read: the key held next
+/// passes slow keys, though bounce keys' delay would still be running.
+#[test]
+fn ax11_a_press_slow_keys_rejected_arms_no_bounce() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_bounce_keys(true, 2000).expect("in bounds");
+    run.state.set_slow_keys(true, 200).expect("in bounds");
+    tap(&mut run, KEY_A);
+    assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
+    key(&mut run.state, KEY_A, true);
+    wait(&mut run, 250);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A]);
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// Neither does the release of a press dropped by a change of focus.
+#[test]
+fn ax11_a_dropped_press_arms_no_bounce() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_bounce_keys(true, 2000).expect("in bounds");
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    run.state.aids_drop_pending();
+    key(&mut run.state, KEY_A, false);
+    run.state.set_slow_keys(false, 0).expect("in bounds");
+    tap(&mut run, KEY_A);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A]);
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// A bounced press's release restarts the delay, so a chattering key stays rejected.
+#[test]
+fn ax11_a_bounced_release_restarts_the_delay() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_bounce_keys(true, 500).expect("in bounds");
+    tap(&mut run, KEY_A);
+    key(&mut run.state, KEY_A, true);
+    wait(&mut run, 400);
+    key(&mut run.state, KEY_A, false);
+    wait(&mut run, 200);
+    key(&mut run.state, KEY_A, true);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A], "the third press is a bounce");
+    assert_eq!(
+        told(&mut run),
+        [Notice::Rejected(Aid::Bounce), Notice::Rejected(Aid::Bounce)]
+    );
+    run.stop();
+}
+
+/// A second press of a key held back, which a virtual keyboard may send, starts no timer of its
+/// own: the release cancels the one that runs, and a later press waits its whole delay.
+#[test]
+fn ax11_a_second_press_keeps_the_timer_of_the_first() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    keyboard.key(&mut typist, &mut run, KEY_A, true);
+    keyboard.key(&mut typist, &mut run, KEY_A, true);
+    keyboard.key(&mut typist, &mut run, KEY_A, false);
+    wait(&mut run, 500);
+    keyboard.key(&mut typist, &mut run, KEY_A, true);
+    wait(&mut run, 1600);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [], "the first timer was cancelled");
+    wait(&mut run, 500);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A], "the delay ends the press");
+    run.stop();
+}
+
+/// The keymap of `VirtualKeyboard::new` that puts Control_L on code 31, S, with Mod3.
+const CONTROL_ON_MOD3: &str = r#"xkb_keymap {
+    xkb_keycodes "mod3" { minimum = 8; maximum = 255; <ESCA> = 38; <LCTL> = 39; };
+    xkb_types "mod3" { include "complete" };
+    xkb_compatibility "mod3" { include "complete" };
+    xkb_symbols "mod3" {
+        key <ESCA> { [ Escape ] };
+        key <LCTL> { symbols[Group1] = [ Control_L ], actions[Group1] = [ SetMods(modifiers=Mod3) ] };
+        modifier_map Mod3 { <LCTL> };
+    };
+};"#;
+
+/// The modifiers the seat has latched and locked.
+fn seat_latched(run: &Running) -> (u32, u32) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let mods = keyboard.modifier_state().serialized;
+    (mods.latched, mods.locked)
+}
+
+/// A modifier latched on the hardware is set under a virtual keymap as that keymap maps it, and
+/// as the seat's does when the seat's comes back.
+#[test]
+fn ax11_a_hardware_latch_follows_the_keymap() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(CONTROL_ON_MOD3));
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTCTRL);
+    assert_eq!(seat_latched(&run), (XKB_CTRL, 0));
+    keyboard.key(&mut typist, &mut run, KEY_S, true);
+    assert_eq!(
+        seat_latched(&run),
+        (XKB_MOD3, 0),
+        "under the virtual keymap"
+    );
+    key(&mut run.state, KEY_LEFTALT, true);
+    assert_eq!(seat_latched(&run), (XKB_CTRL, 0), "under the seat's again");
+    run.stop();
+}
+
+/// The same for a modifier latched on the virtual keyboard: its bit is its keymap's, and the
+/// hardware reads the seat's.
+#[test]
+fn ax11_a_virtual_latch_follows_the_keymap() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(CONTROL_ON_MOD3));
+    run.state.set_sticky_keys(true, false);
+    keyboard.chord(&mut typist, &mut run, &[KEY_S]);
+    assert_eq!(
+        seat_latched(&run),
+        (XKB_MOD3, 0),
+        "under the virtual keymap"
+    );
+    key(&mut run.state, KEY_LEFTALT, true);
+    assert_eq!(seat_latched(&run), (XKB_CTRL, 0), "under the seat's");
+    run.stop();
+}
+
+/// A keymap from the configuration keeps what sticky keys hold, under its own masks.
+#[test]
+fn ax11_a_new_keymap_keeps_the_latched_and_locked_modifiers() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTSHIFT);
+    tap(&mut run, KEY_LEFTCTRL);
+    tap(&mut run, KEY_LEFTCTRL);
+    let file = xkb_file("aids");
+    write_xkb(&file, "it");
+    run.state.load_xkb_config(&file);
+    assert_eq!(seat_latched(&run), (XKB_SHIFT, XKB_CTRL));
+    run.stop();
+}
+
+/// A session paused drops a press held back, whose timer stops, and forgets it: the key's next
+/// press waits its own delay and is typed.
+#[test]
+fn ax11_a_pause_forgets_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    run.state.pause();
+    wait(&mut run, 300);
+    key(&mut run.state, KEY_A, true);
+    wait(&mut run, 800);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [], "the first timer stopped");
+    wait(&mut run, 400);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A], "the second press was timed");
+    run.stop();
+}
+
+/// A modifier held across a pause counts as held no more: the next key is no chord.
+#[test]
+fn ax11_a_pause_forgets_a_modifier_held() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_sticky_keys(true, true);
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    run.state.pause();
+    key(&mut run.state, KEY_A, true);
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// A pause ends a run of Shift presses.
+#[test]
+fn ax11_a_pause_starts_the_shift_count_again() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_aid_gestures(true);
+    for _ in 0..4 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    run.state.pause();
+    tap(&mut run, KEY_LEFTSHIFT);
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// A pause stops the timing of Shift held: its release may never come here.
+#[test]
+fn ax11_a_pause_stops_the_shift_hold() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_aid_gestures(true);
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    run.state.pause();
+    wait(&mut run, 8100);
+    assert_eq!(told(&mut run), []);
     run.stop();
 }
