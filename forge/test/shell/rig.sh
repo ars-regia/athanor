@@ -1369,10 +1369,14 @@ orca)
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
-        if [ -n "$unit" ]; then own=(--own-compositor float - "${3:-en}"); fi
+        walk=(Tab*7)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor float - "${3:-en}")
+            walk=(ctrl+alt+Tab "${walk[@]}")
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
             RIG_DATA_OVERLAY="$bar_overlay" \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
