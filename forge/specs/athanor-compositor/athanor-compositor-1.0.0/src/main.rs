@@ -6,6 +6,7 @@
 // one reads a socket option the safe crates lack (`identity::so_peerpidfd`).
 #![deny(unsafe_code)]
 
+mod a11y;
 mod bindings;
 mod capture;
 mod clipboard;
@@ -24,6 +25,7 @@ mod input_method;
 mod keyboard_group;
 mod layer;
 mod lock;
+mod look;
 mod output_management;
 mod output_power;
 mod ready;
@@ -50,8 +52,7 @@ pub type Error = Box<dyn std::error::Error>;
 
 const USAGE: &str = "usage: athanor-compositor [--scale <factor>]\n       \
     athanor-compositor --headless [--render-node <path>] [--output <width>x<height>[@<scale>]]...\n       \
-    athanor-compositor --drm\n       \
-    athanor-compositor --screen-filter-on";
+    athanor-compositor --drm";
 
 /// How the compositor runs, from its arguments.
 #[derive(Debug, PartialEq)]
@@ -153,6 +154,8 @@ fn run() -> Result<(), Error> {
     };
     // The layouts of the file before the first client, which never sees the environment's.
     xkb_config::start(&mut state, &event_loop.handle());
+    // The colour filter of cosmic-comp's session, on from the first frame (AX10).
+    screen_filter::start(&mut state, &event_loop.handle());
     let socket = state::listen(&event_loop.handle())?;
     // Under the user manager, as `athanor-compositor.service` runs it, the satellite gets a
     // scope of its own (OS4).
@@ -189,10 +192,6 @@ fn run() -> Result<(), Error> {
 }
 
 fn main() -> ExitCode {
-    // athanor-compositor-session's question, answered before any log or display.
-    if std::env::args().skip(1).eq(["--screen-filter-on"]) {
-        return screen_filter::answer();
-    }
     // RUST_LOG adds to the log, as `smithay::backend::drm::compositor=trace` for where each
     // element of a frame goes; what it does not name stays at info. Its directives follow
     // `info`, and a later directive replaces an earlier one of the same target, so a bare level

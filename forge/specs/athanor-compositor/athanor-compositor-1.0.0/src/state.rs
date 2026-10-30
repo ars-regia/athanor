@@ -5,7 +5,9 @@ use crate::handlers::{shown, HeldCommit};
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
 use crate::input_method::PlacedPopup;
+use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
+use crate::look::{FilterElement, Filters};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
 use crate::output_power::OutputPower;
@@ -23,11 +25,11 @@ use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::{
-    default_primary_scanout_output_compare, Kind, RenderElementStates,
+    default_primary_scanout_output_compare, Kind, RenderElement, RenderElementStates,
 };
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
-use smithay::backend::renderer::{ImportAll, ImportDma, Renderer, Texture};
-use smithay::desktop::space::render_output;
+use smithay::backend::renderer::{ImportDma, Texture};
+use smithay::desktop::space::{space_render_elements, SpaceRenderElements};
 use smithay::desktop::utils::{
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, update_surface_primary_scanout_output,
@@ -231,6 +233,8 @@ pub struct State {
     pub keyboard_groups: Vec<AthanorKeyboardGroupV1>,
     /// The group the live objects were last sent (`State::send_keyboard_group`).
     pub sent_group: u32,
+    /// The magnifier and the colour filters, and the managers of athanor-a11y-v1.
+    pub a11y: crate::a11y::A11y,
     /// The keyboard's repeat, rate then delay as `repeat_info` takes them: `REPEAT_RATE` and
     /// `REPEAT_DELAY` until `xkb_config` sets it.
     pub repeat: (i32, i32),
@@ -330,6 +334,7 @@ impl State {
         crate::workspace::global(&dh);
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
+        crate::a11y::global(&dh);
         crate::output_management::global(&dh);
         crate::output_power::global(&dh);
         // Synthetic input, which takes the hardware's path (`input.rs`).
@@ -418,6 +423,7 @@ impl State {
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
+            a11y: crate::a11y::A11y::default(),
             repeat: (REPEAT_RATE, REPEAT_DELAY),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
@@ -1051,7 +1057,8 @@ impl<'a> View<'a> {
     }
 }
 
-/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents.
+/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents, as
+/// `look` says of the magnifier and the colour filters.
 pub fn draw_view<'d, R>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
@@ -1059,56 +1066,48 @@ pub fn draw_view<'d, R>(
     age: usize,
     view: View<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
+    look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
-    R: Renderer + ImportAll,
+    R: Filters,
     R::TextureId: Clone + Texture + 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
+    let scale = output.current_scale().fractional_scale();
+    let surface = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
+        render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+            renderer,
+            surface,
+            at,
+            scale,
+            1.0,
+            Kind::Unspecified,
+        )
+        .into_iter()
+        .map(SpaceRenderElements::Surface)
+    };
+    // The popups and the lock surface are surfaces as the space's are, above them.
+    let mut elements: Vec<SpaceRenderElements<R, WaylandSurfaceRenderElement<R>>> = Vec::new();
     match view {
         View::Space(space, popups) => {
-            let scale = output.current_scale().fractional_scale();
-            let popups: Vec<WaylandSurfaceRenderElement<R>> = popups
-                .iter()
-                .flat_map(|(surface, at)| {
-                    render_elements_from_surface_tree(
-                        renderer,
-                        surface,
-                        at.to_physical_precise_round(scale),
-                        scale,
-                        1.0,
-                        Kind::Unspecified,
-                    )
-                })
-                .collect();
-            render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
-                output,
-                renderer,
-                framebuffer,
-                1.0,
-                age,
-                [space],
-                &popups,
-                damage_tracker,
-                BACKGROUND,
-            )
+            for (popup, at) in popups {
+                let at = at.to_physical_precise_round(scale);
+                elements.extend(surface(renderer, popup, at));
+            }
+            elements.extend(space_render_elements(renderer, [space], output, 1.0)?);
         }
-        View::Locked(surface) => {
-            let scale = output.current_scale().fractional_scale();
-            let elements: Vec<WaylandSurfaceRenderElement<R>> = surface
-                .map(|surface| {
-                    render_elements_from_surface_tree(
-                        renderer,
-                        surface,
-                        (0, 0),
-                        scale,
-                        1.0,
-                        Kind::Unspecified,
-                    )
-                })
-                .unwrap_or_default();
-            damage_tracker.render_output(renderer, framebuffer, age, &elements, BACKGROUND)
-        }
+        View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
+        View::Locked(None) => {}
     }
+    crate::look::draw(
+        renderer,
+        framebuffer,
+        output,
+        age,
+        elements,
+        damage_tracker,
+        look,
+    )
 }
 
 /// What the pointer can find under it.

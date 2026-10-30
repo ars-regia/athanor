@@ -3018,8 +3018,9 @@ COSMIC_ALLOWED = (
     "forge/tools/calmo-cosmic-theme/",
     # The own compositor reads cosmic-comp's keyboard layouts (doc_own_stack.md decision 27).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
-    # It reads cosmic-comp's colour filter until cosmic-comp's session leaves the greeter
-    # (doc_own_stack.md decision 28).
+    # It reads and writes cosmic-comp's colour filter and reads its accessibility_zoom, so both
+    # sessions share one state, until cosmic-comp's session leaves the greeter
+    # (doc_own_stack.md decision 28, doc_accessibility.md AX10).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
     # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
     # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).

@@ -7,7 +7,7 @@
 use crate::bindings;
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, Event, InputBackend,
+    AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, ButtonState, Device, Event, InputBackend,
     InputEvent, InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent,
 };
@@ -246,7 +246,8 @@ impl State {
                 let Some(area) = self.output_area() else {
                     return;
                 };
-                let location = event.position_transformed(area.size) + area.loc.to_f64();
+                let location =
+                    self.unzoomed(event.position_transformed(area.size) + area.loc.to_f64());
                 self.pointer_moved_to(event.device().id(), location, event.time());
             }
             // A mouse or a touchpad on a console: moved by its delta, kept on the outputs.
@@ -262,6 +263,9 @@ impl State {
                     return;
                 };
                 let source = event.source();
+                if self.scroll_zooms(&event) {
+                    return;
+                }
                 let mut frame = AxisFrame::new(event.time()).source(source);
                 for axis in [Axis::Horizontal, Axis::Vertical] {
                     let discrete = event.amount_v120(axis);
@@ -312,6 +316,36 @@ impl State {
 }
 
 impl State {
+    /// Super with the vertical scroll zooms, when cosmic-comp's accessibility_zoom enables the
+    /// mouse shortcuts and the session is not locked, as cosmic-comp does: a wheel notch is
+    /// five percent, a touchpad's or a knob's continuous amount one percent per unit, against
+    /// the device's natural scrolling. Whether the scroll was taken, and not sent to a client.
+    fn scroll_zooms<I: InputBackend>(&mut self, event: &impl PointerAxisEvent<I>) -> bool {
+        let held = self
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.modifier_state().logo);
+        if !held || self.lock.is_some() || !self.a11y.zoom.mouse_shortcuts {
+            return false;
+        }
+        let Some(mut amount) = event
+            .amount_v120(Axis::Vertical)
+            .map(|v120| v120 / 120.0)
+            .or_else(|| event.amount(Axis::Vertical))
+            .filter(|amount| *amount != 0.0)
+        else {
+            return false;
+        };
+        if event.relative_direction(Axis::Vertical) == AxisRelativeDirection::Inverted {
+            amount = -amount;
+        }
+        if event.source() == AxisSource::Wheel {
+            amount *= 5.0;
+        }
+        self.scroll_zoom(-amount / 100.0);
+        true
+    }
+
     /// Where the outputs are in the space.
     pub(crate) fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
         self.space
@@ -617,10 +651,10 @@ impl VirtualPointerHandler for State {
         };
         // Clamped first: the far edge, x == x_extent, maps to the first column past the area,
         // which a neighbouring output holds.
-        let to = clamp_into(
+        let to = self.unzoomed(clamp_into(
             area,
             event.position_transformed(area.size) + area.loc.to_f64(),
-        );
+        ));
         if let Some(location) = confine(&outputs, pointer.current_location(), to) {
             self.pointer_moved_to(event.device().id(), location, event.time());
         }
