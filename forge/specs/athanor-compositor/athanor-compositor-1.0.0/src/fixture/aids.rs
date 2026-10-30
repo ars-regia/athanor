@@ -11,6 +11,7 @@ use super::{
 use crate::aids::{Aid, InvalidDelay, Notice, SHIFT};
 use crate::bindings::Action;
 use crate::identity::AllowList;
+use crate::session_calls::LAUNCHER;
 use smithay::backend::input::{ButtonState, InputTime, TabletToolTipState};
 use smithay::reexports::wayland_server::Resource;
 use std::sync::{Arc, Mutex};
@@ -223,6 +224,26 @@ fn ax11_bounce_keys_reject_a_press_within_the_delay() {
     let (pressed, _) = sent_to(&mut window, &mut run, &[KEY_A]);
     assert_eq!(pressed, [KEY_A], "after the delay, the key passes");
     assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// Sticky keys take the launcher's key as well: Super tapped, then A, shows it once, which is
+/// the way to the launcher while Super alone latches (AX11).
+#[test]
+fn ax11_super_then_a_shows_the_launcher() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTMETA);
+    window.roundtrip(&mut run);
+    assert_eq!(run.state.fired, [], "Super tapped latches, no launcher");
+    let (pressed, _) = sent_to(&mut window, &mut run, &[KEY_A]);
+    assert_eq!(
+        run.state.fired,
+        [Action::Call(&LAUNCHER)],
+        "the latched Super takes A, once"
+    );
+    assert_eq!(pressed, [], "which the client is not sent");
     run.stop();
 }
 

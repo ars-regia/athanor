@@ -367,6 +367,7 @@ fn an_inhibitor_keeps_the_way_out() {
     game.wait(&mut run, &log, &["active"], "the inhibitor is active");
     let window = &mut game.local;
     reaches(window, &mut run, &[KEY_LEFTMETA, KEY_C], "Super+C");
+    reaches(window, &mut run, &[KEY_LEFTMETA, KEY_A], "Super+A");
     reaches(window, &mut run, &[KEY_LEFTMETA, KEY_1], "Super+1");
     reaches(window, &mut run, &[KEY_LEFTMETA], "Super alone");
     for (codes, action, what) in [

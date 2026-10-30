@@ -8741,9 +8741,9 @@ fn super_alt_escape_ends_the_compositor_even_locked() {
     run.stop();
 }
 
-/// Decision 28's six keys stay unbound until what they open is built: Super+W and XF86LaunchA
-/// (the overview), Super+= and Super+- (the magnifier), Super+A (the application library) and
-/// Super+V (the clipboard history) reach the focused client, and the compositor does nothing.
+/// Decision 28's five keys stay unbound until what they open is built: Super+W and XF86LaunchA
+/// (the overview), Super+= and Super+- (the magnifier) and Super+V (the clipboard history)
+/// reach the focused client, and the compositor does nothing.
 #[test]
 fn decision_28_keys_reach_the_client_and_do_nothing() {
     let mut run = Running::start(None);
@@ -8753,7 +8753,6 @@ fn decision_28_keys_reach_the_client_and_do_nothing() {
         (&[KEY_SCALE], "XF86LaunchA"),
         (&[KEY_LEFTMETA, KEY_EQUAL], "Super+="),
         (&[KEY_LEFTMETA, KEY_MINUS], "Super+-"),
-        (&[KEY_LEFTMETA, KEY_A], "Super+A"),
         (&[KEY_LEFTMETA, KEY_V], "Super+V"),
     ] {
         reaches(&mut window, &mut run, codes, what);
@@ -8830,6 +8829,7 @@ fn only_the_lock_list_acts_while_locked() {
     for (codes, what) in [
         (&[KEY_LEFTMETA, KEY_ESC][..], "Super+Escape"),
         (&[KEY_LEFTMETA, KEY_C], "Super+C"),
+        (&[KEY_LEFTMETA, KEY_A], "Super+A"),
         (
             &[KEY_LEFTMETA, KEY_LEFTSHIFT, KEY_ESC],
             "Super+Shift+Escape",
@@ -9330,6 +9330,23 @@ fn super_with_a_key_or_a_click_shows_nothing() {
     key(&mut run.state, KeyState::Released);
     window.roundtrip(&mut run);
     assert!(run.state.fired.is_empty(), "Super with a click");
+    run.stop();
+}
+
+/// Super+A shows the launcher until `athanor-library` exists; the client sees no A (AX11).
+#[test]
+fn super_a_shows_the_launcher() {
+    use crate::bindings::Action;
+    use crate::session_calls::LAUNCHER;
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    acts(
+        &mut window,
+        &mut run,
+        &[KEY_LEFTMETA, KEY_A],
+        Some(Action::Call(&LAUNCHER)),
+        "Super+A",
+    );
     run.stop();
 }
 

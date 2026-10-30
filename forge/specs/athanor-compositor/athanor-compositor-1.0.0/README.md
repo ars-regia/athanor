@@ -361,10 +361,11 @@ itself is anchored to the top too, and a bottom bar falls in the second group; f
 the cycle reads the first output, and a popup of a layer surface restarts it); and **Super+Escape takes the keyboard back and locks
 the session** (LP5), with Super alone. While the session is locked only the terminal switches,
 Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
-nothing, and every other key goes to the lock surface. Decision 28's six
+nothing, and every other key goes to the lock surface. Decision 28's five
 keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
 
-Super pressed and released alone shows the launcher (`os.athanor.Launcher1.Show`), and Super+C
+Super pressed and released alone, and Super+A until `athanor-library` exists, show the launcher
+(`os.athanor.Launcher1.Show`), and Super+C
 toggles the control center (`os.athanor.ControlCenter1.Toggle`); a key, a button, an axis or a
 gesture while Super is held, or a lock, cancels the launcher. Both press and release of Super
 reach the client. The calls go to the session bus from one thread, `session-calls`

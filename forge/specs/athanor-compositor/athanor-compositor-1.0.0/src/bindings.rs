@@ -8,7 +8,8 @@
 pub(crate) mod cosmic;
 
 use crate::session_calls::{
-    Call, Command, Job, Request, CONTROL_CENTER, LOG_OUT, MIC_MUTE, MUTE, NEXT, PLAY_PAUSE,
+    Call, Command, Job, Request, CONTROL_CENTER, LAUNCHER, LOG_OUT, MIC_MUTE, MUTE, NEXT,
+    PLAY_PAUSE,
     POWER_OFF, PREVIOUS,
 };
 use crate::state::State;
@@ -123,6 +124,7 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER, Keysym::space), Action::NextGroup),
     (on(CTRL | ALT, Keysym::Tab), Action::FocusCycle),
     (on(SUPER, Keysym::c), Action::Call(&CONTROL_CENTER)),
+    (on(SUPER, Keysym::a), Action::Call(&LAUNCHER)),
     (on(0, Keysym::XF86_AudioMute), Action::Run(&MUTE)),
     (on(0, Keysym::XF86_AudioMicMute), Action::Run(&MIC_MUTE)),
     (on(0, Keysym::XF86_AudioPlay), Action::Run(&PLAY_PAUSE)),
