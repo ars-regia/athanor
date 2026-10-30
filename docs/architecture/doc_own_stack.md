@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), awaiting the maintainer's approval with it: OS5 names the description of `athanor_a11y_v1`, and decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -253,7 +253,16 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   by the global `athanor_keyboard_group_manager_v1`, its layouts read from LN9's store (decision
   27); and a private
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
-  (OS4), and its description is in the repository, versioned, before its first client;
+  (OS4), and its description is in the repository, versioned, before its first client.
+  *Amended on 2026-10-30 (#862), with revision 3 of `doc_accessibility.md`:* `athanor_a11y_v1` is
+  described in `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`, one privileged
+  global, `athanor_a11y_manager_v1`, granted to the bar alone, whose requests turn the magnifier on
+  and off, zoom in and out, set the colour inversion and one of the four filters of
+  `cosmic_a11y_manager_v1` version 3 (greyscale, protanopia, deuteranopia, tritanopia) or none,
+  and set the keyboard aids of `doc_accessibility.md` AX11 (sticky keys with two-key-off, slow keys
+  and bounce keys with their delays, and the switch of the Shift gestures), and whose events send
+  the magnifier's and the filters' state, the latched and locked modifiers, a key the aids
+  rejected, never which key, and a Shift gesture (AX10, AX11);
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
@@ -748,7 +757,18 @@ amendment's audit:
       file that cannot be read or parsed, an abort or a signal, counts as on. Its reader, one source file of the
       compositor, `src/screen_filter.rs`, reads that file and writes nothing: an exception to
       SH2's containment beside decision 27's, named by path in SH2's exceptions and in
-      `verify.py boundary`, which leaves when cosmic-comp's session leaves the greeter. Under the
+      `verify.py boundary`, which leaves when cosmic-comp's session leaves the greeter.
+      *Amended on 2026-10-30 (#862), with revision 3 of `doc_accessibility.md` (AX10), the
+      maintainer's decision of that day:* when the own compositor has the colour filters, the same
+      file also writes `a11y_screen_filter.ron` in the format cosmic-comp writes, and reads
+      `accessibility_zoom` of `com.system76.CosmicComp`, so that both sessions show the same
+      state (revision 3 proposes the reader of `accessibility_zoom` in this file, so that the
+      exception stays one path); it writes nothing else in the user's configuration, and the
+      exception, so widened, keeps its path and leaves as before. The hand-off above and the
+      hidden controls below, for the magnifier and the filters, leave when the own compositor
+      has them (#864). Not taken: a state file of the
+      compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
+      for colour filters. Under the
       own compositor the magnifier, inversion and filter controls of the bar are hidden, and
       Super+= and Super+- unbound (OS13); those of Settings, the upstream cosmic-settings, stay
       shown and switched off, since the compositor does not offer `cosmic_a11y_manager_v1`, until
