@@ -302,7 +302,9 @@ windows is written in the plan that implements it, against cosmic-comp's as the 
 departure from it is an entry in the register. Any other model enters through the register (CO2).
 
 **OS13. Key bindings.** The compositor binds by default the keys the approved documents name: Super
-for the launcher and Super+A for the application library (`doc_launcher.md` LA8); Super+C and
+for the launcher, except while sticky keys are on, when Super alone latches and shows nothing and
+Super then A stays reachable (`doc_accessibility.md` AX11, maintainer decision, 2026-10-30), and
+Super+A for the application library (`doc_launcher.md` LA8); Super+C and
 Super+N (`doc_control_center.md` CC9) and Super+V (CC10); Super+W and Super+1 to Super+0
 (`doc_overview.md` OV1, OV13), with OV13's Super+Shift and the same keys to move the window,
 Super+Ctrl with the arrows or h, j, k, l to step, Super+Shift+Ctrl to carry the window, and its

@@ -64,7 +64,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with changes:** t
 
 | Key | Action |
 |---|---|
-| Super, or the bar's launcher module | show; hide when shown |
+| Super, or the bar's launcher module | show; hide when shown. While sticky keys are on, Super alone latches and shows nothing (`doc_accessibility.md` AX11, maintainer decision, 2026-10-30) |
 | Escape, a click outside | hide |
 | Arrows, Page Up and Down | move the selection |
 | Enter | the primary action of the result |
@@ -159,7 +159,7 @@ Applied on 2026-10-01, with the approval of this document.
 
 On a fresh install in the dev VM and on the maintainer's desktop upgraded in place, with both programs enabled:
 
-1. Super shows the launcher and Super+A the library; the time from the `Show` call to the first frame is measured and stays under 150 ms.
+1. Super shows the launcher and Super+A the library, with sticky keys off (`doc_accessibility.md` AX11); the time from the `Show` call to the first frame is measured and stays under 150 ms.
 2. "fx" puts Firefox first; a Flatpak application is found by its name.
 3. `2+2*3` answers 8; `100 USD to EUR` answers with the date of the rates.
 4. A fixture document is found by a word of its content, with the excerpt.
