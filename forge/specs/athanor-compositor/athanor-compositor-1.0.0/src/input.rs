@@ -281,11 +281,31 @@ impl State {
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }
-            // No gesture is served yet; one still disarms Super alone (D4).
-            InputEvent::GestureSwipeBegin { .. }
+            // A gesture goes to the focused surface; one still disarms Super alone (D4).
+            event @ (InputEvent::GestureSwipeBegin { .. }
+            | InputEvent::GestureSwipeUpdate { .. }
+            | InputEvent::GestureSwipeEnd { .. }
             | InputEvent::GesturePinchBegin { .. }
-            | InputEvent::GestureHoldBegin { .. } => self.super_tap = None,
-            InputEvent::DeviceRemoved { device } => self.absolute_device_gone(&device.id()),
+            | InputEvent::GesturePinchUpdate { .. }
+            | InputEvent::GesturePinchEnd { .. }
+            | InputEvent::GestureHoldBegin { .. }
+            | InputEvent::GestureHoldEnd { .. }) => {
+                if matches!(
+                    event,
+                    InputEvent::GestureSwipeBegin { .. }
+                        | InputEvent::GesturePinchBegin { .. }
+                        | InputEvent::GestureHoldBegin { .. }
+                ) {
+                    self.super_tap = None;
+                }
+                self.gesture_event(event);
+            }
+            event @ (InputEvent::DeviceAdded { .. }
+            | InputEvent::DeviceRemoved { .. }
+            | InputEvent::TabletToolAxis { .. }
+            | InputEvent::TabletToolProximity { .. }
+            | InputEvent::TabletToolTip { .. }
+            | InputEvent::TabletToolButton { .. }) => self.tablet_event(event),
             _ => {}
         }
     }

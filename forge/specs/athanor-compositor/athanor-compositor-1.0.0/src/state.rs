@@ -132,6 +132,17 @@ pub struct State {
     /// The press of Super, alone, whose release shows the launcher unless another key, a
     /// button, an axis or a gesture comes first (plan D4).
     pub super_tap: Option<Keycode>,
+    /// The toplevels exported by xdg-foreign (`foreign.rs`).
+    pub foreign: crate::foreign::Foreign,
+    /// The touchpad gesture in progress (`gestures.rs`).
+    pub gesture: Option<crate::gestures::Kind>,
+    /// The windows owed an answer to a decoration request (`decoration.rs`).
+    pub decoration_owed: Vec<WlSurface>,
+    /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
+    pub tool_pressed: std::collections::HashMap<
+        smithay::backend::input::TabletToolDescriptor,
+        Vec<u32>,
+    >,
     /// Counts the locks taken: a request for the session bus carries the epoch it was asked
     /// in, and the worker drops one asked before a lock (`session_calls`).
     pub lock_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -328,6 +339,10 @@ impl State {
         VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
         // Composed text (OS9 item 3): the input method by grant, text input outside a sandbox.
         crate::input_method::globals(&dh);
+        crate::gestures::global(&dh);
+        crate::tablet::global(&dh);
+        crate::decoration::global(&dh);
+        crate::foreign::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -354,6 +369,10 @@ impl State {
             #[cfg(test)]
             fired: Vec::new(),
             super_tap: None,
+            foreign: Default::default(),
+            gesture: None,
+            decoration_owed: Vec::new(),
+            tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             virtual_modifiers: HashMap::new(),
