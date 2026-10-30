@@ -143,7 +143,7 @@ fn send_layouts(object: &AthanorKeyboardGroupV1, names: &[String]) {
         object.layouts(
             names
                 .iter()
-                .map(|name| name.replace('\n', " ") + "\n")
+                .map(|name| name.replace(['\n', '\r'], " ") + "\n")
                 .collect(),
         );
     }

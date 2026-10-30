@@ -132,6 +132,7 @@ mod tests {
         assert_eq!(names_of(""), Vec::<String>::new());
         assert_eq!(names_of("English (US)\n\n"), ["English (US)", ""]);
         assert_eq!(names_of("\n\n"), ["", ""]);
+        assert_eq!(names_of("English (US)\n\nItalian\n"), ["English (US)", "", "Italian"]);
     }
 
     /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp and
