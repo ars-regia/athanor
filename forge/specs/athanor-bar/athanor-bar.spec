@@ -77,8 +77,9 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 - The accessibility menu's magnifier, inversion and filter rows are shown under
   athanor-compositor too, through its athanor_a11y_manager_v1, and under cosmic-comp through
   cosmic_a11y_manager_v1 up to version 3. The magnifier's GNOME key,
-  screen-magnifier-enabled, is sent to the compositor at the bar's start and at each change,
-  and the magnifier row writes it (doc_accessibility.md AX10, #864).
+  screen-magnifier-enabled, turns the magnifier on at the bar's start when true and is sent to
+  the compositor at each change, and the magnifier row writes it and tells the compositor
+  (doc_accessibility.md AX10, #864).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - The notification popups already shown on an output hide while a popover of the bar is

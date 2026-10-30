@@ -2,9 +2,9 @@
 //! function, read back by the bar's appearance watch. The screen reader through the AT-SPI bus's status.
 //! The magnifier, inverted colours and the colour filter through the compositor. Each row
 //! shows only when its source answers; with none, the button is hidden (SH1).
-//! The magnifier's GNOME key decides whether it is on (doc_accessibility.md AX10): the bar
-//! sends it to the compositor at its start and at each change, and the magnifier row writes
-//! the key and shows the state the compositor sends.
+//! The magnifier's GNOME key decides whether it is on for a session (doc_accessibility.md AX10):
+//! the bar turns it on at its start when the key is true and sends each change, and the
+//! magnifier row writes the key, tells the compositor and shows the state the compositor sends.
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -45,8 +45,9 @@ fn filter_label(filter: ScreenFilter) -> String {
     }
 }
 
-/// The magnifier's key, watched once per process whichever surfaces build the module: it is
-/// sent to the compositor at the first build and at each change. `None` without the schema.
+/// The magnifier's key, watched once per process whichever surfaces build the module: at the
+/// first build, true turns the magnifier on, and each change is sent to the compositor. `None`
+/// without the schema.
 fn magnifier_key(bar: &Rc<Bar>) -> Option<gio::Settings> {
     thread_local!(static KEY: OnceCell<Option<gio::Settings>> = const { OnceCell::new() });
     KEY.with(|key| key.get_or_init(|| watch_magnifier(bar)).clone())
@@ -275,15 +276,11 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     inner.magnifier.connect_state_set(move |_, enabled| {
         if let (Some(bar), Some(inner)) = (weak_bar.upgrade(), weak_inner.upgrade()) {
             if !inner.updating.get() {
-                let sent = match &key {
-                    Some(key) => key
-                        .set_boolean(MAGNIFIER_KEY, enabled)
-                        .map_err(|err| err.to_string()),
-                    None => bar
-                        .client()
+                let sent = magnifier::switch(key.as_ref(), enabled, |enabled| {
+                    bar.client()
                         .map_or(Ok(()), |client| client.set_magnifier(enabled))
-                        .map_err(|err| err.to_string()),
-                };
+                        .map_err(|err| err.to_string())
+                });
                 if let Err(err) = sent {
                     tracing::error!(error = %err, "cannot switch the magnifier");
                     // Show the compositor's state again, once this handler has returned.
