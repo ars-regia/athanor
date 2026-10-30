@@ -252,10 +252,27 @@ pub fn unit(cgroup: &str) -> Option<&str> {
     (unit.ends_with(".service") || unit.ends_with(".scope")).then_some(unit)
 }
 
+/// How a grant's unit ends when it names the instances of every template with its prefix.
+const TEMPLATES: &str = "*@.service";
+
+/// Whether `grant`, a unit of the allow-list, names `unit`: the same name, or an instance of a
+/// template with its prefix.
+fn names_unit(grant: &str, unit: &str) -> bool {
+    match grant.strip_suffix(TEMPLATES) {
+        Some(prefix) => unit
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(".service"))
+            .and_then(|rest| rest.split_once('@'))
+            .is_some_and(|(_, instance)| !instance.is_empty()),
+        None => grant == unit,
+    }
+}
+
 /// The allow-list: which executable in which unit is granted which privileged globals. One
 /// grant per line, `<executable> <unit> <interface>...`, separated by spaces; `#` starts a
 /// comment line. The executable is an absolute path under `/usr`, the unit a `.service` or
-/// `.scope`, each interface one of `Privilege`'s.
+/// `.scope`, or `<prefix>*@.service`, every instance of a template whose name starts with the
+/// prefix; each interface one of `Privilege`'s.
 #[derive(Debug, Default, PartialEq)]
 pub struct AllowList(Vec<(PathBuf, String, Vec<Privilege>)>);
 
@@ -294,6 +311,13 @@ impl AllowList {
             if !(unit.ends_with(".service") || unit.ends_with(".scope")) || unit.contains('/') {
                 return Err(bad("the unit is not a service or a scope").into());
             }
+            let named = match unit.strip_suffix(TEMPLATES) {
+                Some(prefix) => !prefix.is_empty() && !prefix.contains(['*', '@']),
+                None => !unit.contains('*'),
+            };
+            if !named {
+                return Err(bad("a star ends a prefix, before @.service").into());
+            }
             let privileges = fields
                 .map(|name| {
                     Privilege::named(name).ok_or_else(|| bad(&format!("{name} is not privileged")))
@@ -318,7 +342,7 @@ impl AllowList {
         let named: Vec<_> = self
             .0
             .iter()
-            .filter(|(executable, u, _)| *executable == identity.executable && u == unit)
+            .filter(|(executable, u, _)| *executable == identity.executable && names_unit(u, unit))
             .collect();
         if named.is_empty() {
             return Vec::new();
@@ -381,6 +405,41 @@ mod tests {
             } else {
                 Err(io::ErrorKind::NotFound.into())
             }
+        }
+    }
+
+    #[test]
+    fn a_family_of_units_names_the_instances_of_its_templates() {
+        const FAMILY: &str = "app-athanor-com.system76.CosmicSettings*@.service";
+        for unit in [
+            "app-athanor-com.system76.CosmicSettings@0123.service",
+            "app-athanor-com.system76.CosmicSettings.Displays@0123.service",
+        ] {
+            assert!(names_unit(FAMILY, unit), "{unit}");
+        }
+        for unit in [
+            "app-athanor-com.system76.CosmicSettings.service",
+            "app-athanor-com.system76.CosmicSettings@.service",
+            "app-athanor-com.system76.CosmicSettings@0123.scope",
+            "app-athanor-org.gnome.Nautilus@0123.service",
+        ] {
+            assert!(!names_unit(FAMILY, unit), "{unit}");
+        }
+        // Only a family is one: a name with a star is otherwise an ordinary, unmatched name.
+        assert!(!names_unit("a*.service", "ab.service"));
+    }
+
+    #[test]
+    fn a_star_stands_only_for_the_end_of_a_prefix() {
+        for unit in [
+            "*@.service",
+            "a*b@.service",
+            "a@*@.service",
+            "a*.service",
+            "a*.scope",
+        ] {
+            let line = format!("/usr/bin/x {unit} zwlr_output_manager_v1\n");
+            assert!(AllowList::parse(&line).is_err(), "{unit}");
         }
     }
 
@@ -711,7 +770,7 @@ mod tests {
     /// draws on the overlay layer. Then the upstream clients of doc_session.md revision 4,
     /// SN12 and SN15, which no crate of the tree builds: the locker, the idle daemon and
     /// cosmic-osd.
-    const SHELL_CLIENTS: [(&str, &str, &[&str]); 7] = [
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 8] = [
         (
             "athanor-bar",
             "athanor-bar.service",
@@ -770,6 +829,11 @@ mod tests {
             &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
         ),
         ("cosmic-osd", "cosmic-osd.service", &["zwlr_layer_shell_v1"]),
+        (
+            "cosmic-randr",
+            "app-athanor-com.system76.CosmicSettings*@.service",
+            &["zwlr_output_manager_v1"],
+        ),
     ];
 
     /// Crates that draw on the top or overlay layer without a line: the compositor itself, and

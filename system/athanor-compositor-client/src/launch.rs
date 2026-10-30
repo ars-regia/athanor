@@ -8,18 +8,21 @@ use std::io::{self, ErrorKind};
 use std::os::fd::AsFd;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gio::prelude::*;
 use glib::Variant;
 
 use crate::connection::{Client, Error};
+use crate::shortcuts::SETTINGS_PAGE_PREFIX;
 use crate::unit::{self, Unit};
 
 /// Runs a command inside the user's default terminal (freedesktop's terminal
 /// intent specification).
 const TERMINAL: &str = "xdg-terminal-exec";
+/// Where the desktop entries of the image live.
+const IMAGE_APPLICATIONS: &str = "/usr/share/applications";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
@@ -259,6 +262,8 @@ struct Start<'a> {
     /// For the activation token; none for a command.
     info: Option<&'a gio::AppInfo>,
     working_directory: String,
+    /// Starts on the main socket instead of behind a security context of its own.
+    main_socket: bool,
 }
 
 impl Client {
@@ -323,6 +328,7 @@ impl Client {
             name: &name,
             info: Some(app.upcast_ref()),
             working_directory,
+            main_socket: keeps_main_socket(&id, location.as_deref()),
         };
         self.start(&start, argv).await
     }
@@ -386,6 +392,7 @@ impl Client {
             name,
             info: None,
             working_directory: "~".to_owned(),
+            main_socket: false,
         };
         let argv = [vec![TERMINAL.to_owned(), "--".to_owned()], argv.to_vec()].concat();
         self.start(&start, argv).await
@@ -404,6 +411,13 @@ impl Client {
         let random = unit::random();
         let unit_name = unit::app_unit_name(start.id, &random)
             .ok_or_else(|| entry("its desktop id is too long"))?;
+        if start.main_socket {
+            // The socket this client is connected to, whatever the process's environment says.
+            let display = self.display_name()?;
+            let unit = self.application_unit(start, argv, unit_name, &display, None);
+            unit.start(None).await?;
+            return Ok(unit.name);
+        }
         let runtime_directory = format!("athanor/{random}");
         let dir = socket_dir(std::env::var_os("XDG_RUNTIME_DIR"), &random)?;
         let result = self
@@ -442,22 +456,49 @@ impl Client {
             &unit_name,
         )?;
 
-        let mut environment = vec![format!("WAYLAND_DISPLAY={}", socket.display())];
+        let unit = self.application_unit(
+            start,
+            argv,
+            unit_name,
+            &socket.display().to_string(),
+            Some(runtime_directory),
+        );
+        unit.start(Some(close_write.into())).await?;
+        Ok(unit.name)
+    }
+
+    /// The unit of an application on the Wayland socket `display`.
+    fn application_unit(
+        &self,
+        start: &Start<'_>,
+        argv: Vec<String>,
+        name: String,
+        display: &str,
+        runtime_directory: Option<String>,
+    ) -> Unit {
+        let mut environment = vec![format!("WAYLAND_DISPLAY={display}")];
         if let Some(token) = self.activation_token(start.info) {
             environment.push(format!("XDG_ACTIVATION_TOKEN={token}"));
             environment.push(format!("DESKTOP_STARTUP_ID={token}"));
         }
-        let unit = Unit {
-            name: unit_name,
+        Unit {
+            name,
             description: start.name.to_owned(),
             argv,
             environment,
             working_directory: start.working_directory.clone(),
-            runtime_directory: Some(runtime_directory),
-        };
-        unit.start(Some(close_write.into())).await?;
-        Ok(unit.name)
+            runtime_directory,
+        }
     }
+}
+
+/// Whether a desktop entry keeps the main socket (doc_bar.md, BR2): Settings and its pages
+/// from the image, until cosmic-settings leaves it. Settings waits at start-up on cosmic-randr,
+/// which waits for a global no security context offers. An entry outside the image with the
+/// same id starts like any other application.
+fn keeps_main_socket(id: &str, location: Option<&str>) -> bool {
+    id.starts_with(SETTINGS_PAGE_PREFIX)
+        && location.is_some_and(|path| Path::new(path).starts_with(IMAGE_APPLICATIONS))
 }
 
 /// The COSMIC components the shell opens until its own replace them (doc_bar.md, BR3).
@@ -661,6 +702,36 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+
+    #[test]
+    fn settings_from_the_image_keeps_the_main_socket() {
+        let image = Some("/usr/share/applications/com.system76.CosmicSettings.desktop");
+        assert!(keeps_main_socket("com.system76.CosmicSettings.desktop", image));
+        assert!(keeps_main_socket(
+            "com.system76.CosmicSettings.Displays.desktop",
+            image
+        ));
+    }
+
+    #[test]
+    fn an_entry_outside_the_image_starts_behind_a_context_whatever_its_id() {
+        let id = "com.system76.CosmicSettings.desktop";
+        for home in [
+            None,
+            Some("/home/a/.local/share/applications/com.system76.CosmicSettings.desktop"),
+            Some("/usr/local/share/applications/com.system76.CosmicSettings.desktop"),
+            Some("/usr/share/applicationsx/com.system76.CosmicSettings.desktop"),
+        ] {
+            assert!(!keeps_main_socket(id, home), "{home:?}");
+        }
+    }
+
+    #[test]
+    fn any_other_entry_of_the_image_starts_behind_a_context() {
+        let image = Some("/usr/share/applications/org.gnome.Nautilus.desktop");
+        assert!(!keeps_main_socket("org.gnome.Nautilus.desktop", image));
+        assert!(!keeps_main_socket("com.system76.CosmicSettingsDaemon.desktop", image));
+    }
 
     #[test]
     fn an_https_url_is_looked_up_by_its_own_scheme() {
