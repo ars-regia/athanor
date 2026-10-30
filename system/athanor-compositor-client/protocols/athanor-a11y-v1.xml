@@ -46,7 +46,9 @@
     session is locked, and while a surface the compositor identifies by its client's line in
     the allow-list as a trusted prompt has the keyboard focus, the modifiers, key_rejected and
     gesture events are not sent, so that nothing of a password's typing reaches a client; the
-    modifiers event is sent again when that ends.
+    modifiers event is sent again when that ends. The allow-list has no mark of a trusted prompt
+    yet: the first code that serves this protocol adds it (doc_own_stack.md OS5, proposed with
+    revision 3 of doc_accessibility.md, #865).
 
     A new version adds interfaces, requests, events or enum entries; a client binds the
     version it knows.
@@ -56,7 +58,8 @@
     <description summary="the accessibility features of the compositor">
       Switches the magnifier and the colour filters, configures the keyboard aids, and sends
       their state. When the manager is bound, the magnifier, screen_filter and modifiers events
-      are sent at once, then each at each change.
+      are sent at once, then each at each change; the modifiers event is sent at once unless
+      the session is locked or a trusted prompt has the focus, in which case at the end of it.
 
       A zoom step multiplies or divides the level by one plus the increment of cosmic-comp's
       accessibility_zoom as a fraction (50 is 1.5 times), as cosmic-comp does, and keeps it
