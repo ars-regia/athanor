@@ -111,7 +111,7 @@ pub struct Aids {
     shift_hold: Option<RegistrationToken>,
     /// Whether the last notice found the session locked or a trusted prompt focused.
     quiet: bool,
-    /// The aids turned off while quiet, told when the quiet ends.
+    /// The aids turned off while quiet, each once, told when the quiet ends.
     deferred: Vec<Aid>,
     /// Every notice sent, for the fixture.
     #[cfg(test)]
@@ -660,7 +660,11 @@ impl State {
     fn aid_notice(&mut self, notice: Notice) {
         self.aids_quiet_changed();
         match notice {
-            Notice::AidOff(aid) if self.aids.quiet => self.aids.deferred.push(aid),
+            Notice::AidOff(aid) if self.aids.quiet => {
+                if !self.aids.deferred.contains(&aid) {
+                    self.aids.deferred.push(aid);
+                }
+            }
             _ if self.aids.quiet => {}
             notice => self.send_aid_notice(notice),
         }

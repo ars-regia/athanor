@@ -445,6 +445,27 @@ fn ax11_the_aids_work_on_the_lock_surface_and_tell_nothing() {
     run.stop();
 }
 
+/// Sticky keys turned off twice during one lock are told once, at the unlock.
+#[test]
+fn ax11_an_aid_turned_off_twice_while_locked_is_told_once() {
+    let mut run = Running::start(None);
+    let (mut locker, lock) = lock_session(&mut run);
+    for _ in 0..2 {
+        run.state.set_sticky_keys(true, true);
+        chord(&mut run.state, &[KEY_LEFTCTRL, KEY_A]);
+    }
+    assert_eq!(told(&mut run), [], "nothing is told while locked");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    assert_eq!(
+        told(&mut run),
+        [modifiers(0, 0), Notice::AidOff(Aid::Sticky)]
+    );
+    run.stop();
+}
+
 /// Under a keyboard-shortcuts inhibitor the aids work as without one.
 #[test]
 fn ax11_the_aids_work_under_a_shortcuts_inhibitor() {
