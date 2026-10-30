@@ -488,7 +488,7 @@ impl State {
     }
 
     /// Shift pressed five times in a row offers sticky keys, and held for eight seconds slow
-    /// keys, while the gestures are on; any other key starts the count again.
+    /// keys, while the gestures are on and that aid is off; any other key starts the count again.
     fn shift_gestures(&mut self, syms: &[Keysym], pressed: bool) {
         let shift = syms
             .iter()
@@ -507,12 +507,16 @@ impl State {
         self.aids.shift_presses += 1;
         if self.aids.shift_presses == SHIFT_PRESSES {
             self.aids.shift_presses = 0;
-            self.aid_notice(Notice::Gesture(Aid::Sticky));
+            if self.aids.sticky.is_none() {
+                self.aid_notice(Notice::Gesture(Aid::Sticky));
+            }
         }
         let timer = Timer::from_duration(SHIFT_HOLD);
         match self.loop_handle.insert_source(timer, |_, _, state| {
             state.aids.shift_hold = None;
-            state.aid_notice(Notice::Gesture(Aid::Slow));
+            if state.aids.slow.is_none() {
+                state.aid_notice(Notice::Gesture(Aid::Slow));
+            }
             TimeoutAction::Drop
         }) {
             Ok(timer) => self.aids.shift_hold = Some(timer),

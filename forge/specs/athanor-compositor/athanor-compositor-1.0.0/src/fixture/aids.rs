@@ -323,6 +323,41 @@ fn ax11_the_shift_gestures_are_told_only_while_on() {
     run.stop();
 }
 
+/// A gesture offers an aid that is off: five Shift presses to latch and lock offer nothing with
+/// sticky keys on, and neither does Shift held once slow keys are on, read when the eight
+/// seconds end. Each aid leaves the other's gesture alone.
+#[test]
+fn ax11_a_gesture_offers_only_an_aid_that_is_off() {
+    let offered = |notices: Vec<Notice>| -> Vec<Notice> {
+        let gesture = |notice: &Notice| matches!(notice, Notice::Gesture(_));
+        notices.into_iter().filter(gesture).collect()
+    };
+    let mut run = Running::start(None);
+    run.state.set_aid_gestures(true);
+    run.state.set_sticky_keys(true, false);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    assert_eq!(offered(told(&mut run)), [], "sticky keys are on");
+
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    run.state.set_slow_keys(true, 100).expect("in bounds");
+    wait(&mut run, 8100);
+    key(&mut run.state, KEY_LEFTSHIFT, false);
+    assert_eq!(offered(told(&mut run)), [], "slow keys came on meanwhile");
+
+    run.state.set_sticky_keys(false, false);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    assert_eq!(
+        offered(told(&mut run)),
+        [Notice::Gesture(Aid::Sticky)],
+        "slow keys on leave sticky keys' offer"
+    );
+    run.stop();
+}
+
 /// A delay above 2000 ms is refused, the protocol's `invalid_value`, and changes nothing.
 #[test]
 fn ax11_a_delay_above_2000_ms_is_refused() {
