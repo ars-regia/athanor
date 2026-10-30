@@ -25,8 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import orca_walk  # noqa: E402
 
 MINIMISED = re.compile("cc-window-2")
-# Orca's echo of a key: one lower-case word, as "enter".
-ECHO = re.compile(r"[^\W\d_A-Z]+")
+# Orca's echo of a key is one word, as "enter" (capitalised in some catalogues).
+ECHO = re.compile(r"[^\W\d_]+")
+GOLDEN = Path(__file__).resolve().parent / "golden" / "orca"
 WINDOW_FOCUSED = re.compile(r"cc-window-1(?: frame| cornice)?")
 
 
@@ -35,14 +36,23 @@ def spoken_by_the_dock(lines):
     return [line for line in lines if not WINDOW_FOCUSED.fullmatch(line)]
 
 
-def answered_a_command(lines, size=3):
+def is_echo(line, reference):
+    """Whether `line` is Orca's echo of a key: one word, in any case, that no announcement of
+    the reference holds. A state word of a button ("collapsed") is in the reference."""
+    return ECHO.fullmatch(line) is not None and line not in reference
+
+
+def answered_a_command(lines, reference, size=3):
     """Whether Orca spoke a command's answer: under athanor-compositor the walk presses KP_Enter,
-    "where am I", on a button, and Orca says again what it said when it took the focus, after
-    the echo of the key. Without the keyboard monitor (AX4) the key goes to the button instead,
-    which opens its menu and says nothing of the kind."""
+    "where am I", on a button, and Orca says again what it said when the last Tab gave the button
+    the focus, between the echoes of the two keys. Without the keyboard monitor (AX4) the key
+    goes to the button instead, which opens its menu and says nothing of the kind. `reference`
+    is the set of utterances of the GTK walk."""
     return any(
-        ECHO.fullmatch(lines[at]) and lines[at - size : at] == lines[at + 1 : at + 1 + size]
-        for at in range(size, len(lines) - size)
+        is_echo(lines[at], reference)
+        and is_echo(lines[at - size - 1], reference)
+        and lines[at - size : at] == lines[at + 1 : at + 1 + size]
+        for at in range(size + 1, len(lines) - size)
     )
 
 
@@ -118,7 +128,8 @@ def main(argv):
     transcript = Path(walk[0])
     if transcript.exists():
         spoken = transcript.read_text(encoding="utf-8").splitlines()
-        if "KP_Enter" in walk and not answered_a_command(spoken):
+        reference = set((GOLDEN / transcript.name).read_text(encoding="utf-8").splitlines())
+        if "KP_Enter" in walk and not answered_a_command(spoken, reference):
             print("FAIL Orca did not answer KP_Enter, 'where am I'", file=sys.stderr)
             status = 1
         transcript.write_text(
