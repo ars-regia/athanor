@@ -272,30 +272,59 @@ and revision 2 specifies (decision 19); the input source follows
 `athanor_keyboard_group_manager_v1`.
 
 Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
-requires (OS4):
+requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
 
-- The rig's Orca walks (`rig.sh orca`) do not need it. In the rig under cosmic-comp, which owns
-  `org.freedesktop.a11y.Manager` with the monitor on the scene's bus, Orca's debug log records no
-  key event during a walk, and `KP_Enter`, Orca's "where am I", pressed through `wtype` after two
-  Tabs, is not spoken: Orca speaks from AT-SPI focus events alone. The keys reach the
-  application through the virtual keyboard and, by these signs, not the monitor; cosmic-comp's
-  source was not traced to confirm it.
-- Orca's own commands need it. Under this compositor nothing owns `org.freedesktop.a11y.Manager`,
-  so Orca's commands do not reach Orca. A client the allow-list grants them gets the virtual
-  keyboard and pointer (OS9 task 6); what `wtype` lacks to walk a surface in the rig is its line
-  in the allow-list (OS9 task 7).
-- The size of the work: the monitor on the session bus (`GrabKeyboard`, `UngrabKeyboard`,
-  `WatchKeyboard`, `UnwatchKeyboard`, `SetKeyGrabs`, the `KeyEvent` signal) through zbus, already
-  a dependency of the workspace, on a thread of its own that talks to calloop through a channel;
-  the filter in the keyboard path that sends every key to a watcher and keeps the grabbed ones
-  from the focused client; and AX4's admission at every call, the owner of
-  `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
-  `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
-  checks. Whether the image's session bus returns `ProcessFD` is unverified
-  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). The virtual keyboard's
-  keys take the hardware's path (OS9 task 6), so they will pass through that filter as well,
-  which cosmic-comp's do not. With `wtype`'s allow-list line (OS9 task 7), `rig.sh orca` can
-  then run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
+- The interface (`GrabKeyboard`, `UngrabKeyboard`, `WatchKeyboard`, `UnwatchKeyboard`,
+  `SetKeyGrabs`, the `KeyEvent` signal) lives at `/org/freedesktop/a11y/Manager` under
+  `org.freedesktop.a11y.Manager` on the session bus, served through zbus on threads of its own
+  that talk to calloop through channels. Its calls are handled one at a time, in the order the
+  bus sent them, so that a grab and its release are never applied the wrong way round; each is
+  answered once it is admitted. The admission asks the bus, and reads the changes of names, on
+  a second connection: zbus stops reading a connection while one of its queues is full, so the
+  calls waiting on the first never block the answers the admission waits for. The signal goes to
+  its client alone. If the bus closes or the name's watch ends, every client is forgotten and
+  the monitor stops, logged: no stale grab outlives it.
+- Every call is admitted before it changes anything: its sender owns
+  `org.gnome.Orca.KeyboardMonitor`, runs in the cgroup of `orca.service`, and runs an
+  executable under `/usr` that is the very file at its path, read through the pidfd of
+  `GetConnectionCredentials`' `ProcessFD`, or, from a bus without it, the pid asked for twice
+  and opened as a pidfd, with AX5's reuse check after the reads. `/usr/bin/orca` is a Python
+  script, so the executable is the interpreter: the unit is what tells Orca apart. A refused
+  call is answered `org.freedesktop.DBus.Error.AccessDenied` and changes nothing; a refused
+  client is forgotten; the journal names a refusal at most once a minute. When Orca's name
+  changes owner, or a connection comes or goes, every admitted client is admitted again, and
+  one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
+  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer; the
+  image's bus and Orca itself are not yet observed. Changes of names queue one wake-up at most,
+  so that a connection that comes and goes in a loop leaves room for Orca's call.
+- In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
+  the bindings, and the input method's forwarded keys are not sent twice. A protected key, one
+  whose action no inhibitor takes from the compositor (`Action::never_inhibited`: lock, VT
+  switch, terminate, reveal, the focus cycle, the screen reader's own key), is sent to no
+  client, Orca included, press and release, as OS4 says of the reveal key: the maintainer's
+  decision of 2026-10-30 (#863). After the bindings a key Orca grabs, its virtual modifiers
+  (Insert, Caps Lock) or the whole keyboard is kept from the focused client; no grab takes a
+  protected key. A grab matches the key as the keyboard reads it, and a capital letter matches
+  the small one Orca grabs, since Caps Lock capitalizes it; the modifiers match exactly, all but
+  the Lock that Caps Lock, held, sets. A virtual modifier is held by its key, not by the keysym the
+  keyboard reads for it when it is let go. The monitor is not a binding: under a shortcuts inhibitor
+  a watcher is still sent every key and a grab still takes its key (`doc_own_stack.md` decision
+  30). A key is protected locked or not, though the lock leaves some protected keys to the lock
+  surface. While the session is locked a watcher is still sent every key but the protected ones, the
+  lock surface's included, as cosmic-comp does, so that Orca speaks during the unlock, and no
+  grab or virtual modifier takes a key: the maintainer's decision of 2026-10-30 (#863), not an
+  oversight. Caps Lock as Orca's modifier gives back the lock it found, on or off, and the
+  focused client is told; a key a grab keeps from the client that changes the modifiers, as
+  Caps Lock under a grab of the keyboard does, is told to the client as modifiers. `KeyEvent`
+  is declared in the interface, so its introspection lists it.
+- The fixture tests (`src/fixture/keyboard_monitor.rs`) cover the watcher, the grabs, the
+  protected keys under a grab, under an inhibitor and while locked, Caps Lock's capital letters
+  and its lock, a virtual modifier let go under Shift, the refused callers, the virtual keyboard, the shortcuts
+  inhibitor and the lock. One test serves the interface on a private `dbus-daemon`: Orca is
+  admitted before its answer, another client is answered `AccessDenied`, a key is addressed to
+  its client alone, Orca is forgotten when it lets its name go, and every client when the bus
+  goes. Not yet covered: the order of calls under load, `rig.sh orca` testing an Orca command
+  under `RIG_COMPOSITOR=athanor`, and a check on the laptop with Orca itself.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected

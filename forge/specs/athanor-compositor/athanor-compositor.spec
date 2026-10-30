@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,13 +52,18 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
-* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - The magnifier and the colour filters (doc_accessibility.md AX10, revision 3): the
   privileged athanor_a11y_manager_v1 for the bar, Super+= and Super+- to zoom, Super with
   the scroll wheel when accessibility_zoom allows it, the colour inversion and filters on
   each output's frame, and cosmic-comp's a11y_screen_filter.ron read at start and written
   at each change, so both sessions show the same state. athanor-compositor-session no longer
   starts cosmic-comp's session for the magnifier or a filter, and --screen-filter-on is gone.
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
+- Serve org.freedesktop.a11y.KeyboardMonitor to Orca alone, admitted at every call by its
+  unit and executable, so that Orca's own commands reach it, and send it every key but the
+  protected ones (doc_accessibility.md AX4, #863)
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
 - Tablets, pointer gestures, xdg-decoration and xdg-foreign (decision 30): drawing tablets,

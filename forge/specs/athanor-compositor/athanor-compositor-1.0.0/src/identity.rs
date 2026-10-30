@@ -210,9 +210,24 @@ fn so_peerpidfd(socket: BorrowedFd<'_>) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// A pidfd of the process `pid` (`pidfd_open`, Linux 5.3), for a peer known by its pid alone. The
+/// pid may name another process by then: AX5's reuse check is the caller's.
+#[allow(unsafe_code)]
+pub(crate) fn pidfd_open(pid: u32) -> io::Result<OwnedFd> {
+    let pid = libc::pid_t::try_from(pid).map_err(io::Error::other)?;
+    // SAFETY: pidfd_open takes a pid and flags by value and touches no memory of this process.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = libc::c_int::try_from(fd).map_err(io::Error::other)?;
+    // SAFETY: on success the kernel installed a new pidfd at `fd` that nothing else owns.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
 /// The pid `pidfd` names in the compositor's pid namespace, from its fdinfo: -1 once the process
 /// is reaped (its pid free for reuse), 0 if it is outside the namespace; both are refused.
-fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, Error> {
+pub(crate) fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, Error> {
     let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd()))?;
     let pid: i32 = info
         .lines()
