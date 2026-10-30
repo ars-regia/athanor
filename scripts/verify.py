@@ -2224,9 +2224,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
 # code outside that crate makes the call, written as a method or as a path: athanor-compositor-
 # client binds the capture globals at the first `Client::capture`, the window actions at the
-# first action of `Client::window_actions`, and the keyboard group at the first
-# `Client::watch_keyboard_group`; capture.rs, actions.rs and keyboard_group.rs hold every name of
-# them in the crate.
+# first action of `Client::window_actions`, the keyboard group at the first
+# `Client::watch_keyboard_group`, and athanor-compositor's accessibility manager at the first
+# `Client::watch_accessibility`; capture.rs, actions.rs, keyboard_group.rs and a11y.rs hold every
+# name of them in the crate.
 ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
              ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-compositor-client/src/actions.rs":
@@ -2234,16 +2235,22 @@ ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
               re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
              "system/athanor-compositor-client/src/keyboard_group.rs":
              ("system/athanor-compositor-client",
-              re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/a11y.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)"))}
 CLIENT_CRATE = "system/athanor-compositor-client"
 # Where athanor-compositor-client names the privileged globals it binds at connect, at the
-# first capture, at the first window action and at the first watch of the keyboard group. Each
-# names at least one, or the check no longer sees what the client binds.
+# first capture, at the first window action, at the first watch of the keyboard group and at the
+# first watch of the accessibility state. Each names at least one, or the check no longer sees
+# what the client binds.
 CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
                 "system/athanor-compositor-client/src/capture.rs": "at the first capture",
                 "system/athanor-compositor-client/src/actions.rs": "at the first window action",
                 "system/athanor-compositor-client/src/keyboard_group.rs":
-                "at the first watch of the keyboard group"}
+                "at the first watch of the keyboard group",
+                "system/athanor-compositor-client/src/a11y.rs":
+                "at the first watch of the accessibility state"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 
@@ -3018,8 +3025,9 @@ COSMIC_ALLOWED = (
     "forge/tools/calmo-cosmic-theme/",
     # The own compositor reads cosmic-comp's keyboard layouts (doc_own_stack.md decision 27).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
-    # It reads cosmic-comp's colour filter until cosmic-comp's session leaves the greeter
-    # (doc_own_stack.md decision 28).
+    # It reads and writes cosmic-comp's colour filter and reads its accessibility_zoom, so both
+    # sessions share one state, until cosmic-comp's session leaves the greeter
+    # (doc_own_stack.md decision 28, doc_accessibility.md AX10).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
     # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
     # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).

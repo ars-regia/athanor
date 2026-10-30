@@ -6,6 +6,7 @@ pub mod clock;
 pub mod control_center;
 pub mod dbusmenu;
 pub mod keyboard;
+pub mod magnifier;
 pub mod notices;
 pub mod order;
 pub mod popups;

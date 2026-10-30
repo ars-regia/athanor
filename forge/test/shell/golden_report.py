@@ -40,16 +40,12 @@ CLOSED = "not granted them was closed"
 HIDDEN = {
     "bar-workspaces": ("decision 28 hides the bar's workspaces module", 835),
     "bar-library": ("decision 28 hides the bar's application library button", 836),
-    "bar-a11y-rows": (
-        "decision 28 hides the magnifier, inversion and filter rows of the bar's accessibility menu",
-        837,
-    ),
     "dock-workspaces": ("decision 28 hides the dock's workspaces button", 835),
     "dock-library": ("decision 28 hides the dock's application library button", 836),
 }
 # The accessible name of each control of HIDDEN that a screen reader's references hold, by
 # language: atspi_compare.py and orca_compare.py exempt it under the own compositor (decision 28
-# item 3). The rows of the accessibility menu are in no reference: no walk opens the menu.
+# item 3).
 NAMES = {
     "bar-workspaces": {"en": "Workspaces", "it": "Spazi di lavoro"},
     "bar-library": {"en": "Applications", "it": "Applicazioni"},
@@ -84,7 +80,7 @@ def differs(result):
     return result.differing is not None and not compare.verdict(result.differing, result.allowed)
 
 
-def drawn(preset, dock, accessibility_menu=False):
+def drawn(preset, dock):
     """The controls of HIDDEN that a bar running `preset` (None: no bar) and a dock set to `dock`
     draw under cosmic-comp, by the presets of doc_bar.md BR7 (workspaces under float and
     minimal, the application library under all three) and the dock setting of doc_shell.md SH7
@@ -94,8 +90,6 @@ def drawn(preset, dock, accessibility_menu=False):
         controls.add("bar-workspaces")
     if preset is not None:
         controls.add("bar-library")
-    if accessibility_menu:
-        controls.add("bar-a11y-rows")
     if dock == "visible":
         controls |= {"dock-workspaces", "dock-library"}
     return controls
@@ -114,7 +108,7 @@ def hidden(surface, case):
         preset, dock = None, "visible"
     else:
         return set()
-    return drawn(preset, dock, surface == "bar-accessibility")
+    return drawn(preset, dock)
 
 
 def exemptions(preset, dock, lang):

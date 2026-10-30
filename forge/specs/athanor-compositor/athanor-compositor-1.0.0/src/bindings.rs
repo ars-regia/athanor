@@ -2,7 +2,7 @@
 //! rule that matches a key against it, as cosmic-comp matches, and the rule of what acts while
 //! the session is locked (doc_lock_and_prompts.md section 1, L14). A bound key that acts is kept
 //! from every client, the input method's grab included, press and release (`State::kept_keys`);
-//! every other key, decision 28's six included, is forwarded. The compositor reads no
+//! every other key, decision 28's four included, is forwarded. The compositor reads no
 //! configuration for its defaults: a user's own bindings are a later change (OS13).
 
 pub(crate) mod cosmic;
@@ -71,6 +71,11 @@ pub(crate) enum Action {
     Step(Step),
     /// Super+Shift+Ctrl with the same keys: the focused window is carried one workspace.
     Carry(Step),
+    /// Super+=: the magnifier one zoom step in, on at one step when off (doc_accessibility.md
+    /// AX10).
+    ZoomIn,
+    /// Super+-: the magnifier one zoom step out, off at level 1.
+    ZoomOut,
 }
 
 impl Action {
@@ -88,6 +93,8 @@ impl Action {
             | Self::TouchpadToggle => false,
             Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
             Self::Step(_) | Self::Carry(_) => false,
+            // Not in section 1's list: the lock surface gets the keys.
+            Self::ZoomIn | Self::ZoomOut => false,
         }
     }
 
@@ -100,10 +107,12 @@ impl Action {
 
     /// Whether the action stays the compositor's under a client's keyboard-shortcuts inhibitor:
     /// the user's way out and the trusted path (OS4, decision 30): the lock, the terminal
-    /// switch, Super+Alt+Escape, the reveal key, Ctrl+Alt+Tab and the screen reader's key.
+    /// switch, Super+Alt+Escape, the reveal key, Ctrl+Alt+Tab, the screen reader's key and the
+    /// magnifier's keys.
     pub(crate) fn never_inhibited(&self) -> bool {
         match self {
             Self::Lock | Self::Vt(_) | Self::Terminate | Self::Reveal | Self::FocusCycle => true,
+            Self::ZoomIn | Self::ZoomOut => true,
             Self::Call(call) => **call == cosmic::SCREEN_READER,
             Self::CloseFocused | Self::NextGroup | Self::Run(_) | Self::TouchpadToggle => false,
             Self::Workspace(_) | Self::LastWorkspace | Self::MoveTo(_) | Self::MoveToLast => false,
@@ -191,6 +200,8 @@ pub(crate) const DEFAULTS: &[(Trigger, Action)] = &[
     (on(SUPER | SHIFT | CTRL, Keysym::Down), Action::Carry(Step::Next)),
     (on(SUPER | SHIFT | CTRL, Keysym::j), Action::Carry(Step::Next)),
     (on(SUPER | SHIFT | CTRL, Keysym::l), Action::Carry(Step::Next)),
+    (on(SUPER, Keysym::equal), Action::ZoomIn),
+    (on(SUPER, Keysym::minus), Action::ZoomOut),
 ];
 
 const fn on(mods: u8, sym: Keysym) -> Trigger {
@@ -301,6 +312,8 @@ impl State {
             Action::MoveToLast => self.send_focused_to(0),
             Action::Step(step) => self.step(step),
             Action::Carry(step) => self.carry(step),
+            Action::ZoomIn => self.zoom_step(true),
+            Action::ZoomOut => self.zoom_step(false),
         }
     }
 
@@ -367,6 +380,8 @@ mod tests {
             Action::TouchpadToggle,
             Action::Call(&cosmic::VOLUME_UP),
             Action::Call(&cosmic::SCREEN_READER),
+            Action::ZoomIn,
+            Action::ZoomOut,
         ];
         let acting: Vec<Action> = all.into_iter().filter(Action::while_locked).collect();
         assert_eq!(
@@ -403,6 +418,8 @@ mod tests {
             Action::Reveal,
             Action::FocusCycle,
             Action::Call(&cosmic::SCREEN_READER),
+            Action::ZoomIn,
+            Action::ZoomOut,
         ] {
             assert!(action.never_inhibited(), "{action:?}");
         }

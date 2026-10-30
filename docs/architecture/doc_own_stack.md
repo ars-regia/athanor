@@ -280,7 +280,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   turned off itself (AX10, AX11). The allow-list, `data/privileged-clients`, has no mark of a
   trusted prompt today: the first code that serves the aids adds one, by which the compositor
   knows such a prompt (#865; proposed with revision 3 of `doc_accessibility.md` and approved with it, AX11);
-- the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
+- the magnifier and the colour filters, the compositor's since #864 (`doc_accessibility.md` AX10)
+  (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
   is replaced in 1.0 by `athanor-overview` (decision 28).
@@ -328,9 +329,9 @@ as their interface (OS5, `doc_settings.md`). While the session is locked only th
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, Super+= and Super+- until the own compositor has the magnifier, Super+A
+overview comes, Super+A
 until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
-their own fixture tests come with them. Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
+their own fixture tests come with them. Super+= and Super+- are bound since the own compositor has the magnifier (amended on 2026-10-30, #864). Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
 (`doc_accessibility.md` AX3) exist, the volume and display brightness keys and Super+Alt+S call
 cosmic-settings-daemon, as cosmic-comp's session does, from one source file of the compositor,
 `src/bindings/cosmic.rs` (decision 29).
@@ -734,15 +735,16 @@ amendment's audit:
       item (amended on 2026-10-30, #863). The aids' part of gap 4
       is open until the aids land (#865), under gap 4's acceptance);
     - item 1 for every difference that hides, moves or changes a control or a text, by any
-      amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
-      the workspaces and applications buttons of the bar and of the dock, the clipboard
-      history's switch), and the move of the neighbouring controls their absence causes:
+      amount, but the controls this decision hides (the
+      workspaces and applications buttons of the bar and of the dock, the clipboard
+      history's switch; the magnifier, inversion and filter rows left this list and the
+      `bar-accessibility` difference with #864, amended on 2026-10-30), and the move of the
+      neighbouring controls their absence causes:
       where a case of `cases.py` draws the control under the preset and the dock setting it
       runs with (`doc_bar.md` BR7, the presets' table and the dock, `doc_shell.md` SH7, and
       the surfaces `rig.sh` draws: the bar's workspaces module in the bar's surfaces and
       layout cases under the `float` and `minimal` presets; its application library button
-      there and under the `bar` preset; the magnifier, inversion and filter rows in
-      `bar-accessibility` only; the dock's buttons in `dock` and in the layout cases whose
+      there and under the `bar` preset; the dock's buttons in `dock` and in the layout cases whose
       dock is visible, not auto-hidden or none), one entry per case and hidden control, covering its absence and the move it
       causes, is recorded in `athanor-differences.toml` with a cause that names this decision
       and the control, such as "decision 28 hides the workspaces module", and the issue that
@@ -790,15 +792,18 @@ amendment's audit:
       state and the exception stays one path; it writes nothing else in the user's configuration, and the
       exception, so widened, keeps its path and leaves as before. The hand-off above and the
       hidden controls below, for the magnifier and the filters, leave when the own compositor
-      has them (#864). Not taken: a state file of the
+      has them (#864). *Done in #864 (2026-10-30):* the hand-off and
+      `athanor-compositor --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
+      these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
+      Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
-      for colour filters. Under the
-      own compositor the magnifier, inversion and filter controls of the bar are hidden, and
+      for colour filters. Until #864 the
+      own compositor hid the bar's magnifier, inversion and filter controls and left
       Super+= and Super+- unbound (OS13); those of Settings, the upstream cosmic-settings, stay
       shown and switched off, since the compositor does not offer `cosmic_a11y_manager_v1`, until
-      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29). A user who zooms only with those keys,
-      which persist nothing, is not detected: they pick cosmic-comp's session at the greeter,
-      whose entry says that it has the magnifier (revision 4 of `doc_session.md`);
+      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29, and on 2026-10-30, #864). A user who zoomed only with those keys,
+      which persisted nothing, was not detected: they picked cosmic-comp's session at the greeter,
+      whose entry said that it has the magnifier (revision 4 of `doc_session.md`);
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
       hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
       8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back;

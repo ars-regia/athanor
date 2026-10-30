@@ -88,3 +88,7 @@ pub mod toplevel_state {
 pub mod keyboard_group {
     generated!("protocols/athanor-keyboard-group-v1.xml", []);
 }
+
+pub mod athanor_a11y {
+    generated!("protocols/athanor-a11y-v1.xml", []);
+}

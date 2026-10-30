@@ -64,15 +64,10 @@
 #              cosmic-comp's entry stops the compositor in athanor-session's cleanup before
 #              cosmic-comp starts, and runs the shortcut unit; after a second SIGKILL, a sign-in
 #              to the default stops the compositor in step 1 before it starts it again
-#   magnifier  item 17, three of its four cases: the GNOME key set true in a previous session,
-#              the dconf database with mode 0000, the dconf directory with mode 0600, each
-#              handed off with its cause; prints question 13's answer, what gsettings prints
-#              for a readable database that does not parse; with the key false, the default
-#              starts
-#   filter     item 18: a11y_screen_filter.ron with the inversion, with a filter, with text that
-#              does not parse, with mode 0000, and /usr/bin/false bind-mounted over the
-#              compositor, each handed off with the reader's status; with the file absent, or
-#              holding neither, the default starts
+#   a11y       items 17 and 18 left with #864 (SN15 step 2): with the magnifier's GNOME key
+#              true and a11y_screen_filter.ron holding the inversion, the default starts and
+#              the compositor's journal shows the magnifier turned on by the bar, the
+#              inversion read and the shader compiled; a frame's pixels are not looked at
 #   localed    item 19: systemd-localed masked and stopped hands the sign-in off, the journal
 #              naming the failed read of X11Layout
 #   absent     item 9: with the compositor's files removed under `bootc usr-overlay`, no menu,
@@ -82,9 +77,7 @@
 #              with both scopes active
 #   cleanup    removes the account and the probes; run only on request
 #
-# Not here: the case of item 17 where the greeter's accessibility menu turns the magnifier on,
-# since the greeter sends no ATHANOR_A11Y yet (doc_accessibility.md AX13; the script's own
-# test, test_compositor_session.py, covers the variable); that the screen stays lit under the
+# Not here: that the screen stays lit under the
 # inhibitor, which only the console shows (the stage reads the lock, not the output power);
 # the lines of cosmic-greeter, cosmic-idle and cosmic-osd against SN12's derivation run, and
 # `verify.py allow-list`, which are read from the pull request and the tree; question 12's
@@ -98,7 +91,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 source "$HERE/devvm.env"
 
 SHOTS=$ROOT/.scratch/default-session-acceptance
-STAGES=(account default cosmic grants lock dock kill exit gate ready keyboard linger magnifier filter localed absent boot)
+STAGES=(account default cosmic grants lock dock kill exit gate ready keyboard linger a11y localed absent boot)
 USER_NAME=pia
 FULL_NAME=Pia
 USER_UID=1006
@@ -107,7 +100,6 @@ HOME_DIR=/home/$USER_NAME
 CONFIG=$HOME_DIR/.config
 FAVORITES=$CONFIG/athanor/favorites.toml
 IDLE_DIR=$CONFIG/cosmic/com.system76.CosmicIdle/v1
-DCONF=$CONFIG/dconf
 FILTER=$HOME_DIR/.local/state/cosmic-comp/a11y_screen_filter.ron
 PROBE_DIR=/run/greeter-acceptance
 DEFAULT_TITLE=Athanor
@@ -139,7 +131,7 @@ STAGE=
 WORK=$(mktemp -d)
 # What a stage changed in the guest and must put back, even when it fails.
 DROP_INS=() KEYMAP_SAVED='' LINGER_SET='' FAVORITES_SAVED='' USR_STRIPPED='' IDLE_SET=''
-DCONF_MODES='' DCONF_SAVED='' FILTER_SET='' READER_BOUND='' LOCALED_MASKED=''
+FILTER_SET='' LOCALED_MASKED=''
 # Set by sign_in: the guest's second, and this host's $SECONDS, at the password's Enter.
 SIGN_IN_SINCE='' SIGN_IN_AT=''
 # Every restore is tried, whatever failed before it, and each one that fails is named.
@@ -154,9 +146,6 @@ finish() {
     if ((${#DROP_INS[@]})) && user_up; then
         in_session systemctl --user daemon-reload || echo "NOT RESTORED: $USER_NAME's user manager did not reload"
     fi
-    if [[ -n $READER_BOUND ]]; then
-        guest_ssh sudo umount "$READER" || echo "NOT RESTORED: /usr/bin/false is still mounted over $READER"
-    fi
     if [[ -n $LOCALED_MASKED ]]; then
         guest_ssh sudo systemctl unmask --runtime systemd-localed.service ||
             echo "NOT RESTORED: systemd-localed.service is still masked in /run"
@@ -164,13 +153,6 @@ finish() {
     if [[ -n $KEYMAP_SAVED ]]; then
         guest_ssh "sudo localectl set-x11-keymap --no-convert $KEYMAP_SAVED" ||
             echo "NOT RESTORED: the system keyboard; set it back with localectl set-x11-keymap --no-convert $KEYMAP_SAVED"
-    fi
-    if [[ -n $DCONF_MODES ]]; then
-        dconf_restored || echo "NOT RESTORED: the modes of $DCONF and $DCONF/user: $DCONF_MODES"
-    fi
-    if [[ -n $DCONF_SAVED ]]; then
-        guest_ssh "sudo -u $USER_NAME mv -f $DCONF/user.acceptance $DCONF/user" ||
-            echo "NOT RESTORED: $DCONF/user; the original is $DCONF/user.acceptance"
     fi
     if [[ -n $FILTER_SET ]]; then
         guest_ssh "sudo rm -f $FILTER" || echo "NOT RESTORED: $FILTER is still there"
@@ -873,47 +855,6 @@ handed_off_for() { # handed_off_for CAUSE
     terminated
 }
 
-# Puts back the modes of the dconf directory and database DCONF_MODES saved, one
-# "MODE PATH" per line.
-dconf_restored() {
-    local mode path
-    while read -r mode path; do
-        guest_ssh sudo chmod "$mode" "$path" || return 1
-    done <<< "$DCONF_MODES"
-}
-
-stage_magnifier() {
-    local key=org.gnome.desktop.a11y.applications
-    own_up
-    in_session gsettings set "$key" screen-magnifier-enabled true
-    log_out
-    ended 60 "$SECONDS"
-    handed_off_for "the magnifier is on (true)"
-    # The next sign-ins need the user manager, and her dconf files, to hand the key back.
-    linger_on
-    in_session gsettings reset "$key" screen-magnifier-enabled
-    guest_ssh "sudo test -e $DCONF/user" || fail "$DCONF/user does not exist after the key was set"
-    DCONF_MODES=$(guest_ssh "sudo stat -c '%a %n' $DCONF $DCONF/user") || fail "cannot read the modes of $DCONF"
-    guest_ssh sudo chmod 0000 "$DCONF/user"
-    handed_off_for "$DCONF/user cannot be read"
-    dconf_restored
-    guest_ssh sudo chmod 0600 "$DCONF"
-    handed_off_for "$DCONF cannot be searched"
-    dconf_restored
-    DCONF_MODES=''
-    # Question 13: what gsettings prints for a database it can read that does not parse.
-    guest_ssh "sudo -u $USER_NAME cp -p $DCONF/user $DCONF/user.acceptance"
-    DCONF_SAVED=1
-    printf 'not a dconf database\n' | guest_ssh "sudo -u $USER_NAME tee $DCONF/user > /dev/null"
-    echo "question 13: gsettings on a database that does not parse: $(in_session \
-        "gsettings get $key screen-magnifier-enabled 2>&1; echo \"exited \$?\"" | paste -sd ' ')"
-    guest_ssh "sudo -u $USER_NAME mv -f $DCONF/user.acceptance $DCONF/user"
-    DCONF_SAVED=''
-    own_up
-    log_out
-    ended 60 "$SECONDS"
-}
-
 # Writes TEXT to cosmic-comp's filter record as the account, or removes it with `absent`.
 filter_set() { # filter_set TEXT|absent
     FILTER_SET=1
@@ -925,27 +866,28 @@ filter_set() { # filter_set TEXT|absent
     fi
 }
 
-stage_filter() {
-    filter_set '(inverted: true, color_filter: None)'
-    handed_off_for "--screen-filter-on exited 10)"
-    filter_set '(inverted: false, color_filter: Some(Greyscale))'
-    handed_off_for "--screen-filter-on exited 10)"
-    filter_set 'not a screen filter'
-    handed_off_for "--screen-filter-on exited 1)"
-    filter_set '(inverted: false, color_filter: None)'
-    guest_ssh sudo chmod 0000 "$FILTER"
-    handed_off_for "--screen-filter-on exited 1)"
-    filter_set absent
-    guest_ssh sudo mount --bind /usr/bin/false "$READER"
-    READER_BOUND=1
-    handed_off_for "--screen-filter-on exited 1)"
-    guest_ssh sudo umount "$READER"
-    READER_BOUND=''
+# The compositor's journal of this sign-in has, without its colours, a line matching PATTERN.
+compositor_logged() { # compositor_logged PATTERN
+    local log
+    log=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | sed 's/\x1b\[[0-9;]*m//g') || return 1
+    grep -q "$1" <<< "$log"
+}
+
+stage_a11y() {
+    local key=org.gnome.desktop.a11y.applications
     own_up
+    in_session gsettings set "$key" screen-magnifier-enabled true
     log_out
     ended 60 "$SECONDS"
-    filter_set '(inverted: false, color_filter: None)'
+    filter_set '(inverted: true, color_filter: None)'
     own_up
+    wait_until 30 compositor_logged 'magnifier on=true' ||
+        fail "the key is true and the compositor did not turn the magnifier on 30 s after the session"
+    compositor_logged "colour filter from cosmic-comp's state.*inverted: true" ||
+        fail "the compositor did not read the stored inversion"
+    ! compositor_logged "the colour filter's shader did not compile" ||
+        fail "the inversion is stored and the compositor cannot draw it"
+    in_session gsettings reset "$key" screen-magnifier-enabled
     log_out
     ended 60 "$SECONDS"
     filter_set absent

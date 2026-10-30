@@ -753,14 +753,15 @@ compositor-globals)
         ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
         zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
         zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
-        athanor_keyboard_group_manager_v1 ext_data_control_manager_v1 zwlr_data_control_manager_v1; do
+        athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1 \
+        zwlr_data_control_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 16 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 17 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;

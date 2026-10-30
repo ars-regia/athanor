@@ -156,6 +156,36 @@ mod athanor_keyboard_group {
     );
 }
 
+/// The client side of athanor-a11y-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_a11y {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-compositor-client/protocols/athanor-a11y-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-compositor-client/protocols/athanor-a11y-v1.xml"
+    );
+}
+
 /// The window: its top half red, its bottom half blue, so that a frame read upside down fails.
 /// The left button's evdev code.
 const BTN_LEFT: u32 = 0x110;
@@ -1132,7 +1162,7 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_output_image_capture_source_manager_v1 ext_image_copy_capture_manager_v1 \
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
-    athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 \
+    athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 \
     zwlr_output_power_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
@@ -5084,6 +5114,10 @@ impl Local {
 #[cfg(test)]
 mod constraints;
 
+// AX10: the magnifier and the colour filters (athanor-a11y-v1, `a11y.rs`, `look.rs`).
+#[cfg(test)]
+mod a11y;
+
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
     run.state
@@ -8737,9 +8771,10 @@ fn super_alt_escape_ends_the_compositor_even_locked() {
     run.stop();
 }
 
-/// Decision 28's six keys stay unbound until what they open is built: Super+W and XF86LaunchA
-/// (the overview), Super+= and Super+- (the magnifier), Super+A (the application library) and
-/// Super+V (the clipboard history) reach the focused client, and the compositor does nothing.
+/// Decision 28's keys stay unbound until what they open is built: Super+W and XF86LaunchA (the
+/// overview), Super+A (the application library) and Super+V (the clipboard history) reach the
+/// focused client, and the compositor does nothing. The magnifier's Super+= and Super+- are
+/// bound (`a11y::super_equal_and_minus_step_the_magnifier`).
 #[test]
 fn decision_28_keys_reach_the_client_and_do_nothing() {
     let mut run = Running::start(None);
@@ -8747,8 +8782,6 @@ fn decision_28_keys_reach_the_client_and_do_nothing() {
     for (codes, what) in [
         (&[KEY_LEFTMETA, KEY_W][..], "Super+W"),
         (&[KEY_SCALE], "XF86LaunchA"),
-        (&[KEY_LEFTMETA, KEY_EQUAL], "Super+="),
-        (&[KEY_LEFTMETA, KEY_MINUS], "Super+-"),
         (&[KEY_LEFTMETA, KEY_A], "Super+A"),
         (&[KEY_LEFTMETA, KEY_V], "Super+V"),
     ] {

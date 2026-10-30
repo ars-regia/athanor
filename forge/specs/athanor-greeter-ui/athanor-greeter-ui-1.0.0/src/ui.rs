@@ -324,9 +324,7 @@ fn session_menu(sessions: &[Session], checked: &Rc<Cell<Session>>) -> MenuButton
             Session::CosmicComp => (
                 "greeter-session-cosmic-comp",
                 tr("Athanor on cosmic-comp"),
-                Some(tr(
-                    "Magnifier, colour filters, workspace overview and Alt+Tab",
-                )),
+                Some(tr("Workspace overview and Alt+Tab")),
             ),
         };
         let text = Box::builder().orientation(Orientation::Vertical).build();

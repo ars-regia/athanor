@@ -3,6 +3,7 @@
 //! context (doc_bar.md, BR2). Wayland and COSMIC types stay inside this crate; the shell
 //! sees only the types of [`model`].
 
+mod a11y;
 mod actions;
 #[cfg(feature = "gtk")]
 mod capture;
