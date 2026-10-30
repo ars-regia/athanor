@@ -9,6 +9,7 @@
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 
+use athanor_bar::magnifier::{self, KEY as MAGNIFIER_KEY, SCHEMA as MAGNIFIER_SCHEMA};
 use athanor_compositor_client::{theme, ScreenFilter};
 use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
@@ -24,8 +25,6 @@ const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 const STATUS: &str = "org.a11y.Status";
 const READER: &str = "ScreenReaderEnabled";
 const TIMEOUT_MS: i32 = 5000;
-const MAGNIFIER_SCHEMA: &str = "org.gnome.desktop.a11y.applications";
-const MAGNIFIER_KEY: &str = "screen-magnifier-enabled";
 
 /// The filters a user can choose. `Unknown` is read, never offered.
 const FILTERS: [ScreenFilter; 5] = [
@@ -60,17 +59,13 @@ fn watch_magnifier(bar: &Rc<Bar>) -> Option<gio::Settings> {
         return None;
     }
     let settings = gio::Settings::new(MAGNIFIER_SCHEMA);
-    let send = |bar: &Bar, settings: &gio::Settings| {
-        let enabled = settings.boolean(MAGNIFIER_KEY);
+    let weak = Rc::downgrade(bar);
+    magnifier::follow(&settings, move |enabled| {
+        let Some(bar) = weak.upgrade() else {
+            return;
+        };
         if let Some(Err(err)) = bar.client().map(|client| client.set_magnifier(enabled)) {
             tracing::info!(error = %err, enabled, "the magnifier's key cannot reach the compositor");
-        }
-    };
-    send(bar, &settings);
-    let weak = Rc::downgrade(bar);
-    settings.connect_changed(Some(MAGNIFIER_KEY), move |settings, _| {
-        if let Some(bar) = weak.upgrade() {
-            send(&bar, settings);
         }
     });
     Some(settings)
