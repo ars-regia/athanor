@@ -414,17 +414,17 @@ mod tests {
 
     #[test]
     fn a_family_of_units_names_the_instances_of_its_templates() {
-        const FAMILY: &str = "app-athanor-com.system76.CosmicSettings*@.service";
+        const FAMILY: &str = "app-athanor-com.example.Settings*@.service";
         for unit in [
-            "app-athanor-com.system76.CosmicSettings@0123.service",
-            "app-athanor-com.system76.CosmicSettings.Displays@0123.service",
+            "app-athanor-com.example.Settings@0123.service",
+            "app-athanor-com.example.Settings.Displays@0123.service",
         ] {
             assert!(names_unit(FAMILY, unit), "{unit}");
         }
         for unit in [
-            "app-athanor-com.system76.CosmicSettings.service",
-            "app-athanor-com.system76.CosmicSettings@.service",
-            "app-athanor-com.system76.CosmicSettings@0123.scope",
+            "app-athanor-com.example.Settings.service",
+            "app-athanor-com.example.Settings@.service",
+            "app-athanor-com.example.Settings@0123.scope",
             "app-athanor-org.gnome.Nautilus@0123.service",
         ] {
             assert!(!names_unit(FAMILY, unit), "{unit}");
