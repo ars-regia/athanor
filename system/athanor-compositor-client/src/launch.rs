@@ -8,7 +8,7 @@ use std::io::{self, ErrorKind};
 use std::os::fd::AsFd;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::net::UnixListener;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use gio::prelude::*;
@@ -498,7 +498,11 @@ impl Client {
 /// same id starts like any other application.
 fn keeps_main_socket(id: &str, location: Option<&str>) -> bool {
     id.starts_with(SETTINGS_PAGE_PREFIX)
-        && location.is_some_and(|path| Path::new(path).starts_with(IMAGE_APPLICATIONS))
+        && location.is_some_and(|path| {
+            let path = Path::new(path);
+            path.starts_with(IMAGE_APPLICATIONS)
+                && !path.components().any(|part| part == Component::ParentDir)
+        })
 }
 
 /// The COSMIC components the shell opens until its own replace them (doc_bar.md, BR3).
@@ -721,6 +725,7 @@ mod tests {
             Some("/home/a/.local/share/applications/com.system76.CosmicSettings.desktop"),
             Some("/usr/local/share/applications/com.system76.CosmicSettings.desktop"),
             Some("/usr/share/applicationsx/com.system76.CosmicSettings.desktop"),
+            Some("/usr/share/applications/../../../tmp/com.system76.CosmicSettings.desktop"),
         ] {
             assert!(!keeps_main_socket(id, home), "{home:?}");
         }

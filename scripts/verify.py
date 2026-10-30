@@ -2210,6 +2210,7 @@ UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
             "/usr/bin/cosmic-osd": "cosmic-osd.service",
             "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
+PACKAGES_JSON = "forge/config/packages.json"
 # The compositor serves those globals and the layers, and enforces the list: no client to check.
 # Its installed path and its bin target both, so that another binary installed there is checked.
 SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
@@ -2615,6 +2616,7 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         if executable not in installed and executable not in upstream:
             problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
     components = read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
+    packages = read(root / PACKAGES_JSON) if (root / PACKAGES_JSON).is_file() else ""
     for executable, unit in sorted(upstream.items()):
         if executable not in lines:
             problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
@@ -2626,6 +2628,9 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         if unit.endswith(".scope") and not re.search(started, components, re.MULTILINE):
             problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
                             "names: the grant would reach nothing")
+        if packages and f'"{Path(executable).name}"' not in packages:
+            problems.append(f"{executable} is upstream and {PACKAGES_JSON} no longer installs it: "
+                            f"remove its line and its entry in UPSTREAM (doc_settings.md SE23)")
         if executable in installed:
             problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
                             "remove it from UPSTREAM, so that its line is derived")

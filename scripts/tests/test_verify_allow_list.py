@@ -545,6 +545,16 @@ class AllowList(unittest.TestCase):
             },
         )
 
+    def test_an_upstream_client_the_image_no_longer_installs_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1\n")
+        self.write(verify.PACKAGES_JSON, '{"packages": ["cosmic-osd"]}\n')
+        self.assertEqual(self.problems(OSD), [])
+        self.write(verify.PACKAGES_JSON, '{"packages": ["cosmic-idle"]}\n')
+        out = self.problems(OSD)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("no longer installs it", out[0])
+
     def test_an_upstream_line_no_spec_installs_passes(self):
         self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
         self.lines("/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1\n")
