@@ -62,7 +62,7 @@ const VIRTUAL_MOD_START: u32 = 15;
 /// The signals the queue holds; a full queue drops a key's signal, with a warning.
 const QUEUE: usize = 256;
 /// The jobs the admission's queue holds: the one call zbus hands the interface at a time, and
-/// a wake-up after a change of names.
+/// the one wake-up after changes of names that `wake` lets wait.
 const JOBS: usize = 4;
 /// How long a warning that repeats is held back.
 const HUSH: Duration = Duration::from_secs(60);
@@ -457,17 +457,37 @@ enum Job {
 }
 
 /// What `keyboard-monitor-names` saw: a change it raises, which the admission lowers before it
-/// admits each client again, and the end of the changes.
+/// admits each client again, and the end of the changes; and a wake-up queued, not yet taken.
 #[derive(Default)]
 struct Names {
     changed: AtomicBool,
     blind: AtomicBool,
+    waking: AtomicBool,
 }
 
-/// Wakes the admission, unless it has ended. A full queue holds a job already, after which the
-/// admission reads the flags: a wake-up dropped then is not needed.
-fn wake(jobs: &SyncSender<Job>) -> bool {
-    !matches!(jobs.try_send(Job::Wake), Err(TrySendError::Disconnected(_)))
+impl Names {
+    /// Wakes the admission, unless it has ended, with one wake-up at most in its queue: a
+    /// connection that comes and goes in a loop leaves room for Orca's call. A full queue holds a
+    /// job already, after which the admission reads the flags: a wake-up dropped then is not
+    /// needed.
+    fn wake(&self, jobs: &SyncSender<Job>) -> bool {
+        if self.waking.swap(true, Ordering::SeqCst) {
+            return true;
+        }
+        match jobs.try_send(Job::Wake) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                self.waking.store(false, Ordering::SeqCst);
+                true
+            }
+            Err(TrySendError::Disconnected(_)) => false,
+        }
+    }
+
+    /// The admission took the wake-up: a change after this point queues another.
+    fn woken(&self) {
+        self.waking.store(false, Ordering::SeqCst);
+    }
 }
 
 /// The interface, on zbus's executor: each call waits for its admission.
@@ -622,13 +642,13 @@ pub(crate) fn serve(
                 let name = args.name();
                 if matches!(name, BusName::Unique(_)) || name.as_str() == ORCA {
                     seen.changed.store(true, Ordering::SeqCst);
-                    if !wake(&watcher) {
+                    if !seen.wake(&watcher) {
                         return;
                     }
                 }
             }
             seen.blind.store(true, Ordering::SeqCst);
-            if !wake(&watcher) {
+            if !seen.wake(&watcher) {
                 tracing::debug!("the keyboard monitor ended before its reader of names");
             }
         })?;
@@ -672,6 +692,9 @@ pub(crate) fn serve(
         let Ok(job) = admissions.recv() else {
             return Ok(());
         };
+        if matches!(job, Job::Wake) {
+            names.woken();
+        }
         if names.blind.load(Ordering::SeqCst) {
             break;
         }
@@ -811,6 +834,29 @@ mod tests {
             Pin::new(&mut answered).poll(&mut context),
             Poll::Ready(true)
         );
+    }
+
+    /// Changes of names in a loop queue one wake-up, and Orca's call still finds room; taken,
+    /// the wake-up lets the next change queue another.
+    #[test]
+    fn changes_of_names_leave_room_for_a_call() {
+        let (jobs, admissions) = sync_channel(JOBS);
+        let names = Names::default();
+        for _ in 0..100 {
+            assert!(names.wake(&jobs));
+        }
+        let (answer, _answered) = answer();
+        let call = jobs.try_send(Job::Call(ORCA.into(), Change::Watch(true), answer));
+        assert!(call.is_ok(), "the call is queued");
+        assert!(matches!(admissions.try_recv(), Ok(Job::Wake)));
+        assert!(matches!(admissions.try_recv(), Ok(Job::Call(..))));
+        assert!(admissions.try_recv().is_err(), "one wake-up, one call");
+        names.woken();
+        assert!(names.wake(&jobs));
+        assert!(matches!(admissions.try_recv(), Ok(Job::Wake)));
+        names.woken();
+        drop(admissions);
+        assert!(!names.wake(&jobs), "the admission has ended");
     }
 
     /// A repeated warning is said once, then held back and counted.

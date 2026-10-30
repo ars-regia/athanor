@@ -110,10 +110,13 @@ impl State {
                 // Orca is sent every key once: the input method's forwarded keys are the
                 // hardware's it was sent already. The monitor is not a binding: an inhibitor
                 // leaves it working (decision 30). A protected key is the compositor's alone,
-                // Orca's too (OS4; the maintainer's decision of 2026-10-30, #863).
+                // Orca's too (OS4; the maintainer's decision of 2026-10-30, #863), locked or not:
+                // the bindings the lock sets aside are protected all the same.
                 if !past_grab {
                     let released = key_state == KeyState::Released;
-                    let protected = found.is_some_and(|action| action.never_inhibited());
+                    let protected = !released
+                        && bindings::find(modifiers, &handle, false)
+                            .is_some_and(|action| action.never_inhibited());
                     state
                         .keyboard_monitor
                         .observe(modifiers, &handle, released, protected);

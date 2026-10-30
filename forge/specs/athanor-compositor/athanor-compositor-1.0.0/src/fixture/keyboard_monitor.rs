@@ -36,7 +36,10 @@ const KEY_S: u32 = 31;
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_CAPSLOCK: u32 = 58;
 const KEY_INSERT: u32 = 110;
-const KEY_KP0: u32 = 82;
+const KEY_ESC: u32 = 1;
+const KEY_TAB: u32 = 15;
+const KEY_LEFTCTRL: u32 = 29;
+const KEY_F1: u32 = 59;
 
 /// The Lock modifier of xkb's masks: Caps Lock's.
 const LOCK: u32 = 1 << 1;
@@ -552,37 +555,64 @@ fn ax4_a_grab_never_takes_a_protected_key() {
     run.stop();
 }
 
-/// KP_Insert as Orca's modifier: held, it gives Orca the S it grabs with it; let go, with Shift
-/// pressed in between, it is let go, and S alone is the window's again. With the fixture's
-/// keymap the keypad key reads KP_Insert on its release under Shift too, so the test does not
-/// tell a modifier held by its key from one held by its keysym.
+/// A virtual modifier is held by its key, not by its keysym: S as Orca's modifier, pressed as s
+/// and let go under Shift as S, is let go, and A alone is the window's again.
 #[test]
 fn ax4_a_virtual_modifier_is_let_go_by_its_key() {
     let mut run = Running::start(None);
     let (mut window, _) = focused_window(&mut run);
-    let insert = Keysym::KP_Insert.raw();
-    let grabs = Change::KeyGrabs(vec![insert], vec![(Keysym::s.raw(), 1 << 15)]);
+    let grabs = Change::KeyGrabs(vec![Keysym::s.raw()], vec![(Keysym::a.raw(), 1 << 15)]);
     assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, grabs));
     let queued = listen(&mut run);
     assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, Change::Watch(true)));
-    key(&mut run, KEY_KP0, KeyState::Pressed);
-    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_S]);
-    assert_eq!(presses, [], "KP_Insert held, S is Orca's");
+    key(&mut run, KEY_S, KeyState::Pressed);
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
+    assert_eq!(presses, [], "S held, A is Orca's");
     key(&mut run, KEY_LEFTSHIFT, KeyState::Pressed);
-    key(&mut run, KEY_KP0, KeyState::Released);
+    key(&mut run, KEY_S, KeyState::Released);
     key(&mut run, KEY_LEFTSHIFT, KeyState::Released);
     window.roundtrip(&mut run);
-    let keypad: Vec<_> = heard(&queued)
+    let letter: Vec<_> = heard(&queued)
         .into_iter()
-        .filter(|(_, sym)| [Keysym::KP_Insert, Keysym::KP_0].contains(sym))
+        .filter(|(_, sym)| [Keysym::s, Keysym::S].contains(sym))
         .collect();
     assert_eq!(
-        keypad,
-        [(false, Keysym::KP_Insert), (true, Keysym::KP_Insert)],
-        "Orca is sent the keypad key, pressed and let go"
+        letter,
+        [(false, Keysym::s), (true, Keysym::S)],
+        "the key is let go under Shift as S"
     );
-    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_S]);
-    assert_eq!(presses, [KEY_S], "KP_Insert let go, S is the window's");
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
+    assert_eq!(presses, [KEY_A], "S let go, A is the window's");
+    run.stop();
+}
+
+/// While the session is locked a protected key is still sent to no client, Orca watching
+/// included, though the lock leaves some to the lock surface (the maintainer's decision of
+/// 2026-10-30, #863).
+#[test]
+fn ax4_while_locked_orca_is_sent_no_protected_key() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let queued = listen(&mut run);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, Change::Watch(true)));
+    let (mut locker, _lock) = lock_session(&mut run);
+    let chords: [(&[u32], &str); 6] = [
+        (&[KEY_LEFTMETA, KEY_ESC], "Super+Escape"),
+        (&[KEY_LEFTMETA, KEY_LEFTALT, KEY_ESC], "Super+Alt+Escape"),
+        (&[KEY_LEFTMETA, KEY_LEFTALT, KEY_T], "Super+Alt+T"),
+        (&[KEY_LEFTMETA, KEY_LEFTALT, KEY_S], "Super+Alt+S"),
+        (&[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB], "Ctrl+Alt+Tab"),
+        (&[KEY_LEFTCTRL, KEY_LEFTALT, KEY_F1], "Ctrl+Alt+F1"),
+    ];
+    let modifiers = [Keysym::Super_L, Keysym::Alt_L, Keysym::Control_L];
+    for (codes, what) in chords {
+        sent_to(&mut locker, &mut run, codes);
+        let sent = heard(&queued);
+        assert_eq!(sent.len(), 2 * (codes.len() - 1), "{what}: Orca hears the modifiers");
+        for (_, sym) in sent {
+            assert!(modifiers.contains(&sym), "{what}: Orca is sent {sym:?}");
+        }
+    }
     run.stop();
 }
 

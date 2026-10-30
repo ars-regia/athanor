@@ -285,7 +285,8 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
   changes owner, or a connection comes or goes, every admitted client is admitted again, and
   one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
   9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer; the
-  image's bus and Orca itself are not yet observed.
+  image's bus and Orca itself are not yet observed. Changes of names queue one wake-up at most,
+  so that a connection that comes and goes in a loop leaves room for Orca's call.
 - In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
   the bindings, and the input method's forwarded keys are not sent twice. A protected key, one
   whose action no inhibitor takes from the compositor (`Action::never_inhibited`: lock, VT
@@ -298,7 +299,8 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
   the Lock that Caps Lock, held, sets. A virtual modifier is held by its key, not by the keysym the
   keyboard reads for it when it is let go. The monitor is not a binding: under a shortcuts inhibitor
   a watcher is still sent every key and a grab still takes its key (`doc_own_stack.md` decision
-  30). While the session is locked a watcher is still sent every key but the protected ones, the
+  30). A key is protected locked or not, though the lock leaves some protected keys to the lock
+  surface. While the session is locked a watcher is still sent every key but the protected ones, the
   lock surface's included, as cosmic-comp does, so that Orca speaks during the unlock, and no
   grab or virtual modifier takes a key: the maintainer's decision of 2026-10-30 (#863), not an
   oversight. Caps Lock as Orca's modifier gives back the lock it found, on or off, and the
@@ -306,8 +308,8 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
   Caps Lock under a grab of the keyboard does, is told to the client as modifiers. `KeyEvent`
   is declared in the interface, so its introspection lists it.
 - The fixture tests (`src/fixture/keyboard_monitor.rs`) cover the watcher, the grabs, the
-  protected keys under a grab and under an inhibitor, Caps Lock's capital letters and its lock,
-  the keypad's virtual modifier, the refused callers, the virtual keyboard, the shortcuts
+  protected keys under a grab, under an inhibitor and while locked, Caps Lock's capital letters
+  and its lock, a virtual modifier let go under Shift, the refused callers, the virtual keyboard, the shortcuts
   inhibitor and the lock. One test serves the interface on a private `dbus-daemon`: Orca is
   admitted before its answer, another client is answered `AccessDenied`, a key is addressed to
   its client alone, Orca is forgotten when it lets its name go, and every client when the bus
