@@ -378,7 +378,7 @@ itself is anchored to the top too, and a bottom bar falls in the second group; f
 the cycle reads the first output, and a popup of a layer surface restarts it); and **Super+Escape takes the keyboard back and locks
 the session** (LP5), with Super alone. While the session is locked only the terminal switches,
 Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
-nothing, and every other key goes to the lock surface. Decision 28's five
+nothing, and every other key goes to the lock surface. Decision 28's three
 keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
 
 Super pressed and released alone, and Super+A until `athanor-library` exists, show the launcher

@@ -6,7 +6,7 @@
 //! press back until the key has been held for their delay; sticky keys latch a modifier pressed
 //! and released alone, lock it when it is pressed again, and let it go at the third press. The
 //! protected keys of decision 30 pass slow and bounce keys unfiltered. The settings come from
-//! `athanor_a11y_v1` (#864); the compositor keeps them for the session only, and every aid is
+//! `athanor_a11y_v1`; the compositor keeps them for the session only, and every aid is
 //! off until a client sets it.
 
 use crate::bindings;
@@ -61,7 +61,6 @@ pub enum Notice {
 }
 
 /// A delay of slow or bounce keys above `MAX_DELAY`, in milliseconds.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidDelay(pub u32);
 
@@ -232,9 +231,7 @@ fn delay(on: bool, ms: u32) -> Result<Option<Duration>, InvalidDelay> {
     Ok(on.then(|| Duration::from_millis(ms.into())))
 }
 
-// The setters are `athanor_a11y_v1`'s requests, which #864 serves; until then only the
-// fixture calls them.
-#[cfg_attr(not(test), allow(dead_code))]
+// The setters are `athanor_a11y_v1`'s requests (`a11y.rs`).
 impl State {
     /// Sticky keys on or off; off lets go of every modifier they latched or locked.
     pub fn set_sticky_keys(&mut self, on: bool, two_key_off: bool) {
@@ -335,7 +332,7 @@ impl State {
             // The modifiers slow keys hold back with it are let through first, so that the key
             // reads as the chord it is. One bounce keys rejected goes too only when the chord
             // needs it, since a protected key passes them; one dropped stays dropped.
-            let held: Vec<_> = self
+            let mut held: Vec<_> = self
                 .aids
                 .withheld
                 .iter()
@@ -520,8 +517,8 @@ impl State {
         let (set_latched, set_locked) = self.aids.set;
         let latched = (current.latched & !xkb_mask(&masks, set_latched))
             | xkb_mask(&masks, self.aids.latched);
-        let locked = (current.locked & !xkb_mask(&masks, set_locked))
-            | xkb_mask(&masks, self.aids.locked);
+        let locked =
+            (current.locked & !xkb_mask(&masks, set_locked)) | xkb_mask(&masks, self.aids.locked);
         self.aids.set = (self.aids.latched, self.aids.locked);
         let mask = [current.depressed, latched, locked, current.layout_effective];
         self.set_modifiers(&keyboard, mask);
@@ -732,10 +729,12 @@ impl State {
         }
     }
 
-    /// Sends `notice` to the clients of `athanor_a11y_v1`, which #864 serves; until then it is
-    /// logged.
+    /// Sends `notice` to the clients of `athanor_a11y_v1`.
     fn send_aid_notice(&mut self, notice: Notice) {
         tracing::debug!(?notice, "keyboard aid");
+        for manager in &self.a11y.managers {
+            crate::a11y::send_aid_notice(manager, notice);
+        }
         #[cfg(test)]
         self.aids.sent.push(notice);
     }

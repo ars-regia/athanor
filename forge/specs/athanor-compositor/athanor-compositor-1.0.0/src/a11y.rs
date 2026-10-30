@@ -2,23 +2,24 @@
 //! and the colour inversion and filters, switched by the shell, and their state. The description
 //! is Athanor's own, `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`. The
 //! manager is privileged (OS4): the bar's accessibility module is its one client. The keyboard
-//! aids' requests are validated and change nothing yet: the aids are #865's.
+//! aids' requests and events are served here, and the aids themselves are `aids.rs` (AX11).
 //!
 //! The magnifier scales each output's frame about a focal point, which follows the pointer as
 //! `accessibility_zoom`'s `view_moves` says, and the colour filter is one pass over the frame
 //! (`look.rs`). The stored inversion and filter, and the magnifier's behaviour, are cosmic-comp's
 //! (`screen_filter.rs`).
 
+use crate::aids::{Aid, InvalidDelay, Notice, MAX_DELAY};
 use crate::identity::Privilege;
 use crate::screen_filter::{Movement, ScreenFilter, Zoom};
 use crate::state::{granted, State};
 use protocol::athanor_a11y_manager_v1::{
-    self, ActiveState, AthanorA11yManagerV1, Error, Filter, Modifier,
+    self, ActiveState, Aid as WireAid, AthanorA11yManagerV1, Error, Filter, Modifier,
 };
 use smithay::desktop::{layer_map_for_output, WindowSurfaceType};
 use smithay::output::Output;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource, WEnum};
 use smithay::utils::{IsAlive, Logical, Physical, Point, Rectangle, Size};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
@@ -57,9 +58,6 @@ pub mod protocol {
 /// cosmic-comp's highest level (`src/input/actions.rs:33` at `epoch-1.10.0`).
 pub const MAX_LEVEL: f64 = 256.0;
 
-/// The longest delay of slow and bounce keys, in ms (AX11, revision 3).
-const MAX_DELAY: u32 = 2000;
-
 /// The filters this version names, by the name cosmic-comp stores.
 const FILTERS: [(Filter, &str); 4] = [
     (Filter::Greyscale, "Greyscale"),
@@ -91,7 +89,7 @@ pub struct A11y {
     pub screen: ScreenFilter,
     /// Where they are stored, once the state root is known.
     pub filter_path: Option<PathBuf>,
-    /// Every bound manager, which the keyboard aids' events also reach (#865).
+    /// Every bound manager, which the keyboard aids' events also reach.
     pub(crate) managers: Vec<AthanorA11yManagerV1>,
 }
 
@@ -132,10 +130,9 @@ impl GlobalDispatch2<AthanorA11yManagerV1, State> for A11yManagers {
         let manager = data_init.init(resource, A11yManagers);
         send_magnifier(&manager, state.a11y.level);
         send_screen_filter(&manager, &state.a11y.shown_filter());
-        // No modifier is latched or locked before the aids exist; a manager bound while the
-        // session is locked is sent the event when the aids land (#865).
-        if state.lock.is_none() {
-            manager.modifiers(Modifier::empty(), Modifier::empty());
+        // While the aids are quiet the event waits for the end of the quiet, which tells it.
+        if let Some(notice) = state.aid_modifiers() {
+            send_aid_notice(&manager, notice);
         }
         state.a11y.managers.push(manager);
     }
@@ -157,6 +154,12 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
     ) {
         use athanor_a11y_manager_v1::Request;
         let refuse = |what: &str| manager.post_error(Error::InvalidValue, what.to_string());
+        let on = |active: ActiveState| active == ActiveState::Enabled;
+        let bounded = |delay: Result<(), InvalidDelay>| {
+            if let Err(InvalidDelay(ms)) = delay {
+                refuse(&format!("a delay of {ms} ms, above {MAX_DELAY}"));
+            }
+        };
         match request {
             Request::SetMagnifier { active } => match active {
                 WEnum::Value(active) => state.set_magnifier(active == ActiveState::Enabled),
@@ -170,27 +173,21 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
                 }
                 _ => refuse("no such active_state or filter"),
             },
-            // The keyboard aids: checked as the description bounds them, applied by none until
-            // #865 fills these arms.
             Request::SetStickyKeys {
-                active: WEnum::Value(_),
-                two_key_off: WEnum::Value(_),
-            }
-            | Request::SetAidGestures {
-                active: WEnum::Value(_),
-            } => {}
+                active: WEnum::Value(active),
+                two_key_off: WEnum::Value(two_key_off),
+            } => state.set_sticky_keys(on(active), on(two_key_off)),
+            Request::SetAidGestures {
+                active: WEnum::Value(active),
+            } => state.set_aid_gestures(on(active)),
             Request::SetSlowKeys {
-                active: WEnum::Value(_),
+                active: WEnum::Value(active),
                 delay,
-            }
-            | Request::SetBounceKeys {
-                active: WEnum::Value(_),
+            } => bounded(state.set_slow_keys(on(active), delay)),
+            Request::SetBounceKeys {
+                active: WEnum::Value(active),
                 delay,
-            } => {
-                if delay > MAX_DELAY {
-                    refuse("a delay above 2000 ms");
-                }
-            }
+            } => bounded(state.set_bounce_keys(on(active), delay)),
             Request::SetStickyKeys { .. }
             | Request::SetAidGestures { .. }
             | Request::SetSlowKeys { .. }
@@ -201,6 +198,25 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
 
     fn destroyed(&self, state: &mut State, _client: ClientId, manager: &AthanorA11yManagerV1) {
         state.a11y.managers.retain(|kept| kept != manager);
+    }
+}
+
+/// Tells `manager` what the keyboard aids did. The bits of a `Notice`'s modifiers are the
+/// protocol's own (`aids::SHIFT` and its neighbours).
+pub(crate) fn send_aid_notice(manager: &AthanorA11yManagerV1, notice: Notice) {
+    let aid = |aid| match aid {
+        Aid::Sticky => WireAid::StickyKeys,
+        Aid::Slow => WireAid::SlowKeys,
+        Aid::Bounce => WireAid::BounceKeys,
+    };
+    match notice {
+        Notice::Modifiers { latched, locked } => manager.modifiers(
+            Modifier::from_bits_truncate(latched),
+            Modifier::from_bits_truncate(locked),
+        ),
+        Notice::Rejected(which) => manager.key_rejected(aid(which)),
+        Notice::Gesture(which) => manager.gesture(aid(which)),
+        Notice::AidOff(which) => manager.aid_off(aid(which)),
     }
 }
 

@@ -46,9 +46,8 @@
     session is locked, and while a surface the compositor identifies by its client's line in
     the allow-list as a trusted prompt has the keyboard focus, the modifiers, key_rejected and
     gesture events are not sent, so that nothing of a password's typing reaches a client; the
-    modifiers event is sent again when that ends. The allow-list has no mark of a trusted prompt
-    yet: the first code that serves the keyboard aids adds it (doc_own_stack.md OS5, proposed with
-    revision 3 of doc_accessibility.md, #865).
+    modifiers event is sent again when that ends. A line of the allow-list marks such a client
+    with the word trusted-prompt (doc_own_stack.md OS5, doc_accessibility.md AX11).
 
     A new version adds interfaces, requests, events or enum entries; a client binds the
     version it knows.
