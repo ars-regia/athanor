@@ -4,7 +4,6 @@
 //! sees (`bindings.rs`). A virtual keyboard's keys and a virtual pointer's motion and buttons, of
 //! the clients the allow-list grants them, take the same path (OS4, OS9 task 6).
 
-use crate::aids::Origin;
 use crate::bindings;
 use crate::keyboard_monitor::Taken;
 use crate::state::{identity_of, State, Under};
