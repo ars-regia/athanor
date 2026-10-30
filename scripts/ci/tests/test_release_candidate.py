@@ -324,20 +324,52 @@ class Candidate(Tool):
         self.github(run=run_object(event="pull_request"))
         self.refused("event pull_request")
 
-    def test_the_check_waits_for_the_record_to_catch_up_with_the_jobs(self):
+    def settle(self, *reads, attempt=1):
+        """settled() over the given API answers, an exception being raised: (run, jobs, reads
+        left)."""
         import release_candidate as module
 
-        stale = [run_object(status="queued"), jobs({"name": "late", "conclusion": None})]
-        fresh = [run_object(), jobs()]
-        reads = iter(stale + fresh)
+        answers = iter(reads)
+
+        def api(*_):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
         saved = module.api, module.SETTLE, module.SETTLE_PAUSE
-        module.api, module.SETTLE, module.SETTLE_PAUSE = lambda *_: next(reads), 60, 0
+        module.api, module.SETTLE, module.SETTLE_PAUSE = api, 60, 0
         try:
-            run, found = module.settled(R, "412")
+            run, found = module.settled(R, "412", attempt)
         finally:
             module.api, module.SETTLE, module.SETTLE_PAUSE = saved
-        self.assertEqual(run["status"], "in_progress")
-        self.assertEqual(found, fresh[1][0]["jobs"])
+        return run, found, len(list(answers))
+
+    def test_the_check_waits_while_the_run_reads_as_queued(self):
+        run, _, left = self.settle(run_object(status="queued"), jobs(), run_object(), jobs())
+        self.assertEqual((run["status"], left), ("in_progress", 0))
+
+    def test_the_check_waits_while_a_job_has_no_conclusion(self):
+        late = jobs({"name": "late", "conclusion": None})
+        _, found, left = self.settle(run_object(), late, run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_the_check_waits_while_the_image_job_is_not_listed(self):
+        _, found, left = self.settle(run_object(), [{"jobs": []}], run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_a_failed_read_during_the_wait_is_read_again(self):
+        import release_candidate as module
+
+        _, found, left = self.settle(module.Refused("502"), run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_a_run_at_another_attempt_is_not_waited_for(self):
+        spare = (run_object(), jobs())
+        run, _, left = self.settle(
+            run_object(status="queued", run_attempt=2), jobs(), *spare
+        )
+        self.assertEqual((run["run_attempt"], left), (2, 2))
 
     def test_a_record_that_stays_behind_is_refused(self):
         self.github(pages=jobs({"name": "late", "conclusion": None}))
