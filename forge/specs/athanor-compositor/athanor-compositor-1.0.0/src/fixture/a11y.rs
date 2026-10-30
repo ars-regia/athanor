@@ -564,6 +564,61 @@ fn an_absolute_motion_points_through_the_magnifier() {
     run.stop();
 }
 
+/// A device that points at the screen names what the view shows, and after a followed focus the
+/// view shows the focus, not the pointer: the pointer lands on the point under the device and the
+/// view stays where it is.
+#[test]
+fn an_absolute_motion_after_a_followed_focus_points_through_the_view() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = bar.bind(1);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = bar.bind(2);
+    let device = manager.create_virtual_pointer(Some(&seat), &bar.queue.handle(), ());
+    let area = run
+        .state
+        .output_areas()
+        .into_iter()
+        .reduce(|all, area| all.merge(area))
+        .expect("the outputs");
+    let (w, h) = (area.size.w as u32, area.size.h as u32);
+    let middle = window_middle(&run);
+
+    run.state.a11y.zoom.moves = Movement::OnEdge;
+    run.state
+        .pointer_to(Point::from((1.0, 1.0)), InputTime::now());
+    run.state.zoom_step(true);
+    run.state.zoom_step(true);
+    run.state.capture(0).expect("frame of output 0");
+    let corner = run.state.a11y.focal.clone().expect("the view").1;
+
+    let (window, _) = fixture_window(&run);
+    run.state.set_keyboard_focus(None);
+    run.state.focus(&window);
+    run.event_loop
+        .dispatch(Some(Duration::ZERO), &mut run.state)
+        .expect("dispatch");
+    run.state.capture(0).expect("frame of output 0");
+    let (_, view, level) = run.state.a11y.focal.clone().expect("the view");
+    assert_ne!(view, corner, "the view went to the focus");
+
+    let at = middle + Point::from((90, 0));
+    let local = at - area.loc;
+    device.motion_absolute(0, local.x as u32, local.y as u32, w, h);
+    device.frame();
+    bar.roundtrip(&mut run);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    // The view is computed back from its start in floats.
+    let close = |a: Point<f64, Logical>, b: Point<f64, Logical>| {
+        (a.x - b.x).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6
+    };
+    let shown = view + (at.to_f64() - view).downscale(level);
+    assert!(close(pointer.current_location(), shown), "the point shown under the device");
+    run.state.capture(0).expect("frame of output 0");
+    let stayed = run.state.a11y.focal.clone().expect("the view").1;
+    assert!(close(stayed, view), "the view stayed");
+    run.stop();
+}
+
 /// The inversion and the filters are one pass on the frame shown: the window's red inverted is
 /// cyan, and greyscale is its luma.
 #[test]

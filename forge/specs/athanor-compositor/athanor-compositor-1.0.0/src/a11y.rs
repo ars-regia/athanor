@@ -79,7 +79,7 @@ pub struct A11y {
     pub zoom: Zoom,
     /// The output the view is magnified on, the point of it (logical, from its origin) that
     /// stays in place, and the level it was placed at.
-    focal: Option<(Output, Point<f64, Logical>, f64)>,
+    pub(crate) focal: Option<(Output, Point<f64, Logical>, f64)>,
     /// The middle of the surface the keyboard last went to, and where the pointer was then:
     /// the view follows that point in place of the pointer until the pointer moves or acts.
     pub(crate) focus: Option<(Point<f64, Logical>, Point<f64, Logical>)>,
@@ -307,13 +307,11 @@ impl A11y {
         area: Option<Rectangle<i32, Logical>>,
         pointer: Option<Point<f64, Logical>>,
     ) -> Look {
-        let pointer = match (self.focus, pointer) {
-            (Some((focus, since)), Some(now)) if now == since => Some(focus),
-            _ => {
-                self.focus = None;
-                pointer
-            }
-        };
+        let focus = pointer.and_then(|now| self.focus_at(now));
+        if focus.is_none() {
+            self.focus = None;
+        }
+        let pointer = focus.or(pointer);
         let filter = Affine::of(&self.shown_filter());
         if filter.is_none() {
             crate::look::release(output);
@@ -326,6 +324,12 @@ impl A11y {
 
     /// The inversion and the filter as they are drawn, which is what a manager is told: with no
     /// pass, none, whatever is stored.
+    fn focus_at(&self, pointer: Point<f64, Logical>) -> Option<Point<f64, Logical>> {
+        self.focus
+            .filter(|(_, since)| *since == pointer)
+            .map(|(focus, _)| focus)
+    }
+
     fn shown_filter(&self) -> ScreenFilter {
         if self.no_pass {
             ScreenFilter::default()
@@ -414,7 +418,8 @@ impl State {
     /// that follows the pointer at every motion moves with that point, so the point is
     /// `location` itself: continuously it is then shown there, and any other answer would
     /// drift while the device stays still. A view that moves at its edge stays put, so the point
-    /// is the one shown at `location` now: the view of the next frame on the pointer's output.
+    /// is the one shown at `location` now: the view of the next frame on the output of the point
+    /// that frame follows, the keyboard's focus included (`A11y::look`).
     pub(crate) fn unzoomed(&self, location: Point<f64, Logical>) -> Point<f64, Logical> {
         let level = self.a11y.level;
         if level <= 1.0 || self.a11y.zoom.moves != Movement::OnEdge {
@@ -423,9 +428,10 @@ impl State {
         let Some(pointer) = self.seat.get_pointer().map(|p| p.current_location()) else {
             return location;
         };
+        let followed = self.a11y.focus_at(pointer).unwrap_or(pointer);
         let on = self.space.outputs().find_map(|output| {
             let area = self.space.output_geometry(output)?.to_f64();
-            area.contains(pointer).then_some((output, area))
+            area.contains(followed).then_some((output, area))
         });
         let Some((output, area)) = on.filter(|(_, area)| area.contains(location)) else {
             return location;
@@ -437,7 +443,7 @@ impl State {
             .filter(|(on, _, at)| on == output && *at == level)
             .map(|(_, at, _)| *at);
         let origin = area.loc;
-        let at = focal(Movement::OnEdge, level, area.size, pointer - origin, last);
+        let at = focal(Movement::OnEdge, level, area.size, followed - origin, last);
         origin + at + (location - origin - at).downscale(level)
     }
 
