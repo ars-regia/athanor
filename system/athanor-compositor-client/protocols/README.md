@@ -33,8 +33,9 @@ which pins the vendored files only. A published version does not change: a chang
 interface version.
 
 `athanor-keyboard-group-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, decisions
-19 and 27): the active layout group of a keyboard, made by `athanor_keyboard_group_manager_v1`
-for a `wl_keyboard`, and the request that switches it, served by athanor-compositor. It is MIT,
+19 and 27): the names of a seat's layouts and the active layout group of its keyboard, made by
+`athanor_keyboard_group_manager_v1` for a `wl_keyboard`, and the request that switches the group,
+served by athanor-compositor. It is MIT,
 2026 Athanor Forge, and it is not in `SHA256SUMS` either.
 
 `athanor-a11y-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, as amended on

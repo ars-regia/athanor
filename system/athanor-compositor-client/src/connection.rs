@@ -803,7 +803,7 @@ pub(crate) struct State {
     output_modes: HashMap<ObjectId, OutputMode>,
     pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
-    keyboard_layouts: Vec<String>,
+    pub(crate) keyboard_layouts: Vec<String>,
     pub(crate) keyboard_group: u32,
     accessibility: Accessibility,
     pub(crate) events: Vec<Event>,
@@ -1118,13 +1118,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             return;
         }
         match read_keymap(fd, size) {
-            Ok(text) => {
-                let layouts = keymap::layout_names(&text);
-                if layouts != state.keyboard_layouts {
-                    state.keyboard_layouts = layouts.clone();
-                    state.events.push(Event::KeyboardLayouts(layouts));
-                }
-            }
+            Ok(text) => state.keymap_layouts(keymap::layout_names(&text)),
             Err(err) => tracing::warn!("the keymap could not be read: {err}"),
         }
     }

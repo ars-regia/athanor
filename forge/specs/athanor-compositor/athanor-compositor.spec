@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        10%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- athanor-keyboard-group-v1 version 2 names the seat's layouts, which a virtual keyboard's
+  keymap sent to every wl_keyboard no longer hides from the bar: Tab reaches past the input
+  source under wtype (#876)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Serve the keyboard monitor in a `--headless` run of the binary too, so that Orca's own
   commands reach Orca in the shell rig's scenes (#841, #863)

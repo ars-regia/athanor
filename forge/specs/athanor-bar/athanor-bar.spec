@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        16%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- The input-source button takes the seat's layouts from athanor-keyboard-group-v1 version 2, so
+  a virtual keyboard's keymap no longer hides it under the keyboard focus (#876).
+
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - The notification popups already shown on an output hide while a popover of the bar is
   open there, as new ones already waited, so none is drawn over the notification list under

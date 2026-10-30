@@ -291,6 +291,8 @@ struct Client {
     toplevel_closed: Vec<ObjectId>,
     /// The `group` events of every athanor_keyboard_group_v1 object, in order.
     keyboard_groups: Vec<(ObjectId, u32)>,
+    /// The names of the keyboard group objects' `layouts` events, in order.
+    keyboard_layouts: Vec<String>,
     /// The events of every zwlr_output_power_v1 object, in order.
     power: Vec<(ObjectId, PowerEvent)>,
 }
@@ -535,8 +537,11 @@ impl Dispatch<athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboard
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        let athanor_keyboard_group::athanor_keyboard_group_v1::Event::Group { group } = event;
-        client.keyboard_groups.push((object.id(), group));
+        use athanor_keyboard_group::athanor_keyboard_group_v1::Event;
+        match event {
+            Event::Group { group } => client.keyboard_groups.push((object.id(), group)),
+            Event::Layouts { names } => client.keyboard_layouts.push(names),
+        }
     }
 }
 
@@ -4600,8 +4605,20 @@ impl Local {
         wl_keyboard::WlKeyboard,
         athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
     ) {
+        self.keyboard_group_at(run, 2)
+    }
+
+    /// `keyboard_group`, from a manager of `version`.
+    fn keyboard_group_at(
+        &mut self,
+        run: &mut Running,
+        version: u32,
+    ) -> (
+        wl_keyboard::WlKeyboard,
+        athanor_keyboard_group::athanor_keyboard_group_v1::AthanorKeyboardGroupV1,
+    ) {
         let manager: athanor_keyboard_group::athanor_keyboard_group_manager_v1::AthanorKeyboardGroupManagerV1 =
-            self.bind(1);
+            self.bind(version);
         let seat: wl_seat::WlSeat = self.bind(1);
         let qh = self.queue.handle();
         let keyboard = seat.get_keyboard(&qh, ());
@@ -4751,6 +4768,87 @@ fn a_virtual_keymap_leaves_the_group_alone() {
     );
     assert_eq!(local.groups_of(&object), [0, 1]);
     assert_eq!(local.client.modifier_groups.last(), Some(&1));
+    run.stop();
+}
+
+/// A virtual keyboard's keymap goes to every `wl_keyboard`, the unfocused bar's included, but the
+/// keyboard group object goes on naming the seat's layouts: naming them from the keymap hid the
+/// bar's input-source button under the focus at each key of wtype, and Tab never left the clock
+/// (#876). The keymap the object is made under does not name them either.
+#[test]
+fn a_virtual_keymap_leaves_the_layouts_alone() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group(&mut run);
+    let seat = "English (US)\nItalian";
+    assert_eq!(bar.client.keyboard_layouts, [seat], "sent when it is made");
+    let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut window, &mut run, 30, true);
+    typist.key(&mut window, &mut run, 30, false);
+    assert!(
+        run.state.virtual_keymap.is_some(),
+        "the virtual keymap is current"
+    );
+    bar.roundtrip(&mut run);
+    let keymaps = bar.client.keymaps;
+    assert!(
+        keymaps > 1,
+        "an unfocused keyboard is sent the virtual keymap too"
+    );
+    let mut late = Local::connect(&mut run, None);
+    late.keyboard_group(&mut run);
+    assert_eq!(
+        late.client.keyboard_layouts,
+        [seat],
+        "made under the virtual keymap"
+    );
+    drop(typist);
+    drop(window);
+    run.until("the seat's keymap comes back", |state| {
+        state.virtual_keymap.is_none()
+    });
+    bar.roundtrip(&mut run);
+    assert!(bar.client.keymaps > keymaps, "the seat's keymap comes back");
+    assert_eq!(bar.client.keyboard_layouts, [seat], "nothing is sent again");
+    assert_eq!(bar.groups_of(&object), [0]);
+    run.stop();
+}
+
+/// A live change of `xkb_config` names the new layouts, also under a virtual keyboard's keymap,
+/// which it replaces.
+#[test]
+fn a_live_change_names_the_layouts() {
+    let mut run = Running::start(None);
+    let file = xkb_file("names");
+    write_xkb(&file, "us,it");
+    crate::xkb_config::follow(&mut run.state, &run.event_loop.handle(), file.clone());
+    let (mut window, _) = focused_window(&mut run);
+    window.keyboard_group(&mut run);
+    let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
+    typist.key(&mut window, &mut run, 30, true);
+    typist.key(&mut window, &mut run, 30, false);
+    write_xkb(&file, "us,it,de");
+    window.pump(&mut run, "the three layouts", |client, _| {
+        client.keyboard_layouts.len() > 1
+    });
+    assert_eq!(
+        window.client.keyboard_layouts.last().map(String::as_str),
+        Some("English (US)\nItalian\nGerman")
+    );
+    run.stop();
+}
+
+/// A client of version 1 is not sent the event its version does not have.
+#[test]
+fn version_1_is_not_sent_the_layouts() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, object) = bar.keyboard_group_at(&mut run, 1);
+    assert_eq!(bar.groups_of(&object), [0]);
+    assert!(bar.client.keyboard_layouts.is_empty());
     run.stop();
 }
 
