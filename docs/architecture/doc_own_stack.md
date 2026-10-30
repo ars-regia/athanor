@@ -209,8 +209,11 @@ is a barrier against it.
   unconfined code. It
   is written in the compositor over zbus; milestone C1 estimated about 500 lines for the monitor,
   the key filter and AX4's admission (C1 results, section 10, item 6). Whether the image's session
-  bus returns `ProcessFD` is AX4's open doubt 9, answered before the acceptance. Until the
-  monitor exists, Orca's own commands do not reach Orca under the own compositor (SN16, gap 3).
+  bus returns `ProcessFD` was AX4's open doubt 9: the reference laptop's bus, the image's
+  dbus-broker 37, returns it (checked on 2026-10-30, #863; the shell rig's bus is not observed).
+  The monitor landed in #870 and was checked on the laptop in the development session, not yet
+  in the image's default session, which #863 and item 3 of OS19 own (SN16, gap 3; amended on
+  2026-10-30, #863); before it, Orca's own commands did not reach Orca under the own compositor.
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
   by identity as above. An output is captured through `ext_output_image_capture_source_manager_v1`,
@@ -226,7 +229,11 @@ is a barrier against it.
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
 and row 4 (the reduced-motion switch, AX9) are behaviour the own compositor ships from its first
-version. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
+version, with one difference from cosmic-comp that the switch's pull request lists
+(`doc_session.md` SN13, step 6) beside those of decision 29: a layer surface with on-demand
+interactivity takes the keyboard on a click or on Ctrl+Alt+Tab (AX7), not when it maps as under
+cosmic-comp (#614), so the dock says nothing to Orca until Ctrl+Alt+Tab (the shell rig's Orca
+walk of the dock starts with that key, #841); the behaviour is not changed. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
 three-finger swipe) follows decision 4 of `doc_overview.md`. Row 8's behaviour, an input method's
 grab dropped while locked, is a requirement tested in the fixture of OS6 (#750). Row 9, the special
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
@@ -718,8 +725,11 @@ amendment's audit:
       (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* revision 4 of
       `doc_session.md` (#811) recorded gap 3 and the keyboard aids of gap 4 as closed at the
       switch, in error: the own compositor had neither the keyboard monitor nor the aids. Gap 3
-      is open, accepted by the maintainer by number on 2026-10-30, until the monitor lands
-      (#863), and the aids' part of gap 4 until the aids land (#865), under gap 4's acceptance);
+      was open, accepted by the maintainer by number on 2026-10-30, until the monitor landed
+      (#870), and is closed only in the development session on tty3, where it was checked the
+      same day on the reference laptop: the default session's check stays with #863 and this
+      item (amended on 2026-10-30, #863). The aids' part of gap 4
+      is open until the aids land (#865), under gap 4's acceptance);
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
       the workspaces and applications buttons of the bar and of the dock, the clipboard

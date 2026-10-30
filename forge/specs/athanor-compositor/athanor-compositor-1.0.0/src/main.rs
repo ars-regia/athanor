@@ -149,7 +149,11 @@ fn run() -> Result<(), Error> {
     let mut state = match &options {
         Options::Nested { scale } => winit::start(&mut event_loop, display, *scale)?,
         Options::Headless { node, outputs } => {
-            headless::start(&mut event_loop, display, node.as_deref(), outputs)?
+            let mut state = headless::start(&mut event_loop, display, node.as_deref(), outputs)?;
+            // Here, not in `headless::start`, which the fixture tests call too: only the binary
+            // owns `org.freedesktop.a11y.Manager`, so that the shell rig's Orca walks reach Orca.
+            state.keyboard_monitor.events = keyboard_monitor::start(&event_loop.handle());
+            state
         }
         Options::Drm => udev::start(&mut event_loop, display)?,
     };

@@ -59,6 +59,10 @@ off screen.
 athanor-compositor --headless --render-node /dev/dri/renderD128 --output 1920x1080 --output 1280x800@1.5
 ```
 
+A manual `--headless` run, like the shell rig's, also asks the session bus for the name
+`org.freedesktop.a11y.Manager`, which Orca's keyboard commands need; if the session already has an
+owner, the compositor logs it and runs without Orca's commands.
+
 On a render node it draws through GBM and GLES and offers `linux-dmabuf` (version 4, with
 feedback naming the node) and, when the node can wait on a syncobj, `linux-drm-syncobj-v1`.
 Without `--render-node` Pixman draws on the CPU and clients use `wl_shm`. Every 10 seconds it
@@ -296,8 +300,9 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
   client is forgotten; the journal names a refusal at most once a minute. When Orca's name
   changes owner, or a connection comes or goes, every admitted client is admitted again, and
   one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
-  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer; the
-  image's bus and Orca itself are not yet observed. Changes of names queue one wake-up at most,
+  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer, and the
+  reference laptop's bus returned it on 2026-10-30 (#863, with Orca running); the rig's bus is
+  not observed. Changes of names queue one wake-up at most,
   so that a connection that comes and goes in a loop leaves room for Orca's call.
 - In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
   the bindings, and the input method's forwarded keys are not sent twice. A protected key, one
