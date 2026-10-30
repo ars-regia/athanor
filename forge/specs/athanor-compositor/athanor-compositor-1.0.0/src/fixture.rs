@@ -10358,4 +10358,6 @@ mod keyboard_monitor;
 
 #[cfg(test)]
 mod aids;
+
+#[cfg(test)]
 mod parented;
