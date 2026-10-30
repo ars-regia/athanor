@@ -738,7 +738,12 @@ amendment's audit:
       (#870), and is closed only in the development session on tty3, where it was checked the
       same day on the reference laptop: the default session's check stays with #863 and this
       item (amended on 2026-10-30, #863). The aids' part of gap 4
-      is open until the aids land (#865), under gap 4's acceptance);
+      was open until the aids landed (#865), under gap 4's acceptance, and is closed only in
+      the development session on tty3, where it was checked on 2026-10-31 on the reference
+      laptop, but for two checks a person must do: a slow key and a bounce key pressed by hand
+      on a hardware keyboard, and the password typed by hand unlocking the session with the
+      aids on (`doc_session.md` SN16, gap 4). The default session's check stays with this item
+      (amended on 2026-10-31, #865));
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the
       workspaces and applications buttons of the bar and of the dock, the clipboard
