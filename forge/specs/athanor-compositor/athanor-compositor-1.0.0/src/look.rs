@@ -197,7 +197,8 @@ where
 }
 
 /// Lets go of `output`'s offscreen frame, drawn with either renderer: with no pass on, it only
-/// holds memory.
+/// holds memory. No renderer is needed: a dropped GL texture is queued, and freed when its
+/// renderer next cleans up, at its next unbind.
 pub fn release(output: &Output) {
     if let Some(cell) = kept::<GlesRenderer>(output) {
         cell.borrow_mut().take();

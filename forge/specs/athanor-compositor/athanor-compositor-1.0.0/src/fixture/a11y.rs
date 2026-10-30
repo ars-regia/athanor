@@ -720,10 +720,8 @@ fn the_filters_on_a_render_node() {
 
     manager.set_screen_filter(ActiveState::Disabled, Filter::None);
     bar.roundtrip(&mut run);
+    assert!(!held(&run), "the offscreen frame goes with the filter, with no frame drawn");
     shown(&mut run, "off again");
-    // The event loop may have drawn the other output with the filter on.
-    run.state.capture(1).expect("frame of output 1");
-    assert!(!held(&run), "the offscreen frame goes with the filter");
     run.stop();
 }
 
@@ -764,7 +762,8 @@ fn a_filter_that_cannot_be_drawn_is_reported_off() {
 }
 
 /// The offscreen frame of the pass is kept from frame to frame while a filter is on, and let go
-/// when it goes off: a whole output's memory, for nothing.
+/// on every output when it goes off, with no frame drawn: a head turned off draws none, and would
+/// hold a whole output's memory for nothing.
 #[test]
 fn the_offscreen_frame_goes_with_the_filter() {
     let mut run = Running::start(None);
@@ -777,14 +776,14 @@ fn the_offscreen_frame_goes_with_the_filter() {
     manager.set_screen_filter(ActiveState::Enabled, Filter::None);
     bar.roundtrip(&mut run);
     run.state.capture(0).expect("frame of output 0");
+    run.state.capture(1).expect("frame of output 1");
     run.state.capture(0).expect("frame of output 0");
     assert!(held(&run), "kept");
     manager.set_screen_filter(ActiveState::Disabled, Filter::None);
     bar.roundtrip(&mut run);
-    run.state.capture(0).expect("frame of output 0");
-    // The event loop may have drawn the other output with the filter on.
-    run.state.capture(1).expect("frame of output 1");
     assert!(!held(&run), "let go");
+    run.state.capture(0).expect("frame of output 0");
+    assert!(!held(&run), "and not drawn again");
     run.stop();
 }
 

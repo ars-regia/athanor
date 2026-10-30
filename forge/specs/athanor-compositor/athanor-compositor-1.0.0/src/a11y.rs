@@ -313,9 +313,6 @@ impl A11y {
         }
         let pointer = focus.or(pointer);
         let filter = Affine::of(&self.shown_filter());
-        if filter.is_none() {
-            crate::look::release(output);
-        }
         Look {
             zoom: self.zoom_on(output, area, pointer),
             filter,
@@ -493,7 +490,7 @@ impl State {
     /// the pass changes nothing: what cannot be shown is not stored.
     fn set_screen_filter(&mut self, inverted: bool, filter: Filter) {
         if self.a11y.no_pass {
-            self.send_shown_filter();
+            self.filter_changed();
             return;
         }
         self.a11y.screen.inverted = inverted;
@@ -504,7 +501,7 @@ impl State {
                 .map(|(_, name)| (*name).to_string());
         }
         self.store_screen_filter();
-        self.send_shown_filter();
+        self.filter_changed();
         self.request_redraw();
     }
 
@@ -512,13 +509,18 @@ impl State {
     /// stored stays as it is, for a session that can.
     pub(crate) fn no_filter_pass(&mut self) {
         self.a11y.no_pass = true;
-        self.send_shown_filter();
+        self.filter_changed();
     }
 
-    fn send_shown_filter(&self) {
+    /// Tells every manager what is shown. With no pass left, every output's offscreen frame
+    /// goes now: a head turned off has no next render to let go of it at.
+    fn filter_changed(&self) {
         let shown = self.a11y.shown_filter();
         for manager in &self.a11y.managers {
             send_screen_filter(manager, &shown);
+        }
+        if Affine::of(&shown).is_none() {
+            self.space.outputs().for_each(crate::look::release);
         }
     }
 }
