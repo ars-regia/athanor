@@ -68,6 +68,7 @@ impl SessionLockHandler for State {
         self.lock_epoch
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.super_tap = None;
+        self.aids_drop_pending();
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();
@@ -91,6 +92,7 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.aids_drop_pending();
         self.aids_quiet_changed();
         self.focus_top();
         self.refresh_pointer();

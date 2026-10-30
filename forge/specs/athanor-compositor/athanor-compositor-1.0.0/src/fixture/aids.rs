@@ -5,15 +5,17 @@
 
 use super::{
     chord, focused_window, key, lock_session, sent_to, Local, Running, VirtualKeyboard,
-    FIXTURE_ALLOW_LIST,
+    FIXTURE_ALLOW_LIST, SWAPPED_KEYMAP,
 };
 use crate::aids::{Aid, InvalidDelay, Notice, SHIFT};
 use crate::bindings::Action;
 use crate::identity::AllowList;
+use smithay::backend::input::{ButtonState, InputTime};
 use smithay::reexports::wayland_server::Resource;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::protocol::wl_seat;
+use wayland_protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 
 const KEY_ESC: u32 = 1;
@@ -23,6 +25,8 @@ const KEY_S: u32 = 31;
 const KEY_LEFTCTRL: u32 = 29;
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_LEFTALT: u32 = 56;
+const KEY_TAB: u32 = 15;
+const BTN_LEFT: u32 = 0x110;
 const KEY_F1: u32 = 59;
 const KEY_LEFTMETA: u32 = 125;
 
@@ -38,6 +42,12 @@ fn told(run: &mut Running) -> Vec<Notice> {
 fn tap(run: &mut Running, code: u32) {
     key(&mut run.state, code, true);
     key(&mut run.state, code, false);
+}
+
+/// Whether the seat's keyboard holds no key pressed.
+fn no_key_pressed(run: &Running) -> bool {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    keyboard.pressed_keys().is_empty()
 }
 
 /// Runs the loop for `ms` milliseconds, so that the aids' timers fire.
@@ -137,7 +147,7 @@ fn ax11_two_key_off_turns_sticky_keys_off() {
     );
 
     run.state.set_sticky_keys(true, true);
-    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_A]);
+    chord(&mut run.state, &[KEY_LEFTSHIFT, KEY_A]);
     window.roundtrip(&mut run);
     assert_eq!(
         told(&mut run),
@@ -356,7 +366,11 @@ fn ax11_the_aids_work_on_the_lock_surface_and_tell_nothing() {
         "sticky keys work on the lock surface"
     );
     assert_eq!(told(&mut run), [], "and nothing is told while locked");
-    assert_eq!(run.state.aid_modifiers(), None, "nor to a client that binds now");
+    assert_eq!(
+        run.state.aid_modifiers(),
+        None,
+        "nor to a client that binds now"
+    );
 
     lock.unlock_and_destroy();
     locker.pump(&mut run, "the session is unlocked", |_, state| {
@@ -468,5 +482,357 @@ fn ax11_a_trusted_prompt_is_told_nothing() {
         [modifiers(0, 0), Notice::AidOff(Aid::Sticky)],
         "the prompt left, what changed is told"
     );
+    run.stop();
+}
+
+/// Turning the last aid off leaves no press to arrive with no release: a key released within
+/// the delay stays rejected, and a key still held comes through, with its release.
+#[test]
+fn ax11_a_press_held_back_outlives_the_last_aid_turned_off() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 200).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    run.state.set_slow_keys(false, 0).expect("in bounds");
+    key(&mut run.state, KEY_A, false);
+    wait(&mut run, 250);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.keys,
+        [],
+        "released within the delay, it is rejected"
+    );
+    assert!(no_key_pressed(&run), "and no press is left with no release");
+    assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
+
+    run.state.set_slow_keys(true, 200).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    run.state.set_slow_keys(false, 0).expect("in bounds");
+    wait(&mut run, 250);
+    key(&mut run.state, KEY_A, false);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [KEY_A], "held, it comes through");
+    assert_eq!(window.client.released, [KEY_A], "with its release");
+    assert!(no_key_pressed(&run));
+    run.stop();
+}
+
+/// A modifier bounce keys rejected is let go with its release, though the aid went off
+/// meanwhile: it does not count as held when a key is judged protected later.
+#[test]
+fn ax11_a_rejected_modifier_does_not_stay_held_after_the_aid_is_off() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_bounce_keys(true, 2000).expect("in bounds");
+    tap(&mut run, KEY_LEFTCTRL);
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    assert_eq!(told(&mut run), [Notice::Rejected(Aid::Bounce)]);
+    run.state.set_bounce_keys(false, 0).expect("in bounds");
+    key(&mut run.state, KEY_LEFTCTRL, false);
+
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    chord(&mut run.state, &[KEY_LEFTALT, KEY_F1]);
+    assert_eq!(run.state.fired, [], "Alt+F1 is no switch to a text console");
+    run.stop();
+}
+
+/// A press held back when another client takes the keyboard reaches neither client, and its
+/// release is swallowed.
+#[test]
+fn ax11_a_focus_change_drops_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut first, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    let (mut second, _) = focused_window(&mut run);
+    wait(&mut run, 1100);
+    key(&mut run.state, KEY_A, false);
+    first.roundtrip(&mut run);
+    second.roundtrip(&mut run);
+    assert_eq!(first.client.keys, [], "the first window is sent nothing");
+    assert_eq!(second.client.keys, [], "and the second no press");
+    assert_eq!(second.client.released, [], "and no release");
+    assert!(no_key_pressed(&run));
+    run.stop();
+}
+
+/// A press held back when the session locks is dropped at the lock, before a lock surface
+/// takes the keyboard.
+#[test]
+fn ax11_a_lock_drops_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    let mut locker = Local::connect(&mut run, None);
+    let locks: ExtSessionLockManagerV1 = locker.bind(1);
+    let _lock = locks.lock(&locker.queue.handle(), ());
+    locker.pump(&mut run, "the session is locked", |_, state| {
+        state.lock.is_some()
+    });
+    wait(&mut run, 1100);
+    assert!(no_key_pressed(&run), "no press lands under the lock");
+    key(&mut run.state, KEY_A, false);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [], "and the window is sent nothing");
+    assert_eq!(window.client.released, []);
+    run.stop();
+}
+
+/// A press held back on the lock surface when the session unlocks does not reach the window
+/// the unlock gives the keyboard to: a password's last character stays at the lock.
+#[test]
+fn ax11_an_unlock_keeps_a_password_key_from_the_window_underneath() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let (mut locker, lock) = lock_session(&mut run);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    wait(&mut run, 1100);
+    key(&mut run.state, KEY_A, false);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.keys, [], "the window is sent no press");
+    assert_eq!(window.client.released, [], "and no release");
+    run.stop();
+}
+
+/// An unlock with no window to go to drops a press held back too: nothing gives the keyboard
+/// a new client, and the press would stay on it until a window opens.
+#[test]
+fn ax11_an_unlock_drops_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut locker, lock) = lock_session(&mut run);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    wait(&mut run, 1100);
+    assert!(no_key_pressed(&run));
+    key(&mut run.state, KEY_A, false);
+    run.stop();
+}
+
+/// With two-key-off a chord being built turns nothing off, and neither does a protected
+/// combination: Ctrl+Alt+Tab works and sticky keys stay on.
+#[test]
+fn ax11_two_key_off_spares_a_protected_combination() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_sticky_keys(true, true);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        told(&mut run),
+        [],
+        "neither Alt nor Tab turns sticky keys off"
+    );
+    assert_eq!(
+        run.state.fired,
+        [Action::FocusCycle],
+        "and the key still works"
+    );
+    tap(&mut run, KEY_LEFTSHIFT);
+    assert_eq!(told(&mut run), [modifiers(SHIFT, 0)], "they are still on");
+    run.stop();
+}
+
+/// A virtual keyboard's key is no part of a chord of the hardware's: it neither turns sticky
+/// keys off nor keeps the modifier held on the hardware from latching.
+#[test]
+fn ax11_two_key_off_reads_one_keyboard_at_a_time() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_sticky_keys(true, true);
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    keyboard.chord(&mut typist, &mut run, &[KEY_A]);
+    assert_eq!(told(&mut run), [], "the aid stays on");
+    key(&mut run.state, KEY_LEFTCTRL, false);
+    let notices = told(&mut run);
+    assert!(
+        matches!(notices[..], [Notice::Modifiers { latched, locked: 0 }] if latched != 0),
+        "and Ctrl was tapped alone: {notices:?}"
+    );
+    run.stop();
+}
+
+/// The Shift gestures count the hardware keyboard: a virtual keyboard's Shift offers nothing,
+/// and a virtual key does not break a run of the hardware's.
+#[test]
+fn ax11_the_shift_gestures_read_the_hardware_keyboard_only() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_aid_gestures(true);
+    for _ in 0..5 {
+        keyboard.chord(&mut typist, &mut run, &[KEY_LEFTSHIFT]);
+    }
+    assert_eq!(told(&mut run), [], "a client's five presses offer nothing");
+    for _ in 0..4 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    keyboard.chord(&mut typist, &mut run, &[KEY_A]);
+    tap(&mut run, KEY_LEFTSHIFT);
+    assert_eq!(told(&mut run), [Notice::Gesture(Aid::Sticky)]);
+    run.stop();
+}
+
+/// A pointer button pressed starts the count of Shift presses again, as another key does: five
+/// Shift+clicks offer nothing.
+#[test]
+fn ax11_a_click_starts_the_shift_count_again() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    run.state.set_aid_gestures(true);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+        run.state
+            .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+        run.state
+            .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+    }
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// Another key stops the timing of Shift held: nothing is offered eight seconds on.
+#[test]
+fn ax11_another_key_stops_the_shift_hold() {
+    let mut run = Running::start(None);
+    run.state.set_aid_gestures(true);
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    key(&mut run.state, KEY_A, true);
+    wait(&mut run, 8100);
+    assert_eq!(told(&mut run), []);
+    run.stop();
+}
+
+/// A latched or locked modifier counts towards a protected key: Ctrl and Alt tapped, then F1,
+/// switches to a text console at once with slow keys at their longest.
+#[test]
+fn ax11_a_protected_key_reads_the_latched_and_locked_modifiers() {
+    for taps in [1, 2] {
+        let mut run = Running::start(None);
+        let _window = focused_window(&mut run);
+        run.state.set_sticky_keys(true, false);
+        for _ in 0..taps {
+            tap(&mut run, KEY_LEFTCTRL);
+            tap(&mut run, KEY_LEFTALT);
+        }
+        run.state.set_slow_keys(true, 2000).expect("in bounds");
+        key(&mut run.state, KEY_F1, true);
+        assert_eq!(run.state.fired, [Action::Vt(1)], "after {taps} taps");
+        run.stop();
+    }
+}
+
+/// A latch survives a virtual keyboard with modifiers and no keymap: the seat's modifiers
+/// coming back after its key do not take a latch it set away.
+#[test]
+fn ax11_a_latch_of_a_virtual_keyboard_survives_its_key() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_sticky_keys(true, false);
+    keyboard.modifiers(&mut typist, &mut run, 0);
+    keyboard.chord(&mut typist, &mut run, &[KEY_LEFTSHIFT]);
+    assert_eq!(told(&mut run), [modifiers(SHIFT, 0)]);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.modifier_latches.last(), Some(&XKB_SHIFT));
+    run.stop();
+}
+
+/// A hardware latch a virtual keyboard's key with no keymap uses up does not come back when the
+/// seat's modifiers do.
+#[test]
+fn ax11_a_latch_used_by_a_virtual_keyboard_does_not_come_back() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTSHIFT);
+    keyboard.modifiers(&mut typist, &mut run, 0);
+    keyboard.chord(&mut typist, &mut run, &[KEY_A]);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.modifier_latches.last(), Some(&0));
+    run.stop();
+}
+
+/// A hardware latch applies under a virtual keyboard's own keymap: S is Super there, a modifier,
+/// which leaves the latch for the next key.
+#[test]
+fn ax11_a_latch_crosses_a_virtual_keymap() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(SWAPPED_KEYMAP));
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTSHIFT);
+    keyboard.key(&mut typist, &mut run, KEY_S, true);
+    let seat = run.state.seat.get_keyboard().expect("a keyboard");
+    assert_eq!(seat.modifier_state().serialized.latched, XKB_SHIFT);
+    run.stop();
+}
+
+/// A latch not used under a virtual keyboard's own keymap is there when the seat's comes back.
+#[test]
+fn ax11_a_latch_comes_back_with_the_seat_keymap() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(SWAPPED_KEYMAP));
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTSHIFT);
+    keyboard.key(&mut typist, &mut run, KEY_S, true);
+    keyboard.key(&mut typist, &mut run, KEY_S, false);
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    let seat = run.state.seat.get_keyboard().expect("a keyboard");
+    assert_eq!(
+        seat.modifier_state().serialized.latched & XKB_SHIFT,
+        XKB_SHIFT
+    );
+    run.stop();
+}
+
+/// A modifier held back on one keyboard does not make another keyboard's key protected.
+#[test]
+fn ax11_a_protected_key_reads_its_own_keyboard_held_back() {
+    let mut run = Running::start(None);
+    let _window = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, None);
+    run.state.set_slow_keys(true, 2000).expect("in bounds");
+    key(&mut run.state, KEY_LEFTCTRL, true);
+    key(&mut run.state, KEY_LEFTALT, true);
+    keyboard.chord(&mut typist, &mut run, &[KEY_F1]);
+    assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
+    run.stop();
+}
+
+/// A latch a key under a virtual keyboard's own keymap uses up does not come back with the
+/// seat's keymap, before the next hardware key.
+#[test]
+fn ax11_a_latch_used_under_a_virtual_keymap_does_not_come_back() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut typist = Local::connect(&mut run, None);
+    let keyboard = VirtualKeyboard::new(&mut typist, &mut run, Some(SWAPPED_KEYMAP));
+    run.state.set_sticky_keys(true, false);
+    tap(&mut run, KEY_LEFTSHIFT);
+    keyboard.chord(&mut typist, &mut run, &[KEY_A]);
+    tap(&mut run, KEY_A);
+    window.roundtrip(&mut run);
+    let seat = run.state.seat.get_keyboard().expect("a keyboard");
+    assert_eq!(seat.modifier_state().serialized.latched, 0);
+    assert_eq!(window.client.modifier_latches.last(), Some(&0));
     run.stop();
 }

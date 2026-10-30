@@ -272,6 +272,9 @@ impl State {
     /// A button pressed or released: a press first focuses what is under the pointer.
     pub fn button_input(&mut self, button: u32, button_state: ButtonState, time: InputTime) {
         self.super_tap = None;
+        if button_state == ButtonState::Pressed {
+            self.aids_pointer_pressed();
+        }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -405,28 +408,23 @@ impl State {
         }
         let modifiers = self.virtual_modifiers.get(device).copied();
         let seat_modifiers = (self.virtual_keymap.is_none() && modifiers.is_some())
-            .then(|| keyboard.modifier_state().serialized);
+            .then(|| self.seat_modifiers(&keyboard));
         if let Some(modifiers) = modifiers {
             self.set_modifiers(&keyboard, modifiers);
         }
         input(self);
         if let Some(saved) = seat_modifiers {
-            let mask = [
-                saved.depressed,
-                saved.latched,
-                saved.locked,
-                saved.layout_effective,
-            ];
-            self.set_modifiers(&keyboard, mask);
+            self.set_modifiers(&keyboard, saved);
         }
         self.send_keyboard_group();
     }
 
     /// Sets the seat's modifiers to `[depressed, latched, locked, group]`, a virtual keyboard's,
-    /// with no key: the focused surface is sent them when they change, and so is the input
-    /// method's grab, which a key would otherwise have carried them to.
+    /// with no key, and those of sticky keys over them: the focused surface is sent them when
+    /// they change, and so is the input method's grab, which a key would otherwise have carried
+    /// them to.
     pub(crate) fn set_modifiers(&mut self, keyboard: &KeyboardHandle<Self>, mask: [u32; 4]) {
-        let [depressed, latched, locked, group] = mask;
+        let [depressed, latched, locked, group] = self.with_sticky(mask);
         let before = keyboard.modifier_state().serialized;
         keyboard.with_xkb_state(self, |mut context| {
             context.set_modifier_mask(depressed, latched, locked, group)
@@ -454,18 +452,10 @@ impl State {
         }
         let (seat_keymap, seat_modifiers) = match current {
             Some(current) => (current.seat_keymap.clone(), current.seat_modifiers),
-            None => {
-                let saved = keyboard.modifier_state().serialized;
-                (
-                    keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
-                    [
-                        saved.depressed,
-                        saved.latched,
-                        saved.locked,
-                        saved.layout_effective,
-                    ],
-                )
-            }
+            None => (
+                keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                self.seat_modifiers(keyboard),
+            ),
         };
         if *keymap == *seat_keymap {
             self.restore_seat_keymap();
@@ -484,6 +474,15 @@ impl State {
             seat_keymap,
             seat_modifiers,
         });
+        // A new keymap starts with no modifier: sticky keys' apply to its keys too.
+        let mods = keyboard.modifier_state().serialized;
+        let mask = [
+            mods.depressed,
+            mods.latched,
+            mods.locked,
+            mods.layout_effective,
+        ];
+        self.set_modifiers(keyboard, mask);
         self.input_method_keymap_changed();
         true
     }
@@ -509,7 +508,7 @@ impl State {
             }
         }
         // A new keymap starts with no modifier locked: the seat's Caps Lock and layout return.
-        let [depressed, latched, locked, layout] = current.seat_modifiers;
+        let [depressed, latched, locked, layout] = self.with_sticky(current.seat_modifiers);
         keyboard.with_xkb_state(self, |mut context| {
             context.set_modifier_mask(depressed, latched, locked, layout)
         });
