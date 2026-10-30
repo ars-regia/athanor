@@ -1029,3 +1029,90 @@ fn a_session_unlock_keeps_a_suspension() {
     game.wait(&mut run, &log, &lifted, "the click lifts it");
     run.stop();
 }
+
+/// A pen moves the pointer as any absolute device does: under a lock the pointer stays.
+#[test]
+fn a_pens_motion_keeps_a_lock() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let (_lock, log) = game.lock(Lifetime::Persistent);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    let before = Game::location(&run);
+    run.state.tool_motion(
+        "pen".into(),
+        &tool,
+        at + Point::from((30.0, 0.0)),
+        super::devices::pressure(),
+        InputTime::now(),
+    );
+    game.settle(&mut run);
+    assert_eq!(Game::location(&run), before, "a locked pointer stays");
+    run.stop();
+}
+
+/// A pen moves the pointer as any absolute device does: a confined pointer stays in its region.
+#[test]
+fn a_pens_motion_keeps_a_confinement() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let region = middle(&mut game.local);
+    let (_confined, log) = game.confine(Some(&region), Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    let inside = at + Point::from((5.0, 5.0));
+    for (to, stays) in [(inside, inside), (at + Point::from((60.0, 5.0)), inside)] {
+        run.state.tool_motion(
+            "pen".into(),
+            &tool,
+            to,
+            super::devices::pressure(),
+            InputTime::now(),
+        );
+        game.settle(&mut run);
+        assert_eq!(Game::location(&run), stays, "inside the region");
+    }
+    run.stop();
+}
+
+/// A pen put down elsewhere under a lock moves nothing for the landing: the locking client is
+/// sent the small move that follows, not the jump from where the pen was lifted.
+#[test]
+fn a_pen_landing_under_a_lock_sends_no_jump() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let relative: ZwpRelativePointerManagerV1 = game.local.bind(1);
+    let motions = Motions::default();
+    let _relative =
+        relative.get_relative_pointer(&game.pointer, &game.local.queue.handle(), motions.clone());
+    let (_lock, log) = game.lock(Lifetime::Persistent);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    let (tablet, tool, at) = super::devices::pen_at(&mut run, &mut game.local, game.at);
+    let before = Game::location(&run);
+    let far = at + Point::from((100.0, 0.0));
+    for (to, proximity) in [(at, smithay::backend::input::ProximityState::Out), (far, smithay::backend::input::ProximityState::In)] {
+        run.state.tool_proximity(
+            "pen".into(),
+            &tablet,
+            &tool,
+            to,
+            proximity,
+            smithay::input::tablet::tool::AxisFrame::default(),
+            InputTime::now(),
+        );
+    }
+    run.state.tool_motion(
+        "pen".into(),
+        &tool,
+        far + Point::from((3.0, 0.0)),
+        super::devices::pressure(),
+        InputTime::now(),
+    );
+    game.settle(&mut run);
+    let mut sent = std::mem::take(&mut *motions.lock().expect("the motions"));
+    // The sample of the lift repeats the last position: a move of nothing.
+    sent.retain(|motion| *motion != [0.0; 4]);
+    assert_eq!(sent, [[3.0, 0.0, 3.0, 0.0]], "only the small move");
+    assert_eq!(Game::location(&run), before, "the pointer stays");
+    run.stop();
+}

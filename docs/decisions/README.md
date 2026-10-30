@@ -68,7 +68,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 
 | Id | No. | Title | Status | Areas |
 | --- | --- | --- | --- | --- |
-| W1-ACCESSIBILITY | 0001 | [doc_accessibility decisions (wave 1)](0001-wave1-accessibility.md) | accepted | accessibility, shell |
+| W1-ACCESSIBILITY | 0001 | [doc_accessibility decisions (wave 1)](0001-wave1-accessibility.md) | amended by ADR-0133 | accessibility, shell |
 | W1-OSD | 0002 | [doc_osd decisions (wave 1)](0002-wave1-osd.md) | amended by A2-1 | shell, osd |
 | W1-LOCK | 0003 | [doc_lock_and_prompts decisions (wave 1)](0003-wave1-lock-and-prompts.md) | amended by A2-1, A2-6, A2-7 | security, shell |
 | W1-DISKS | 0004 | [doc_disks decisions (wave 1)](0004-wave1-disks.md) | amended by A2-14, A2-16 | storage, security |
@@ -200,3 +200,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0130 | 0130 | [The upgrade acceptance seeds a file the image ships and requires the attestation](0130-upgrade-acceptance-seed-and-attestation.md) | accepted | update, security, process |
 | ADR-0131 | 0131 | [The GitHub Release of each promotion, and release 0.9 without the VSA](0131-github-release-of-each-promotion.md) | accepted | build, release, process, security |
 | ADR-0132 | 0132 | [The own compositor becomes the default session before its full acceptance](0132-own-compositor-default-before-full-acceptance.md) | accepted | shell, security, process |
+| ADR-0133 | 0133 | [The own compositor takes the magnifier, the colour filters and the keyboard aids](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md) | accepted | accessibility, shell |

@@ -47,8 +47,12 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
 use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
 use smithay::reexports::drm::Device as _;
+use smithay::reexports::input::event::gesture::{
+    GestureHoldEvent, GesturePinchEvent, GestureSwipeEvent,
+};
 use smithay::reexports::input::event::{
-    DeviceEvent, EventTrait, KeyboardEvent, PointerEvent, SwitchEvent,
+    DeviceEvent, EventTrait, GestureEvent, KeyboardEvent, PointerEvent, SwitchEvent,
+    TabletToolEvent,
 };
 use smithay::reexports::input::{
     Device as InputDevice, Event as LibinputEvent, Libinput, SendEventsMode,
@@ -157,8 +161,8 @@ fn send_events(device: &InputDevice, on: bool) {
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
-/// devices, the switches and the kinds that handler acts on; `None` for the rest, which it takes
-/// only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
+/// devices, the switches, the gestures, the tablet tools and the kinds that handler acts on;
+/// `None` for the rest, which it takes only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
 fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend>> {
     Some(match event {
         LibinputEvent::Device(DeviceEvent::Added(added)) => InputEvent::DeviceAdded {
@@ -182,6 +186,40 @@ fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend
         },
         LibinputEvent::Pointer(PointerEvent::ScrollContinuous(event)) => InputEvent::PointerAxis {
             event: PointerScrollAxis::Continuous(event),
+        },
+        LibinputEvent::Gesture(gesture) => match gesture {
+            GestureEvent::Swipe(GestureSwipeEvent::Begin(event)) => {
+                InputEvent::GestureSwipeBegin { event }
+            }
+            GestureEvent::Swipe(GestureSwipeEvent::Update(event)) => {
+                InputEvent::GestureSwipeUpdate { event }
+            }
+            GestureEvent::Swipe(GestureSwipeEvent::End(event)) => {
+                InputEvent::GestureSwipeEnd { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::Begin(event)) => {
+                InputEvent::GesturePinchBegin { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::Update(event)) => {
+                InputEvent::GesturePinchUpdate { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::End(event)) => {
+                InputEvent::GesturePinchEnd { event }
+            }
+            GestureEvent::Hold(GestureHoldEvent::Begin(event)) => {
+                InputEvent::GestureHoldBegin { event }
+            }
+            GestureEvent::Hold(GestureHoldEvent::End(event)) => {
+                InputEvent::GestureHoldEnd { event }
+            }
+            _ => return None,
+        },
+        LibinputEvent::Tablet(tablet) => match tablet {
+            TabletToolEvent::Axis(event) => InputEvent::TabletToolAxis { event },
+            TabletToolEvent::Proximity(event) => InputEvent::TabletToolProximity { event },
+            TabletToolEvent::Tip(event) => InputEvent::TabletToolTip { event },
+            TabletToolEvent::Button(event) => InputEvent::TabletToolButton { event },
+            _ => return None,
         },
         _ => return None,
     })

@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="athanor_a11y_v1">
+  <copyright>
+    Copyright © 2026 Athanor Forge
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="the compositor's magnifier, colour filters and keyboard aids">
+    The magnifier, the colour inversion and filters, and the keyboard aids (sticky, slow and
+    bounce keys) of the compositor, switched and configured by the shell, and their state. The
+    compositor offers the manager only to the clients its allow-list names for it; it is
+    Athanor's own protocol (doc_own_stack.md OS4 and OS5, doc_accessibility.md AX10 and AX11).
+    Its requests and events follow cosmic_a11y_manager_v1 version 3 where that protocol covers
+    the same thing.
+
+    The compositor stores the inversion and the filter, and reads the magnifier's behaviour,
+    where cosmic-comp does, so that both sessions show the same state (doc_accessibility.md
+    AX10). It stores no keyboard aid setting: a client sends them after it binds and at each
+    change, and until one does every aid is off. What a client sets outlives it: destroying the
+    manager or the client's exit changes no state, so the bounds of each request, not the
+    client, keep the keyboard usable.
+
+    While the session is locked the aids keep working, on the lock surface too, since their
+    user types the password with them. The keys the compositor always keeps, the protected keys
+    of doc_own_stack.md decision 30 (the reveal key, Super+Escape, Super+Alt+Escape, Ctrl+Alt+Tab,
+    Super+Alt+A, Super+Alt+S and the switch to a text console), pass slow keys and bounce keys
+    unfiltered, so that no setting of the aids makes the lock surface unusable. While the
+    session is locked, and while a surface the compositor identifies by its client's line in
+    the allow-list as a trusted prompt has the keyboard focus, the modifiers, key_rejected and
+    gesture events are not sent, so that nothing of a password's typing reaches a client; the
+    modifiers event is sent again when that ends. The allow-list has no mark of a trusted prompt
+    yet: the first code that serves the keyboard aids adds it (doc_own_stack.md OS5, proposed with
+    revision 3 of doc_accessibility.md, #865).
+
+    A new version adds interfaces, requests, events or enum entries; a client binds the
+    version it knows.
+  </description>
+
+  <interface name="athanor_a11y_manager_v1" version="1">
+    <description summary="the accessibility features of the compositor">
+      Switches the magnifier and the colour filters, configures the keyboard aids, and sends
+      their state. When the manager is bound, the magnifier, screen_filter and modifiers events
+      are sent at once, then each at each change; the modifiers event is sent at once unless
+      the session is locked or a trusted prompt has the focus, in which case at the end of it.
+
+      A zoom step multiplies or divides the level by one plus the increment of cosmic-comp's
+      accessibility_zoom as a fraction (50 is 1.5 times), as cosmic-comp does, and keeps it
+      between 1 and cosmic-comp's maximum, 256; a level below 1.01 is 1, the magnifier off. An
+      increment of 0, which would never change the level, or one that cannot be read, is
+      replaced by cosmic-comp's default, 50, and logged.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_value" value="0"
+        summary="an argument is not a value of its enum, or lies outside its bounds"/>
+    </enum>
+
+    <enum name="active_state">
+      <entry name="disabled" value="0" summary="the feature is off"/>
+      <entry name="enabled" value="1" summary="the feature is on"/>
+    </enum>
+
+    <enum name="filter">
+      <description summary="a colour filter">
+        The values are those of cosmic_a11y_manager_v1's filter enum. As in its version 2,
+        none (cosmic's disabled) turns the filter off, where its version 3 adds a separate
+        filter_state: the stored state is cosmic-comp's record, which holds one filter or none,
+        not a chosen filter switched off.
+      </description>
+      <entry name="none" value="0" summary="no colour filter"/>
+      <entry name="unknown" value="1"
+        summary="a filter this version does not name; in a request, the current filter kept"/>
+      <entry name="greyscale" value="2" summary="greyscale"/>
+      <entry name="protanopia" value="3" summary="daltonized for protanopia"/>
+      <entry name="deuteranopia" value="4" summary="daltonized for deuteranopia"/>
+      <entry name="tritanopia" value="5" summary="daltonized for tritanopia"/>
+    </enum>
+
+    <enum name="modifier" bitfield="true">
+      <entry name="shift" value="1" summary="Shift"/>
+      <entry name="control" value="2" summary="Control"/>
+      <entry name="alt" value="4" summary="Alt"/>
+      <entry name="super" value="8" summary="Super"/>
+      <entry name="altgr" value="16" summary="AltGr, the third level"/>
+    </enum>
+
+    <enum name="aid">
+      <entry name="sticky_keys" value="0" summary="sticky keys"/>
+      <entry name="slow_keys" value="1" summary="slow keys"/>
+      <entry name="bounce_keys" value="2" summary="bounce keys"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        The magnifier, the filters and the keyboard aids keep their state and settings, in
+        this session, until a client changes them.
+      </description>
+    </request>
+
+    <request name="set_magnifier">
+      <description summary="turn the magnifier on or off">
+        Turns the magnifier on at the last level it had in this session, or at one zoom step,
+        or off. The client waits for the magnifier event before it shows the change.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+    </request>
+
+    <request name="zoom_in">
+      <description summary="zoom in by one step">
+        Raises the level by one zoom step, as the zoom-in key does. With the magnifier off,
+        turns it on at one step.
+      </description>
+    </request>
+
+    <request name="zoom_out">
+      <description summary="zoom out by one step">
+        Lowers the level by one zoom step, as the zoom-out key does; at level 1 the magnifier
+        is off. With the magnifier off, does nothing.
+      </description>
+    </request>
+
+    <event name="magnifier">
+      <description summary="the state of the magnifier"/>
+      <arg name="active" type="uint" enum="active_state"/>
+      <arg name="level" type="fixed" summary="the magnification, 1 when off"/>
+    </event>
+
+    <request name="set_screen_filter">
+      <description summary="set the colour inversion and filter">
+        Sets the inversion and the filter, and stores them as cosmic-comp does. A filter of
+        unknown keeps the current filter, so that a client can change the inversion without
+        knowing the filter. The client waits for the screen_filter event before it shows the
+        change.
+      </description>
+      <arg name="inverted" type="uint" enum="active_state"/>
+      <arg name="filter" type="uint" enum="filter"/>
+    </request>
+
+    <event name="screen_filter">
+      <description summary="the state of the colour inversion and filter">
+        A filter in the stored state that this version does not name is sent as unknown.
+      </description>
+      <arg name="inverted" type="uint" enum="active_state"/>
+      <arg name="filter" type="uint" enum="filter"/>
+    </event>
+
+    <request name="set_sticky_keys">
+      <description summary="configure sticky keys">
+        With sticky keys on, a modifier pressed and released alone is latched for the next
+        key, and pressed twice is locked until it is pressed again. With two_key_off enabled,
+        two keys pressed together turn sticky keys off, and the compositor sends aid_off.
+        Turning sticky keys off releases every latched and locked modifier.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+      <arg name="two_key_off" type="uint" enum="active_state"/>
+    </request>
+
+    <request name="set_slow_keys">
+      <description summary="configure slow keys">
+        With slow keys on, a key other than the protected keys is accepted only once it has
+        been held for delay milliseconds; a key released earlier is rejected. A delay above
+        2000 raises invalid_value.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+      <arg name="delay" type="uint"
+        summary="the time a key is held before it is accepted, in ms, from 0 to 2000"/>
+    </request>
+
+    <request name="set_bounce_keys">
+      <description summary="configure bounce keys">
+        With bounce keys on, a press of a key other than the protected keys within delay
+        milliseconds of its last release is rejected. A delay above 2000 raises invalid_value.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+      <arg name="delay" type="uint"
+        summary="the time after a release in which the key is ignored, in ms, from 0 to 2000"/>
+    </request>
+
+    <request name="set_aid_gestures">
+      <description summary="allow the Shift gestures">
+        With the gestures enabled, Shift pressed five times in a row is reported as the
+        sticky_keys gesture, and Shift held for eight seconds as the slow_keys gesture. The
+        compositor changes no setting for a gesture: the client offers the aid to the user.
+        Disabled until the client enables them.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+    </request>
+
+    <event name="modifiers">
+      <description summary="the latched and locked modifiers">
+        The modifiers sticky keys holds latched and locked; a modifier absent is neither. Not
+        sent while the session is locked or a trusted prompt has the keyboard focus.
+      </description>
+      <arg name="latched" type="uint" enum="modifier"/>
+      <arg name="locked" type="uint" enum="modifier"/>
+    </event>
+
+    <event name="key_rejected">
+      <description summary="the aids rejected a key">
+        Slow keys or bounce keys rejected a key press. Which key is never sent. Not sent while
+        the session is locked or a trusted prompt has the keyboard focus.
+      </description>
+      <arg name="aid" type="uint" enum="aid"/>
+    </event>
+
+    <event name="gesture">
+      <description summary="a Shift gesture was made">
+        The gesture that offers sticky keys or slow keys, sent only while the gestures are
+        enabled, and not while the session is locked or a trusted prompt has the keyboard
+        focus. bounce_keys is never sent.
+      </description>
+      <arg name="aid" type="uint" enum="aid"/>
+    </event>
+
+    <event name="aid_off">
+      <description summary="the compositor turned an aid off">
+        The compositor turned an aid off itself: sticky_keys, by two-key-off. The client
+        stores the aid as off, so that the setting it sends next agrees. Sent when it happens,
+        or when the lock or the trusted prompt's focus ends if it happened then.
+      </description>
+      <arg name="aid" type="uint" enum="aid"/>
+    </event>
+  </interface>
+</protocol>
