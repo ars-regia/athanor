@@ -5,14 +5,15 @@
 //! the clients the allow-list grants them, take the same path (OS4, OS9 task 6).
 
 use crate::bindings;
+use crate::keyboard_monitor::Taken;
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, Event, InputBackend,
-    InputEvent, InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, Device, Event, InputBackend, InputEvent,
+    InputTime, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Keysym, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
@@ -94,17 +95,28 @@ impl State {
             .and_then(|surface| surface.client());
         // Read before the filter, which runs with the keyboard held.
         let inhibited = self.shortcuts_inhibited();
-        // Caps Lock as Orca's modifier, let go: the lock its press set, which no client saw.
-        let mut unlock_caps = false;
+        let locked = keyboard.modifier_state().serialized.locked;
+        // One of Orca's virtual modifiers, pressed or let go: it changes no modifier.
+        let mut virtual_modifier = false;
+        // Let go, it changed the locked modifiers (Caps Lock): those before its press.
+        let mut relock = None;
         let filtered =
             keyboard.input_intercept(source, self, code, key_state, |state, modifiers, handle| {
+                let found = match key_state {
+                    KeyState::Pressed => bindings::find(modifiers, &handle, state.lock.is_some()),
+                    KeyState::Released => None,
+                };
                 // The keyboard aids of AX11 take their place here, before the monitor (#865).
                 // Orca is sent every key once: the input method's forwarded keys are the
                 // hardware's it was sent already. The monitor is not a binding: an inhibitor
-                // leaves it working (decision 30).
+                // leaves it working (decision 30). A protected key is the compositor's alone,
+                // Orca's too (OS4; the maintainer's decision of 2026-10-30, #863).
                 if !past_grab {
                     let released = key_state == KeyState::Released;
-                    state.keyboard_monitor.observe(modifiers, &handle, released);
+                    let protected = found.is_some_and(|action| action.never_inhibited());
+                    state
+                        .keyboard_monitor
+                        .observe(modifiers, &handle, released, protected);
                 }
                 match key_state {
                     KeyState::Pressed => {
@@ -123,33 +135,35 @@ impl State {
                         }
                         // Under an inhibitor only the user's way out stays the compositor's
                         // (decision 30).
-                        match bindings::find(modifiers, &handle, state.lock.is_some())
-                            .filter(|action| !inhibited || action.never_inhibited())
-                        {
+                        match found.filter(|action| !inhibited || action.never_inhibited()) {
                             Some(action) => {
                                 state.kept_keys.push(code);
                                 FilterResult::Intercept(Some(action))
                             }
                             // After the bindings, Orca's grabs, an inhibitor or not (decision
-                            // 30). While the session is locked no grab or virtual modifier
-                            // takes a key from the lock surface, and Orca, watching, is still
-                            // sent every key, the lock surface's included, as cosmic-comp does,
-                            // so that it speaks during the unlock: the maintainer's decision of
-                            // 2026-10-30 (#863), not an oversight.
-                            None if !past_grab
-                                && state.lock.is_none()
-                                && state.keyboard_monitor.takes(modifiers, &handle) =>
-                            {
-                                state.kept_keys.push(code);
-                                FilterResult::Intercept(None)
+                            // 30): a grab never takes a protected key. While the session is
+                            // locked no grab or virtual modifier takes a key from the lock
+                            // surface, and Orca, watching, is still sent every key, the lock
+                            // surface's included, as cosmic-comp does, so that it speaks during
+                            // the unlock: the maintainer's decision of 2026-10-30 (#863), not an
+                            // oversight.
+                            None if !past_grab && state.lock.is_none() => {
+                                match state.keyboard_monitor.takes(modifiers, &handle, locked) {
+                                    Some(taken) => {
+                                        virtual_modifier = taken == Taken::Modifier;
+                                        state.kept_keys.push(code);
+                                        FilterResult::Intercept(None)
+                                    }
+                                    None => FilterResult::Forward,
+                                }
                             }
                             None => FilterResult::Forward,
                         }
                     }
                     KeyState::Released => {
-                        unlock_caps = state.keyboard_monitor.released(&handle)
-                            && handle.modified_sym() == Keysym::Caps_Lock
-                            && modifiers.caps_lock;
+                        let before = state.keyboard_monitor.released(&handle);
+                        virtual_modifier = before.is_some();
+                        relock = before.filter(|before| *before != modifiers.serialized.locked);
                         // The release of a kept press is kept: the client never saw the key
                         // go down.
                         match state.kept_keys.iter().position(|k| *k == code) {
@@ -163,7 +177,16 @@ impl State {
                 }
             });
         let filtered = match filtered {
-            Some((FilterResult::Intercept(kept), _)) => Some(kept),
+            Some((FilterResult::Intercept(kept), mods_changed)) => {
+                // A key kept from the focus for Orca changed the modifiers, as Caps Lock under
+                // its grab does: the focus, sent no key, is sent the modifiers, so that it reads
+                // the next key as the compositor does. A virtual modifier's change is undone
+                // instead (below).
+                if kept.is_none() && mods_changed && !virtual_modifier {
+                    keyboard.advertise_modifier_state(self);
+                }
+                Some(kept)
+            }
             Some((FilterResult::Forward, mods_changed)) => {
                 if past_grab {
                     // The focus is sent no modifiers while a grab holds the keyboard: they are
@@ -195,15 +218,20 @@ impl State {
             Some(Some(action)) => self.fire_by_key(action),
             Some(None) => {}
         }
-        if unlock_caps {
-            // Pressed again and let go, kept from the client as the first press was: the lock
-            // is undone, and the client, never sent it, is sent nothing.
+        if let Some(before) = relock {
+            // Caps Lock as Orca's modifier: pressed again and let go, kept from every client as
+            // the first press was, it gives back the lock from before its press, on or off.
             for key_state in [KeyState::Pressed, KeyState::Released] {
                 let serial = SERIAL_COUNTER.next_serial();
                 keyboard.input(self, code, key_state, serial, time, |_, _, _| {
                     FilterResult::Intercept(())
                 });
             }
+            if keyboard.modifier_state().serialized.locked != before {
+                tracing::warn!("Orca's modifier changed the keyboard's locks for good");
+            }
+            // The focus may have been sent the lock with a key forwarded meanwhile.
+            keyboard.advertise_modifier_state(self);
         }
         // Super alone, released: the launcher, after the release has reached the client, which
         // saw Super pressed (D4). Not while locked (`State::fire`), nor when an inhibitor became

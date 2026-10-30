@@ -267,33 +267,52 @@ requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
 - The interface (`GrabKeyboard`, `UngrabKeyboard`, `WatchKeyboard`, `UnwatchKeyboard`,
   `SetKeyGrabs`, the `KeyEvent` signal) lives at `/org/freedesktop/a11y/Manager` under
   `org.freedesktop.a11y.Manager` on the session bus, served through zbus on threads of its own
-  that talk to calloop through channels. The signal goes to its client alone. If the bus closes
-  or the name's watch ends, every client is forgotten and the monitor stops, logged: no stale
-  grab outlives it.
+  that talk to calloop through channels. Its calls are handled one at a time, in the order the
+  bus sent them, so that a grab and its release are never applied the wrong way round; each is
+  answered once it is admitted. The admission asks the bus, and reads the changes of names, on
+  a second connection: zbus stops reading a connection while one of its queues is full, so the
+  calls waiting on the first never block the answers the admission waits for. The signal goes to
+  its client alone. If the bus closes or the name's watch ends, every client is forgotten and
+  the monitor stops, logged: no stale grab outlives it.
 - Every call is admitted before it changes anything: its sender owns
   `org.gnome.Orca.KeyboardMonitor`, runs in the cgroup of `orca.service`, and runs an
   executable under `/usr` that is the very file at its path, read through the pidfd of
   `GetConnectionCredentials`' `ProcessFD`, or, from a bus without it, the pid asked for twice
   and opened as a pidfd, with AX5's reuse check after the reads. `/usr/bin/orca` is a Python
   script, so the executable is the interpreter: the unit is what tells Orca apart. A refused
-  call is answered without an error and changes nothing; a refused client is forgotten. When
-  Orca's name changes owner, or an admitted client leaves the bus, every client is admitted
-  again. AX4 open doubt 9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an
-  ordinary peer; the image's bus and Orca itself are not yet observed.
+  call is answered `org.freedesktop.DBus.Error.AccessDenied` and changes nothing; a refused
+  client is forgotten; the journal names a refusal at most once a minute. When Orca's name
+  changes owner, or a connection comes or goes, every admitted client is admitted again, and
+  one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
+  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer; the
+  image's bus and Orca itself are not yet observed.
 - In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
-  the bindings, and the input method's forwarded keys are not sent twice. After the bindings a
-  key Orca grabs, its virtual modifiers (Insert, Caps Lock) or the whole keyboard is kept from
-  the focused client. The monitor is not a binding: under a shortcuts inhibitor a watcher is
-  still sent every key and a grab still takes its key (`doc_own_stack.md` decision 30). While
-  the session is locked a watcher is still sent every key, the lock surface's included, as
-  cosmic-comp does, so that Orca speaks during the unlock, and no grab or virtual modifier takes
-  a key: the maintainer's decision of 2026-10-30 (#863), not an oversight. Caps Lock as Orca's
-  modifier leaves no lock behind. `KeyEvent` is declared in the interface, so its
-  introspection lists it.
+  the bindings, and the input method's forwarded keys are not sent twice. A protected key, one
+  whose action no inhibitor takes from the compositor (`Action::never_inhibited`: lock, VT
+  switch, terminate, reveal, the focus cycle, the screen reader's own key), is sent to no
+  client, Orca included, press and release, as OS4 says of the reveal key: the maintainer's
+  decision of 2026-10-30 (#863). After the bindings a key Orca grabs, its virtual modifiers
+  (Insert, Caps Lock) or the whole keyboard is kept from the focused client; no grab takes a
+  protected key. A grab matches the key as the keyboard reads it, and a capital letter matches
+  the small one Orca grabs, since Caps Lock capitalizes it; the modifiers match exactly, all but
+  the Lock that Caps Lock, held, sets. A virtual modifier is held by its key, not by the keysym the
+  keyboard reads for it when it is let go. The monitor is not a binding: under a shortcuts inhibitor
+  a watcher is still sent every key and a grab still takes its key (`doc_own_stack.md` decision
+  30). While the session is locked a watcher is still sent every key but the protected ones, the
+  lock surface's included, as cosmic-comp does, so that Orca speaks during the unlock, and no
+  grab or virtual modifier takes a key: the maintainer's decision of 2026-10-30 (#863), not an
+  oversight. Caps Lock as Orca's modifier gives back the lock it found, on or off, and the
+  focused client is told; a key a grab keeps from the client that changes the modifiers, as
+  Caps Lock under a grab of the keyboard does, is told to the client as modifiers. `KeyEvent`
+  is declared in the interface, so its introspection lists it.
 - The fixture tests (`src/fixture/keyboard_monitor.rs`) cover the watcher, the grabs, the
-  refused callers, the virtual keyboard, the shortcuts inhibitor and the lock. Not yet
-  covered: `rig.sh orca` testing an Orca command under `RIG_COMPOSITOR=athanor`, and a check on
-  the laptop with Orca itself.
+  protected keys under a grab and under an inhibitor, Caps Lock's capital letters and its lock,
+  the keypad's virtual modifier, the refused callers, the virtual keyboard, the shortcuts
+  inhibitor and the lock. One test serves the interface on a private `dbus-daemon`: Orca is
+  admitted before its answer, another client is answered `AccessDenied`, a key is addressed to
+  its client alone, Orca is forgotten when it lets its name go, and every client when the bus
+  goes. Not yet covered: the order of calls under load, `rig.sh orca` testing an Orca command
+  under `RIG_COMPOSITOR=athanor`, and a check on the laptop with Orca itself.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected

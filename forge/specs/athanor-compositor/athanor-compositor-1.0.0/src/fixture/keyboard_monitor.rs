@@ -1,18 +1,29 @@
 //! The fixture's tests of Orca's keyboard monitor (doc_own_stack.md OS4, doc_accessibility.md
 //! AX4; `keyboard_monitor.rs`). A call is admitted as the monitor's thread admits it, through
 //! `check` with the bus's credentials of this test's own process, read as whatever executable
-//! and cgroup the test sets; the signals are read from the queue the loop sends them to.
+//! and cgroup the test sets; the signals are read from the queue the loop sends them to. The
+//! last test serves the interface on a private bus, as the monitor's thread does.
 
 use super::{
     focused_window, lock_session, sent_to, Local, Running, VirtualKeyboard,
 };
+use crate::bindings::Action;
 use crate::identity::{pidfd_open, FileId, Process};
-use crate::keyboard_monitor::{check, Change, KeyEvent, Update};
-use smithay::input::keyboard::Keysym;
+use crate::keyboard_monitor::{check, serve, Change, KeyEvent, Update, INTERFACE, NAME, PATH};
+use smithay::backend::input::{InputTime, KeyState};
+use smithay::input::keyboard::{KeyboardSource, Keysym};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{channel, sync_channel, Receiver};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use wayland_client::protocol::wl_seat;
+use zbus::blocking::fdo::DBusProxy;
+use zbus::blocking::connection::Builder;
+use zbus::blocking::{Connection, MessageIterator};
+use zbus::message::Type;
+use zbus::{MatchRule, Message};
 use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
 use zbus::fdo::ConnectionCredentials;
 
@@ -25,6 +36,12 @@ const KEY_S: u32 = 31;
 const KEY_LEFTSHIFT: u32 = 42;
 const KEY_CAPSLOCK: u32 = 58;
 const KEY_INSERT: u32 = 110;
+const KEY_KP0: u32 = 82;
+
+/// The Lock modifier of xkb's masks: Caps Lock's.
+const LOCK: u32 = 1 << 1;
+/// How long the bus test waits for an answer.
+const WAIT: Duration = Duration::from_secs(10);
 
 /// Orca's unique name on the bus, and another client's.
 const ORCA: &str = ":1.42";
@@ -108,6 +125,48 @@ fn pressed(keysym: Keysym) -> [(bool, Keysym); 2] {
     [(false, keysym), (true, keysym)]
 }
 
+/// Super and Alt, pressed and released around a key Orca is not sent.
+const SUPER_ALT: [(bool, Keysym); 4] = [
+    (false, Keysym::Super_L),
+    (false, Keysym::Alt_L),
+    (true, Keysym::Alt_L),
+    (true, Keysym::Super_L),
+];
+
+/// One key, pressed or let go, from the hardware keyboard.
+fn key(run: &mut Running, code: u32, key_state: KeyState) {
+    let code = (code + 8).into();
+    let time = InputTime::now();
+    run.state
+        .key_input(code, key_state, time, KeyboardSource::Physical);
+}
+
+/// The window's keyboard is the compositor's for Super+Alt+T, the reveal key, whatever Orca
+/// grabs: Orca is sent neither its press nor its release, and the key is revealed.
+fn reveal_is_protected(window: &mut Local, run: &mut Running, queued: &Receiver<KeyEvent>) {
+    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
+    let t = Keysym::t.raw();
+    let super_alt = 0x40 | 0x08;
+    let grabs = [
+        ("the whole keyboard", Change::Grab(true), SUPER_ALT.to_vec()),
+        ("Super+Alt+T", Change::KeyGrabs(vec![], vec![(t, super_alt)]), vec![]),
+    ];
+    for (what, grab, expected) in grabs {
+        assert!(call(run, ORCA, ORCA, &ORCA_PROCESS, grab), "{what}");
+        let fired = run.state.fired.len();
+        sent_to(window, run, &reveal);
+        assert_eq!(
+            run.state.fired[fired..],
+            [Action::Reveal],
+            "{what}: Orca's grab does not take the reveal key"
+        );
+        assert_eq!(heard(queued), expected, "{what}: Orca is not sent T");
+        for ungrab in [Change::Grab(false), Change::KeyGrabs(vec![], vec![])] {
+            assert!(call(run, ORCA, ORCA, &ORCA_PROCESS, ungrab));
+        }
+    }
+}
+
 /// An admitted watcher is sent every key, a bound one too, and the window is still sent the keys
 /// no binding and no grab takes.
 #[test]
@@ -141,22 +200,24 @@ fn ax4_a_watcher_receives_every_key_and_the_window_still_gets_it() {
         "and Orca is sent each of them"
     );
 
-    // Super+Alt+T, the reveal key, is the compositor's: the window never sees T, Orca does.
-    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
-    let (presses, _) = sent_to(&mut window, &mut run, &reveal);
-    assert_eq!(presses, [KEY_LEFTMETA, KEY_LEFTALT], "the binding keeps T");
+    // Super+C, bound, is the compositor's: the window never sees C, Orca does.
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_LEFTMETA, KEY_C]);
+    assert_eq!(presses, [KEY_LEFTMETA], "the binding keeps C");
     assert_eq!(
         heard(&queued),
         [
             (false, Keysym::Super_L),
-            (false, Keysym::Alt_L),
-            (false, Keysym::t),
-            (true, Keysym::t),
-            (true, Keysym::Alt_L),
+            (false, Keysym::c),
+            (true, Keysym::c),
             (true, Keysym::Super_L),
         ],
         "Orca hears a bound key too"
     );
+    // Super+Alt+T, the reveal key, is protected: the window never sees T, nor does Orca.
+    let reveal = [KEY_LEFTMETA, KEY_LEFTALT, KEY_T];
+    let (presses, _) = sent_to(&mut window, &mut run, &reveal);
+    assert_eq!(presses, [KEY_LEFTMETA, KEY_LEFTALT], "the binding keeps T");
+    assert_eq!(heard(&queued), SUPER_ALT, "Orca is not sent a protected key");
 
     assert!(call(
         &mut run,
@@ -171,7 +232,8 @@ fn ax4_a_watcher_receives_every_key_and_the_window_still_gets_it() {
 }
 
 /// A key Orca grabs, alone or with its virtual modifier, reaches Orca and not the window; other
-/// keys reach the window. Caps Lock as the virtual modifier leaves no lock behind.
+/// keys reach the window. Caps Lock as the virtual modifier leaves no lock behind, and a letter
+/// Orca grabs is still its own while Caps Lock capitalizes it.
 #[test]
 fn ax4_a_grabbed_key_reaches_orca_and_not_the_window() {
     let mut run = Running::start(None);
@@ -254,6 +316,20 @@ fn ax4_a_grabbed_key_reaches_orca_and_not_the_window() {
         !keyboard.modifier_state().caps_lock,
         "Caps Lock as Orca's modifier locks nothing"
     );
+    let s = Keysym::s.raw();
+    let grabs = Change::KeyGrabs(vec![caps], vec![(s, 1 << 15)]);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, grabs));
+    assert_eq!(
+        sent_to(&mut window, &mut run, &[KEY_CAPSLOCK, KEY_S]),
+        (vec![], vec![]),
+        "Caps Lock+S is Orca's"
+    );
+    assert_eq!(
+        heard(&queued),
+        pressed(Keysym::S),
+        "though Caps Lock, pressed, capitalizes the S Orca grabs"
+    );
+    assert!(!keyboard.modifier_state().caps_lock, "and locks nothing");
 
     // A client that goes is forgotten.
     let forget = Update {
@@ -445,7 +521,7 @@ fn ax4_an_inhibitor_leaves_the_monitor_working() {
         [KEY_LEFTMETA, KEY_LEFTALT],
         "the compositor keeps Super+Alt+T"
     );
-    assert_eq!(heard(&queued).len(), 6, "and Orca hears it");
+    assert_eq!(heard(&queued), SUPER_ALT, "and Orca is not sent T");
 
     assert_eq!(
         sent_to(&mut window, &mut run, &[KEY_A]),
@@ -453,5 +529,284 @@ fn ax4_an_inhibitor_leaves_the_monitor_working() {
         "Orca's grab takes A"
     );
     assert_eq!(heard(&queued), pressed(Keysym::a), "and Orca hears it");
+
+    assert!(call(
+        &mut run,
+        ORCA,
+        ORCA,
+        &ORCA_PROCESS,
+        Change::Watch(false)
+    ));
+    reveal_is_protected(&mut window, &mut run, &queued);
     run.stop();
+}
+
+/// Neither a grab of the whole keyboard nor a grab of the key takes a protected key from the
+/// compositor, nor is Orca sent it (the maintainer's decision of 2026-10-30, #863).
+#[test]
+fn ax4_a_grab_never_takes_a_protected_key() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let queued = listen(&mut run);
+    reveal_is_protected(&mut window, &mut run, &queued);
+    run.stop();
+}
+
+/// KP_Insert as Orca's modifier: held, it gives Orca the S it grabs with it; let go, with Shift
+/// pressed in between, it is let go, and S alone is the window's again. With the fixture's
+/// keymap the keypad key reads KP_Insert on its release under Shift too, so the test does not
+/// tell a modifier held by its key from one held by its keysym.
+#[test]
+fn ax4_a_virtual_modifier_is_let_go_by_its_key() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let insert = Keysym::KP_Insert.raw();
+    let grabs = Change::KeyGrabs(vec![insert], vec![(Keysym::s.raw(), 1 << 15)]);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, grabs));
+    let queued = listen(&mut run);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, Change::Watch(true)));
+    key(&mut run, KEY_KP0, KeyState::Pressed);
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_S]);
+    assert_eq!(presses, [], "KP_Insert held, S is Orca's");
+    key(&mut run, KEY_LEFTSHIFT, KeyState::Pressed);
+    key(&mut run, KEY_KP0, KeyState::Released);
+    key(&mut run, KEY_LEFTSHIFT, KeyState::Released);
+    window.roundtrip(&mut run);
+    let keypad: Vec<_> = heard(&queued)
+        .into_iter()
+        .filter(|(_, sym)| [Keysym::KP_Insert, Keysym::KP_0].contains(sym))
+        .collect();
+    assert_eq!(
+        keypad,
+        [(false, Keysym::KP_Insert), (true, Keysym::KP_Insert)],
+        "Orca is sent the keypad key, pressed and let go"
+    );
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_S]);
+    assert_eq!(presses, [KEY_S], "KP_Insert let go, S is the window's");
+    run.stop();
+}
+
+/// Caps Lock as Orca's modifier gives back the lock it found, on or off, and the window is told;
+/// Caps Lock under Orca's grab of the keyboard locks the keyboard, and the window, sent no key,
+/// is told of the lock.
+#[test]
+fn ax4_caps_lock_leaves_the_lock_as_the_window_knows_it() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let (presses, _) = sent_to(&mut window, &mut run, &[KEY_CAPSLOCK]);
+    assert_eq!(presses, [KEY_CAPSLOCK]);
+    assert!(keyboard.modifier_state().caps_lock, "Caps Lock locks");
+
+    let caps = Keysym::Caps_Lock.raw();
+    let grabs = Change::KeyGrabs(vec![caps], vec![]);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, grabs));
+    assert_eq!(
+        sent_to(&mut window, &mut run, &[KEY_CAPSLOCK]),
+        (vec![], vec![])
+    );
+    assert!(
+        keyboard.modifier_state().caps_lock,
+        "Caps Lock as Orca's modifier leaves the lock on"
+    );
+    let told = window.client.modifier_locks.last().copied();
+    assert_eq!(told.map(|locks| locks & LOCK), Some(LOCK), "as the window knows");
+
+    let ungrab = Change::KeyGrabs(vec![], vec![]);
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, ungrab));
+    assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, Change::Grab(true)));
+    assert_eq!(
+        sent_to(&mut window, &mut run, &[KEY_CAPSLOCK]),
+        (vec![], vec![]),
+        "the grab takes Caps Lock"
+    );
+    assert!(!keyboard.modifier_state().caps_lock, "which unlocks");
+    let told = window.client.modifier_locks.last().copied();
+    assert_eq!(told.map(|locks| locks & LOCK), Some(0), "as the window is told");
+    run.stop();
+}
+
+/// A private session bus: a `dbus-daemon` of its own, stopped and removed when dropped.
+struct Bus {
+    daemon: Child,
+    address: String,
+    dir: PathBuf,
+}
+
+impl Bus {
+    fn start() -> Self {
+        let dir = std::env::temp_dir().join(format!("athanor-compositor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("the bus's directory");
+        // A configuration of its own: `--session` reads the host's, which on a system running
+        // dbus-broker has no <listen> element.
+        let config = dir.join("bus.conf");
+        let policy = "<policy context=\"default\"><allow send_destination=\"*\"/>\
+                      <allow receive_sender=\"*\"/><allow own=\"*\"/></policy>";
+        let listen = format!("unix:path={}", dir.join("bus").display());
+        let text = format!("<busconfig><type>session</type><listen>{listen}</listen>{policy}</busconfig>");
+        std::fs::write(&config, text).expect("bus.conf");
+        let mut daemon = Command::new("dbus-daemon")
+            .args(["--nofork", "--nopidfile", "--print-address"])
+            .arg(format!("--config-file={}", config.display()))
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("dbus-daemon on PATH");
+        let mut address = String::new();
+        let stdout = daemon.stdout.take().expect("the daemon's output");
+        BufReader::new(stdout)
+            .read_line(&mut address)
+            .expect("the bus's address");
+        let address = address.trim().to_owned();
+        Self {
+            daemon,
+            address,
+            dir,
+        }
+    }
+
+    fn builder(&self) -> Builder<'static> {
+        Builder::address(self.address.as_str()).expect("the bus's address")
+    }
+
+    fn connect(&self) -> Connection {
+        self.builder().build().expect("a connection to the bus")
+    }
+}
+
+impl Drop for Bus {
+    fn drop(&mut self) {
+        // Test teardown: a daemon that already exited, or a directory already gone, is fine.
+        self.daemon.kill().ok();
+        self.daemon.wait().ok();
+        std::fs::remove_dir_all(&self.dir).ok();
+    }
+}
+
+/// The error's name, if the call failed.
+fn refused(answer: zbus::Result<Message>) -> Option<String> {
+    match answer {
+        Ok(_) => None,
+        Err(zbus::Error::MethodError(name, _, _)) => Some(name.to_string()),
+        Err(error) => panic!("the call did not reach the monitor: {error}"),
+    }
+}
+
+/// `method` of the monitor, with no arguments, called by `client`: the error's name, if it fails.
+fn ask(client: &Connection, method: &str) -> Option<String> {
+    refused(client.call_method(Some(NAME), PATH, Some(INTERFACE), method, &()))
+}
+
+/// The next `KeyEvent` `signals` delivers, within `WAIT`.
+fn next_key(signals: MessageIterator) -> (MessageIterator, Message) {
+    let (sent, received) = channel();
+    std::thread::spawn(move || {
+        let mut signals = signals;
+        let next = signals.next();
+        // The test may have given up waiting.
+        sent.send((signals, next)).ok();
+    });
+    let (signals, next) = received.recv_timeout(WAIT).expect("a key, in time");
+    (signals, next.expect("the bus").expect("a message"))
+}
+
+/// The `KeyEvent` signals addressed to `client`.
+fn key_events(client: &Connection) -> MessageIterator {
+    let rule = MatchRule::builder()
+        .msg_type(Type::Signal)
+        .interface(INTERFACE)
+        .and_then(|rule| rule.member("KeyEvent"))
+        .map(|rule| rule.build())
+        .expect("a match rule");
+    MessageIterator::for_match_rule(rule, client, None).expect("the match rule added")
+}
+
+/// On a real bus the monitor admits Orca's calls, and Orca's alone, before it answers them;
+/// refuses another client's with `AccessDenied`; sends a key to its client alone; forgets Orca
+/// when it lets its name go; and when the bus goes, forgets every client and stops.
+#[test]
+fn ax4_on_the_bus_the_monitor_serves_orca_alone() {
+    use crate::keyboard_monitor::ORCA as ORCA_NAME;
+    let bus = Bus::start();
+    let (served, asking) = (bus.builder(), bus.connect());
+    let (sent, updates) = channel();
+    let (events, queued) = sync_channel(8);
+    let server = std::thread::spawn(move || {
+        let send = |update: Update| {
+            sent.send(update)
+                .map_err(|_| crate::Error::from("the test has ended"))
+        };
+        serve(served, &asking, &ORCA_PROCESS, &send, queued).map_err(|error| error.to_string())
+    });
+    let (orca, other) = (bus.connect(), bus.connect());
+    let names = DBusProxy::new(&orca).expect("the bus's proxy");
+    let deadline = Instant::now() + WAIT;
+    while !names
+        .name_has_owner(NAME.try_into().expect("a name"))
+        .expect("the bus answers")
+    {
+        assert!(Instant::now() < deadline, "the monitor took its name in time");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    orca.request_name(ORCA_NAME).expect("Orca's name");
+    let orca_name = orca.unique_name().expect("Orca's unique name").to_string();
+    let other_name = other.unique_name().expect("a unique name").to_string();
+
+    assert_eq!(ask(&orca, "WatchKeyboard"), None, "Orca is admitted");
+    let watch = Update {
+        client: orca_name.clone(),
+        change: Change::Watch(true),
+    };
+    assert_eq!(updates.try_recv().ok(), Some(watch), "before it is answered");
+    let denied = Some("org.freedesktop.DBus.Error.AccessDenied".to_owned());
+    for method in ["WatchKeyboard", "GrabKeyboard"] {
+        assert_eq!(ask(&other, method), denied, "{method}: another client is refused");
+    }
+    let body = (vec![1_u32], vec![(2_u32, 3_u32)]);
+    let answer = orca.call_method(Some(NAME), PATH, Some(INTERFACE), "SetKeyGrabs", &body);
+    assert_eq!(refused(answer), None);
+    let grabs = Update {
+        client: orca_name.clone(),
+        change: Change::KeyGrabs(vec![1], vec![(2, 3)]),
+    };
+    assert_eq!(updates.try_recv().ok(), Some(grabs), "a refused call changes nothing");
+
+    let (to_orca, to_other) = (key_events(&orca), key_events(&other));
+    for (destination, released) in [(&orca_name, false), (&other_name, true)] {
+        let event = KeyEvent {
+            destination: destination.clone(),
+            released,
+            state: 1,
+            keysym: Keysym::a.raw(),
+            unichar: 'a'.into(),
+            keycode: 38,
+        };
+        events.send(event).expect("the signals' thread");
+    }
+    let (_, signal) = next_key(to_orca);
+    let destination = signal.header().destination().map(|name| name.to_string());
+    assert_eq!(destination, Some(orca_name.clone()), "a key is addressed to Orca");
+    let body: (bool, u32, u32, u32, u16) = signal.body().deserialize().expect("a KeyEvent");
+    assert_eq!(body, (false, 1, Keysym::a.raw(), 'a'.into(), 38));
+    let (_, signal) = next_key(to_other);
+    let body: (bool, u32, u32, u32, u16) = signal.body().deserialize().expect("a KeyEvent");
+    assert!(body.0, "another client is sent its own key, not Orca's");
+
+    orca.release_name(ORCA_NAME).expect("Orca lets its name go");
+    let forget = Update {
+        client: orca_name.clone(),
+        change: Change::Forget,
+    };
+    assert_eq!(updates.recv_timeout(WAIT).ok(), Some(forget), "Orca is forgotten");
+
+    orca.request_name(ORCA_NAME).expect("Orca's name");
+    assert_eq!(ask(&orca, "WatchKeyboard"), None, "Orca is admitted again");
+    updates.try_recv().expect("its change");
+    drop(bus);
+    let forget = Update {
+        client: orca_name,
+        change: Change::Forget,
+    };
+    assert_eq!(updates.recv_timeout(WAIT).ok(), Some(forget), "the bus gone, Orca is forgotten");
+    let ended = server.join().expect("the monitor's thread");
+    assert!(ended.is_err(), "and the monitor stops: {ended:?}");
 }

@@ -2,8 +2,8 @@
 //! `org.freedesktop.a11y.KeyboardMonitor` at `/org/freedesktop/a11y/Manager`, under the name
 //! `org.freedesktop.a11y.Manager` on the session bus, the interface libatspi's `AtspiDevice`
 //! calls and cosmic-comp serves. A client watches the keyboard, grabs it whole, or grabs single
-//! keys; a watcher is sent every key as a `KeyEvent` signal addressed to it alone, and a grabbed
-//! press, with its release, reaches no other client.
+//! keys; a watcher is sent every key but the protected ones as a `KeyEvent` signal addressed to
+//! it alone, and a grabbed press, with its release, reaches no other client.
 //!
 //! Admission (AX4): a call counts only from the owner of `org.gnome.Orca.KeyboardMonitor` whose
 //! process lies in `orca.service`'s cgroup and runs an executable under `/usr` that is the very
@@ -12,42 +12,62 @@
 //! a pidfd opened on its `ProcessID`, whose connection must still name that pid once it is read
 //! (AX5's reuse check). Orca is a Python script, so its executable is the interpreter: the unit
 //! is what tells Orca from another program under `/usr`. Every call is admitted anew, and every
-//! change of the name's owner, or of an admitted client's connection, admits each client again
-//! and forgets those that fail. A refused call is answered as an accepted one and changes
-//! nothing; the journal names it.
+//! change of the name's owner, or of a connection, admits each admitted client again and
+//! forgets those that fail. A refused call changes nothing and is answered `AccessDenied`; the
+//! journal names it, at most once a minute.
 //!
-//! Threads: `keyboard-monitor` admits the calls and the changes of names one at a time, in the
-//! order the bus sent them, and hands the event loop an `Update` through a channel;
-//! `keyboard-monitor-names` reads the changes of names; `keyboard-monitor-signals` sends the
+//! Threads and connections: the interface is served on one connection, whose calls zbus hands
+//! it one at a time, in the order the bus sent them; each call waits for its admission and is
+//! answered after it. `keyboard-monitor` admits the calls, and the admitted clients again after a
+//! change of names, one at a time, and hands the event loop an `Update` through a channel. It asks
+//! the bus on a second connection, which also carries the changes of names that
+//! `keyboard-monitor-names` reads. zbus stops reading a connection while one of its queues is
+//! full: the calls waiting on the first never stand between the admission and the bus's answers,
+//! and the reader of names never waits on the admission. `keyboard-monitor-signals` sends the
 //! signals the loop queues (`Monitor::observe`). The loop never waits on the bus.
 
 use crate::identity::{self, Process};
 use crate::state::State;
 use crate::Error;
-use smithay::input::keyboard::{KeysymHandle, ModifiersState};
+use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
 use smithay::reexports::calloop::{channel, LoopHandle};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::future::Future;
 use std::os::fd::AsFd;
 use std::path::{Component, Path};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context, Poll, Waker};
+use std::time::{Duration, Instant};
 use zbus::blocking::fdo::DBusProxy;
+use zbus::blocking::connection::Builder;
+use zbus::blocking::Connection;
 use zbus::fdo::ConnectionCredentials;
 use zbus::message::Header;
+use zbus::names::BusName;
 use zbus::object_server::SignalEmitter;
 
-const PATH: &str = "/org/freedesktop/a11y/Manager";
-const NAME: &str = "org.freedesktop.a11y.Manager";
-const INTERFACE: &str = "org.freedesktop.a11y.KeyboardMonitor";
+pub(crate) const PATH: &str = "/org/freedesktop/a11y/Manager";
+pub(crate) const NAME: &str = "org.freedesktop.a11y.Manager";
+pub(crate) const INTERFACE: &str = "org.freedesktop.a11y.KeyboardMonitor";
 /// The name Orca 49 claims for the monitor (`Atspi.Device.new_full("org.gnome.Orca")`).
-const ORCA: &str = "org.gnome.Orca.KeyboardMonitor";
+pub(crate) const ORCA: &str = "org.gnome.Orca.KeyboardMonitor";
 /// The unit Orca runs as (AX3).
 const ORCA_UNIT: &str = "orca.service";
 /// In a key grab's modifiers, the bit of the first virtual modifier `SetKeyGrabs` names; the
 /// bits below are the real modifiers (at-spi2-core's `ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START`).
 const VIRTUAL_MOD_START: u32 = 15;
-/// The calls and the signals each queue holds; a full queue drops a call, or a key's signal,
-/// with a warning.
+/// The signals the queue holds; a full queue drops a key's signal, with a warning.
 const QUEUE: usize = 256;
+/// The jobs the admission's queue holds: the one call zbus hands the interface at a time, and
+/// a wake-up after a change of names.
+const JOBS: usize = 4;
+/// How long a warning that repeats is held back.
+const HUSH: Duration = Duration::from_secs(60);
+/// xkb's Lock modifier, which Caps Lock sets among the modifiers held while it is down.
+const LOCK: u32 = 1 << 1;
 
 /// A key a client grabs: the key's keysym with exactly these real modifiers held and these
 /// virtual modifiers active.
@@ -73,6 +93,31 @@ impl KeyGrab {
             mods: raw_mods & ((1 << VIRTUAL_MOD_START) - 1),
             virtual_mods,
         }
+    }
+
+    /// Whether the grab is the key `sym`, with exactly `mods` held and the virtual modifiers
+    /// `active`. A capital letter matches its small one too: Orca grabs a key without Shift by
+    /// its small letter (`keybindings.py`, `create_key_definitions`), and Caps Lock, locked or
+    /// held as Orca's modifier, capitalizes it. Shift+H stays no grab of H alone, since the
+    /// modifiers must match, all but Lock: Caps Lock, held as Orca's modifier, sets it, and Orca
+    /// grabs no key with it. A key is read under the keyboard's state, not at its first level,
+    /// so that a keypad digit under Num Lock is not the KP_Up Orca grabs.
+    fn takes(&self, sym: Keysym, mods: u32, active: &BTreeSet<u32>) -> bool {
+        (self.keysym == sym.raw() || self.keysym == uncapped(sym).raw())
+            && self.mods == mods & !LOCK
+            && self.virtual_mods == *active
+    }
+}
+
+/// The small letter of a capital one, or the keysym itself.
+fn uncapped(sym: Keysym) -> Keysym {
+    let Some(letter) = sym.key_char() else {
+        return sym;
+    };
+    let mut small = letter.to_lowercase();
+    match (small.next(), small.next()) {
+        (Some(small), None) if small != letter => Keysym::from_char(small),
+        _ => sym,
     }
 }
 
@@ -120,11 +165,56 @@ pub(crate) struct KeyEvent {
     pub keycode: u16,
 }
 
-/// The event loop's side of the monitor: the admitted clients and the virtual modifiers held.
+/// What `Monitor::takes` took a press as.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Taken {
+    /// One of Orca's virtual modifiers, which changes no modifier of the keyboard.
+    Modifier,
+    /// A key Orca grabs, alone or with the whole keyboard.
+    Key,
+}
+
+/// A virtual modifier held: its keysym, and the keyboard's locked modifiers before its press.
+#[derive(Debug)]
+struct Held {
+    keysym: u32,
+    locked: u32,
+}
+
+/// A warning that repeats, said at most once every `HUSH`: a client that floods the bus, or a
+/// signal thread that stalls, does not flood the journal.
+#[derive(Debug, Default)]
+struct Hush {
+    said: Option<Instant>,
+    held: u64,
+}
+
+impl Hush {
+    /// Whether to say the warning now, and how many were held back since it was last said.
+    fn now(&mut self) -> Option<u64> {
+        let now = Instant::now();
+        if self
+            .said
+            .is_some_and(|said| now.duration_since(said) < HUSH)
+        {
+            self.held += 1;
+            return None;
+        }
+        self.said = Some(now);
+        Some(std::mem::take(&mut self.held))
+    }
+}
+
+/// The event loop's side of the monitor: the admitted clients and the keys held.
 #[derive(Debug, Default)]
 pub(crate) struct Monitor {
     clients: HashMap<String, Client>,
-    active: BTreeSet<u32>,
+    /// The virtual modifiers held, by xkb keycode: what is let go is the key that was pressed,
+    /// whatever keysym the keyboard's state reads for it then.
+    active: BTreeMap<u32, Held>,
+    /// The protected keys held, by xkb keycode: their release is sent to no client either.
+    withheld: BTreeSet<u32>,
+    full: Hush,
     /// Where the signals go; none headless, a test's queue in the fixture.
     pub events: Option<SyncSender<KeyEvent>>,
 }
@@ -149,32 +239,48 @@ impl Monitor {
         }
         // A virtual modifier no client names any more holds nothing back.
         let clients = &self.clients;
-        self.active
-            .retain(|keysym| clients.values().any(|c| c.virtual_mods.contains(keysym)));
+        self.active.retain(|_, held| {
+            clients
+                .values()
+                .any(|c| c.virtual_mods.contains(&held.keysym))
+        });
     }
 
-    /// Whether one of `client`'s key grabs is the key `keysym` with `mods` held.
-    fn grabs_key(&self, client: &Client, mods: u32, keysym: u32) -> bool {
-        client.key_grabs.iter().any(|grab| {
-            grab.keysym == keysym && grab.mods == mods && grab.virtual_mods == self.active
-        })
+    /// The keysyms of the virtual modifiers held.
+    fn active(&self) -> BTreeSet<u32> {
+        self.active.values().map(|held| held.keysym).collect()
     }
 
     /// Queues the key for each client that watches the keyboard, grabs it whole, or grabs this
-    /// key: every key, bound or not, aimed at any surface, the lock's included.
+    /// key: every key, bound or not, aimed at any surface, the lock's included, but a
+    /// `protected` press, with its release. A protected key fires an action the user's way out
+    /// and the trusted path keep (`Action::never_inhibited`): as OS4 says of the reveal key, no
+    /// client is ever sent it, Orca included (the maintainer's decision of 2026-10-30, #863).
     pub(crate) fn observe(
-        &self,
+        &mut self,
         modifiers: &ModifiersState,
         handle: &KeysymHandle<'_>,
         released: bool,
+        protected: bool,
     ) {
+        let code = handle.raw_code().raw();
+        if released {
+            if self.withheld.remove(&code) {
+                return;
+            }
+        } else if protected {
+            self.withheld.insert(code);
+            return;
+        }
         let Some(events) = &self.events else {
             return;
         };
         let keysym = handle.modified_sym();
         let mods = modifiers.serialized.depressed;
+        let active = self.active();
         for (name, client) in &self.clients {
-            if !(client.watched || client.grabbed || self.grabs_key(client, mods, keysym.raw())) {
+            let grabs = |grab: &KeyGrab| grab.takes(keysym, mods, &active);
+            if !(client.watched || client.grabbed || client.key_grabs.iter().any(grabs)) {
                 continue;
             }
             let event = KeyEvent {
@@ -183,44 +289,54 @@ impl Monitor {
                 state: mods,
                 keysym: keysym.raw(),
                 unichar: keysym.key_char().map_or(0, u32::from),
-                keycode: u16::try_from(handle.raw_code().raw()).unwrap_or_default(),
+                keycode: u16::try_from(code).unwrap_or_default(),
             };
-            match events.try_send(event) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {
-                    tracing::warn!(
-                        "the keyboard monitor's queue is full; a key is not sent to Orca"
-                    );
-                }
-                Err(TrySendError::Disconnected(_)) => {
-                    tracing::warn!("the keyboard monitor has ended; a key is not sent to Orca");
+            if let Err(error) = events.try_send(event) {
+                if let Some(held) = self.full.now() {
+                    tracing::warn!(%error, held, "a key is not sent to Orca");
                 }
             }
         }
     }
 
-    /// Whether a press is kept from the focused client: a virtual modifier, which becomes
-    /// active, or a key a client grabs, or any key while a client grabs the keyboard. The
-    /// caller asks only when no binding took the key and the session is not locked.
-    pub(crate) fn takes(&mut self, modifiers: &ModifiersState, handle: &KeysymHandle<'_>) -> bool {
-        let keysym = handle.modified_sym().raw();
+    /// Whether a press is kept from the focused client, and as what: a virtual modifier, which
+    /// becomes active and is told the keyboard's `locked` modifiers before its press; a key a
+    /// client grabs; or any key while a client grabs the keyboard. The caller asks only when no
+    /// binding took the key and the session is not locked.
+    pub(crate) fn takes(
+        &mut self,
+        modifiers: &ModifiersState,
+        handle: &KeysymHandle<'_>,
+        locked: u32,
+    ) -> Option<Taken> {
+        let keysym = handle.modified_sym();
         if self
             .clients
             .values()
-            .any(|c| c.virtual_mods.contains(&keysym))
+            .any(|c| c.virtual_mods.contains(&keysym.raw()))
         {
-            self.active.insert(keysym);
-            return true;
+            let held = Held {
+                keysym: keysym.raw(),
+                locked,
+            };
+            self.active.insert(handle.raw_code().raw(), held);
+            return Some(Taken::Modifier);
         }
         let mods = modifiers.serialized.depressed;
+        let active = self.active();
+        let grabs = |grab: &KeyGrab| grab.takes(keysym, mods, &active);
         self.clients
             .values()
-            .any(|c| c.grabbed || self.grabs_key(c, mods, keysym))
+            .any(|c| c.grabbed || c.key_grabs.iter().any(grabs))
+            .then_some(Taken::Key)
     }
 
-    /// A key let go: whether it was an active virtual modifier, which is no longer.
-    pub(crate) fn released(&mut self, handle: &KeysymHandle<'_>) -> bool {
-        self.active.remove(&handle.modified_sym().raw())
+    /// A key let go: if it was an active virtual modifier, which is no longer, the keyboard's
+    /// locked modifiers before its press.
+    pub(crate) fn released(&mut self, handle: &KeysymHandle<'_>) -> Option<u32> {
+        self.active
+            .remove(&handle.raw_code().raw())
+            .map(|held| held.locked)
     }
 }
 
@@ -280,57 +396,139 @@ fn admit(bus: &DBusProxy<'_>, client: &str, process: &dyn Process) -> Result<(),
     Ok(())
 }
 
-/// What the `keyboard-monitor` thread admits, in order.
-enum Job {
-    Call(String, Change),
-    /// The owner of a name changed, or a connection ended.
-    Renamed(String),
-    /// The changes of names can no longer be read.
-    Blind,
+/// The admission's answer to one call, shared by its two ends.
+#[derive(Default)]
+struct Slot {
+    admitted: bool,
+    answered: bool,
+    waker: Option<Waker>,
 }
 
-/// The interface, on zbus's threads: it queues each call for admission.
+fn slot(slot: &Mutex<Slot>) -> MutexGuard<'_, Slot> {
+    // A slot holds three plain fields, which no panic leaves half written.
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The admission's end of a call: `admit` it, or drop it, which refuses it.
+struct Answer(Arc<Mutex<Slot>>);
+
+impl Answer {
+    fn admit(self) {
+        slot(&self.0).admitted = true;
+    }
+}
+
+impl Drop for Answer {
+    fn drop(&mut self) {
+        let mut slot = slot(&self.0);
+        slot.answered = true;
+        if let Some(waker) = slot.waker.take() {
+            waker.wake();
+        }
+    }
+}
+
+/// The call's end: whether the call was admitted, once it is answered.
+struct Answered(Arc<Mutex<Slot>>);
+
+impl Future for Answered {
+    type Output = bool;
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<bool> {
+        let mut slot = slot(&self.0);
+        if slot.answered {
+            return Poll::Ready(slot.admitted);
+        }
+        slot.waker = Some(context.waker().clone());
+        Poll::Pending
+    }
+}
+
+fn answer() -> (Answer, Answered) {
+    let shared = Arc::new(Mutex::new(Slot::default()));
+    (Answer(shared.clone()), Answered(shared))
+}
+
+/// What the `keyboard-monitor` thread admits.
+enum Job {
+    Call(String, Change, Answer),
+    /// Read the flags of `Names`.
+    Wake,
+}
+
+/// What `keyboard-monitor-names` saw: a change it raises, which the admission lowers before it
+/// admits each client again, and the end of the changes.
+#[derive(Default)]
+struct Names {
+    changed: AtomicBool,
+    blind: AtomicBool,
+}
+
+/// Wakes the admission, unless it has ended. A full queue holds a job already, after which the
+/// admission reads the flags: a wake-up dropped then is not needed.
+fn wake(jobs: &SyncSender<Job>) -> bool {
+    !matches!(jobs.try_send(Job::Wake), Err(TrySendError::Disconnected(_)))
+}
+
+/// The interface, on zbus's executor: each call waits for its admission.
 struct Interface {
     jobs: SyncSender<Job>,
 }
 
 impl Interface {
-    fn ask(&self, header: &Header<'_>, change: Change) {
+    async fn ask(&self, header: &Header<'_>, change: Change) -> zbus::fdo::Result<()> {
         let Some(client) = header.sender() else {
-            return;
+            return Err(zbus::fdo::Error::AccessDenied(
+                "a call with no sender".into(),
+            ));
         };
-        let job = Job::Call(client.to_string(), change);
-        if let Err(error) = self.jobs.try_send(job) {
-            tracing::warn!(%client, %error, "a keyboard monitor call is dropped");
+        let (answer, answered) = answer();
+        if let Err(error) = self
+            .jobs
+            .try_send(Job::Call(client.to_string(), change, answer))
+        {
+            return Err(zbus::fdo::Error::LimitsExceeded(format!(
+                "the keyboard monitor cannot take the call: {error}"
+            )));
+        }
+        if answered.await {
+            Ok(())
+        } else {
+            Err(zbus::fdo::Error::AccessDenied(format!(
+                "the keyboard monitor serves Orca alone: {ORCA}'s owner, in {ORCA_UNIT}"
+            )))
         }
     }
 }
 
-#[zbus::interface(name = "org.freedesktop.a11y.KeyboardMonitor")]
+// One call at a time, in the bus's order: a grab and its release are never applied the wrong
+// way round.
+#[zbus::interface(name = "org.freedesktop.a11y.KeyboardMonitor", spawn = false)]
 impl Interface {
-    fn grab_keyboard(&self, #[zbus(header)] header: Header<'_>) {
-        self.ask(&header, Change::Grab(true));
+    async fn grab_keyboard(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        self.ask(&header, Change::Grab(true)).await
     }
 
-    fn ungrab_keyboard(&self, #[zbus(header)] header: Header<'_>) {
-        self.ask(&header, Change::Grab(false));
+    async fn ungrab_keyboard(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        self.ask(&header, Change::Grab(false)).await
     }
 
-    fn watch_keyboard(&self, #[zbus(header)] header: Header<'_>) {
-        self.ask(&header, Change::Watch(true));
+    async fn watch_keyboard(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        self.ask(&header, Change::Watch(true)).await
     }
 
-    fn unwatch_keyboard(&self, #[zbus(header)] header: Header<'_>) {
-        self.ask(&header, Change::Watch(false));
+    async fn unwatch_keyboard(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
+        self.ask(&header, Change::Watch(false)).await
     }
 
-    fn set_key_grabs(
+    async fn set_key_grabs(
         &self,
         #[zbus(header)] header: Header<'_>,
         virtual_mods: Vec<u32>,
         keystrokes: Vec<(u32, u32)>,
-    ) {
-        self.ask(&header, Change::KeyGrabs(virtual_mods, keystrokes));
+    ) -> zbus::fdo::Result<()> {
+        self.ask(&header, Change::KeyGrabs(virtual_mods, keystrokes))
+            .await
     }
 
     /// A key pressed or released, sent to the one client it is for. Declared so that the
@@ -367,7 +565,19 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) -> Option<SyncSender<Ke
     let spawned = std::thread::Builder::new()
         .name("keyboard-monitor".into())
         .spawn(move || {
-            if let Err(error) = serve(&updates, queued) {
+            let send = |update: Update| {
+                updates
+                    .send(update)
+                    .map_err(|_| Error::from("the event loop has ended"))
+            };
+            let served = Builder::session().and_then(|served| {
+                Connection::session().map(|asking| (served, asking))
+            });
+            let ended = match served {
+                Ok((served, asking)) => serve(served, &asking, &identity::Proc, &send, queued),
+                Err(error) => Err(error.into()),
+            };
+            if let Err(error) = ended {
                 tracing::error!(%error, "the keyboard monitor has stopped; Orca's own commands do not reach Orca");
             }
         });
@@ -380,39 +590,57 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) -> Option<SyncSender<Ke
     }
 }
 
-/// Serves the interface and admits its calls until the compositor ends, or the changes of names
+/// Serves the interface on the connection `served` builds, admits its calls, asking the bus on
+/// `asking`, and sends the keys of `queued`, until the compositor ends or the changes of names
 /// can no longer be read: then every client is forgotten and the interface withdrawn.
-fn serve(updates: &channel::Sender<Update>, queued: Receiver<KeyEvent>) -> Result<(), Error> {
-    let connection = zbus::blocking::Connection::session()?;
-    let bus = DBusProxy::new(&connection)?;
+pub(crate) fn serve(
+    served: Builder<'_>,
+    asking: &Connection,
+    process: &dyn Process,
+    updates: &dyn Fn(Update) -> Result<(), Error>,
+    queued: Receiver<KeyEvent>,
+) -> Result<(), Error> {
+    let bus = DBusProxy::new(asking)?;
     // Read from before the first call can be admitted, so that no change is missed.
     let renames = bus.receive_name_owner_changed()?;
-    let (jobs, admissions) = sync_channel(QUEUE);
-    let watcher = jobs.clone();
+    let names = Arc::new(Names::default());
+    let (jobs, admissions) = sync_channel(JOBS);
+    let (watcher, seen) = (jobs.clone(), names.clone());
     std::thread::Builder::new()
         .name("keyboard-monitor-names".into())
         .spawn(move || {
             for rename in renames {
-                let job = match rename.args() {
-                    Ok(args) => Job::Renamed(args.name().to_string()),
+                let args = match rename.args() {
+                    Ok(args) => args,
                     Err(error) => {
                         tracing::error!(%error, "a change of a name on the bus cannot be read");
-                        Job::Blind
+                        break;
                     }
                 };
-                // A blocking send: a change of names is never dropped.
-                if watcher.send(job).is_err() {
-                    return;
+                // Orca's name or a connection came or went; another well-known name is no
+                // client of the monitor.
+                let name = args.name();
+                if matches!(name, BusName::Unique(_)) || name.as_str() == ORCA {
+                    seen.changed.store(true, Ordering::SeqCst);
+                    if !wake(&watcher) {
+                        return;
+                    }
                 }
             }
-            if watcher.send(Job::Blind).is_err() {
+            seen.blind.store(true, Ordering::SeqCst);
+            if !wake(&watcher) {
                 tracing::debug!("the keyboard monitor ended before its reader of names");
             }
         })?;
-    let emitter = connection.clone();
+    // The interface is served from the connection's start: its object server is set up in
+    // zbus's runtime, which `blocking::Connection::object_server` called first, outside it,
+    // is not.
+    let served = served.serve_at(PATH, Interface { jobs })?.build()?;
+    let emitter = served.clone();
     std::thread::Builder::new()
         .name("keyboard-monitor-signals".into())
         .spawn(move || {
+            let mut failed = Hush::default();
             for event in queued {
                 let body = (
                     event.released,
@@ -425,72 +653,83 @@ fn serve(updates: &channel::Sender<Update>, queued: Receiver<KeyEvent>) -> Resul
                 if let Err(error) =
                     emitter.emit_signal(destination, PATH, INTERFACE, "KeyEvent", &body)
                 {
-                    tracing::warn!(%error, "a key was not sent to Orca");
+                    if let Some(held) = failed.now() {
+                        tracing::warn!(%error, held, "a key was not sent to Orca");
+                    }
                 }
             }
         })?;
-    connection.object_server().at(PATH, Interface { jobs })?;
     let reply =
-        connection.request_name_with_flags(NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())?;
+        served.request_name_with_flags(NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())?;
     if reply != zbus::fdo::RequestNameReply::PrimaryOwner {
         return Err(format!("{NAME} is owned by another process ({reply:?})").into());
     }
     tracing::info!("serving Orca's keyboard monitor");
 
-    let process = identity::Proc;
     let mut admitted: HashSet<String> = HashSet::new();
-    for job in admissions {
-        match job {
-            Job::Call(client, change) => match admit(&bus, &client, &process) {
-                Ok(()) => {
-                    admitted.insert(client.clone());
-                    updates.send(Update { client, change })?;
-                }
-                Err(error) => {
-                    tracing::warn!(%client, %error, "a keyboard monitor call is refused");
-                    if admitted.remove(&client) {
-                        updates.send(Update {
-                            client,
-                            change: Change::Forget,
-                        })?;
+    let mut refusals = Hush::default();
+    loop {
+        let Ok(job) = admissions.recv() else {
+            return Ok(());
+        };
+        if names.blind.load(Ordering::SeqCst) {
+            break;
+        }
+        if names.changed.swap(false, Ordering::SeqCst) {
+            // The clients are not told: the interface has no signal for it.
+            let failed: Vec<String> = admitted
+                .iter()
+                .filter(|client| match admit(&bus, client, process) {
+                    Ok(()) => false,
+                    Err(error) => {
+                        tracing::warn!(%client, %error, "a keyboard monitor client is forgotten");
+                        true
                     }
-                }
-            },
-            Job::Renamed(name) if name == ORCA || admitted.contains(&name) => {
-                let failed: Vec<String> = admitted
-                    .iter()
-                    .filter(|client| match admit(&bus, client, &process) {
-                        Ok(()) => false,
-                        Err(error) => {
-                            tracing::info!(%client, %error, "a keyboard monitor client is forgotten");
-                            true
-                        }
-                    })
-                    .cloned()
-                    .collect();
-                for client in failed {
-                    admitted.remove(&client);
-                    updates.send(Update {
-                        client,
-                        change: Change::Forget,
-                    })?;
-                }
+                })
+                .cloned()
+                .collect();
+            for client in failed {
+                admitted.remove(&client);
+                updates(Update {
+                    client,
+                    change: Change::Forget,
+                })?;
             }
-            Job::Renamed(_) => {}
-            Job::Blind => {
-                for client in admitted.drain() {
-                    updates.send(Update {
+        }
+        let Job::Call(client, change, answer) = job else {
+            continue;
+        };
+        match admit(&bus, &client, process) {
+            Ok(()) => {
+                admitted.insert(client.clone());
+                // The loop has the change before the client has its answer.
+                updates(Update { client, change })?;
+                answer.admit();
+            }
+            Err(error) => {
+                if let Some(held) = refusals.now() {
+                    tracing::warn!(%client, %error, held, "a keyboard monitor call is refused");
+                }
+                if admitted.remove(&client) {
+                    updates(Update {
                         client,
                         change: Change::Forget,
                     })?;
                 }
-                connection.object_server().remove::<Interface, _>(PATH)?;
-                connection.release_name(NAME)?;
-                return Err("the changes of names on the bus can no longer be read".into());
             }
         }
     }
-    Ok(())
+    for client in admitted.drain() {
+        updates(Update {
+            client,
+            change: Change::Forget,
+        })?;
+    }
+    // The calls queued, and those that follow, are refused.
+    drop(admissions);
+    served.object_server().remove::<Interface, _>(PATH)?;
+    served.release_name(NAME)?;
+    Err("the changes of names on the bus can no longer be read".into())
 }
 
 #[cfg(test)]
@@ -510,7 +749,10 @@ mod tests {
             "UnwatchKeyboard",
             "SetKeyGrabs",
         ] {
-            assert!(xml.contains(&format!("<method name=\"{method}\"")), "{method}: {xml}");
+            assert!(
+                xml.contains(&format!("<method name=\"{method}\"")),
+                "{method}: {xml}"
+            );
         }
         assert!(xml.contains("<signal name=\"KeyEvent\">"), "{xml}");
         for (name, kind) in [
@@ -532,5 +774,53 @@ mod tests {
         let grab = KeyGrab::new(&[0xff63, 0xffe5], 0x61, (1 << 16) | 4);
         assert_eq!(grab.mods, 4);
         assert_eq!(grab.virtual_mods, BTreeSet::from([0xffe5]));
+    }
+
+    /// A grab of a small letter takes its capital with the same modifiers, and nothing else.
+    #[test]
+    fn a_grab_of_a_letter_takes_its_capital() {
+        let none = BTreeSet::new();
+        let grab = KeyGrab::new(&[], Keysym::h.raw(), 0);
+        assert!(grab.takes(Keysym::H, 0, &none), "Caps Lock's H");
+        assert!(grab.takes(Keysym::h, 0, &none));
+        assert!(grab.takes(Keysym::H, LOCK, &none), "Caps Lock held");
+        assert!(!grab.takes(Keysym::H, 1, &none), "Shift+H is not H alone");
+        assert!(!grab.takes(Keysym::j, 0, &none));
+        let keypad = KeyGrab::new(&[], Keysym::KP_Up.raw(), 0);
+        assert!(
+            !keypad.takes(Keysym::KP_8, 0, &none),
+            "Num Lock's 8 is not KP_Up"
+        );
+        assert_eq!(uncapped(Keysym::_8), Keysym::_8);
+    }
+
+    /// An answer dropped refuses the call; one admitted admits it.
+    #[test]
+    fn a_dropped_answer_refuses_the_call() {
+        let mut context = Context::from_waker(Waker::noop());
+        let (refused, mut answered) = answer();
+        assert_eq!(Pin::new(&mut answered).poll(&mut context), Poll::Pending);
+        drop(refused);
+        assert_eq!(
+            Pin::new(&mut answered).poll(&mut context),
+            Poll::Ready(false)
+        );
+        let (admitted, mut answered) = answer();
+        admitted.admit();
+        assert_eq!(
+            Pin::new(&mut answered).poll(&mut context),
+            Poll::Ready(true)
+        );
+    }
+
+    /// A repeated warning is said once, then held back and counted.
+    #[test]
+    fn a_repeated_warning_is_held_back() {
+        let mut hush = Hush::default();
+        assert_eq!(hush.now(), Some(0));
+        assert_eq!(hush.now(), None);
+        assert_eq!(hush.now(), None);
+        hush.said = Instant::now().checked_sub(HUSH);
+        assert_eq!(hush.now(), Some(2));
     }
 }
