@@ -392,7 +392,7 @@ impl State {
         if self.output_of_workspace(from).as_ref() != Some(&output) {
             if let Some(at) = self
                 .window_area_on(&output)
-                .map(|area| centred(area, window.geometry()))
+                .map(|area| centred(area, window.geometry().size))
             {
                 self.space.relocate_element(window, at);
                 for (kept, place) in self.minimised.iter_mut().chain(self.parked.iter_mut()) {
@@ -654,18 +654,13 @@ impl State {
         }
     }
 
-    /// Where a parked or minimised window at `at` comes back: there, or centred on its
+    /// Where a parked or minimised window at `at`, its geometry's top left, comes back: there, or centred on its
     /// workspace's output when that output no longer shows that place (`home_area`).
     pub fn reachable(&self, window: &Window, at: Point<i32, Logical>) -> Point<i32, Logical> {
-        let geometry = window.geometry();
-        // The geometry's offset is the client's: added saturating.
-        let origin = (
-            at.x.saturating_add(geometry.loc.x),
-            at.y.saturating_add(geometry.loc.y),
-        );
-        let kept = Rectangle::new(origin.into(), geometry.size);
+        let size = window.geometry().size;
+        let kept = Rectangle::new(at, size);
         match self.home_area(window) {
-            Some(area) if !self.shown_at_home(window, kept) => centred(area, geometry),
+            Some(area) if !self.shown_at_home(window, kept) => centred(area, size),
             _ => at,
         }
     }
