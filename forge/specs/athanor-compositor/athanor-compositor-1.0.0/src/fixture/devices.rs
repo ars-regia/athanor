@@ -28,7 +28,7 @@ pub(super) struct Seen {
     /// The mode of each decoration configure.
     modes: Vec<WEnum<zxdg_toplevel_decoration_v1::Mode>>,
     /// The handle an exported object announced.
-    handle: Option<String>,
+    pub(super) handle: Option<String>,
     /// An imported object was told its handle is gone.
     import_destroyed: bool,
     /// The scale of each pinch update; `begun` and `ended` count the pinch's other events.

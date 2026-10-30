@@ -2293,7 +2293,7 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
     let centred = run
         .state
         .window_area()
-        .map(|area| crate::state::centred(area, window.geometry()));
+        .map(|area| crate::state::centred(area, window.geometry().size));
     let second = run
         .state
         .space
@@ -5272,7 +5272,7 @@ fn a_window_restored_after_its_output_left_is_centred() {
     let free = run.state.window_area().expect("an area");
     assert_eq!(
         run.state.space.element_location(&window),
-        Some(crate::state::centred(free, window.geometry()))
+        Some(crate::state::centred(free, window.geometry().size))
     );
     run.stop();
 }
@@ -5304,6 +5304,148 @@ fn a_maximised_window_restored_fits_the_area() {
     assert_eq!((width, height), (fitted.size.w, fitted.size.h));
     assert_eq!(location_of(&run, &id), fitted.loc);
     assert_eq!(window.geometry().size, fitted.size);
+    run.stop();
+}
+
+/// Gives the window of `local` a client-side shadow of 15 by 12 around its geometry, as GTK
+/// draws one, and returns the geometry the compositor then holds: the space's location of a
+/// window is the geometry's top left, never the buffer's origin.
+fn shadowed(run: &mut Running, local: &mut Local) -> smithay::utils::Rectangle<i32, Logical> {
+    let id = local.id.clone().expect("an id");
+    let (surface, xdg) = local.window.clone().expect("a window");
+    xdg.set_window_geometry(15, 12, WIDTH - 30, HEIGHT - 24);
+    surface.commit();
+    local.roundtrip(run);
+    let geometry = window_of(run, &id).geometry();
+    assert_eq!(
+        geometry,
+        smithay::utils::Rectangle::new((15, 12).into(), (WIDTH - 30, HEIGHT - 24).into())
+    );
+    geometry
+}
+
+/// A window with a shadow maximised and restored comes back where it was, and does not drift by
+/// the shadow on each cycle (#853).
+#[test]
+fn a_shadowed_window_is_restored_where_it_was() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let before = location_of(&run, &id);
+    let area = run.state.window_area().expect("an area");
+    for _ in 0..2 {
+        toplevel.set_maximized();
+        local.redraw(&mut run);
+        assert_eq!(location_of(&run, &id), area.loc, "the geometry takes the area");
+        toplevel.unset_maximized();
+        local.redraw(&mut run);
+        assert_eq!(location_of(&run, &id), before, "back where it was");
+    }
+    run.stop();
+}
+
+/// A window with a shadow restored from minimised after its output left is centred by its
+/// geometry (#853).
+#[test]
+fn a_shadowed_window_restored_after_its_output_left_is_centred() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let geometry = shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let second = output_at(&run, 1);
+    let area = run.state.space.output_geometry(&second).expect("an area");
+    run.state
+        .space
+        .relocate_element(&window, area.loc + Point::from((10, 10)));
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    run.state.remove_output(&second);
+    assert!(run.state.unminimise(&window), "restored");
+    let free = run.state.window_area().expect("an area");
+    let centre = Point::from((
+        free.loc.x + (free.size.w - geometry.size.w) / 2,
+        free.loc.y + (free.size.h - geometry.size.h) / 2,
+    ));
+    assert_eq!(run.state.space.element_location(&window), Some(centre));
+    run.stop();
+}
+
+/// A window with a shadow that an output leaves is centred by its geometry (#853).
+#[test]
+fn a_shadowed_window_on_an_output_that_goes_is_centred() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let geometry = shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let second = output_at(&run, 1);
+    let area = run.state.space.output_geometry(&second).expect("an area");
+    run.state
+        .space
+        .relocate_element(&window, area.loc + Point::from((10, 10)));
+    run.state.remove_output(&second);
+    let free = run.state.window_area().expect("an area");
+    let centre = Point::from((
+        free.loc.x + (free.size.w - geometry.size.w) / 2,
+        free.loc.y + (free.size.h - geometry.size.h) / 2,
+    ));
+    assert_eq!(run.state.space.element_location(&window), Some(centre));
+    run.stop();
+}
+
+/// A window with a shadow moved to a workspace of another output is centred there by its
+/// geometry (#853).
+#[test]
+fn a_shadowed_window_moved_to_another_output_is_centred() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let geometry = shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let second = output_at(&run, 1);
+    let target = run.state.active_workspace(&second).expect("a workspace");
+    assert!(run.state.move_window_to(&window, target));
+    let free = run.state.window_area_on(&second).expect("an area");
+    let centre = Point::from((
+        free.loc.x + (free.size.w - geometry.size.w) / 2,
+        free.loc.y + (free.size.h - geometry.size.h) / 2,
+    ));
+    assert_eq!(run.state.space.element_location(&window), Some(centre));
+    run.stop();
+}
+
+/// A minimised window with a shadow whose geometry lies wholly left of the output is not shown
+/// there: the shadow does not count towards its place, so it is brought back centred (#853).
+#[test]
+fn a_shadowed_window_out_of_reach_is_centred() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let geometry = shadowed(&mut run, &mut local);
+    let id = local.id.clone().expect("an id");
+    let window = window_of(&run, &id);
+    let first = output_at(&run, 0);
+    let area = run.state.space.output_geometry(&first).expect("an area");
+    // The geometry ends 5 px left of the output; shifted by the shadow's 15 it would reach in.
+    run.state.space.relocate_element(
+        &window,
+        Point::from((area.loc.x - geometry.size.w - 5, area.loc.y + 100)),
+    );
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert!(run.state.unminimise(&window), "restored");
+    let free = run.state.window_area().expect("an area");
+    let centre = Point::from((
+        free.loc.x + (free.size.w - geometry.size.w) / 2,
+        free.loc.y + (free.size.h - geometry.size.h) / 2,
+    ));
+    assert_eq!(run.state.space.element_location(&window), Some(centre));
     run.stop();
 }
 
@@ -10209,3 +10351,6 @@ mod devices;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod parented;
