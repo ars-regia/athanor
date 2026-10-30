@@ -665,7 +665,7 @@ fn ax11_a_focus_change_within_a_client_drops_a_press_held_back() {
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
     let held = first.toplevel().expect("a toplevel").wl_surface().clone();
-    local.pump(&mut run, "the second window has the keyboard", |_, state| {
+    local.pump(&mut run, "the second window is focused", |_, state| {
         let keyboard = state.seat.get_keyboard().expect("a keyboard");
         keyboard.current_focus().is_some_and(|focus| focus != held)
     });
