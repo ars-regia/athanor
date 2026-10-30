@@ -474,7 +474,10 @@ impl State {
         if level == self.a11y.level {
             return;
         }
-        tracing::debug!(level, "magnifier");
+        if (level > 1.0) != (self.a11y.level > 1.0) {
+            tracing::info!(on = level > 1.0, level, "magnifier");
+        }
+        tracing::debug!(level, "magnifier level");
         self.a11y.level = level;
         if level > 1.0 {
             self.a11y.last_level = Some(level);

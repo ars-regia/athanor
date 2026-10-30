@@ -65,8 +65,9 @@
 #              cosmic-comp starts, and runs the shortcut unit; after a second SIGKILL, a sign-in
 #              to the default stops the compositor in step 1 before it starts it again
 #   a11y       items 17 and 18 left with #864 (SN15 step 2): with the magnifier's GNOME key
-#              true, and then with a11y_screen_filter.ron holding the inversion, the default
-#              starts, since the own compositor has the magnifier and the filters
+#              true and a11y_screen_filter.ron holding the inversion, the default starts and
+#              the compositor's journal shows the magnifier turned on by the bar, the
+#              inversion read and the shader compiled; a frame's pixels are not looked at
 #   localed    item 19: systemd-localed masked and stopped hands the sign-in off, the journal
 #              naming the failed read of X11Layout
 #   absent     item 9: with the compositor's files removed under `bootc usr-overlay`, no menu,
@@ -865,6 +866,13 @@ filter_set() { # filter_set TEXT|absent
     fi
 }
 
+# The compositor's journal of this sign-in has, without its colours, a line matching PATTERN.
+compositor_logged() { # compositor_logged PATTERN
+    local log
+    log=$(unit_journal "$SIGN_IN_SINCE" "$COMPOSITOR" -o cat | sed 's/\x1b\[[0-9;]*m//g') || return 1
+    grep -q "$1" <<< "$log"
+}
+
 stage_a11y() {
     local key=org.gnome.desktop.a11y.applications
     own_up
@@ -873,6 +881,12 @@ stage_a11y() {
     ended 60 "$SECONDS"
     filter_set '(inverted: true, color_filter: None)'
     own_up
+    wait_until 30 compositor_logged 'magnifier on=true' ||
+        fail "the key is true and the compositor did not turn the magnifier on 30 s after the session"
+    compositor_logged "colour filter from cosmic-comp's state.*inverted: true" ||
+        fail "the compositor did not read the stored inversion"
+    ! compositor_logged "the colour filter's shader did not compile" ||
+        fail "the inversion is stored and the compositor cannot draw it"
     in_session gsettings reset "$key" screen-magnifier-enabled
     log_out
     ended 60 "$SECONDS"
