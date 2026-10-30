@@ -10,7 +10,7 @@ areas: [accessibility, shell]
 # 0133. The own compositor takes the magnifier, the colour filters and the keyboard aids
 
 **Accepted** by the maintainer on 2026-10-30 (#862). Revision 3 of `doc_accessibility.md`
-applies it and awaits the maintainer's approval (ADR-0074).
+applies it, approved by the maintainer on 2026-10-30 (#867, ADR-0074).
 
 ## Context
 

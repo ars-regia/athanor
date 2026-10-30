@@ -269,7 +269,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   three while the session is locked or a trusted prompt has the focus, and an aid the compositor
   turned off itself (AX10, AX11). The allow-list, `data/privileged-clients`, has no mark of a
   trusted prompt today: the first code that serves the aids adds one, by which the compositor
-  knows such a prompt (#865; proposed with revision 3 of `doc_accessibility.md`, AX11);
+  knows such a prompt (#865; proposed with revision 3 of `doc_accessibility.md` and approved with it, AX11);
 - the magnifier and the colour filters, which are cosmic-comp's today (`doc_accessibility.md`);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces

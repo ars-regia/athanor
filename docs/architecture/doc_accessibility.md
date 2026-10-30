@@ -371,7 +371,7 @@ Decisions 1 to 8 were taken by the maintainer on 2026-10-05; decision 9 on 2026-
 12. **The aids' state shown by the bar until `athanor-osd` exists** (AX11, AX15; #862, ADR-0133), taken on 2026-10-30. Under the own compositor the bar's accessibility module shows the latched and locked modifiers and announces them over AT-SPI from the state `athanor_a11y_v1` sends, and no sound is played, until `athanor-osd` takes the notices over. Not taken: revision 2's rule that the aids merge after `athanor-osd`'s handover; by ADR-0133's reading, it would hold back the aids of decision 11.
 13. **Known limits at the greeter** (AX13; #862, ADR-0133), taken on 2026-10-30. The greeter runs on cosmic-comp and has no bar: until `athanor-a11y watch` runs there, it applies no magnifier key, and the sign-in is made without keyboard aids, since the patch of decision 4 is unbuilt.
 
-**Proposed with revision 3, for the maintainer's decision:** the zoom step and its increment (AX10); the bounds of the aids' delays, and the aids while the session is locked or a trusted prompt has the focus (AX11); the fixture tests of AX17; the failure behaviour of the filter file.
+**Proposed with revision 3, approved as written by the maintainer on 2026-10-30 with this revision (#867):** the zoom step and its increment (AX10); the bounds of the aids' delays, and the aids while the session is locked or a trusted prompt has the focus (AX11); the fixture tests of AX17; the failure behaviour of the filter file.
 
 **Open doubts left by the decisions**, each settled by a spike of section 4 before the step that needs it:
 
