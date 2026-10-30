@@ -49,6 +49,7 @@ pub fn start(
         scale,
     );
     let formats = backend.renderer().dmabuf_formats();
+    let pass = crate::look::prepare(backend.renderer());
     let nested = Nested {
         backend,
         output: output.clone(),
@@ -56,6 +57,9 @@ pub fn start(
         frame_scheduled: false,
     };
     let mut state = State::new(event_loop, display, Backend::Nested(Box::new(nested)))?;
+    if !pass {
+        state.no_filter_pass();
+    }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     state.map_output(&output);
@@ -98,6 +102,10 @@ impl State {
         let frame_target = self.clock.now() + frame_period;
         let output = nested.output.clone();
         let popups = self.composing.popups_on(&self.space, &output);
+        let pointer = self.seat.get_pointer().map(|p| p.current_location());
+        let look = self
+            .a11y
+            .look(&output, self.space.output_geometry(&output), pointer);
         let age = nested.backend.buffer_age().unwrap_or(0);
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
@@ -110,6 +118,7 @@ impl State {
                     age,
                     view,
                     &mut nested.damage_tracker,
+                    look,
                 );
                 // The draw alone, as on the headless backend: the submit waits on the parent.
                 if let (Ok(_), Some(stats)) = (&drawn, &mut self.frame_stats) {

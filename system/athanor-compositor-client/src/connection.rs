@@ -52,9 +52,6 @@ use crate::model::{
     Accessibility, Change, Event, ScreenFilter, Table, Tiling, Window, WindowId, WindowState,
     Workspace, WorkspaceId,
 };
-use crate::protocols::a11y::client::cosmic_a11y_manager_v1::{
-    self, ActiveState, CosmicA11yManagerV1, Filter,
-};
 use crate::protocols::keyboard_layout::client::{
     zcosmic_keyboard_layout_manager_v1::ZcosmicKeyboardLayoutManagerV1,
     zcosmic_keyboard_layout_v1::{self, ZcosmicKeyboardLayoutV1},
@@ -332,28 +329,19 @@ impl Client {
 
     pub fn set_magnifier(&self, enabled: bool) -> Result<(), Error> {
         let state = self.inner.live_state()?;
-        state.a11y()?.set_magnifier(active_state(enabled));
+        state.a11y()?.set_magnifier(enabled);
         drop(state);
         self.flush()
     }
 
     pub fn set_screen_filter(&self, inverted: bool, filter: ScreenFilter) -> Result<(), Error> {
-        let filter = match filter {
-            ScreenFilter::None => Filter::Disabled,
-            ScreenFilter::Greyscale => Filter::Greyscale,
-            ScreenFilter::Protanopia => Filter::DaltonizeProtanopia,
-            ScreenFilter::Deuteranopia => Filter::DaltonizeDeuteranopia,
-            ScreenFilter::Tritanopia => Filter::DaltonizeTritanopia,
-            ScreenFilter::Unknown => {
-                return Err(Error::InvalidArgument(
-                    "an unknown screen filter cannot be set",
-                ))
-            }
-        };
+        if filter == ScreenFilter::Unknown {
+            return Err(Error::InvalidArgument(
+                "an unknown screen filter cannot be set",
+            ));
+        }
         let state = self.inner.live_state()?;
-        state
-            .a11y()?
-            .set_screen_filter(active_state(inverted), filter);
+        state.a11y()?.set_screen_filter(inverted, filter);
         drop(state);
         self.flush()
     }
@@ -745,13 +733,6 @@ mod queue_source {
     }
 }
 
-fn active_state(enabled: bool) -> ActiveState {
-    if enabled {
-        ActiveState::Enabled
-    } else {
-        ActiveState::Disabled
-    }
-}
 
 #[derive(Default)]
 pub(crate) struct Globals {
@@ -766,7 +747,7 @@ pub(crate) struct Globals {
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
     pub(crate) keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
-    a11y: Option<CosmicA11yManagerV1>,
+    pub(crate) a11y: Option<crate::a11y::Manager>,
     security_context: Option<WpSecurityContextManagerV1>,
     /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
     /// globals at the first capture.
@@ -805,7 +786,7 @@ pub(crate) struct State {
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
     keyboard_layouts: Vec<String>,
     pub(crate) keyboard_group: u32,
-    accessibility: Accessibility,
+    pub(crate) accessibility: Accessibility,
     pub(crate) events: Vec<Event>,
     /// The window pictures in flight, by call.
     #[cfg(feature = "gtk")]
@@ -848,8 +829,7 @@ impl State {
             keyboard_group: crate::keyboard_group::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
-            // Version 3 deprecates the screen filter events of version 2.
-            a11y: bind(globals, qh, 2..=2),
+            a11y: crate::a11y::bind_cosmic(globals, qh),
             security_context: bind(globals, qh, 1..=1),
             #[cfg(feature = "gtk")]
             shm: bind(globals, qh, 1..=1),
@@ -915,11 +895,11 @@ impl State {
             .ok_or(Error::Unavailable("zcosmic_toplevel_info_v1"))
     }
 
-    fn a11y(&self) -> Result<&CosmicA11yManagerV1, Error> {
+    fn a11y(&self) -> Result<&crate::a11y::Manager, Error> {
         self.globals
             .a11y
             .as_ref()
-            .ok_or(Error::Unavailable("cosmic_a11y_manager_v1"))
+            .ok_or(Error::Unavailable("an accessibility manager"))
     }
 
     // The compositor names an output in reply to its bind, before it can report a toplevel
@@ -970,7 +950,7 @@ impl State {
         }
     }
 
-    fn set_accessibility(&mut self, next: Accessibility) {
+    pub(crate) fn set_accessibility(&mut self, next: Accessibility) {
         if next != self.accessibility {
             self.accessibility = next;
             self.events.push(Event::Accessibility(next));
@@ -1141,37 +1121,6 @@ impl Dispatch<ZcosmicKeyboardLayoutV1, ()> for State {
     ) {
         let zcosmic_keyboard_layout_v1::Event::Group { group } = event;
         state.set_group(group);
-    }
-}
-
-impl Dispatch<CosmicA11yManagerV1, ()> for State {
-    fn event(
-        state: &mut Self,
-        _: &CosmicA11yManagerV1,
-        event: cosmic_a11y_manager_v1::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        let enabled = |value: WEnum<ActiveState>| value == WEnum::Value(ActiveState::Enabled);
-        let mut next = state.accessibility;
-        match event {
-            cosmic_a11y_manager_v1::Event::Magnifier { active } => next.magnifier = enabled(active),
-            cosmic_a11y_manager_v1::Event::ScreenFilter { inverted, filter } => {
-                next.inverted = enabled(inverted);
-                next.filter = match filter {
-                    WEnum::Value(Filter::Disabled) => ScreenFilter::None,
-                    WEnum::Value(Filter::Greyscale) => ScreenFilter::Greyscale,
-                    WEnum::Value(Filter::DaltonizeProtanopia) => ScreenFilter::Protanopia,
-                    WEnum::Value(Filter::DaltonizeDeuteranopia) => ScreenFilter::Deuteranopia,
-                    WEnum::Value(Filter::DaltonizeTritanopia) => ScreenFilter::Tritanopia,
-                    WEnum::Value(Filter::Unknown) | WEnum::Unknown(_) => ScreenFilter::Unknown,
-                };
-            }
-            // Version 3 only; this client binds version 2.
-            cosmic_a11y_manager_v1::Event::ScreenFilter2 { .. } => {}
-        }
-        state.set_accessibility(next);
     }
 }
 

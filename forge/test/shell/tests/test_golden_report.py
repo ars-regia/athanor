@@ -131,13 +131,13 @@ class GoldenReportTest(unittest.TestCase):
 
 
     def test_the_controls_decision_28_hides_follow_the_presets(self):
-        bar_ws, bar_lib, rows = "bar-workspaces", "bar-library", "bar-a11y-rows"
+        bar_ws, bar_lib = "bar-workspaces", "bar-library"
         dock = {"dock-workspaces", "dock-library"}
         self.assertEqual(gr.hidden("bar", "bar-light-1.0-en"), {bar_lib})
         self.assertEqual(gr.hidden("bar-shield", "bar-shield-dark-1.5-de"), {bar_lib})
         self.assertEqual(gr.hidden("bar-power", "bar-power-light-1.0-en"), {bar_ws, bar_lib})
         self.assertEqual(
-            gr.hidden("bar-accessibility", "bar-accessibility-light-1.0-rtl"), {bar_ws, bar_lib, rows}
+            gr.hidden("bar-accessibility", "bar-accessibility-light-1.0-rtl"), {bar_ws, bar_lib}
         )
         self.assertEqual(gr.hidden("dock", "dock-light-1.0-en"), dock)
         self.assertEqual(
@@ -153,11 +153,10 @@ class GoldenReportTest(unittest.TestCase):
             for control in gr.hidden(surface, tag):
                 counts[control] += 1
         # The 12 bar surfaces under float and the 21 float and minimal layout cases; the 14 bar
-        # surfaces and the 27 layout cases; bar-accessibility; dock and the 9 layout cases with a
-        # visible dock.
+        # surfaces and the 27 layout cases; dock and the 9 layout cases with a visible dock.
         self.assertEqual(
             counts,
-            {bar_ws: 12 * 12 + 21, bar_lib: 14 * 12 + 27, rows: 12,
+            {bar_ws: 12 * 12 + 21, bar_lib: 14 * 12 + 27,
              "dock-workspaces": 12 + 9, "dock-library": 12 + 9},
         )
 

@@ -21,27 +21,27 @@ msgstr ""
 msgid "The sign-in service sent a reply of {size} bytes, too large to read"
 msgstr ""
 
-#: src/auth.rs:305
+#: src/auth.rs:310
 msgid "Checking your credentials…"
 msgstr ""
 
-#: src/auth.rs:339
+#: src/auth.rs:344
 msgid "The login service gave an unexpected answer."
 msgstr ""
 
-#: src/auth.rs:349
+#: src/auth.rs:354
 msgid "Too many authentication steps."
 msgstr ""
 
-#: src/auth.rs:359
+#: src/auth.rs:364
 msgid "Wrong password"
 msgstr ""
 
-#: src/auth.rs:361
+#: src/auth.rs:366
 msgid "The login service refused the sign-in."
 msgstr ""
 
-#: src/auth.rs:375
+#: src/auth.rs:380
 msgid "The login service cannot be reached."
 msgstr ""
 
@@ -129,7 +129,7 @@ msgstr ""
 msgid "Signed with a key of the policy in force"
 msgstr ""
 
-#: src/ui.rs:190 src/ui.rs:890 src/ui.rs:932
+#: src/ui.rs:190 src/ui.rs:892 src/ui.rs:934
 msgid "Other user"
 msgstr ""
 
@@ -151,71 +151,71 @@ msgid "Athanor on cosmic-comp"
 msgstr ""
 
 #: src/ui.rs:327
-msgid "Magnifier, colour filters, workspace overview and Alt+Tab"
+msgid "Workspace overview and Alt+Tab"
 msgstr ""
 
-#: src/ui.rs:670
+#: src/ui.rs:671
 msgid "%A %-d %B"
 msgstr ""
 
-#: src/ui.rs:704
+#: src/ui.rs:705
 msgid "Password"
 msgstr ""
 
-#: src/ui.rs:713 src/ui.rs:718 src/ui.rs:719
+#: src/ui.rs:714 src/ui.rs:719 src/ui.rs:720
 msgid "User name"
 msgstr ""
 
-#: src/ui.rs:732 src/ui.rs:735
+#: src/ui.rs:733 src/ui.rs:736
 msgid "Back to the list"
 msgstr ""
 
-#: src/ui.rs:741
+#: src/ui.rs:742
 msgid "Sign in"
 msgstr ""
 
-#: src/ui.rs:744 src/ui.rs:748
+#: src/ui.rs:745 src/ui.rs:749
 msgid "Cancel"
 msgstr ""
 
-#: src/ui.rs:884
+#: src/ui.rs:886
 #, rust-format
 msgid "Password for {name}"
 msgstr ""
 
-#: src/ui.rs:908
+#: src/ui.rs:910
 msgid "Accounts"
 msgstr ""
 
-#: src/ui.rs:1068
+#: src/ui.rs:1070
 msgid "Enter a user name of at most 256 bytes, without control characters."
 msgstr ""
 
-#: src/ui.rs:1084
+#: src/ui.rs:1086
 msgid "Signing in…"
 msgstr ""
 
-#: src/ui.rs:1099
+#: src/ui.rs:1101
 msgid "Sign-in was cancelled."
 msgstr ""
 
-#: src/ui.rs:1107
+#: src/ui.rs:1109
 #, rust-format
 msgid "Sign-in failed: {reason}"
 msgstr ""
 
-#: src/ui.rs:1143 src/ui.rs:1144
+#: src/ui.rs:1145 src/ui.rs:1146
 msgid "High contrast"
 msgstr ""
 
-#: src/ui.rs:1164
+#: src/ui.rs:1166
 msgid "Suspend"
 msgstr ""
 
-#: src/ui.rs:1170
+#: src/ui.rs:1172
 msgid "Restart"
 msgstr ""
 
-#: src/ui.rs:1176
+#: src/ui.rs:1178
 msgid "Shut down"
 msgstr ""
