@@ -17,7 +17,7 @@ use smithay::backend::input::{InputTime, KeyState};
 use smithay::input::keyboard::{xkb, KeyboardHandle, KeyboardSource, Keycode, Keysym};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::RegistrationToken;
-use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use std::collections::HashMap;
 use std::sync::PoisonError;
@@ -103,8 +103,8 @@ pub struct Aids {
     set: (u32, u32),
     held: Vec<Held>,
     withheld: HashMap<Keycode, Withheld>,
-    /// The client the keyboard last went to.
-    focus: Option<ClientId>,
+    /// The surface that has the keyboard, for a press held back.
+    focus: Option<WlSurface>,
     /// When each key was last released, for bounce keys.
     released: HashMap<Keycode, Instant>,
     shift_presses: u8,
@@ -634,10 +634,11 @@ impl State {
         self.stop_shift_hold();
     }
 
-    /// The keyboard went to `client`: a press held back for another client is dropped.
-    pub(crate) fn aids_focus_changed(&mut self, client: Option<ClientId>) {
-        if self.aids.focus != client {
-            self.aids.focus = client;
+    /// The keyboard went to `surface`, or to none: a press held back for another surface is
+    /// dropped, of the same client too, and with no surface it would be the next one's held key.
+    pub(crate) fn aids_focus_changed(&mut self, surface: Option<&WlSurface>) {
+        if self.aids.focus.as_ref() != surface {
+            self.aids.focus = surface.cloned();
             self.aids_drop_pending();
         }
     }

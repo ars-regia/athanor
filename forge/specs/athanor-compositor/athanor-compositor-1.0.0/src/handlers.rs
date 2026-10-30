@@ -829,7 +829,7 @@ impl SeatHandler for State {
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         let client = focused.and_then(|surface| surface.client());
-        self.aids_focus_changed(client.as_ref().map(Client::id));
+        self.aids_focus_changed(focused);
         set_primary_focus(&self.display_handle, seat, client.clone());
         set_data_device_focus(&self.display_handle, seat, client);
         self.text_input_focus(focused.cloned());

@@ -6,7 +6,7 @@
 use super::devices::pen_over_window;
 use super::{
     chord, focused_window, key, lock_session, sent_to, write_xkb, xkb_file, Local, Running,
-    VirtualKeyboard, FIXTURE_ALLOW_LIST, SWAPPED_KEYMAP,
+    VirtualKeyboard, FIXTURE_ALLOW_LIST, HEIGHT, SWAPPED_KEYMAP, WIDTH,
 };
 use crate::aids::{Aid, InvalidDelay, Notice, SHIFT};
 use crate::bindings::Action;
@@ -16,9 +16,10 @@ use smithay::backend::input::{ButtonState, InputTime, TabletToolTipState};
 use smithay::reexports::wayland_server::Resource;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use wayland_client::protocol::wl_seat;
+use wayland_client::protocol::{wl_compositor, wl_seat, wl_shm};
 use wayland_protocols::ext::session_lock::v1::client::ext_session_lock_manager_v1::ExtSessionLockManagerV1;
 use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
+use wayland_protocols::xdg::shell::client::xdg_wm_base;
 
 const KEY_ESC: u32 = 1;
 const KEY_Q: u32 = 16;
@@ -615,6 +616,63 @@ fn ax11_a_focus_change_drops_a_press_held_back() {
     assert_eq!(second.client.keys, [], "and the second no press");
     assert_eq!(second.client.released, [], "and no release");
     assert!(no_key_pressed(&run));
+    run.stop();
+}
+
+/// The same for another surface of the same client: the focus is a surface's, not a client's.
+#[test]
+fn ax11_a_focus_change_within_a_client_drops_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut local, first) = focused_window(&mut run);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    run.state.set_slow_keys(true, 1000).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let _toplevel = xdg.get_toplevel(&qh, ());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(&mut run, "the second window is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let held = first.toplevel().expect("a toplevel").wl_surface().clone();
+    local.pump(&mut run, "the second window has the keyboard", |_, state| {
+        let keyboard = state.seat.get_keyboard().expect("a keyboard");
+        keyboard.current_focus().is_some_and(|focus| focus != held)
+    });
+
+    wait(&mut run, 1100);
+    key(&mut run.state, KEY_A, false);
+    local.roundtrip(&mut run);
+    assert_eq!(local.client.keys, [], "neither surface is sent the press");
+    assert!(no_key_pressed(&run));
+    run.stop();
+}
+
+/// The same when the keyboard goes to no surface: the press would otherwise be held on the
+/// seat, and the next surface would receive it among the keys of its enter event.
+#[test]
+fn ax11_a_loss_of_focus_drops_a_press_held_back() {
+    let mut run = Running::start(None);
+    let (mut local, window) = focused_window(&mut run);
+    run.state.set_slow_keys(true, 200).expect("in bounds");
+    key(&mut run.state, KEY_A, true);
+    run.state.set_keyboard_focus(None);
+    wait(&mut run, 300);
+    assert!(no_key_pressed(&run), "the delay ended on no surface");
+    run.state.focus(&window);
+    key(&mut run.state, KEY_A, false);
+    local.roundtrip(&mut run);
+    assert_eq!(local.client.keys, [], "no press");
+    assert_eq!(local.client.released, [], "and no release");
     run.stop();
 }
 
