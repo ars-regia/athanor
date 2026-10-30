@@ -1344,10 +1344,19 @@ orca)
         # Applications); three more reach the test window, whose menu Shift+F10 opens, the
         # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
         # keyboard to the window (#614); orca_dock.py drops that line.
+        # Under athanor-compositor a layer surface takes the keyboard on a click or on
+        # Ctrl+Alt+Tab (AX7), not when it maps, so the walk starts with that key. The dock shows
+        # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
+        # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
+        # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
         seed_bar "$out/seed-orca-dock" float top visible light
-        if [ -n "$unit" ]; then own=(--own-compositor - visible "${3:-en}"); fi
+        walk=(Tab*9 shift+F10 Down*4 Escape)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor - visible "${3:-en}")
+            walk=(ctrl+alt+Tab Tab*6 KP_Enter shift+F10 Down*4 Escape)
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
         surface_not_closed orca dock orca-dock
@@ -1356,14 +1365,22 @@ orca)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
         # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
-        # through `own`). Tab skips Input source (#751), so the
+        # through `own`). Under cosmic-comp Tab skips Input source (#751), so the
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
+        # Red under athanor-compositor (#876): Orca receives the keys and speaks the Clock
+        # button after Ctrl+Alt+Tab, but the seven Tabs then only echo and Accessibility, Tiling,
+        # Power and the Shield are not spoken: each Tab moves the focus to Input source and it
+        # returns to the Clock, so the counts are not the cause; the rest is in the issue.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
-        if [ -n "$unit" ]; then own=(--own-compositor float - "${3:-en}"); fi
+        walk=(Tab*7)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor float - "${3:-en}")
+            walk=(ctrl+alt+Tab "${walk[@]}")
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
             RIG_DATA_OVERLAY="$bar_overlay" \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
