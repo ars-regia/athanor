@@ -4812,7 +4812,7 @@ fn a_virtual_keymap_leaves_the_layouts_alone() {
     let (mut window, _) = focused_window(&mut run);
     let mut bar = Local::connect(&mut run, None);
     let (_keyboard, object) = bar.keyboard_group(&mut run);
-    let seat = "English (US)\nItalian";
+    let seat = "English (US)\nItalian\n";
     assert_eq!(bar.client.keyboard_layouts, [seat], "sent when it is made");
     let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
     typist.key(&mut window, &mut run, 30, true);
@@ -4865,8 +4865,29 @@ fn a_live_change_names_the_layouts() {
     });
     assert_eq!(
         window.client.keyboard_layouts.last().map(String::as_str),
-        Some("English (US)\nItalian\nGerman")
+        Some("English (US)\nItalian\nGerman\n")
     );
+    run.stop();
+}
+
+/// A layout whose symbols file names none is still a group: `layouts` holds a line for it even
+/// at the end of the list, where a list joined by newlines lost it, the client counted one
+/// layout and the bar hid its input source.
+#[test]
+fn an_unnamed_layout_keeps_its_line() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let named = keyboard.with_xkb_state(&mut run.state, |context| {
+        crate::input::keymap_text(context.xkb())
+    });
+    let unnamed: Vec<_> = named.lines().filter(|l| !l.contains("Italian")).collect();
+    keyboard
+        .set_keymap_from_string(&mut run.state, unnamed.join("\n"))
+        .expect("the keymap with no second name");
+    let mut bar = Local::connect(&mut run, None);
+    bar.keyboard_group(&mut run);
+    assert_eq!(bar.client.keyboard_layouts, ["English (US)\n\n"]);
     run.stop();
 }
 

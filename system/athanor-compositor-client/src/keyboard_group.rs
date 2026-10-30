@@ -85,13 +85,18 @@ impl Dispatch<AthanorKeyboardGroupV1, ()> for State {
         match event {
             athanor_keyboard_group_v1::Event::Group { group } => state.set_group(group),
             athanor_keyboard_group_v1::Event::Layouts { names } => {
-                state.set_layouts(names.lines().map(str::to_owned).collect());
+                state.set_layouts(names_of(&names));
             }
         }
     }
 }
 
 delegate_noop!(State: AthanorKeyboardGroupManagerV1);
+
+/// The names of a `layouts` event, one per group: every line is one, an empty one included.
+fn names_of(lines: &str) -> Vec<String> {
+    lines.lines().map(str::to_owned).collect()
+}
 
 impl State {
     /// The group either manager sent, as an event when it changed.
@@ -121,6 +126,13 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_line_of_the_event_is_a_group() {
+        assert_eq!(names_of(""), Vec::<String>::new());
+        assert_eq!(names_of("English (US)\n\n"), ["English (US)", ""]);
+        assert_eq!(names_of("\n\n"), ["", ""]);
+    }
 
     /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp and
     /// version 1 a keymap is all there is.

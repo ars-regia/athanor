@@ -139,7 +139,13 @@ impl Dispatch2<AthanorKeyboardGroupV1, State> for GroupObject {
 /// Sends `object` the names of the seat's layouts, when its version has the event.
 fn send_layouts(object: &AthanorKeyboardGroupV1, names: &[String]) {
     if object.version() >= athanor_keyboard_group_v1::EVT_LAYOUTS_SINCE {
-        object.layouts(names.join("\n"));
+        // Ended, not joined: a last name that is empty still counts as a group.
+        object.layouts(
+            names
+                .iter()
+                .map(|name| name.replace('\n', " ") + "\n")
+                .collect(),
+        );
     }
 }
 

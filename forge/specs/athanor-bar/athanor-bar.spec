@@ -75,7 +75,8 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %changelog
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
 - The input-source button takes the seat's layouts from athanor-keyboard-group-v1 version 2, so
-  a virtual keyboard's keymap no longer hides it under the keyboard focus (#876).
+  a virtual keyboard's keymap no longer hides it under the keyboard focus, and a layout with
+  no name reads "Layout 2" in place of a blank entry (#876).
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - The accessibility menu's magnifier, inversion and filter rows are shown under
