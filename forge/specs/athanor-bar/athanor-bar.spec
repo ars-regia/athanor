@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        18%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,9 +73,17 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
-* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
 - The input-source button takes the seat's layouts from athanor-keyboard-group-v1 version 2, so
   a virtual keyboard's keymap no longer hides it under the keyboard focus (#876).
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- The accessibility menu's magnifier, inversion and filter rows are shown under
+  athanor-compositor too, through its athanor_a11y_manager_v1, and under cosmic-comp through
+  cosmic_a11y_manager_v1 up to version 3. The magnifier's GNOME key,
+  screen-magnifier-enabled, turns the magnifier on at the bar's start when true and is sent to
+  the compositor at each change, and the magnifier row writes it and tells the compositor
+  (doc_accessibility.md AX10, #864).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - The notification popups already shown on an output hide while a popover of the bar is

@@ -87,10 +87,7 @@ class CompositorSession(unittest.TestCase):
             '[ ! -e "$W/busctl-fails" ] || exit 1\n'
             'case "$*" in *X11Layout) echo \'s "it"\' ;; *) echo \'s ""\' ;; esac',
         )
-        self.stub("gsettings", 'cat "$W/magnifier" 2>/dev/null || echo false')
-        self.stub(
-            "athanor-compositor", 'exit "$(cat "$W/filter" 2>/dev/null || echo 0)"'
-        )
+        self.stub("gsettings", "echo false")
         self.stub("athanor-usbguard-hook", "")
         self.stub("athanor-session", 'echo "$XDG_SESSION_TYPE" > "$W/handed-off"')
         text = SCRIPT.read_text().replace(
@@ -99,7 +96,7 @@ class CompositorSession(unittest.TestCase):
         for path in (READER, ENVIRONMENT, IMPORT_LIST):
             self.assertIn(path, text)
             text = text.replace(path, str(CONFIG_SOURCES / path.lstrip("/")))
-        for name in ("athanor-session", "athanor-compositor", "athanor-usbguard-hook"):
+        for name in ("athanor-session", "athanor-usbguard-hook"):
             text = text.replace(f"/usr/bin/{name}", str(self.bin / name))
         self.text = text
         self.script = self.work / "athanor-compositor-session"
@@ -301,38 +298,27 @@ class CompositorSession(unittest.TestCase):
         ):
             self.assertIn(line, exported)
 
-    def test_the_magnifier_from_the_greeter_hands_off(self):
-        status, stderr = self.run_session(ATHANOR_A11Y="screen-reader,magnifier")
-        self.assertEqual(status, 0, stderr)
-        self.assert_handed_off_before_start(
-            "the greeter hands the magnifier to the session"
+    def test_the_magnifier_and_a_colour_filter_hand_nothing_off(self):
+        # They are the compositor's own (doc_accessibility.md AX10, #864): the greeter's
+        # magnifier, the key on, a dconf database that cannot be read and cosmic-comp's
+        # filter file holding the inversion all start the session here.
+        self.stub(
+            "gsettings",
+            'case "$2 $3" in *screen-magnifier-enabled) echo true ;; *) echo false ;; esac',
         )
-
-    def test_the_magnifier_on_in_the_settings_hands_off(self):
-        (self.work / "magnifier").write_text("true\n")
-        self.run_session()
-        self.assert_handed_off_before_start("the magnifier is on (true)")
-
-    def test_a_dconf_database_that_cannot_be_read_hands_off(self):
         dconf = self.work / "home/.config/dconf"
         dconf.mkdir(parents=True)
         (dconf / "user").write_text("")
         (dconf / "user").chmod(0)
-        self.run_session()
-        self.assert_handed_off_before_start(
-            "cannot be read, so the magnifier's setting"
-        )
-
-    def test_a_colour_filter_on_or_unknown_hands_off(self):
-        for code in ("10", "2"):
-            with self.subTest(code=code):
-                (self.work / "filter").write_text(code)
-                for left in ("calls", "journal", "handed-off"):
-                    (self.work / left).unlink(missing_ok=True)
-                self.run_session()
-                self.assert_handed_off_before_start(
-                    f"athanor-compositor --screen-filter-on exited {code}"
-                )
+        state = self.work / "home/.local/state/cosmic-comp"
+        state.mkdir(parents=True)
+        (state / "a11y_screen_filter.ron").write_text("(inverted: true, color_filter: None)")
+        status, stderr = self.run_session(ATHANOR_A11Y="screen-reader,magnifier")
+        self.assertEqual(status, 0, stderr)
+        self.assertFalse(self.handed_off(), self.journal())
+        self.assertNotIn("magnifier", self.journal())
+        self.assertFalse(any(c.startswith("gsettings") and "magnifier" in c for c in self.calls()))
+        self.assertTrue(any("start --wait" in c for c in self.calls()))
 
     def test_a_session_that_did_not_start_hands_off_after_cleaning_up(self):
         status, stderr = self.run_session(start="fail")
