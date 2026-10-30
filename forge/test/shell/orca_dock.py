@@ -47,7 +47,12 @@ def answered_a_command(lines, reference, size=3):
     "where am I", on a button, and Orca says again what it said when the last Tab gave the button
     the focus, between the echoes of the two keys. Without the keyboard monitor (AX4) the key
     goes to the button instead, which opens its menu and says nothing of the kind. `reference`
-    is the set of utterances of the GTK walk."""
+    is the set of utterances of the GTK walk.
+
+    `size` is the three lines Orca says for the cc-window-1 button the walk ends on: its name
+    and "collapsed button.", "Running." and "opens popup" (golden/orca/orca-dock.txt). A change
+    of that row's announcement changes `size`. Any one-word utterance counts as an echo,
+    whatever key it names."""
     return any(
         is_echo(lines[at], reference)
         and is_echo(lines[at - size - 1], reference)
@@ -128,7 +133,12 @@ def main(argv):
     transcript = Path(walk[0])
     if transcript.exists():
         spoken = transcript.read_text(encoding="utf-8").splitlines()
-        reference = set((GOLDEN / transcript.name).read_text(encoding="utf-8").splitlines())
+        golden = GOLDEN / transcript.name
+        if not golden.is_file():
+            print(f"FAIL no golden transcript {golden} to compare {transcript.name} with",
+                  file=sys.stderr)
+            return 1
+        reference = set(golden.read_text(encoding="utf-8").splitlines())
         if "KP_Enter" in walk and not answered_a_command(spoken, reference):
             print("FAIL Orca did not answer KP_Enter, 'where am I'", file=sys.stderr)
             status = 1

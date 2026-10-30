@@ -1367,6 +1367,10 @@ orca)
         # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
         # through `own`). Tab skips Input source (#751), so the
         # seventh Tab comes back round to the first; the eighth once Tab reaches it.
+        # Red under athanor-compositor (#TBD): Orca receives the keys and speaks the Clock
+        # button after Ctrl+Alt+Tab, but the seven Tabs then only echo and Accessibility, Tiling,
+        # Power and the Shield are not spoken; the cause is not known (a person's Tab or the
+        # walk's counts), see the issue.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
