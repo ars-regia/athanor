@@ -209,8 +209,9 @@ is a barrier against it.
   unconfined code. It
   is written in the compositor over zbus; milestone C1 estimated about 500 lines for the monitor,
   the key filter and AX4's admission (C1 results, section 10, item 6). Whether the image's session
-  bus returns `ProcessFD` is AX4's open doubt 9, answered before the acceptance. Until the
-  monitor exists, Orca's own commands do not reach Orca under the own compositor (SN16, gap 3).
+  bus returns `ProcessFD` was AX4's open doubt 9: the laptop image's dbus-broker 37 returns it
+  (checked on 2026-10-30, #863). The monitor landed in #870; before it, Orca's own commands did
+  not reach Orca under the own compositor (SN16, gap 3, closed on 2026-10-30).
 - **Keyboard aids** (AX11) are in the input path from the first version.
 - **No capture while locked** (register row 10), and capture only through the portal and the shell,
   by identity as above. An output is captured through `ext_output_image_capture_source_manager_v1`,
@@ -718,8 +719,9 @@ amendment's audit:
       (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* revision 4 of
       `doc_session.md` (#811) recorded gap 3 and the keyboard aids of gap 4 as closed at the
       switch, in error: the own compositor had neither the keyboard monitor nor the aids. Gap 3
-      is open, accepted by the maintainer by number on 2026-10-30, until the monitor lands
-      (#863), and the aids' part of gap 4 until the aids land (#865), under gap 4's acceptance);
+      was open, accepted by the maintainer by number on 2026-10-30, until the monitor landed
+      (#870, #863; checked on the reference laptop the same day), and the aids' part of gap 4
+      is open until the aids land (#865), under gap 4's acceptance);
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the magnifier, inversion and filter rows of the bar's accessibility menu,
       the workspaces and applications buttons of the bar and of the dock, the clipboard
