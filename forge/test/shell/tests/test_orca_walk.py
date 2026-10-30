@@ -89,6 +89,22 @@ class WalkTest(unittest.TestCase):
             )
             self.assertEqual(len(presses), len([c for c in commands if "Quit" not in c]), compositor)
 
+    def test_orca_runs_in_orca_service_under_athanor_compositor(self):
+        for compositor, prefix in [
+            ("athanor", ["/repo/forge/test/shell/in-unit.sh", "orca.service", "/usr/bin/orca"]),
+            ("cosmic", ["orca"]),
+            (None, ["orca"]),
+        ]:
+            env = {} if compositor is None else {"RIG_COMPOSITOR": compositor}
+            with mock.patch.dict("os.environ", env, clear=False):
+                if compositor is None:
+                    os.environ.pop("RIG_COMPOSITOR", None)
+                self.assertEqual(
+                    walk.orca_command("/out/log"),
+                    [*prefix, "--replace", "--debug-file=/out/log"],
+                    compositor,
+                )
+
     def test_a_failed_quit_kills_orca_and_says_why(self):
         orca = FakeOrca()
         status, stderr = self.run_walk(

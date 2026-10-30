@@ -16,5 +16,28 @@ class SpokenByTheDockTest(unittest.TestCase):
         self.assertEqual(orca_dock.spoken_by_the_dock(dock + window), dock)
 
 
+class AnsweredACommandTest(unittest.TestCase):
+    BUTTON = ["CC Window: cc-window-1 collapsed button.", "Running.", "opens popup"]
+
+    def test_the_focus_said_again_after_the_key_is_an_answer(self):
+        spoken = ["Launcher button.", "tab", *self.BUTTON, "enter", *self.BUTTON, "F10"]
+        self.assertTrue(orca_dock.answered_a_command(spoken))
+
+    def test_a_walk_without_the_monitor_has_none(self):
+        # The key reached the button, which opened its menu: no key echo, no repetition.
+        spoken = ["Launcher button.", *self.BUTTON, "cc-window-1 button.", "New Window button."]
+        self.assertFalse(orca_dock.answered_a_command(spoken))
+        self.assertFalse(orca_dock.answered_a_command([]))
+
+    def test_a_row_that_ends_like_the_next_is_not_an_answer(self):
+        # What the run without the monitor spoke: "Running.", "opens popup", "collapsed" twice.
+        spoken = [
+            "CC Window: cc-window-1 collapsed button.", "Running.", "opens popup", "collapsed",
+            "org.athanor.CcWindow2: cc-window-2 collapsed button.", "Running.", "opens popup",
+            "collapsed",
+        ]
+        self.assertFalse(orca_dock.answered_a_command(spoken))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1344,10 +1344,19 @@ orca)
         # Applications); three more reach the test window, whose menu Shift+F10 opens, the
         # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
         # keyboard to the window (#614); orca_dock.py drops that line.
+        # Under athanor-compositor a layer surface takes the keyboard on a click or on
+        # Ctrl+Alt+Tab (AX7), not when it maps, so the walk starts with that key. The dock shows
+        # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
+        # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
+        # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
         seed_bar "$out/seed-orca-dock" float top visible light
-        if [ -n "$unit" ]; then own=(--own-compositor - visible "${3:-en}"); fi
+        walk=(Tab*9 shift+F10 Down*4 Escape)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor - visible "${3:-en}")
+            walk=(ctrl+alt+Tab Tab*6 KP_Enter shift+F10 Down*4 Escape)
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
         surface_not_closed orca dock orca-dock

@@ -25,10 +25,26 @@ SPEECH = re.compile(r"SPEECH OUTPUT: '(.*?)'(?: \{|$)", re.MULTILINE)
 STARTUP, PAUSE = 30, 1.5
 # Under athanor-compositor only an allow-listed unit holds the virtual keyboard (rig-privileged-clients).
 IN_UNIT = ["/repo/forge/test/shell/in-unit.sh", "rig-wtype.service", "/usr/bin/wtype"]
+# The same holds for Orca's keyboard monitor (AX4): only a process in orca.service's cgroup is
+# admitted, so Orca's own commands reach Orca in the unit of the image's session.
+ORCA_IN_UNIT = ["/repo/forge/test/shell/in-unit.sh", "orca.service", "/usr/bin/orca"]
+
+
+def under_athanor():
+    return os.environ.get("RIG_COMPOSITOR") == "athanor"
 
 
 def wtype():
-    return IN_UNIT if os.environ.get("RIG_COMPOSITOR") == "athanor" else ["wtype"]
+    return IN_UNIT if under_athanor() else ["wtype"]
+
+
+def orca_command(log):
+    """The command that starts Orca, writing its debug file to `log`."""
+    return [
+        *(ORCA_IN_UNIT if under_athanor() else ["orca"]),
+        "--replace",
+        f"--debug-file={log}",
+    ]
 
 
 def owned():
@@ -103,9 +119,7 @@ def main(argv):
     log = transcript.with_suffix(transcript.suffix + ".log")
     log.unlink(missing_ok=True)
     with open(transcript.with_suffix(transcript.suffix + ".stderr"), "w") as stderr:
-        orca = subprocess.Popen(
-            ["orca", "--replace", f"--debug-file={log}"], stdout=stderr, stderr=stderr
-        )
+        orca = subprocess.Popen(orca_command(log), stdout=stderr, stderr=stderr)
         # Orca never outlives the walk, whichever way the walk ends.
         try:
             error = walk(orca, keys)
