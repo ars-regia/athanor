@@ -12,7 +12,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Keysym, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::reexports::wayland_server::Resource;
@@ -85,51 +85,70 @@ impl State {
         let to = keyboard
             .current_focus()
             .and_then(|surface| surface.client());
-        let filtered = keyboard.input_intercept(
-            source,
-            self,
-            code,
-            key_state,
-            |state, modifiers, handle| match key_state {
-                KeyState::Pressed => {
-                    // Any other press disarms Super alone (D4). Only a hardware key counts: the
-                    // input method sends the keys it forwards a second time, as a virtual
-                    // keyboard's.
-                    // A second Super while one is held is not Super alone either, and nothing
-                    // arms while the session is locked.
-                    if source == KeyboardSource::Physical {
-                        state.super_tap = (state.super_tap.is_none()
-                            && state.lock.is_none()
-                            && bindings::arms_super(modifiers, &handle))
-                        .then_some(code);
-                    }
-                    match bindings::find(modifiers, &handle, state.lock.is_some()) {
-                        Some(action) => {
-                            state.kept_keys.push(code);
-                            FilterResult::Intercept(Some(action))
+        // Caps Lock as Orca's modifier, let go: the lock its press set, which no client saw.
+        let mut unlock_caps = false;
+        let filtered =
+            keyboard.input_intercept(source, self, code, key_state, |state, modifiers, handle| {
+                // The keyboard aids of AX11 take their place here, before the monitor (#865).
+                // Orca is sent every key once: the input method's forwarded keys are the
+                // hardware's it was sent already.
+                if !past_grab {
+                    let released = key_state == KeyState::Released;
+                    state.keyboard_monitor.observe(modifiers, &handle, released);
+                }
+                match key_state {
+                    KeyState::Pressed => {
+                        // Any other press disarms Super alone (D4). Only a hardware key counts:
+                        // the input method sends the keys it forwards a second time, as a
+                        // virtual keyboard's.
+                        // A second Super while one is held is not Super alone either, and
+                        // nothing arms while the session is locked.
+                        if source == KeyboardSource::Physical {
+                            state.super_tap = (state.super_tap.is_none()
+                                && state.lock.is_none()
+                                && bindings::arms_super(modifiers, &handle))
+                            .then_some(code);
                         }
-                        None => FilterResult::Forward,
+                        match bindings::find(modifiers, &handle, state.lock.is_some()) {
+                            Some(action) => {
+                                state.kept_keys.push(code);
+                                FilterResult::Intercept(Some(action))
+                            }
+                            // After the bindings, Orca's grabs; never from the lock surface (OS4).
+                            None if !past_grab
+                                && state.lock.is_none()
+                                && state.keyboard_monitor.takes(modifiers, &handle) =>
+                            {
+                                state.kept_keys.push(code);
+                                FilterResult::Intercept(None)
+                            }
+                            None => FilterResult::Forward,
+                        }
+                    }
+                    KeyState::Released => {
+                        unlock_caps = state.keyboard_monitor.released(&handle)
+                            && handle.modified_sym() == Keysym::Caps_Lock
+                            && modifiers.caps_lock;
+                        // The release of a kept press is kept: the client never saw the key
+                        // go down.
+                        match state.kept_keys.iter().position(|k| *k == code) {
+                            Some(at) => {
+                                state.kept_keys.swap_remove(at);
+                                FilterResult::Intercept(None)
+                            }
+                            None => FilterResult::Forward,
+                        }
                     }
                 }
-                // The release of a kept press is kept: the client never saw the key go down.
-                KeyState::Released => match state.kept_keys.iter().position(|k| *k == code) {
-                    Some(at) => {
-                        state.kept_keys.swap_remove(at);
-                        FilterResult::Intercept(None)
-                    }
-                    None => FilterResult::Forward,
-                },
-            },
-        );
+            });
         let filtered = match filtered {
             Some((FilterResult::Intercept(kept), _)) => Some(kept),
             Some((FilterResult::Forward, mods_changed)) => {
                 if past_grab {
                     // The focus is sent no modifiers while a grab holds the keyboard: they are
                     // sent with the key, whether it changed them or not.
-                    keyboard.input_forward_bypassing_grab(
-                        self, code, key_state, serial, time, true,
-                    );
+                    keyboard
+                        .input_forward_bypassing_grab(self, code, key_state, serial, time, true);
                     // The grab was not sent the key: it is sent what the key changed.
                     if mods_changed {
                         self.input_method_modifiers();
@@ -154,6 +173,16 @@ impl State {
             }
             Some(Some(action)) => self.fire(action),
             Some(None) => {}
+        }
+        if unlock_caps {
+            // Pressed again and let go, kept from the client as the first press was: the lock
+            // is undone, and the client, never sent it, is sent nothing.
+            for key_state in [KeyState::Pressed, KeyState::Released] {
+                let serial = SERIAL_COUNTER.next_serial();
+                keyboard.input(self, code, key_state, serial, time, |_, _, _| {
+                    FilterResult::Intercept(())
+                });
+            }
         }
         // Super alone, released: the launcher, after the release has reached the client, which
         // saw Super pressed (D4). Not while locked (`State::fire`).

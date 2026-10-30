@@ -17,6 +17,7 @@ mod identity;
 mod idle_inhibit;
 mod input;
 mod input_method;
+mod keyboard_monitor;
 mod keyboard_group;
 mod layer;
 mod lock;

@@ -10194,3 +10194,6 @@ fn a_window_is_maximised_on_its_output() {
 
 #[cfg(test)]
 mod clipboard;
+
+#[cfg(test)]
+mod keyboard_monitor;
