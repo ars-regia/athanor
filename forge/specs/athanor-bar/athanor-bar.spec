@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        17%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,14 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- The bar sends the keys of org.gnome.desktop.a11y.keyboard to athanor-compositor at its start and
+  at each change, a delay out of bounds clamped and logged, and writes stickykeys-enable false
+  when two-key-off turns sticky keys off. The accessibility button shows the latched and locked
+  modifiers and a rejected key, and announces each over AT-SPI at polite priority; a Shift
+  gesture's offer is announced too, shown for 30 seconds, and accepted from the accessibility
+  menu. No sound is played. (doc_accessibility.md AX11, #865)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - The accessibility menu's magnifier, inversion and filter rows are shown under
   athanor-compositor too, through its athanor_a11y_manager_v1, and under cosmic-comp through

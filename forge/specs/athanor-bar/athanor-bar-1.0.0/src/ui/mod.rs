@@ -11,6 +11,7 @@ mod bus;
 mod clock;
 mod control_center;
 mod input;
+mod keyboard_aids;
 mod logind;
 mod menu;
 mod network;
@@ -168,6 +169,8 @@ pub struct Bar {
     tray: Rc<tray::Host>,
     /// One trust state per bar: every surface's shield reads it.
     trust: Rc<shield::Trust>,
+    /// One keyboard aids' service per bar: a notice is announced once, whatever the surfaces.
+    aids: keyboard_aids::Service,
     /// The bar itself, for the `&self` methods that defer work to an idle.
     me: Weak<Bar>,
 }
@@ -214,6 +217,7 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             notifications: notifications::Service::start(weak),
             tray: tray::Host::start(weak),
             trust: shield::Trust::start(weak),
+            aids: keyboard_aids::Service::default(),
         }
     });
     bar.rebuild();
@@ -234,7 +238,10 @@ fn changed_by(event: &Event) -> Changed {
             Changed::Workspaces
         }
         Event::KeyboardLayouts(_) | Event::KeyboardGroup(_) => Changed::Keyboard,
-        Event::Accessibility(_) => Changed::Accessibility,
+        Event::Accessibility(_)
+        | Event::AidRejected(_)
+        | Event::AidGesture(_)
+        | Event::AidOff(_) => Changed::Accessibility,
     }
 }
 
@@ -602,11 +609,25 @@ impl Bar {
         }
     }
 
+    /// Says `text` over AT-SPI (doc_accessibility.md AX11), from the first surface: a notice is
+    /// the bar's, not a surface's.
+    fn announce(&self, text: &str) {
+        if let Some(surface) = self.surfaces.borrow().first() {
+            surface
+                .window
+                .announce(text, gtk4::AccessibleAnnouncementPriority::Medium);
+        }
+    }
+
     fn watch(self: &Rc<Self>) {
+        self.aids.start(self);
         if let Some(client) = &self.client {
             let weak = Rc::downgrade(self);
             client.connect_events(move |_, event| {
                 if let Some(bar) = weak.upgrade() {
+                    if let Some(text) = bar.aids.heard(event) {
+                        bar.announce(&text);
+                    }
                     bar.refresh(changed_by(event));
                 }
             });

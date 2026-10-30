@@ -5,6 +5,7 @@
 //! The magnifier's GNOME key decides whether it is on for a session (doc_accessibility.md AX10):
 //! the bar turns it on at its start when the key is true and sends each change, and the
 //! magnifier row writes the key, tells the compositor and shows the state the compositor sends.
+//! Beside its icon the button shows the keyboard aids' state, and the menu their offer (AX11).
 
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -15,6 +16,7 @@ use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
 
+use super::keyboard_aids::offer_text;
 use super::popup::{expose_choose_action, switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
@@ -112,6 +114,10 @@ struct Inner {
     filters: Vec<(ScreenFilter, gtk4::CheckButton)>,
     /// A switch or a radio is being set from its source, not by the user.
     updating: Cell<bool>,
+    /// The keyboard aids' state, beside the icon.
+    status: gtk4::Label,
+    offer_row: gtk4::Box,
+    offer: gtk4::Label,
 }
 
 impl Inner {
@@ -132,6 +138,17 @@ impl Inner {
         self.high_contrast
             .set_active(Appearance::read().high_contrast);
         self.updating.set(false);
+    }
+
+    fn show_aids(&self, bar: &Bar) {
+        let shown = bar.aids.shown();
+        self.status.set_text(&shown);
+        self.status.set_visible(!shown.is_empty());
+        let offer = bar.aids.offer();
+        self.offer_row.set_visible(offer.is_some());
+        if let Some(aid) = offer {
+            self.offer.set_text(&offer_text(aid));
+        }
     }
 
     fn show_reader(self: &Rc<Self>, bar: &Rc<Bar>) {
@@ -163,6 +180,9 @@ impl ModuleUi for AccessibilityUi {
     }
 
     fn refresh(&self, bar: &Rc<Bar>, changed: Changed) {
+        if matches!(changed, Changed::Accessibility | Changed::Tick) {
+            self.inner.show_aids(bar);
+        }
         if changed != Changed::Accessibility {
             return;
         }
@@ -188,7 +208,12 @@ impl ModuleUi for AccessibilityUi {
 
 pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let icon = gtk4::Image::from_icon_name("preferences-desktop-accessibility-symbolic");
-    let popup = Popup::new(bar, &icon, &tr("Accessibility"));
+    let status = gtk4::Label::new(None);
+    status.set_visible(false);
+    let button = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    button.append(&icon);
+    button.append(&status);
+    let popup = Popup::new(bar, &button, &tr("Accessibility"));
     let (high_contrast_row, high_contrast) = switch_row(&tr("High contrast"));
     let (reader_row, reader) = switch_row(&tr("Screen reader"));
     let (magnifier_row, magnifier) = switch_row(&tr("Magnifier"));
@@ -212,6 +237,15 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     content.append(&high_contrast_row);
     content.append(&reader_row);
     content.append(&compositor_rows);
+    let offer = gtk4::Label::new(None);
+    offer.set_xalign(0.0);
+    offer.set_hexpand(true);
+    let accept = gtk4::Button::with_label(&tr("Turn on"));
+    let offer_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    offer_row.append(&offer);
+    offer_row.append(&accept);
+    offer_row.set_visible(false);
+    content.append(&offer_row);
     popup.popover.set_child(Some(&content));
     reader_row.set_visible(false);
     compositor_rows.set_visible(false);
@@ -227,10 +261,20 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         inverted,
         filters,
         updating: Cell::new(false),
+        status,
+        offer_row,
+        offer,
     });
     inner.sync_high_contrast();
     inner.fit();
 
+    let weak_bar = Rc::downgrade(bar);
+    accept.connect_clicked(move |_| {
+        if let Some(bar) = weak_bar.upgrade() {
+            bar.aids.accept();
+            bar.refresh(Changed::Accessibility);
+        }
+    });
     let weak_inner = Rc::downgrade(&inner);
     inner.high_contrast.connect_state_set(move |_, enabled| {
         if weak_inner

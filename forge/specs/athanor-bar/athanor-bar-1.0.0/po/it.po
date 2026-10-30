@@ -354,6 +354,62 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
+#: src/ui/keyboard_aids.rs
+msgid "sticky keys"
+msgstr "tasti permanenti"
+
+#: src/ui/keyboard_aids.rs
+msgid "slow keys"
+msgstr "tasti lenti"
+
+#: src/ui/keyboard_aids.rs
+msgid "bounce keys"
+msgstr "tasti rimbalzati"
+
+#: src/ui/keyboard_aids.rs
+msgid "Shift"
+msgstr "Maiusc"
+
+#: src/ui/keyboard_aids.rs
+msgid "Control"
+msgstr "Ctrl"
+
+#: src/ui/keyboard_aids.rs
+msgid "Alt"
+msgstr "Alt"
+
+#: src/ui/keyboard_aids.rs
+msgid "Super"
+msgstr "Super"
+
+#: src/ui/keyboard_aids.rs
+msgid "AltGr"
+msgstr "AltGr"
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} locked"
+msgstr "{modifier} bloccato"
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} latched"
+msgstr "{modifier} agganciato"
+
+#: src/ui/keyboard_aids.rs
+msgid "Key rejected: {aid}"
+msgstr "Tasto rifiutato: {aid}"
+
+#: src/ui/keyboard_aids.rs
+msgid "Turn on {aid}?"
+msgstr "Attivare {aid}?"
+
+#: src/ui/keyboard_aids.rs
+msgid "No modifier held"
+msgstr "Nessun modificatore attivo"
+
+#: src/ui/accessibility.rs
+msgid "Turn on"
+msgstr "Attiva"
+
 #: src/ui/mod.rs:678
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"

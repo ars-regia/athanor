@@ -362,6 +362,62 @@ msgstr ""
 msgid "Input source"
 msgstr ""
 
+#: src/ui/keyboard_aids.rs
+msgid "sticky keys"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "slow keys"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "bounce keys"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Shift"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Control"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Alt"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Super"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "AltGr"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} locked"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} latched"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Key rejected: {aid}"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "Turn on {aid}?"
+msgstr ""
+
+#: src/ui/keyboard_aids.rs
+msgid "No modifier held"
+msgstr ""
+
+#: src/ui/accessibility.rs
+msgid "Turn on"
+msgstr ""
+
 #: src/ui/mod.rs:678
 msgid "Unpin from Bar"
 msgstr ""

@@ -14,6 +14,7 @@ src/ui/bluetooth.rs
 src/ui/clock.rs
 src/ui/control_center.rs
 src/ui/input.rs
+src/ui/keyboard_aids.rs
 src/ui/logind.rs
 src/ui/mod.rs
 src/ui/network.rs
