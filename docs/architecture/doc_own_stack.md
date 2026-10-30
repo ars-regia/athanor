@@ -794,13 +794,13 @@ amendment's audit:
       these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
       Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
-      for colour filters. Under the
-      own compositor the magnifier, inversion and filter controls of the bar are hidden, and
+      for colour filters. Until #864 the
+      own compositor hid the bar's magnifier, inversion and filter controls and left
       Super+= and Super+- unbound (OS13); those of Settings, the upstream cosmic-settings, stay
       shown and switched off, since the compositor does not offer `cosmic_a11y_manager_v1`, until
-      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29). A user who zooms only with those keys,
-      which persist nothing, is not detected: they pick cosmic-comp's session at the greeter,
-      whose entry says that it has the magnifier (revision 4 of `doc_session.md`);
+      the rows come to Athanor's Settings (`doc_settings.md` SE18) (amended on 2026-10-29, and on 2026-10-30, #864). A user who zoomed only with those keys,
+      which persisted nothing, was not detected: they picked cosmic-comp's session at the greeter,
+      whose entry said that it has the magnifier (revision 4 of `doc_session.md`);
     - items 4 and 5 on one console run of at least fifteen minutes per machine in place of the
       hour, past the thirteen minutes after which milestone C1's NVIDIA session stopped (section
       8). The laptop's run keeps its suspend and resume and its output unplugged and plugged back;
