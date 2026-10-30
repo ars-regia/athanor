@@ -90,7 +90,7 @@ its line in the allow-list.
 - `doc_accessibility.md` revision 3 rewrites AX2, AX3, AX10, AX11, AX13, AX15, AX16 to AX18, the
   failure behaviour, section 3 and acceptance items 8 and 16, and adds decisions 10 to 13 to
   section 6. The bounds of the aids' delays and of the zoom increment, and the aids' behaviour
-  while the session is locked, are proposed with it.
+  while the session is locked, were proposed with it and approved as written (#867).
 - `doc_own_stack.md` OS5 and decision 28, `doc_shell.md` SH2 and `doc_session.md` SN15 step 2
   and SN16 gaps 3 and 4 are amended: the hand-off to cosmic-comp's session and the hidden
   controls, for the magnifier and the filters, leave when the own compositor has them (#864);
