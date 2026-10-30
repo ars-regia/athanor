@@ -36,3 +36,10 @@ interface version.
 19 and 27): the active layout group of a keyboard, made by `athanor_keyboard_group_manager_v1`
 for a `wl_keyboard`, and the request that switches it, served by athanor-compositor. It is MIT,
 2026 Athanor Forge, and it is not in `SHA256SUMS` either.
+
+`athanor-a11y-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, as amended on
+2026-10-30; doc_accessibility.md AX10 and AX11, revision 3): the magnifier, the colour inversion
+and filters and the keyboard aids of athanor-compositor, through `athanor_a11y_manager_v1`. It
+is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either. No code is generated from it
+yet: the client's `src/protocols.rs` and the compositor gain their `generate_*_code!` modules,
+and the compositor's RPM spec its `# repo-input:` line, with the first code that serves or binds it.
