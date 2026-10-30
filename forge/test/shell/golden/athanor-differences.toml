@@ -9,7 +9,7 @@
 #   #851: cosmic-comp outlines the focused window; athanor-compositor draws no outline
 #   #738 (no case shows it): cosmic-comp cascades the windows after the first; athanor-compositor places
 #         the first as cosmic-comp does, and cascades none yet
-#   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling, accessibility compositor rows), which athanor-compositor does not serve
+#   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
 #   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks

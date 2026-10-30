@@ -777,7 +777,10 @@ amendment's audit:
       state and the exception stays one path; it writes nothing else in the user's configuration, and the
       exception, so widened, keeps its path and leaves as before. The hand-off above and the
       hidden controls below, for the magnifier and the filters, leave when the own compositor
-      has them (#864). Not taken: a state file of the
+      has them (#864). *Done in #864 (2026-10-30):* the hand-off and
+      `athanor-compositor --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
+      these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
+      Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
       for colour filters. Under the
       own compositor the magnifier, inversion and filter controls of the bar are hidden, and
