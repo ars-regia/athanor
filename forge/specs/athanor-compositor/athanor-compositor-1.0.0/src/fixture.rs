@@ -8283,10 +8283,16 @@ fn a_key_another_source_holds_names_no_serial() {
         state.key_input(38u32.into(), KeyState::Pressed, InputTime::now(), source);
     };
     press(&mut run.state, KeyboardSource::Physical);
-    let held = run.state.grab_serials.key_press.clone().expect("a serial");
+    assert!(run.state.grab_serials.key_press.is_some(), "a serial");
     press(&mut run.state, KeyboardSource::Auxiliary(1));
-    let after = run.state.grab_serials.key_press.clone();
-    assert!(after.is_none() || after == Some(held), "no new serial");
+    assert!(run.state.grab_serials.key_press.is_none(), "no serial");
+    run.state.key_input(
+        38u32.into(),
+        KeyState::Released,
+        InputTime::now(),
+        KeyboardSource::Auxiliary(1),
+    );
+    assert!(run.state.grab_serials.key_release.is_none(), "none on the release");
     run.stop();
 }
 
