@@ -11,7 +11,7 @@
 use crate::identity::Privilege;
 use crate::state::{granted, unconfined, State};
 use smithay::backend::input::{InputTime, KeyState, Keycode};
-use smithay::desktop::{layer_map_for_output, Space, Window, WindowSurfaceType};
+use smithay::desktop::{layer_map_for_output, PopupKeyboardGrab, Space, Window, WindowSurfaceType};
 use smithay::input::keyboard::{
     GrabStartData, KeyboardGrab, KeyboardInnerHandle, ModifiersState, SerializedMods,
 };
@@ -68,7 +68,8 @@ struct Method {
     object: ZwpInputMethodV2,
     /// The `done` events sent, which its `commit` names.
     done: u32,
-    /// Its keyboard grab while installed.
+    /// Its keyboard grab, until released. Another grab or a move of the keyboard may have
+    /// taken it off the keyboard: `resume_input_method_grab` puts it back.
     grab: Option<ZwpInputMethodKeyboardGrabV2>,
     edits: Edits,
 }
@@ -236,8 +237,60 @@ impl State {
         self.send_keyboard_to_grab();
     }
 
-    /// Ends `grab`, if it is the keyboard's grab: never another one that replaced it.
+    /// Puts the input method's grab back on the keyboard, before a key is handled: a popup's
+    /// grab or the move of the keyboard to an exclusive surface took it off. It waits for no key
+    /// held, so that a key pressed for the popup is not released to the input method, and it is
+    /// never put back over another grab. A popup's grab outlives its popup until the next frame
+    /// cleans it up and the keyboard is touched: both happen here, or this key would be the one
+    /// that ends it, for the focused surface.
+    pub fn resume_input_method_grab(&mut self) {
+        let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.clone()) else {
+            return;
+        };
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if !keyboard.pressed_keys().is_empty() {
+            return;
+        }
+        let root = keyboard.with_grab(|_, current| {
+            let popup = current.is::<PopupKeyboardGrab<State>>();
+            popup.then(|| current.start_data().focus.clone()).flatten()
+        });
+        if let Some(Some(root)) = root {
+            self.popups.cleanup();
+            keyboard.set_focus(self, Some(root), SERIAL_COUNTER.next_serial());
+        }
+        if keyboard.is_grabbed() {
+            return;
+        }
+        keyboard.set_grab(self, ImGrab { object: grab }, SERIAL_COUNTER.next_serial());
+        self.send_keyboard_to_grab();
+    }
+
+    /// Whether the keyboard's grab is the input method's, which a popup's grab may replace.
+    pub fn input_method_grabbed(&self) -> bool {
+        self.seat.get_keyboard().is_some_and(|keyboard| {
+            keyboard.with_grab(|_, current| current.downcast_ref::<ImGrab>().is_some())
+                == Some(true)
+        })
+    }
+
+    /// Forgets the input method's grab, for the lock: it is never put back.
+    pub fn drop_input_method_grab(&mut self) {
+        if let Some(method) = &mut self.composing.method {
+            method.grab = None;
+        }
+    }
+
+    /// Ends `grab`, on the keyboard if it is the keyboard's grab: never another one that
+    /// replaced it.
     fn end_grab(&mut self, grab: &ZwpInputMethodKeyboardGrabV2) {
+        if let Some(method) = &mut self.composing.method {
+            if method.grab.as_ref() == Some(grab) {
+                method.grab = None;
+            }
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
@@ -375,15 +428,8 @@ impl KeyboardGrab<State> for ImGrab {
         &GrabStartData { focus: None }
     }
 
-    /// Ended or replaced, by the input method, the lock or another grab: the input method's
-    /// grab object stays, inert.
-    fn unset(&mut self, data: &mut State) {
-        if let Some(method) = &mut data.composing.method {
-            if method.grab.as_ref() == Some(&self.object) {
-                method.grab = None;
-            }
-        }
-    }
+    /// Off the keyboard: `Method::grab` says whether it may come back.
+    fn unset(&mut self, _: &mut State) {}
 }
 
 impl GlobalDispatch2<ZwpTextInputManagerV3, State> for InputMethods {

@@ -85,6 +85,9 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
+        if !past_grab {
+            self.resume_input_method_grab();
+        }
         // A hardware key is read under the seat's keymap, which its clients are sent first.
         if source == KeyboardSource::Physical {
             self.restore_seat_keymap();

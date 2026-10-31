@@ -75,6 +75,7 @@ impl SessionLockHandler for State {
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.unset_grab(self);
         }
+        self.drop_input_method_grab();
         if let Some(pointer) = self.seat.get_pointer() {
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
         }

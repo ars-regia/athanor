@@ -773,7 +773,10 @@ impl XdgShellHandler for State {
         };
         if let Some(keyboard) = keyboard.filter(|_| takes_keyboard) {
             let previous = grab.previous_serial().unwrap_or(serial);
-            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
+            if keyboard.is_grabbed()
+                && !(keyboard.has_grab(serial)
+                    || keyboard.has_grab(previous)
+                    || self.input_method_grabbed())
             {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
