@@ -942,10 +942,11 @@ compositor and that the own compositor did not yet offer:
     project's authors where the source names no holder; and states that it was changed and
     when, as GPL-3.0 section 5(a) asks. The pull request names them (ADR-0121 decision 2). cosmic-comp,
     `GPL-3.0-only`, stays read and not copied (OS3). The outline cosmic-comp draws around the
-    focused window (#738) is not drawn yet. It is a drawn mark that hides, moves or changes no
-    control or text, so it stays recorded in `forge/test/shell/golden/athanor-differences.toml`
-    with its cause and its issue, #851, as a difference of colour is (decision 28), and comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2), which needs the
-    same drawing, so that the two marks are designed to be told apart. Not taken: for shortcuts
+    focused window (#738) comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2),
+    which needs the same drawing, so that the two marks are designed to be told apart (decision 31,
+    amended on 2026-10-31). It is a drawn mark that hides, moves or changes no control or text, so
+    what still differs stays recorded in `forge/test/shell/golden/athanor-differences.toml` with
+    its cause and its issue, #851, as a difference of colour is (decision 28). Not taken: for shortcuts
     inhibit, a consent dialog per application, as GNOME asks, which does not exist yet, or no
     inhibitor; for the way out, a key of its own, or the console switch and Super+Alt+Escape
     alone; for the pointer, unconfined, which keeps the protocols from every application the
@@ -958,8 +959,8 @@ compositor and that the own compositor did not yet offer:
     pixels, rounded to whole pixels of the output and never below one, each line alone, so that
     the lines of a mark stay equal at any scale:
     - **The focus outline** marks the window with the keyboard focus, and no other. It is drawn
-      outside the window's geometry, as wide as the theme's `active_hint`, with corners of 15 px,
-      the window radius of `doc_visual_language.md`, in the theme's `window_hint` when it is set
+      outside the window's geometry, as wide as the theme's `active_hint`, with corners concentric
+      with the 15 px window radius of `doc_visual_language.md`, in the theme's `window_hint` when it is set
       and in its accent otherwise (spike VL-S1, section 2.2). It follows the theme live, is not
       drawn when the `active_hint` setting of `doc_settings.md` is off or the theme's width is 0,
       as in cosmic-comp, and is not drawn on a maximised or full-screen window, which leaves it
@@ -980,7 +981,7 @@ compositor and that the own compositor did not yet offer:
     - **Where the border lies.** It surrounds the window's geometry or, when the surface tree
       reaches beyond the geometry on any side by more than 64 px or by more than a quarter of the
       geometry's size on that axis, the tree's bounding box: a client's shadow fits in that
-      margin, by an estimate the rig checks, and a client cannot collapse the border by declaring
+      margin, by an estimate no check holds yet, and a client cannot collapse the border by declaring
       a small geometry. A client can paint a frame of its own out to that margin, which puts the
       border inside what looks like the window, and this decision accepts that as the price of
       not framing every shadow. The border tells where a confined window ends, not what it draws:
@@ -994,10 +995,11 @@ compositor and that the own compositor did not yet offer:
       a full-screen window, and the border follows the cut. It lies outside the window where it
       fits and inside, over the client's content, where it does not, so a window as large as the
       output shows it whether or not it asked to be maximised, and no client hides it off the
-      output or under the bar. Its corners take the same radius, and are square where the cut
+      output or under the bar. Its corners are concentric with the same radius, and square where the cut
       falls. It is drawn above the window's surface tree and under the window's popups,
       and a popup's border follows the same rule from the popup's geometry, so a popup that covers
-      its window's border carries its own.
+      its window's border carries its own. It is cut to the output alone, since a client can place
+      a popup in a layer surface's zone, past the window area, where nothing need cover it.
     - **Together.** The outline stands outside the border, so a confined window with the focus
       shows the accent around the three lines and the agent's window shows the accent alone. The
       difference is one of shape, whatever the accent, and the two marks together are 3 px wider
