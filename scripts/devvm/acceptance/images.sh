@@ -57,6 +57,7 @@ done
 curl -fsS -o /dev/null "http://127.0.0.1:$ACC_PORT/v2/" || die "the acceptance registry does not answer on 127.0.0.1:$ACC_PORT: journalctl --user -u $ACC_REGISTRY_NAME"
 rpm=$(find "$ACC_RPM_DIR" -name 'athanor-update-1*.x86_64.rpm' | sort -V | tail -n 1)
 [[ -n $rpm ]] || die "no athanor-update RPM under $ACC_RPM_DIR: run forge/scripts/build_rolling_local.sh update"
+pull_base
 
 build() { # build TAG CREATED KEY...
   local tag=$1 created=$2 context break_greetd=
@@ -78,6 +79,8 @@ sign() { # sign TAG KEY
 }
 
 build v1 2026-09-10 acc-1; sign v1 acc-1
+# After the first build, as a base the caller set may reach this host only through it.
+podman image inspect --format "built on $ACC_BASE: {{.Digest}}, created {{.Created}}" "$ACC_BASE"
 build old 2026-09-01 acc-1; sign old acc-1
 build v3 2026-09-16 acc-1
 build v3w 2026-09-16 acc-1; sign v3w other
