@@ -5,11 +5,6 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-/// `$XDG_CONFIG_HOME/cosmic`, then `<dir>/cosmic` for every directory in `XDG_DATA_DIRS`.
-pub(crate) fn dirs() -> Vec<PathBuf> {
-    user_dir().into_iter().chain(system_dirs()).collect()
-}
-
 /// `<dir>/cosmic` for every directory in `XDG_DATA_DIRS`: the defaults the packages ship.
 pub(crate) fn system_dirs() -> Vec<PathBuf> {
     let data = env::var("XDG_DATA_DIRS")

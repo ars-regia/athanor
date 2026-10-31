@@ -242,6 +242,9 @@ seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp
     else
         echo "org.gnome.desktop.interface color-scheme default"
     fi > "$1.gsettings"
+    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
+    # switch to 12 hours by locale.
+    echo "org.gnome.desktop.interface clock-format 24h" >> "$1.gsettings"
 }
 
 variant_env=()
@@ -270,13 +273,10 @@ atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text sca
 
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     seed_layout "$1" "$2" "$3" "$4"
-    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicAppletTime/v1"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1"
     printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
         > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
     seed_scheme "$1" "$5"
-    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
-    # switch to 12 hours by locale.
-    printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
     printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 

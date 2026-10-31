@@ -4,13 +4,21 @@
 
 use std::path::{Component, Path};
 
-/// Whether the clock shows 24 hours. COSMIC's `military_time` decides when it is set, so the
-/// bar agrees with COSMIC's own clock. Otherwise the locale does: `locale_time` is 13:00
-/// formatted with `%X` (the locale's time format) and `locale_pm` is `%p` at 13:00. A
-/// locale whose time format shows no PM marker is a 24-hour locale, even when it defines
-/// one (en_GB).
-pub fn twenty_four_hour(military_time: Option<bool>, locale_time: &str, locale_pm: &str) -> bool {
-    military_time.unwrap_or_else(|| locale_pm.is_empty() || !locale_time.contains(locale_pm))
+/// The user's `clock-format` (doc_languages.md, LN8): `Some(true)` for a 24-hour clock.
+pub fn clock_format(value: Option<&str>) -> Option<bool> {
+    match value {
+        Some("24h") => Some(true),
+        Some("12h") => Some(false),
+        _ => None,
+    }
+}
+
+/// Whether the clock shows 24 hours. The user's `clock-format` decides when it is set.
+/// Otherwise the locale does: `locale_time` is 13:00 formatted with `%X` (the locale's time
+/// format) and `locale_pm` is `%p` at 13:00. A locale whose time format shows no PM marker is
+/// a 24-hour locale, even when it defines one (en_GB).
+pub fn twenty_four_hour(clock_format: Option<bool>, locale_time: &str, locale_pm: &str) -> bool {
+    clock_format.unwrap_or_else(|| locale_pm.is_empty() || !locale_time.contains(locale_pm))
 }
 
 /// The zone identifier, or `None` for GLib's local zone.
@@ -57,7 +65,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cosmics_setting_wins_over_the_locale() {
+    fn only_the_two_formats_are_a_choice() {
+        assert_eq!(clock_format(Some("24h")), Some(true));
+        assert_eq!(clock_format(Some("12h")), Some(false));
+        assert_eq!(clock_format(Some("")), None);
+        assert_eq!(clock_format(None), None);
+    }
+
+    #[test]
+    fn the_users_setting_wins_over_the_locale() {
         assert!(twenty_four_hour(Some(true), "01:00:00 PM", "PM"));
         assert!(!twenty_four_hour(Some(false), "13:00:00", ""));
     }
