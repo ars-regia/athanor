@@ -264,9 +264,7 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        if self.composing.method.as_ref().is_none_or(|m| m.grab.is_none())
-            || !keyboard.pressed_keys().is_empty()
-        {
+        if self.composing.method.as_ref().is_none_or(|m| m.grab.is_none()) {
             return;
         }
         let root = keyboard.with_grab(|_, current| {

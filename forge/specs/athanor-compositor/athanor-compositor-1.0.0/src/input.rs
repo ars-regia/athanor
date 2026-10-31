@@ -98,7 +98,7 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         // A key the input method's grab takes is no client's to name.
-        let to = keyboard
+        let mut to = keyboard
             .current_focus()
             .filter(|_| past_grab || !self.input_method_grabbed())
             .and_then(|surface| surface.client());
@@ -214,8 +214,11 @@ impl State {
                 }
                 None
             }
-            // A key another source holds already: there is nothing to send.
-            None => None,
+            // A key another source holds already: there is nothing to send, so no serial.
+            None => {
+                to = None;
+                None
+            }
         };
         match filtered {
             // Sent to the client: a popup's grab may name its serial.

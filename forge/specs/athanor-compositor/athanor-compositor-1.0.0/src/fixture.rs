@@ -8273,6 +8273,23 @@ fn os9_a_popup_grab_suspends_the_input_method_grab() {
     run.stop();
 }
 
+/// A key another source holds is sent to no client, so it names no serial for the focused one.
+#[test]
+fn a_key_another_source_holds_names_no_serial() {
+    use smithay::backend::input::{InputTime, KeyState};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let press = |state: &mut State, source| {
+        state.key_input(38u32.into(), KeyState::Pressed, InputTime::now(), source);
+    };
+    press(&mut run.state, KeyboardSource::Physical);
+    let held = run.state.grab_serials.key_press.clone().expect("a serial");
+    press(&mut run.state, KeyboardSource::Auxiliary(1));
+    let after = run.state.grab_serials.key_press.clone();
+    assert!(after.is_none() || after == Some(held), "no new serial");
+    run.stop();
+}
+
 /// A grab the input method asks for under a popup's waits for it: the popup keeps the keyboard.
 #[test]
 fn os9_an_input_method_grab_asked_under_a_popup_waits_for_it() {
