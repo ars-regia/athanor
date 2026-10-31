@@ -123,6 +123,8 @@ git commit -m "feat(compositor): dynamic workspaces per output with an empty one
 
 ### Task 3: Toplevel state version 2: workspaces and geometry
 
+**Superseded in part by the amendment above:** the events go on `athanor_workspace_window_v1` in `athanor-workspace-v1.xml`, and `athanor-toplevel-state-v1.xml` stays at version 1.
+
 **Files:**
 - Modify: `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml` (version 2: events `workspace_enter`, `workspace_leave`, `geometry`, per decision 29; `athanor_toplevel_manager_v1` goes to version 2 as well, since `get_toplevel_state` creates the state object at the manager's version), `system/athanor-compositor-client/protocols/README.md`, `C/src/toplevel_state.rs` (sent per frame as a diff, as the state and outputs are; `send_toplevel_state` takes the geometry and the outputs of a window outside the space, on an inactive workspace or minimised, from the place it keeps, since `space.element_bbox` is `None` for it; `workspace_enter` and `workspace_leave` only for a workspace whose handle the client holds through its bound `ext_workspace_manager_v1`, as outputs are sent only once bound), `system/athanor-compositor-client/src/protocols.rs` (the `toplevel_state` module's dependencies gain `wayland_protocols::ext::workspace::v1`, as `toplevel_info`'s list it), `system/athanor-compositor-client/src/connection.rs` (its `Dispatch<AthanorToplevelStateV1>` matches `Event` exhaustively, so the three events get arms that ignore them until Tasks 6 and 7; the manager's bind at `connection.rs:838` goes from `1..=1` to `1..=2`, without which the client never receives them)
 - Test: `C/src/fixture.rs`
@@ -140,6 +142,8 @@ git commit -m "feat(compositor): report a window's workspaces and geometry in th
 ```
 
 ### Task 4: Toplevel actions version 2: move to a workspace
+
+**Superseded in part by the amendment above:** the move goes on `athanor_workspace_window_v1` in `athanor-workspace-v1.xml`, and the actions interface stays at version 1.
 
 **Files:**
 - Modify: the actions interface in the same description (version 2: `move_to_workspace`), `C/src/toplevel_state.rs` (the actions' dispatch)
@@ -224,6 +228,8 @@ git commit -m "feat(compositor-client): report a workspace's capabilities, pin a
 ```
 
 ### Task 9: `Client::activate_workspace` and `WindowActions::move_to_workspace`
+
+**Superseded in part by the amendment above:** `move_to_workspace` is on `WorkspaceControls` in `src/workspace_controls.rs`, with the three branches the amendment names, and no bind of the actions interface widens.
 
 **Files:** `src/connection.rs` (`activate_workspace`: ext-workspace `activate` and `commit`), `src/actions.rs` (`move_to_workspace(WindowId, WorkspaceId)`: cosmic `move_to_ext_workspace` with the workspace's output where `zcosmic_toplevel_manager_v1` is bound at version 4 or later, refused with the global and the version named when it is bound below, else Task 4's request; the actions' bind goes from `1..=1` to `1..=2`, and `move_to_workspace` is refused, with the version named, when the bound version is below 2; `set_sticky(WindowId)`: cosmic `set_sticky` where `zcosmic_toplevel_manager_v1` is bound at version 3 or later, else refused with the global named, athanor-compositor having no sticky windows, D6), `examples/cc-probe.rs` (`workspace <n>`, `move <app_id> <n>`, `sticky <app_id>`), `forge/test/shell/compositor_e2e.py`.
 
