@@ -273,7 +273,7 @@ impl State {
 
     /// The output of `window`'s workspace while that output is in the space, else the first
     /// output, whose active workspace `workspaces_changed` gives the window.
-    fn home_output(&self, window: &Window) -> Option<Output> {
+    pub(crate) fn home_output(&self, window: &Window) -> Option<Output> {
         self.workspace_of(window)
             .and_then(|id| self.output_of_workspace(id))
             .filter(|output| self.space.output_geometry(output).is_some())
