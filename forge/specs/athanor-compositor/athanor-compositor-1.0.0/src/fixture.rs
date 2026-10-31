@@ -4729,6 +4729,59 @@ fn set_group_switches_and_every_object_hears_it() {
     run.stop();
 }
 
+/// The lock leaves the session's layout group alone (LP14): the second group stays while locked
+/// and after the unlock, and the window the unlock focuses hears it. The test switches nothing
+/// on the lock: a group changed there, and any restoring of it, stays with #834.
+#[test]
+fn unlocking_leaves_the_layout_group() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, group) = bar.keyboard_group(&mut run);
+    group.set_group(1);
+    bar.roundtrip(&mut run);
+
+    let mut locker = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let lock = locks.lock(&qh, ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(&mut run, "the lock surface is configured", |client, _| {
+        client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    locker.roundtrip(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let holder = keyboard.current_focus().and_then(|focus| focus.client());
+    assert_eq!(holder.map(|client| client.id()), locker.id, "the lock has the keyboard");
+    assert!(run.state.lock.is_some(), "the session is locked");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1, "while locked");
+    window.roundtrip(&mut run);
+    window.client.modifier_groups.clear();
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    bar.roundtrip(&mut run);
+    window.pump(&mut run, "the window gets the keyboard back", |client, _| {
+        !client.modifier_groups.is_empty()
+    });
+
+    assert!(run.state.lock.is_none(), "the session is unlocked");
+    assert_eq!(bar.groups_of(&group), [0, 1], "the group stays");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1);
+    assert_eq!(window.client.modifier_groups, [1], "the window hears it");
+    run.stop();
+}
+
 /// A group at or beyond the keymap's layouts changes nothing.
 #[test]
 fn a_group_beyond_the_layouts_is_ignored() {
