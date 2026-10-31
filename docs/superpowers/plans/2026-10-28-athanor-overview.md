@@ -229,7 +229,7 @@ git commit -m "feat(compositor-client): report a workspace's capabilities, pin a
 
 ### Task 9: `Client::activate_workspace` and `WindowActions::move_to_workspace`
 
-**Superseded in part by the amendment above:** `move_to_workspace` is on `WorkspaceControls` in `src/workspace_controls.rs`, with the three branches the amendment names, and no bind of the actions interface widens.
+**Superseded in part by the amendment above:** `move_to_workspace` is on `WorkspaceControls` in `src/workspace_controls.rs`, with the amendment's branch for each of athanor-compositor, cosmic-comp and sway, and no bind of the actions interface widens.
 
 **Files:** `src/connection.rs` (`activate_workspace`: ext-workspace `activate` and `commit`), `src/actions.rs` (`move_to_workspace(WindowId, WorkspaceId)`: cosmic `move_to_ext_workspace` with the workspace's output where `zcosmic_toplevel_manager_v1` is bound at version 4 or later, refused with the global and the version named when it is bound below, else Task 4's request; the actions' bind goes from `1..=1` to `1..=2`, and `move_to_workspace` is refused, with the version named, when the bound version is below 2; `set_sticky(WindowId)`: cosmic `set_sticky` where `zcosmic_toplevel_manager_v1` is bound at version 3 or later, else refused with the global named, athanor-compositor having no sticky windows, D6), `examples/cc-probe.rs` (`workspace <n>`, `move <app_id> <n>`, `sticky <app_id>`), `forge/test/shell/compositor_e2e.py`.
 
