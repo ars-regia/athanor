@@ -2,8 +2,8 @@
 # One row per global, `<interface> <class>`; `#` starts a comment line. The classes:
 #   standard     offered to every client
 #   unconfined   offered to every client outside a security context
-#   layer-gated  offered to every client; its top and overlay layers are refused unless the
-#                allow-list grants them (`State::layer_commit`)
+#   layer-gated  offered to every client outside a security context; its top and overlay layers
+#                are refused unless the allow-list grants them (`State::layer_commit`)
 #   privileged   offered only to the clients the allow-list grants it, never inside a security
 #                context
 # The privileged and layer-gated rows are the interfaces the allow-list may name

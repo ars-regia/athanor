@@ -6,6 +6,7 @@
 
 use crate::a11y::Look;
 use crate::look::{FilterElement, Filters};
+use crate::marks::Marks;
 use crate::state::{draw_view, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -210,12 +211,16 @@ impl State {
                 self.capture_sessions.retain(|kept| *kept != session);
                 continue;
             };
+            let marks = self.marks();
             let read = match &mut self.backend {
-                Backend::Headless(headless) => headless.read_back(&target, &self.space),
-                Backend::Drm(drm) => drm.read_back(&target, &self.space),
-                Backend::Nested(nested) => {
-                    read_back::<_, GlesTexture>(nested.backend.renderer(), &target, &self.space)
-                }
+                Backend::Headless(headless) => headless.read_back(&target, &self.space, &marks),
+                Backend::Drm(drm) => drm.read_back(&target, &self.space, &marks),
+                Backend::Nested(nested) => read_back::<_, GlesTexture>(
+                    nested.backend.renderer(),
+                    &target,
+                    &self.space,
+                    &marks,
+                ),
             };
             match read.and_then(|pixels| copy_into(&frame.buffer(), width, height, &pixels)) {
                 Ok(true) => {
@@ -241,10 +246,11 @@ pub fn read_back<R, T>(
     renderer: &mut R,
     what: &Target,
     space: &Space<Window>,
+    marks: &Marks,
 ) -> Result<Vec<u8>, Error>
 where
     R: Filters + ExportMem + Offscreen<T> + Bind<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
@@ -269,7 +275,7 @@ where
             // a client asks for it (the portal, task 7).
             let mut tracker = OutputDamageTracker::from_output(output);
             // ponytail: without the input method's popups; pass them in when a capture needs them.
-            let view = View::Space(space, &[]);
+            let view = View::Space(space, &[], marks);
             let look = Look::default();
             let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker, look)
                 .map_err(|error| format!("{error:?}"))?;

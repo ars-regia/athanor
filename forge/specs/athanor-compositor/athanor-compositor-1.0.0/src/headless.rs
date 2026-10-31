@@ -8,6 +8,7 @@ use crate::lock::Lock;
 use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::look::{FilterElement, Filters};
+use crate::marks::Marks;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -249,6 +250,7 @@ impl State {
 
     /// Draws every output, then sends presentation feedback and frame callbacks.
     fn tick(&mut self, period: Duration) {
+        let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return;
         };
@@ -262,7 +264,7 @@ impl State {
             let look = self
                 .a11y
                 .look(&output, self.space.output_geometry(&output), pointer);
-            let view = (&self.space, self.lock.as_ref(), &popups[..], look);
+            let view = (&self.space, self.lock.as_ref(), &popups[..], &marks, look);
             match headless.draw(index, view, false) {
                 Ok(drawn) => {
                     frames.push((headless.outputs[index].output.clone(), drawn));
@@ -307,13 +309,18 @@ impl Headless {
     }
 
     /// Draws what a capture source names off screen and reads it back (`capture::read_back`).
-    pub fn read_back(&mut self, what: &Target, space: &Space<Window>) -> Result<Vec<u8>, Error> {
+    pub fn read_back(
+        &mut self,
+        what: &Target,
+        space: &Space<Window>,
+        marks: &Marks,
+    ) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
             Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space)
+                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space, marks)
             }
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_back::<_, Image>(renderer, what, space)
+                crate::capture::read_back::<_, Image>(renderer, what, space, marks)
             }
         }
     }
@@ -350,9 +357,15 @@ impl Headless {
     }
 }
 
-/// What an output is drawn from: the space, the lock, the input method's popups, and what the
-/// magnifier and the filters do to it.
-type Shown<'a> = (&'a Space<Window>, Option<&'a Lock>, &'a [PlacedPopup], Look);
+/// What an output is drawn from: the space, the lock, the input method's popups, the windows'
+/// marks, and what the magnifier and the filters do to it.
+type Shown<'a> = (
+    &'a Space<Window>,
+    Option<&'a Lock>,
+    &'a [PlacedPopup],
+    &'a Marks,
+    Look,
+);
 
 /// Draws the space on `virt` into `buffer`, or only its lock surface while the lock holds the
 /// session, and reads the frame back when `read`.
@@ -360,18 +373,18 @@ fn draw<R, T>(
     renderer: &mut R,
     buffer: &mut T,
     virt: &mut Virtual,
-    (space, lock, popups, look): Shown<'_>,
+    (space, lock, popups, marks, look): Shown<'_>,
     read: bool,
 ) -> Result<Drawn, Error>
 where
     R: Filters + ExportMem + Bind<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
     let age = usize::from(virt.drawn);
     let mut target = renderer.bind(buffer)?;
-    let view = View::of(space, lock, popups, &virt.output);
+    let view = View::of(space, lock, popups, marks, &virt.output);
     let result = draw_view(
         renderer,
         &mut target,
@@ -510,6 +523,7 @@ impl State {
     /// The pixels of output `index` as the space now stands, `FRAME_FORMAT`, row by row from
     /// the top.
     pub fn capture(&mut self, index: usize) -> Result<Vec<u8>, Error> {
+        let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return Err("only the headless backend reads frames back".into());
         };
@@ -524,7 +538,7 @@ impl State {
             }
             None => (Vec::new(), Look::default()),
         };
-        let view = (&self.space, self.lock.as_ref(), &popups[..], look);
+        let view = (&self.space, self.lock.as_ref(), &popups[..], &marks, look);
         headless
             .draw(index, view, true)?
             .pixels

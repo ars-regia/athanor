@@ -6,7 +6,7 @@
 #
 #   #736: athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws drop shadows around windows and layer surfaces; athanor-compositor draws none
-#   #851: cosmic-comp outlines the focused window; athanor-compositor draws no outline
+#   #851: cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not; the outline's corners differ, and at scale 1.5 its width by up to 1 px
 #   #738 (no case shows it): cosmic-comp cascades the windows after the first; athanor-compositor places
 #         the first as cosmic-comp does, and cascades none yet
 #   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve
@@ -33,7 +33,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -48,7 +48,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -63,7 +63,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -78,7 +78,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -93,7 +93,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -108,7 +108,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -123,7 +123,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -138,7 +138,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -153,7 +153,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -168,7 +168,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -183,7 +183,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -198,7 +198,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -213,7 +213,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -228,7 +228,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -243,7 +243,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -258,7 +258,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -273,7 +273,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -288,7 +288,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -303,7 +303,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -318,7 +318,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -333,7 +333,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -348,7 +348,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -363,7 +363,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -378,7 +378,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2733,7 +2733,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2748,7 +2748,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2763,7 +2763,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2778,7 +2778,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2793,7 +2793,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2808,7 +2808,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2823,7 +2823,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.0-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2838,7 +2838,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.0-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2853,7 +2853,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.0-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
 issue = 851
 
 [[difference]]
@@ -2868,7 +2868,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-en"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2883,7 +2883,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-de"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]
@@ -2898,7 +2898,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-rtl"
-cause = "cosmic-comp outlines the focused window; athanor-compositor draws no outline"
+cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
 issue = 851
 
 [[difference]]

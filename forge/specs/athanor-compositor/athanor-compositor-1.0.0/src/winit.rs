@@ -95,6 +95,7 @@ pub fn start(
 impl State {
     /// Paints the space, tells the clients what was presented and asks for their next frame.
     fn redraw(&mut self) {
+        let marks = self.marks();
         let Backend::Nested(nested) = &mut self.backend else {
             return;
         };
@@ -109,7 +110,7 @@ impl State {
         let age = nested.backend.buffer_age().unwrap_or(0);
         let rendered = match nested.backend.bind() {
             Ok((renderer, mut framebuffer)) => {
-                let view = View::of(&self.space, self.lock.as_ref(), &popups, &output);
+                let view = View::of(&self.space, self.lock.as_ref(), &popups, &marks, &output);
                 let started = Instant::now();
                 let drawn = draw_view(
                     renderer,
