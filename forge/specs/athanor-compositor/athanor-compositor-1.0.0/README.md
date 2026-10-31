@@ -209,8 +209,9 @@ replaced it; an exclusive layer surface taking the keyboard ends any grab, the i
 included.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
-changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
-position, transform or adaptive sync fails.
+changes nothing but scales from 1 to 4 and transforms; one that disables a head or asks for
+another mode, position or adaptive sync fails, and so does a transform of the nested output,
+whose own rights its frame.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
 and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
