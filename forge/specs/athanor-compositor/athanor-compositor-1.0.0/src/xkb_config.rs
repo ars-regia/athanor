@@ -17,7 +17,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::PoisonError;
 
 /// The file, under the configuration root.
@@ -273,28 +273,41 @@ pub(crate) fn read(path: &Path) -> Result<Option<String>, Refused> {
     Ok(Some(text))
 }
 
-/// How many links in a row a dangling path is followed through.
+/// How many links are followed on the way to a path.
 const LINKS: u8 = 8;
 
-/// Where `path` leads through its links, when its end does not exist too: a dangling link
-/// stands for the place it names, so that place coming back can be seen.
-fn resolve(path: &Path, links: u8) -> PathBuf {
-    for ancestor in path.ancestors() {
-        let rest = path.strip_prefix(ancestor).unwrap_or(path);
-        if let Ok(real) = ancestor.canonicalize() {
-            return real.join(rest);
+/// `path`, then `path` with its first link followed, and so on: each is a way a change can
+/// come, a link in the middle of a chain or one left dangling included, and the last is where
+/// the path leads. The way up to a link holds no link, so that `..` in its target is lexical.
+fn ways(path: &Path) -> Vec<PathBuf> {
+    let mut ways = vec![path.to_path_buf()];
+    for _ in 0..LINKS {
+        let Some(way) = ways.last() else { break };
+        let places: Vec<_> = way.ancestors().collect();
+        let link = places
+            .into_iter()
+            .rev()
+            .find_map(|place| Some((place, std::fs::read_link(place).ok()?)));
+        let Some((link, to)) = link else { break };
+        let mut place = link.parent().unwrap_or(link).to_path_buf();
+        for part in to.components() {
+            match part {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    place.pop();
+                }
+                part => place.push(part),
+            }
         }
-        if let (Some(parent), Ok(to), true) =
-            (ancestor.parent(), std::fs::read_link(ancestor), links > 0)
-        {
-            return resolve(&parent.join(to).join(rest), links - 1);
-        }
+        let rest = way.strip_prefix(link).unwrap_or(way);
+        let next = place.join(rest);
+        ways.push(next);
     }
-    path.to_path_buf()
+    ways
 }
 
 /// The inotify watch of the file's directory, while it exists, and of every ancestor of the
-/// directory, by the path as given and as resolved; the compositor creates nothing.
+/// directory, along every way to it (`ways`); the compositor creates nothing.
 pub struct Watch {
     pub(crate) inotify: Inotify,
     /// The directory that holds the file, and the file's name in it.
@@ -352,7 +365,8 @@ impl Watch {
 
     /// The nearest existing place on the way to the directory.
     fn nearest(&self) -> Option<PathBuf> {
-        resolve(&self.dir, LINKS)
+        ways(&self.dir)
+            .last()?
             .ancestors()
             .find(|path| path.is_dir())
             .map(Path::to_path_buf)
@@ -374,7 +388,8 @@ impl Watch {
 
     /// Moves the watches. The ancestors first, from the root down: a component replaced
     /// between two watches is then seen going. An ancestor that cannot be watched, unreadable
-    /// or denied, leaves the events of the rest, which see less.
+    /// or denied, leaves the events of the rest, which see less; with nothing watched at all
+    /// the path is lost.
     fn watch(&mut self) -> nix::Result<()> {
         let last = self.ancestors.drain(..).map(|(old, _)| old);
         let old: Vec<_> = last.chain(self.watched.take()).collect();
@@ -386,8 +401,7 @@ impl Watch {
                 Err(error) => tracing::debug!(%error, "the last xkb_config watch stays"),
             }
         }
-        let resolved = resolve(&self.dir, LINKS);
-        for way in [self.dir.clone(), resolved] {
+        for way in ways(&self.dir) {
             let places: Vec<_> = way.ancestors().collect();
             for pair in places.windows(2).rev() {
                 let (Some(name), ancestor) = (pair[0].file_name(), pair[1]) else {
@@ -399,8 +413,10 @@ impl Watch {
                 match self.inotify.add_watch(ancestor, ancestor_events()) {
                     Ok(descriptor) => self.ancestors.push((descriptor, name.to_os_string())),
                     Err(Errno::ENOENT | Errno::ENOTDIR) => {}
+                    // Debug: a component searchable and not readable is ordinary, and each
+                    // watch meets it along each way.
                     Err(error) => {
-                        tracing::warn!(%error, ?ancestor, "the xkb_config ancestor is not watched");
+                        tracing::debug!(%error, ?ancestor, "an xkb_config ancestor is not watched");
                     }
                 }
             }
@@ -408,8 +424,14 @@ impl Watch {
         self.watched = match self.inotify.add_watch(&self.dir, dir_events()) {
             Ok(descriptor) => Some(descriptor),
             Err(Errno::ENOENT | Errno::ENOTDIR) => None,
-            Err(error) => return Err(error),
+            Err(error) => {
+                tracing::debug!(%error, dir = ?self.dir, "the xkb_config directory is not watched");
+                None
+            }
         };
+        if self.watched.is_none() && self.ancestors.is_empty() {
+            return Err(Errno::ENOENT);
+        }
         Ok(())
     }
 
@@ -433,7 +455,8 @@ impl Watch {
                     rearm = true;
                     continue;
                 }
-                let moved = event.mask.contains(AddWatchFlags::IN_MOVE_SELF);
+                let moved = AddWatchFlags::IN_MOVE_SELF | AddWatchFlags::IN_IGNORED;
+                let moved = event.mask.intersects(moved);
                 rearm |= self.ancestors.iter().any(|(descriptor, name)| {
                     *descriptor == event.wd && (moved || event.name.as_ref() == Some(name))
                 });
@@ -776,6 +799,53 @@ mod tests {
         write(&file, PRETTY);
         assert!(watch.changed(), "the watch is on the new directory");
         std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A link in the middle of a chain of links that all exist, pointed elsewhere, is followed.
+    #[test]
+    fn the_watch_follows_a_link_in_the_middle_of_a_chain() {
+        let root = scratch("watch-chain");
+        let file = root.join(RELATIVE);
+        let dir = file.parent().expect("a directory");
+        let (first, second) = (root.join("first"), root.join("second"));
+        let middle = root.join("middle");
+        std::fs::create_dir_all(dir.parent().expect("a parent")).expect("the parent");
+        std::fs::create_dir(&first).expect("the first");
+        std::fs::create_dir(&second).expect("the second");
+        std::os::unix::fs::symlink("first", &middle).expect("the middle link");
+        std::os::unix::fs::symlink(&middle, dir).expect("the link");
+        let mut watch = Watch::new(&file).expect("a watch");
+        let next = middle.with_extension("next");
+        std::os::unix::fs::symlink("second", &next).expect("the next link");
+        std::fs::rename(&next, &middle).expect("the link replaced");
+        assert!(watch.changed(), "the middle link was replaced");
+        write(&file, PRETTY);
+        assert!(watch.changed(), "the watch is on the second directory");
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A link to itself is not fatal: its parent still sees it put right.
+    #[test]
+    fn the_watch_survives_a_link_to_itself() {
+        let root = scratch("watch-loop");
+        let file = root.join(RELATIVE);
+        let dir = file.parent().expect("a directory");
+        std::fs::create_dir_all(dir.parent().expect("a parent")).expect("the parent");
+        std::os::unix::fs::symlink(dir, dir).expect("the link");
+        let mut watch = Watch::new(&file).expect("a watch");
+        std::fs::remove_file(dir).expect("the link gone");
+        std::fs::create_dir(dir).expect("the directory");
+        assert!(watch.changed(), "the directory took its place");
+        write(&file, PRETTY);
+        assert!(watch.changed(), "the watch is on the directory");
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A relative path that leads nowhere watches nothing, and says so.
+    #[test]
+    fn a_watch_of_nothing_is_an_error() {
+        let path = Path::new("no-such-place-of-the-tests/xkb_config");
+        assert_eq!(Watch::new(path).err(), Some(Errno::ENOENT));
     }
 
     /// A parent that cannot be watched leaves the directory's own watch. The watch of an
