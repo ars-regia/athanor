@@ -43,6 +43,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-10-29: decision 30, with OS3, OS13 and OS17.
 - Amended on 2026-10-30 (#862): OS5 and decision 28, with revision 3 of `doc_accessibility.md`,
   approved by the maintainer with it (#867).
+- Amended on 2026-10-31: decision 31, with OS4 and `doc_shell.md` SH2's exceptions.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -200,7 +201,8 @@ is a barrier against it.
   window shows whether it carries the border and the name of its application as the security context
   gives it, never the client's own title; it is bound to Super+Alt+T (decision 26).
   The fixture tests a confined client's window bordered in each state and the agent's window,
-  outside a security context, without one (`doc_session.md` SN16, gap 2).
+  outside a security context, without one (`doc_session.md` SN16, gap 2). The border and the
+  outline of the focused window are the marks of decision 31 (amended on 2026-10-31).
 - **The lock path.** `ext_session_lock_manager_v1` is granted only by the locker's line in the
   allow-list, which lands with the change that installs the locker (`doc_session.md` SN16, gap 1;
   OS9 plan, question 3). Until a locker holds it, Super+Escape takes the keyboard back and asks
@@ -944,6 +946,52 @@ compositor and that the own compositor did not yet offer:
     shell launches; for decorations, title bars drawn by the compositor, with text, theme and
     accessibility work the first wave does not need; for the code, ports from cosmic-comp too, which bind the compositor to
     `GPL-3.0-only`, or reading every source and porting nothing.
+31. **The focus outline and the border of confined windows** (OS4; `doc_session.md` SN16, gap 2;
+    #851; taken by the maintainer on 2026-10-31). The own compositor draws two marks, told apart
+    by shape as well as by colour, so that neither rests on colour alone:
+    - **The focus outline** marks the window with the keyboard focus, and no other. It is drawn
+      outside the window's geometry, as wide as the theme's `active_hint`, with rounded corners
+      that follow the window's, in the theme's `window_hint` when it is set and in its accent
+      otherwise (spike VL-S1, section 2.2). It follows the theme live, is not drawn when the
+      `active_hint` setting of `doc_settings.md` is off, and is not drawn on a maximised or
+      full-screen window, which leaves it no place on the output.
+    - **The border** marks every window of a client inside a security context, and of
+      xwayland-satellite, which the compositor confines as one (OS4). It is 1 px wide, with the
+      same corners, in the fixed colour `#808080`, 5.3:1 on black and 3.95:1 on white. It
+      follows no theme and no accent, since an accent must not be able to make it look like
+      the outline, and no setting turns it off. It lies against the window's geometry, outside
+      it, and inside it, over the client's content, on a maximised or full-screen window, as
+      OS4 asks of the latter.
+    - **Together.** The outline of a confined window keeps its place, and the border is drawn
+      over its inner pixel, so the focused window's mark does not change its size between a
+      confined client and the real prompt: a confined window with the focus shows a grey line
+      inside the accent, and the agent's window shows the accent alone.
+    - Each mark is stacked with its window, under whatever stands above that window, and
+      neither is drawn while the lock holds the session. A capture of an output shows them as
+      the output does, and a capture of a window shows neither. The magnifier and the colour
+      filters act on them as on the rest of the frame.
+    - The theme is read by one source file of the compositor,
+      `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs`, which reads
+      the mode, `window_hint`, `active_hint` and the accent of `CosmicTheme` and the
+      `active_hint` setting of `com.system76.CosmicComp`, follows them live and writes nothing.
+      A value it cannot read leaves the last one it read, logged, and before any was read the
+      outline takes the factory accent of `tokens.toml`: the border needs no theme, and the
+      outline is never lost to a bad file. It is named in SH2's exceptions and `verify.py boundary`, and leaves when the
+      store moves with the compositor client.
+    - The reveal key, Super+Alt+T, stays bound and does nothing until the compositor can draw
+      the application's name, in a change of its own, and gap 2 of SN16 stays open until then:
+      the border alone tells a confined window's imitation from the real prompt, and the key
+      is what lets a user check it.
+    The fixture tests that the focused window, and only it, is outlined, and with the setting
+    off is not; that a confined window is bordered in every state and an unconfined one is not;
+    that a window above covers a mark of the window below; and that a mark follows a theme
+    change without a new client. The entries of #851 leave
+    `forge/test/shell/golden/athanor-differences.toml` when the golden report shows no
+    difference for them. Not taken: a border of 2 px in a bright fixed colour, easier to see but
+    on almost every window, since every launch has a security context (`doc_session_daemons.md` SD8), at a cost to Calmo;
+    one line for both marks with only the tone changed, which rests on colour alone; for the
+    outline, a fixed Calmo purple, which ignores the user's accent and `active_hint`; and the
+    reveal key now, which adds drawing text to the compositor to a change that does not need it.
 
 ## 8. Risks
 
