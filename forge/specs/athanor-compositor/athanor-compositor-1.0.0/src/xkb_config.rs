@@ -273,21 +273,41 @@ pub(crate) fn read(path: &Path) -> Result<Option<String>, Refused> {
     Ok(Some(text))
 }
 
-/// The inotify watch of the file's directory, or of its nearest existing ancestor while the
-/// directory does not exist, and of the parent of the directory watched; the compositor
-/// creates nothing.
+/// How many links in a row a dangling path is followed through.
+const LINKS: u8 = 8;
+
+/// Where `path` leads through its links, when its end does not exist too: a dangling link
+/// stands for the place it names, so that place coming back can be seen.
+fn resolve(path: &Path, links: u8) -> PathBuf {
+    for ancestor in path.ancestors() {
+        let rest = path.strip_prefix(ancestor).unwrap_or(path);
+        if let Ok(real) = ancestor.canonicalize() {
+            return real.join(rest);
+        }
+        if let (Some(parent), Ok(to), true) =
+            (ancestor.parent(), std::fs::read_link(ancestor), links > 0)
+        {
+            return resolve(&parent.join(to).join(rest), links - 1);
+        }
+    }
+    path.to_path_buf()
+}
+
+/// The inotify watch of the file's directory, while it exists, and of every ancestor of the
+/// directory, by the path as given and as resolved; the compositor creates nothing.
 pub struct Watch {
     pub(crate) inotify: Inotify,
     /// The directory that holds the file, and the file's name in it.
     dir: PathBuf,
     name: OsString,
-    /// The directory watched and its descriptor.
-    watched: Option<(PathBuf, WatchDescriptor)>,
-    /// The parent of the directory watched, for the directory's name. A removed directory
-    /// sends its own end only when the last reference to it goes, which a process that holds
-    /// it open, or a child forked while it was open and not yet executed, delays; its parent
+    /// The directory's own watch.
+    watched: Option<WatchDescriptor>,
+    /// Each ancestor's watch and the name it holds on the way to the directory. A removed
+    /// directory sends its own end only when the last reference to it goes, which a process
+    /// that holds it open, or a child forked while it was open and not yet executed, delays,
+    /// and a component above the parent sends nothing to the watches below it; the ancestor
     /// sees the name go at once.
-    parent: Option<WatchDescriptor>,
+    ancestors: Vec<(WatchDescriptor, OsString)>,
 }
 
 /// What the file's own directory is watched for.
@@ -302,19 +322,11 @@ fn dir_events() -> AddWatchFlags {
         | AddWatchFlags::IN_ONLYDIR
 }
 
-/// What an ancestor is watched for: the next component appearing, or the ancestor going.
+/// What an ancestor is watched for: an entry appearing, going or replaced, or the ancestor
+/// itself renamed.
 fn ancestor_events() -> AddWatchFlags {
     AddWatchFlags::IN_CREATE
-        | AddWatchFlags::IN_MOVED_TO
-        | AddWatchFlags::IN_DELETE_SELF
-        | AddWatchFlags::IN_MOVE_SELF
-        | AddWatchFlags::IN_ONLYDIR
-}
-
-/// What the parent of the directory watched is watched for: an entry going or replaced, or
-/// the parent itself renamed.
-fn parent_events() -> AddWatchFlags {
-    AddWatchFlags::IN_DELETE
+        | AddWatchFlags::IN_DELETE
         | AddWatchFlags::IN_MOVED_FROM
         | AddWatchFlags::IN_MOVED_TO
         | AddWatchFlags::IN_MOVE_SELF
@@ -322,7 +334,7 @@ fn parent_events() -> AddWatchFlags {
 }
 
 impl Watch {
-    /// Watches the directory of `file`, or its nearest existing ancestor.
+    /// Watches the directory of `file` and its ancestors.
     pub fn new(file: &Path) -> nix::Result<Self> {
         let dir = file.parent().ok_or(Errno::EINVAL)?.to_path_buf();
         let name = file.file_name().ok_or(Errno::EINVAL)?.to_os_string();
@@ -332,76 +344,72 @@ impl Watch {
             dir,
             name,
             watched: None,
-            parent: None,
+            ancestors: Vec::new(),
         };
         watch.arm()?;
         Ok(watch)
     }
 
-    /// The directory, or its nearest existing ancestor.
-    fn nearest(&self) -> nix::Result<PathBuf> {
-        self.dir
+    /// The nearest existing place on the way to the directory.
+    fn nearest(&self) -> Option<PathBuf> {
+        resolve(&self.dir, LINKS)
             .ancestors()
             .find(|path| path.is_dir())
             .map(Path::to_path_buf)
-            .ok_or(Errno::ENOENT)
     }
 
-    /// Watches the directory, or its nearest existing ancestor, in place of the last watch:
-    /// the same path is watched again, since its directory may have been made anew. A
-    /// component made between the lookup and the new watch raised no event on it, so the
-    /// lookup runs again until the watched path is still the nearest, as it does when the
-    /// target or its parent went before it was watched.
+    /// Watches the directory and its ancestors in place of the last watches: the same paths
+    /// are watched again, since a directory may have been made anew. A component made between
+    /// the lookup and the new watch raised no event on it, so the lookup runs again until the
+    /// nearest place is still the same.
     fn arm(&mut self) -> nix::Result<()> {
         loop {
-            let target = self.nearest()?;
-            match self.watch(target.clone()) {
-                Err(Errno::ENOENT) => continue,
-                result => result?,
-            }
-            if self.nearest()? == target {
+            let nearest = self.nearest();
+            self.watch()?;
+            if self.nearest() == nearest {
                 return Ok(());
             }
         }
     }
 
-    /// Moves the watch to `target` and its parent.
-    fn watch(&mut self, target: PathBuf) -> nix::Result<()> {
-        let last = self.watched.take();
-        let old = last.as_ref().map(|(_, old)| *old).into_iter();
-        for old in old.chain(self.parent.take()) {
-            // A watch whose directory went is already removed: EINVAL is no error.
+    /// Moves the watches. The ancestors first, from the root down: a component replaced
+    /// between two watches is then seen going. An ancestor that cannot be watched, unreadable
+    /// or denied, leaves the events of the rest, which see less.
+    fn watch(&mut self) -> nix::Result<()> {
+        let last = self.ancestors.drain(..).map(|(old, _)| old);
+        let old: Vec<_> = last.chain(self.watched.take()).collect();
+        for old in old {
+            // A watch whose directory went is already removed, and one ancestor may be on
+            // both ways: EINVAL is no error.
             match self.inotify.rm_watch(old) {
                 Ok(()) | Err(Errno::EINVAL) => {}
                 Err(error) => tracing::debug!(%error, "the last xkb_config watch stays"),
             }
         }
-        // The parent first: a target replaced between the two watches is then seen going.
-        // A parent that cannot be watched, unreadable or denied, leaves the target's own
-        // events, which a removal held open delays.
-        if let Some(parent) = target
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            self.parent = match self.inotify.add_watch(parent, parent_events()) {
-                Ok(descriptor) => Some(descriptor),
-                Err(Errno::ENOENT) => return Err(Errno::ENOENT),
-                Err(error) => {
-                    tracing::warn!(%error, ?parent, "the xkb_config parent is not watched");
-                    None
+        let resolved = resolve(&self.dir, LINKS);
+        for way in [self.dir.clone(), resolved] {
+            let places: Vec<_> = way.ancestors().collect();
+            for pair in places.windows(2).rev() {
+                let (Some(name), ancestor) = (pair[0].file_name(), pair[1]) else {
+                    continue;
+                };
+                if ancestor.as_os_str().is_empty() {
+                    continue;
                 }
-            };
+                match self.inotify.add_watch(ancestor, ancestor_events()) {
+                    Ok(descriptor) => self.ancestors.push((descriptor, name.to_os_string())),
+                    Err(Errno::ENOENT | Errno::ENOTDIR) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, ?ancestor, "the xkb_config ancestor is not watched");
+                    }
+                }
+            }
         }
-        let events = if target == self.dir {
-            dir_events()
-        } else {
-            ancestor_events()
+        self.watched = match self.inotify.add_watch(&self.dir, dir_events()) {
+            Ok(descriptor) => Some(descriptor),
+            Err(Errno::ENOENT | Errno::ENOTDIR) => None,
+            Err(error) => return Err(error),
         };
-        let descriptor = self.inotify.add_watch(&target, events)?;
-        if last.is_none_or(|(path, _)| path != target) {
-            tracing::info!(watched = ?target, "the xkb_config watch moved");
-        }
-        self.watched = Some((target, descriptor));
         Ok(())
     }
 
@@ -425,21 +433,17 @@ impl Watch {
                     rearm = true;
                     continue;
                 }
-                let Some((path, descriptor)) = &self.watched else {
-                    continue;
-                };
-                if Some(event.wd) == self.parent {
-                    rearm |= event.mask.contains(AddWatchFlags::IN_MOVE_SELF)
-                        || event.name.as_deref() == path.file_name();
-                    continue;
-                }
-                if event.wd != *descriptor {
+                let moved = event.mask.contains(AddWatchFlags::IN_MOVE_SELF);
+                rearm |= self.ancestors.iter().any(|(descriptor, name)| {
+                    *descriptor == event.wd && (moved || event.name.as_ref() == Some(name))
+                });
+                if Some(event.wd) != self.watched {
                     continue;
                 }
                 let gone = AddWatchFlags::IN_IGNORED
                     | AddWatchFlags::IN_DELETE_SELF
                     | AddWatchFlags::IN_MOVE_SELF;
-                if event.mask.intersects(gone) || *path != self.dir {
+                if event.mask.intersects(gone) {
                     rearm = true;
                 } else if event.name.as_deref() == Some(self.name.as_os_str()) {
                     reload = true;
@@ -708,6 +712,69 @@ mod tests {
         std::fs::create_dir_all(dir).expect("the directory again");
         write(&file, PRETTY);
         assert!(watch.changed(), "the directory came back");
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A directory reached through a link, removed while something holds it open, is seen
+    /// going through its own parent, and coming back while the link dangles.
+    #[test]
+    fn the_watch_follows_a_link_to_a_directory_held_open() {
+        let root = scratch("watch-link");
+        let file = root.join(RELATIVE);
+        let dir = file.parent().expect("a directory");
+        let destination = root.join("destination");
+        std::fs::create_dir_all(dir.parent().expect("a parent")).expect("the parent");
+        std::fs::create_dir(&destination).expect("the destination");
+        std::os::unix::fs::symlink(&destination, dir).expect("the link");
+        let mut watch = Watch::new(&file).expect("a watch");
+        write(&file, PRETTY);
+        assert!(watch.changed(), "the file was renamed in through the link");
+        let held = std::fs::File::open(&destination).expect("held open");
+        std::fs::remove_dir_all(&destination).expect("removed");
+        assert!(watch.changed(), "the destination went");
+        std::fs::create_dir(&destination).expect("the destination again");
+        assert!(watch.changed(), "the destination came back");
+        write(&file, ONE_LINE);
+        assert!(watch.changed(), "the watch is on the new destination");
+        drop(held);
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A link pointed elsewhere moves the watch to its new destination.
+    #[test]
+    fn the_watch_follows_a_link_pointed_elsewhere() {
+        let root = scratch("watch-repoint");
+        let file = root.join(RELATIVE);
+        let dir = file.parent().expect("a directory");
+        let (first, second) = (root.join("first"), root.join("second"));
+        std::fs::create_dir_all(dir.parent().expect("a parent")).expect("the parent");
+        std::fs::create_dir(&first).expect("the first");
+        std::fs::create_dir(&second).expect("the second");
+        std::os::unix::fs::symlink(&first, dir).expect("the link");
+        let mut watch = Watch::new(&file).expect("a watch");
+        let next = dir.with_extension("next");
+        std::os::unix::fs::symlink(&second, &next).expect("the next link");
+        std::fs::rename(&next, dir).expect("the link replaced");
+        assert!(watch.changed(), "the link was replaced");
+        write(&file, PRETTY);
+        assert!(watch.changed(), "the watch is on the second directory");
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A component above the parent, renamed and made anew, leaves the watch on the path.
+    #[test]
+    fn the_watch_follows_a_renamed_grandparent() {
+        let root = scratch("watch-grandparent");
+        let file = root.join(RELATIVE);
+        let dir = file.parent().expect("a directory");
+        std::fs::create_dir_all(dir).expect("the directory");
+        let mut watch = Watch::new(&file).expect("a watch");
+        std::fs::rename(root.join("cosmic"), root.join("moved")).expect("renamed");
+        assert!(watch.changed(), "the grandparent was renamed");
+        std::fs::create_dir_all(dir).expect("the directory again");
+        assert!(watch.changed(), "the directory came back");
+        write(&file, PRETTY);
+        assert!(watch.changed(), "the watch is on the new directory");
         std::fs::remove_dir_all(&root).expect("clean");
     }
 
