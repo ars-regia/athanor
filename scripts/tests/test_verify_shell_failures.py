@@ -100,7 +100,9 @@ class BudgetTest(unittest.TestCase):
             root = pathlib.Path(tmp)
             (root / "forge" / "test").mkdir(parents=True)
             (root / "forge" / "test" / "t.sh").write_text("\n".join(lines) + "\n")
-            with mock.patch.object(verify, "ROOT", root), mock.patch.object(verify, "SHELL_BUDGET", budget):
+            with mock.patch.object(verify, "ROOT", root), mock.patch.dict(
+                verify.SHELL_BUDGETS, {"forge/test": budget}
+            ):
                 return verify.check_shell_failures()
 
     def test_within_the_budget_passes(self):
@@ -110,6 +112,47 @@ class BudgetTest(unittest.TestCase):
         r = self.run_check(["a || true", "b 2>/dev/null", "c"], 1)
         self.assertEqual(len(r.problems), 2)
         self.assertIn("t.sh:1", r.problems[0])
+
+    def test_a_script_is_known_by_its_first_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for name, text in [
+                ("a.sh", "true\n"),
+                ("b", "#!/usr/bin/env bash\n"),
+                ("c", "#!/bin/sh\n"),
+                ("d", "#!/usr/bin/python3\n"),
+                ("e", "\xff\xfe binary"),
+            ]:
+                (root / name).write_text(text, encoding="latin-1")
+            found = {p.name for p in verify.shell_scripts(root)}
+        self.assertEqual(found, {"a.sh", "b", "c"})
+
+    def test_a_workflow_line_is_read_as_shell(self):
+        text = "\n".join([
+            "      - run: a || true",
+            "        continue-on-error: true",
+            "      - uses: b",
+            "        continue-on-error: false",
+            "        # c || true",
+            "        continue-on-error: ${{ matrix.d }}",
+        ])
+        self.assertEqual(verify.workflow_failures(text), [1, 2, 6])
+
+    def test_a_guest_string_is_read_as_shell(self):
+        text = 'A = [\n    b"a || true;"\n    b" b",\n    b"c",\n    "d || true",\n]\n'
+        self.assertEqual(verify.guest_failures(text), [2])
+
+    def test_each_tree_keeps_its_own_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "forge" / "scripts").mkdir(parents=True)
+            (root / "forge" / "scripts" / "s.sh").write_text("a || true\nb 2>/dev/null\n")
+            with mock.patch.object(verify, "ROOT", root), mock.patch.dict(
+                verify.SHELL_BUDGETS, {"forge/scripts": 1}
+            ):
+                r = verify.check_shell_failures()
+        self.assertEqual(len(r.problems), 2)
+        self.assertIn("forge/scripts", r.problems[0])
 
     def test_the_repository_is_at_its_budget(self):
         r = verify.check_shell_failures()
