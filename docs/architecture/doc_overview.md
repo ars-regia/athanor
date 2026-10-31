@@ -1,6 +1,15 @@
 # Athanor workspace overview
 
-Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05 and one of 2026-10-08.
+Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** **Amended on 2026-10-31 by `doc_own_stack.md` decision 32, in the note below (#903).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05 and one of 2026-10-08.
+
+**Amendment of 2026-10-31** (`doc_own_stack.md` decision 32, the amendment approved by the maintainer with #903), in the first pull request of the implementation, as that document's decision 28 asks:
+
+- **OV2.** Under athanor-compositor the overview reaches its privileged globals through its line in the allow-list (`doc_own_stack.md` OS4), not through the main socket; the section on the main socket holds for cosmic-comp.
+- **OV3.** `Client::move_window` is `WorkspaceControls::move_to_workspace`, on the object `Client::workspace_controls()` gives, which also carries a window's workspaces and geometry, pin and reorder; the other calls keep their names on `Client`. `Client::workspaces()` reports the compositor's order per output, ext-workspace `coordinates` and else the order of creation, and `Workspace` gains `coordinates: Vec<u32>`, which the strip and acceptance item 7 read. The workspace layout's axis of `move_before` and `move_after` is the axis along which the group's `coordinates` differ, read from the group. Under athanor-compositor a window's workspaces and geometry are absent, and `Workspace.pinned` and the capabilities `pin` and `move` false, until that call, and only the overview makes it, so that the lifting of LA6's limit (section 2, `Window.workspaces`) holds under cosmic-comp and not under athanor-compositor.
+- **OV17 and OV19 step 5.** Under cosmic-comp, Super+W reaches the overview through the `WorkspaceOverview` entry of the `system_actions` file LN9 owns. Under athanor-compositor, that change builds the three-finger swipe, binds it, Super+W and `XF86LaunchA` in OS13 to `os.athanor.Overview1`, shows the workspaces module of the bar and the workspaces button of the dock, measures acceptance items 5 and 9 again through them, tests the swipe in the fixture, which no acceptance item of section 5 covers, and raises each count of `doc_own_stack.md` OS19 item 2 by one.
+- **OV18.** The two-output cases also run in the rig, through athanor-compositor's headless outputs (`RIG_HEADLESS_OUTPUTS=2`), by hand on athanor-ref until a continuous-integration job runs `RIG_COMPOSITOR=athanor`. The scheduled job keeps the cosmic-comp run.
+- **OV19.** The click and Enter that activate a window land in step 3, with the pointer actions, not in step 2.
+- **The patches of decisions 4 and 5 are not written.** The three-finger swipe and the reduced-motion switch are behaviour of the own compositor, and cosmic-comp's session keeps its four-finger switch and its 200 ms slide, so that `enable-animations` does not reach that slide, which is a departure from what this document promised through decision 5 and `doc_accessibility.md` AX9.
 
 ## 1. Scope, non-goals and rationale
 
@@ -68,7 +77,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **OV1. One overview, replacing cosmic-workspaces.** On every output it shows that output's workspaces as a strip, and the windows of the selected workspace as a grid of thumbnails. This is the model of macOS Mission Control and GNOME's overview.
 
-- **Super stays with the launcher** (LA8). The overview opens with Super+W, the `XF86LaunchA` key, the bar's Workspaces module, the dock's workspaces button, a three-finger swipe (OV13, decision 4) and the hot corner when the user turns it on (OV10, OV14).
+- **Super stays with the launcher** (LA8). The overview opens with Super+W, the `XF86LaunchA` key, the bar's Workspaces module, the dock's workspaces button, a three-finger swipe (OV13, decision 4, under the own compositor by the amendment of 2026-10-31) and the hot corner when the user turns it on (OV10, OV14).
 - **The window switcher on Alt+Tab is owned by this document** (amended 2026-10-06, maintainer decision A2-24, #159; section 7). It is a surface of its own, not the overview's grid; F-overview-10. Its design comes in a later revision of this document.
 
 **OV2. Programs and crates.**
@@ -231,8 +240,8 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 - **Unchanged from COSMIC.** The compositor's shortcuts stay as COSMIC ships them: Super+1 to Super+9 and Super+0 to switch, Super+Shift with the same keys to move the window, Super+Ctrl with the arrows or h, j, k, l to step, and Super+Shift+Ctrl to carry the window (`defaults:28-61`).
 - **Four-finger swipes** switch workspace, also unchanged (`src/input/mod.rs:1185-1260`).
 - **Drawn by cosmic-comp.** The switch animation is the compositor's, in 200 ms with `EaseInOutCubic`; VL9 is amended to that duration (section 3).
-- **Reduced motion reaches it through a patch** (decision 5). A cosmic-comp patch adds one boolean configuration key that makes the workspace switch instant. `athanor-compositor-client` writes it from `enable-animations`, as `athanor-style` mirrors the other preferences (VL4). The patch changes no duration. It is proposed upstream first, and its exit is upstream adding a reduced-motion setting (CO3).
-- **A three-finger swipe opens the overview** (decision 4). A cosmic-comp patch maps a vertical three-finger swipe, which the compositor takes today and ignores (`src/input/mod.rs:1195`), to the `WorkspaceOverview` system action: up shows, down hides. No application loses a gesture. The patch is proposed upstream first, and its exit is upstream implementing that TODO (CO3).
+- **Reduced motion reaches it through a patch** (decision 5). A cosmic-comp patch adds one boolean configuration key that makes the workspace switch instant. `athanor-compositor-client` writes it from `enable-animations`, as `athanor-style` mirrors the other preferences (VL4). The patch changes no duration. It is proposed upstream first, and its exit is upstream adding a reduced-motion setting (CO3). Not written (amendment of 2026-10-31): the own compositor carries the switch once it has a slide (`doc_own_stack.md` decision 32).
+- **A three-finger swipe opens the overview** (decision 4). A cosmic-comp patch maps a vertical three-finger swipe, which the compositor takes today and ignores (`src/input/mod.rs:1195`), to the `WorkspaceOverview` system action: up shows, down hides. No application loses a gesture. The patch is proposed upstream first, and its exit is upstream implementing that TODO (CO3). Not written (amendment of 2026-10-31): the own compositor carries the swipe (`doc_own_stack.md` decision 32).
 
 **OV14. The hot corner** (F-overview-11). Drawn by the shell, off by default (decision 6).
 
@@ -317,7 +326,7 @@ The NVIDIA crash of cosmic-workspaces leaves with it. No interim fix to cosmic-w
 4. **Feedback and reach:**
    - the indicator of OV12;
    - the hot corner of OV14 with its GNOME key;
-   - the cosmic-comp patches of decisions 4 and 5, each in its own change under CO3, after its upstream proposal is filed.
+   - the cosmic-comp patches of decisions 4 and 5, each in its own change under CO3, after its upstream proposal is filed. Not written (amendment of 2026-10-31).
 5. **The gate and the switch.** The gate runs first: the measurement on the reference laptop, the scenarios, accessibility and languages, the 84 surface cases and the maintainer's aesthetic signature (ST2). Then the change of OV17 and the register updates of section 3 merge together.
 
 ### Failure behaviour
@@ -356,7 +365,7 @@ Applied with the approval of this document.
 
 - **`shell-features.md`, Workspace overview:**
   - F-overview-11 goes from `have` to `missing`, with the reason (no hot corner in cosmic-comp or cosmic-settings 1.8.0), and back to `have` at OV19 step 4 (decision 6).
-  - F-overview-12 becomes `partial`: four-finger workspace switching exists, and goes to `have` when the three-finger patch of decision 4 ships at OV19 step 4.
+  - F-overview-12 becomes `partial`: four-finger workspace switching exists, and goes to `have` when the own compositor's three-finger swipe ships (amendment of 2026-10-31).
   - F-overview-09's source becomes OV9 at the switch, replacing cosmic-launcher.
   - F-overview-13 goes to `have` at step 3.
   - F-overview-07, 14 and 16 become `excluded`, with the reasons of OV15.
@@ -364,12 +373,12 @@ Applied with the approval of this document.
   - F-overview-10 names this document as owner (section 7).
   - F-overview-18 to 21 become `excluded`.
   - Every `cosmic-workspaces` source becomes `athanor-overview` at the switch.
-- **`doc_visual_language.md` VL9** (ruling of 2026-10-05, on the PR #119 branch): the workspace slide takes the compositor's 200 ms with `EaseInOutCubic`, not 300 ms; the patch of decision 5 only adds the on/off switch.
-- **`doc_accessibility.md` AX9:** reduced motion reaches the compositor's workspace switch through the patch of decision 5, from OV19 step 4.
+- **`doc_visual_language.md` VL9** (ruling of 2026-10-05, on the PR #119 branch): the workspace slide takes the compositor's 200 ms with `EaseInOutCubic`, not 300 ms; the patch of decision 5, not written (amendment of 2026-10-31), only added the on/off switch.
+- **`doc_accessibility.md` AX9:** reduced motion reaches the own compositor's workspace switch once it has a slide; the patch of decision 5 is not written (amendment of 2026-10-31).
 - **`doc_accessibility.md` AX3** (ruling of 2026-10-05): its `ScreenReader` entry moves to the `system_actions` file under `/usr/share/athanor/cosmic-defaults`, not a file in the cosmic-comp package.
 - **`doc_portal.md` section 3** (ruling of 2026-10-05): its `Screenshot` entry goes to the same file.
 - **Amendments of 2026-10-08 (ADR-0099):** `doc_settings.md` SE14 writes the GNOME key of OV14 instead of a schema of this program; `doc_shell_standard.md` ST5 cites this document's memory budget as section 4, item 4.
-- **`doc_compositor.md` CO3:** two patches, the three-finger swipe (decision 4) and the reduced-motion switch (decision 5), each proposed upstream first; a third, the overview namespace on the overlay or top layer, only if spike S3 fails (decision 1).
+- **`doc_compositor.md` CO3:** two patches, the three-finger swipe (decision 4) and the reduced-motion switch (decision 5), neither written (amendment of 2026-10-31); a third, the overview namespace on the overlay or top layer, only if spike S3 fails (decision 1).
 
 ## 4. Open doubts
 
@@ -425,8 +434,8 @@ Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2
 1. **Which layer namespace?** (OV4) Choice: the neutral namespace `athanor-overview` now, with pinned surfaces; a cosmic-comp patch counting the special namespace only on the overlay or top layer only if spike S3 fails. Reason: it needs no patch on cosmic-comp 1.8.0, and the cost it leaves (windows drawn under the overview) is measured before anything depends on it; the special namespace with pinned surfaces would hide every window all session (`quirks.rs:13-25`).
 2. **What do the workspace miniatures show?** (OV5, OV6) Choice: still window captures composed at each window's geometry, with the schematic (rectangle and icon) as fallback per window. Reason: it meets F-overview-02 as written on the shm path, and the fallback keeps every window visible when a capture fails; cosmic-comp's workspace capture would contain the overview itself under a neutral namespace.
 3. **What feedback does a workspace change give?** (OV12) Choice: the overview's own indicator card. Reason: the only option that gives feedback with reduced motion and in every layout, on surfaces that already exist, without reversing OD's exclusion.
-4. **Does a touchpad gesture open the overview?** (OV13) Choice: a cosmic-comp patch mapping the vertical three-finger swipe to `WorkspaceOverview`, proposed upstream first. Reason: it closes F-overview-12 on laptops with the smallest patch, on a gesture the compositor already takes and ignores.
-5. **Does reduced motion reach the workspace slide?** (OV13) Choice: a cosmic-comp patch adding an on/off key, written by the compositor client from `enable-animations`, proposed upstream first; the duration stays the compositor's 200 ms and VL9 is amended to it. Reason: reduced motion is an accessibility need and the workspace slide is the motion users meet most often.
+4. **Does a touchpad gesture open the overview?** (OV13) Choice: a cosmic-comp patch mapping the vertical three-finger swipe to `WorkspaceOverview`, proposed upstream first. Reason: it closes F-overview-12 on laptops with the smallest patch, on a gesture the compositor already takes and ignores. Not written (`doc_own_stack.md` decision 32).
+5. **Does reduced motion reach the workspace slide?** (OV13) Choice: a cosmic-comp patch adding an on/off key, written by the compositor client from `enable-animations`, proposed upstream first; the duration stays the compositor's 200 ms and VL9 is amended to it. Reason: reduced motion is an accessibility need and the workspace slide is the motion users meet most often. Not written (`doc_own_stack.md` decision 32).
 6. **Is there a hot corner?** (OV14) Choice: drawn by the shell, one 1×1 overlay surface per output, off by default, switched on Settings' Desktop page. Reason: it meets F-overview-11 without a patch; off by default avoids accidental openings for new users.
 7. **Can workspaces be renamed?** (OV15) Choice: excluded in release 1; the action shows only when the compositor advertises Rename. Reason: cosmic-comp 1.8.0 neither advertises nor handles it, the capability check brings the feature with upstream at no cost, and CO3 keeps window-management patches for entries that matter more.
 8. **First frame and hot-corner key** (OV6, OV14; 2026-10-08, ADR-0099). Choice: the first complete frame is every card in place with cached thumbnails or icons, drawn with `wl_shm` and Cairo, without GL or GBM; the hot corner is `org.gnome.desktop.interface enable-hot-corners`, with Athanor's vendor default `false`, and the overview ships no schema. Reason: the first needs no fresh thumbnail to be a complete frame and keeps the renderer that cannot race on Vulkan; the second is the key GNOME users and tools already know, and A2-20 prefers an existing GNOME key to a new one.
