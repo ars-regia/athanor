@@ -149,6 +149,8 @@ struct Out {
     acts: Vec<(WidgetId, Act)>,
     states: Vec<State>,
     hider: Option<Hider>,
+    /// The keyboard is on the surface; it says so only at its enter.
+    keyboard: bool,
     /// The input region last set under auto-hide.
     region: Option<Vec<Rect>>,
 }
@@ -483,7 +485,10 @@ impl Dock {
         out.states = states.to_vec();
         out.hider = hider;
         out.region = None;
-        // A new auto-hiding island starts hidden, as the GTK dock's.
+        // A new auto-hiding island starts hidden, as the GTK dock's, unless it holds the keyboard.
+        if let (true, Some(hider)) = (out.keyboard, &mut out.hider) {
+            hider.state.feed(Hide::KeyboardIn);
+        }
         out.follow(shell, id);
     }
 
@@ -856,6 +861,7 @@ impl Application for Dock {
                     acts: Vec::new(),
                     states: Vec::new(),
                     hider: None,
+                    keyboard: false,
                     region: None,
                 },
             );
@@ -932,6 +938,21 @@ impl Application for Dock {
                 Hide::PointerIn
             } else {
                 Hide::PointerOut
+            },
+        );
+    }
+
+    fn keyboard(&mut self, shell: &mut Shell, surface: SurfaceId, focused: bool) {
+        if let Some(out) = self.outs.get_mut(&surface) {
+            out.keyboard = focused;
+        }
+        self.feed(
+            shell,
+            surface,
+            if focused {
+                Hide::KeyboardIn
+            } else {
+                Hide::KeyboardOut
             },
         );
     }

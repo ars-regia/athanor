@@ -36,6 +36,7 @@ from bar_e2e import (  # noqa: E402
 )
 from bar_session import PID_FILE, READY_FILE  # noqa: E402
 from dock_roundtrip import layout  # noqa: E402
+from orca_walk import under_athanor, wtype  # noqa: E402
 
 PSS_LIMIT_KB = 48 * 1024
 WINDOW = "/repo/forge/test/shell/cc_window.py"
@@ -148,6 +149,25 @@ def main():
         "auto-hide: the island leaves for the strip within 2 s",
         wait_for(gone("Launcher"), 2),
     )
+    if under_athanor():
+        # The dock's strip is the one on-demand surface of the top layer here (AX7, #828), so
+        # the cycle's first step reaches it and its second goes back to the window.
+        def cycle():
+            subprocess.run(
+                [*wtype(), "-M", "ctrl", "-M", "alt", "-k", "Tab", "-m", "alt", "-m", "ctrl"],
+                check=True,
+            )
+
+        cycle()
+        check(
+            "auto-hide: the keyboard on the strip shows the island",
+            wait_for(shows("Launcher"), 2),
+        )
+        cycle()
+        check(
+            "auto-hide: the keyboard leaving takes the island away",
+            wait_for(gone("Launcher"), 2),
+        )
     apply(layout("float", "top", "visible"))
     check("visible: the island shows again", wait_for(shows("Launcher"), 2))
     apply(layout("float", "top", "none"))

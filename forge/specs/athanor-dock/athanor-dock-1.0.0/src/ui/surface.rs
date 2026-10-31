@@ -166,6 +166,17 @@ impl Surface {
         let over = hider.clone();
         motion.connect_leave(move |_| feed(&over, Event::PointerOut));
         window.add_controller(motion);
+        // Active is the window holding the keyboard: a focus controller reports nothing while
+        // no widget of it has the focus yet.
+        let over = hider.clone();
+        window.connect_is_active_notify(move |window| {
+            let event = if window.is_active() {
+                Event::KeyboardIn
+            } else {
+                Event::KeyboardOut
+            };
+            feed(&over, event);
+        });
         let weak = Rc::downgrade(dock);
         window.connect_map(move |_| {
             if let Some(dock) = weak.upgrade() {
@@ -329,6 +340,9 @@ impl Surface {
             });
             hider.show(false);
             self.hider.replace(Some(hider));
+            if self.window.is_active() {
+                feed(&self.hider, Event::KeyboardIn);
+            }
         }
         self.window.set_child(Some(&stack));
         self.row = row;

@@ -166,6 +166,9 @@ pub trait Application {
     /// The pointer entered (`inside`) or left `surface`, a popup included.
     fn pointer(&mut self, _shell: &mut Shell, _surface: SurfaceId, _inside: bool) {}
 
+    /// The keyboard entered (`focused`) or left `surface`, a popup included.
+    fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
+
     /// Runs after each turn of the event loop, once its events are handled: where the
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
@@ -1512,6 +1515,17 @@ impl App {
         }
     }
 
+    /// Tells the application the keyboard entered or left `wl`, one of its surfaces.
+    fn keyboard_moved(&mut self, wl: &wl_surface::WlSurface, focused: bool) {
+        let Some(id) = self.shell.find(wl).map(|surface| surface.id) else {
+            return;
+        };
+        self.application.keyboard(&mut self.shell, id, focused);
+        if let Err(error) = self.shell.draw_dirty() {
+            self.fail(error);
+        }
+    }
+
     /// A key held down: as pressed again, except Enter outside a text area, and Space outside
     /// a field, which activate once.
     fn repeat(&mut self, event: KeyEvent) {
@@ -1865,6 +1879,7 @@ impl KeyboardHandler for App {
         _: &[Keysym],
     ) {
         self.keyboard_focus = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_moved(wl, true);
     }
 
     fn leave(
@@ -1872,10 +1887,11 @@ impl KeyboardHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
-        _: &wl_surface::WlSurface,
+        wl: &wl_surface::WlSurface,
         _: u32,
     ) {
         self.keyboard_focus = None;
+        self.keyboard_moved(wl, false);
     }
 
     fn press_key(
