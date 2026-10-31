@@ -396,6 +396,8 @@ fn a_click_does_not_move_the_magnified_view() {
     let (window, _) = fixture_window(&run);
     let area = run.state.space.element_geometry(&window).expect("mapped");
     let edge = (area.loc + Point::from((2, 2))).to_f64();
+    // The focus outline would change the frame, and the view is what is compared.
+    run.state.focus_theme.enabled = false;
     run.state.set_keyboard_focus(None);
     run.state.pointer_to(edge, InputTime::now());
     run.state.zoom_step(true);

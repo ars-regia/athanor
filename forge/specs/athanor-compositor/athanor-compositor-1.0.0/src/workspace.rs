@@ -12,7 +12,7 @@
 use crate::identity::Privilege;
 use crate::state::{centred, granted, State};
 use smithay::backend::input::InputTime;
-use smithay::desktop::{PopupManager, Window};
+use smithay::desktop::{find_popup_root_surface, PopupManager, Window};
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1, GroupCapabilities},
@@ -415,10 +415,14 @@ impl State {
         true
     }
 
-    /// The window with the keyboard focus, if a window has it.
-    fn focused_window(&self) -> Option<Window> {
+    /// The window with the keyboard focus, if a window or a popup of one has it.
+    pub(crate) fn focused_window(&self) -> Option<Window> {
         let surface = self.seat.get_keyboard()?.current_focus()?;
-        self.window_for(&surface)
+        let root = match self.popups.find_popup(&surface) {
+            Some(popup) => find_popup_root_surface(&popup).ok()?,
+            None => surface,
+        };
+        self.window_for(&root)
     }
 
     /// The workspaces of the output the workspace keys act on: the focused window's, else the

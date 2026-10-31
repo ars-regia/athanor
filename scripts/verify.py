@@ -3047,6 +3047,9 @@ COSMIC_ALLOWED = (
     # sessions share one state, until cosmic-comp's session leaves the greeter
     # (doc_own_stack.md decision 28, doc_accessibility.md AX10).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
+    # It reads the theme of the focus outline, read-only, until the store moves with the
+    # compositor client (doc_own_stack.md decision 31).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs",
     # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
     # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).
     "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",

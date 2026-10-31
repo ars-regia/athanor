@@ -8,6 +8,7 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
+use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
 use crate::output_power::OutputPower;
@@ -21,15 +22,12 @@ use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Kind, RenderElement, RenderElementStates,
 };
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::backend::renderer::{ImportDma, Texture};
-use smithay::desktop::space::{space_render_elements, SpaceRenderElements};
 use smithay::desktop::utils::{
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, update_surface_primary_scanout_output,
@@ -239,6 +237,7 @@ pub struct State {
     pub sent_group: u32,
     /// The magnifier and the colour filters, and the managers of athanor-a11y-v1.
     pub a11y: crate::a11y::A11y,
+    pub focus_theme: crate::focus_theme::FocusTheme,
     /// The keyboard's repeat, rate then delay as `repeat_info` takes them: `REPEAT_RATE` and
     /// `REPEAT_DELAY` until `xkb_config` sets it.
     pub repeat: (i32, i32),
@@ -298,10 +297,11 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
-        // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
-        // exclusive surface of a granted client (`escape_exclusive`).
-        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        // A confined client does not see it, since a surface of its own would stand unmarked
+        // (`doc_own_stack.md` decision 31). Of the others, only a client granted `TopLayers`
+        // keeps a surface on the top or overlay layer (`layer_commit`). The escape key takes the
+        // keyboard back from the exclusive surface of a granted client (`escape_exclusive`).
+        let layer_shell_state = WlrLayerShellState::new_with_filter::<Self, _>(&dh, unconfined);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
@@ -430,6 +430,7 @@ impl State {
             keyboard_groups: Vec::new(),
             sent_group: 0,
             a11y: crate::a11y::A11y::default(),
+            focus_theme: crate::focus_theme::FocusTheme::default(),
             repeat: (REPEAT_RATE, REPEAT_DELAY),
             minimised: Vec::new(),
             output_management: OutputManagement::default(),
@@ -1115,7 +1116,7 @@ impl State {
 /// What an output shows: the space with the input method's popups on top, or while the session
 /// is locked only the lock surface the locker gave it, if any, on the background.
 pub enum View<'a> {
-    Space(&'a Space<Window>, &'a [PlacedPopup]),
+    Space(&'a Space<Window>, &'a [PlacedPopup], &'a Marks),
     Locked(Option<&'a WlSurface>),
 }
 
@@ -1124,11 +1125,12 @@ impl<'a> View<'a> {
         space: &'a Space<Window>,
         lock: Option<&'a Lock>,
         popups: &'a [PlacedPopup],
+        marks: &'a Marks,
         output: &Output,
     ) -> Self {
         match lock {
             Some(lock) => View::Locked(lock.surface_on(output)),
-            None => View::Space(space, popups),
+            None => View::Space(space, popups, marks),
         }
     }
 }
@@ -1146,12 +1148,12 @@ pub fn draw_view<'d, R>(
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
     R: Filters,
-    R::TextureId: Clone + Texture + 'static,
+    R::TextureId: Send + Clone + Texture + 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
     let surface = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
-        render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+        render_elements_from_surface_tree::<_, Stacked<R>>(
             renderer,
             surface,
             at,
@@ -1159,18 +1161,16 @@ where
             1.0,
             Kind::Unspecified,
         )
-        .into_iter()
-        .map(SpaceRenderElements::Surface)
     };
     // The popups and the lock surface are surfaces as the space's are, above them.
-    let mut elements: Vec<SpaceRenderElements<R, WaylandSurfaceRenderElement<R>>> = Vec::new();
+    let mut elements: Vec<Stacked<R>> = Vec::new();
     match view {
-        View::Space(space, popups) => {
+        View::Space(space, popups, marks) => {
             for (popup, at) in popups {
                 let at = at.to_physical_precise_round(scale);
                 elements.extend(surface(renderer, popup, at));
             }
-            elements.extend(space_render_elements(renderer, [space], output, 1.0)?);
+            elements.extend(crate::marks::stack(renderer, space, output, marks));
         }
         View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
         View::Locked(None) => {}
@@ -1341,6 +1341,16 @@ pub fn unconfined(client: &Client) -> bool {
         .is_some_and(|data| !data.confined)
 }
 
+impl State {
+    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31).
+    pub fn marks(&self) -> Marks {
+        Marks {
+            focused: self.focused_window(),
+            outline: self.focus_theme.outline(),
+        }
+    }
+}
+
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, client_id: ClientId, reason: DisconnectReason) {
@@ -1416,7 +1426,7 @@ pub fn centred(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point
 }
 
 /// `output`'s logical size rounded, at which the layer map lays it out.
-fn laid_out(output: &Output) -> Option<Size<i32, Logical>> {
+pub(crate) fn laid_out(output: &Output) -> Option<Size<i32, Logical>> {
     output.current_mode().map(|mode| {
         let size = mode
             .size
@@ -1455,7 +1465,7 @@ pub fn placed(
 /// the output laid out at `laid_out`. Each inset is kept inside the output, so that a client's
 /// exclusive zone, however large, cannot place windows outside it or overflow; zones that leave
 /// no room at all are ignored, and windows take the whole output.
-fn inset(
+pub(crate) fn inset(
     area: Rectangle<i32, Logical>,
     laid_out: Size<i32, Logical>,
     zone: Rectangle<i32, Logical>,

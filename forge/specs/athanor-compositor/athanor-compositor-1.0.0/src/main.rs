@@ -14,6 +14,7 @@ mod clipboard;
 mod constraints;
 mod cursor;
 mod decoration;
+mod focus_theme;
 mod foreign;
 mod gestures;
 mod grabs;
@@ -28,6 +29,7 @@ mod keyboard_group;
 mod layer;
 mod lock;
 mod look;
+mod marks;
 mod output_management;
 mod output_power;
 mod ready;
@@ -162,6 +164,8 @@ fn run() -> Result<(), Error> {
     xkb_config::start(&mut state, &event_loop.handle());
     // The colour filter of cosmic-comp's session, on from the first frame (AX10).
     screen_filter::start(&mut state, &event_loop.handle());
+    // The theme of the focus outline (`doc_own_stack.md` decision 31).
+    focus_theme::start(&mut state, &event_loop.handle());
     let socket = state::listen(&event_loop.handle())?;
     // Under the user manager, as `athanor-compositor.service` runs it, the satellite gets a
     // scope of its own (OS4).
