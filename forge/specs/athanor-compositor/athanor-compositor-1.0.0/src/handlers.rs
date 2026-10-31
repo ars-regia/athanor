@@ -125,9 +125,12 @@ impl CompositorHandler for State {
                     self.place(&window);
                     let landed = self.relocated(&window);
                     self.anchor_resized(&window);
-                    // Also what a full-screen window's answer lifts (`marks::lifted`).
+                    // Also what a full-screen window's answer lifts (`marks::lifted`), which an
+                    // answer to an earlier configure does as well.
                     if landed {
                         self.refresh_pointer();
+                    } else if is_full_screen(&window) {
+                        self.repoint();
                     }
                 }
             }
@@ -615,7 +618,7 @@ impl XdgShellHandler for State {
         self.foreign_toplevel_destroyed(surface.wl_surface());
         // The keyboard does not leave a destroyed window by itself, nor does the pointer.
         self.refocus(surface.wl_surface());
-        self.refresh_pointer();
+        self.repoint();
     }
 
     /// The window follows the pointer until every button is up. A maximised window is
@@ -700,14 +703,14 @@ impl XdgShellHandler for State {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.end_window_grab(&window);
             self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
-            self.refresh_pointer();
+            self.repoint();
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.leave_full_screen(&window);
-            self.refresh_pointer();
+            self.repoint();
         }
     }
 

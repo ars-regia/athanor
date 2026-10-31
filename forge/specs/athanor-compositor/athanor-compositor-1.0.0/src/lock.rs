@@ -185,6 +185,18 @@ impl State {
         pointer.frame(self);
     }
 
+    /// `refresh_pointer` for a change of what stands above what, in which nothing under the
+    /// pointer moves: a client that stays there hears nothing.
+    pub(crate) fn repoint(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let under = self.surface_under(pointer.current_location());
+        if under.map(|(surface, _)| surface) != pointer.current_focus() {
+            self.refresh_pointer();
+        }
+    }
+
     /// After a frame of every output: a lock waiting for its confirmation has been drawn, and
     /// is confirmed.
     pub fn locked_drawn(&mut self) {

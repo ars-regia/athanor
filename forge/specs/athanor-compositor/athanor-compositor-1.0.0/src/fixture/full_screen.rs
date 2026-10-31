@@ -483,6 +483,55 @@ fn a_parked_window_stays_parked_when_it_names_an_output() {
     run.stop();
 }
 
+/// Nor can it from under a minimise, and it stays where the user left it to come back to.
+#[test]
+fn a_minimised_window_stays_on_its_workspace_when_it_names_an_output() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, window) = window(&mut run);
+    let named = local.output(0);
+    let home = run.state.workspace_of(&window);
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window));
+    assert!(run.state.activate_workspace(workspaces_of(&run, 0)[1]));
+
+    toplevel.set_fullscreen(Some(&named));
+    local.roundtrip(&mut run);
+
+    assert_eq!(run.state.workspace_of(&window), home);
+    run.stop();
+}
+
+/// What another window asks, or its end, tells the client under the pointer nothing when that
+/// client stays there.
+#[test]
+fn the_client_under_the_pointer_hears_nothing_of_another_window() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut pointed, _kept, under) = window(&mut run);
+    let (mut other, toplevel, elsewhere) = window(&mut run);
+    let (_, area) = second_output(&run);
+    run.state.space.relocate_element(&elsewhere, area.loc);
+    let location = run.state.space.element_geometry(&under).expect("mapped").loc;
+    let inside = (location.x + 5, location.y + 5);
+    run.state.pointer_to(
+        Point::<i32, Logical>::from(inside).to_f64(),
+        smithay::backend::input::InputTime::now(),
+    );
+    pointed.roundtrip(&mut run);
+    let heard = pointed.client.pointer_motions;
+
+    toplevel.unset_fullscreen();
+    other.roundtrip(&mut run);
+    toplevel.destroy();
+    other.roundtrip(&mut run);
+    pointed.roundtrip(&mut run);
+
+    assert_eq!(pointed.client.pointer_motions, heard);
+    run.stop();
+}
+
 /// The black around a smaller client hides what is below it from the pointer as well as from
 /// the eye, with the keyboard elsewhere too.
 #[test]

@@ -731,9 +731,10 @@ impl State {
     /// with the `fullscreen` state and the output's size, and the window moves there at the
     /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
     /// maximised window stays so, and returns to that. A window on an inactive workspace stays
-    /// there, whichever output it names: only the user brings it to the one they see.
+    /// there, whichever output it names, minimised or not: only the user brings it to the one
+    /// they see.
     pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
-        let named = output.filter(|_| !self.is_parked(window));
+        let named = output.filter(|_| self.on_active_workspace(window));
         if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
             // Before its first commit a window has no workspace yet.
             self.place_on_workspace(window);
@@ -927,6 +928,7 @@ impl State {
         // `xdg_toplevel.set_fullscreen` says.
         if let Some(area) = full_screen_area(window) {
             let to = centred(area, window.geometry().size);
+            landed |= self.space.element_location(window) != Some(to);
             self.space.relocate_element(window, to);
         }
         landed
