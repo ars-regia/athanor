@@ -5,14 +5,14 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4 on 2026-10-31, the amendment approved by the maintainer with #892. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25, 2026-10-28 and 2026-10-29; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
-15 in ADR-0126, and decisions 16 to 30 in section 7. Text marked "(decision N)" is what the
+2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25, 2026-10-28, 2026-10-29 and 2026-10-31; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
+15 in ADR-0126, and decisions 16 to 31 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -171,7 +171,9 @@ is a barrier against it.
   process, a file under `/usr` in the read-only image, and the systemd unit it runs in match an
   allow-list under `/usr`. Both are read from the connection's peer credentials and pidfd when it
   connects. A string the client supplies grants nothing, which narrows the finding of spike P4 to
-  unconfined code. The bottom and background layers stay open to every client. Every shipped client
+  unconfined code. The bottom and background layers stay open to every unconfined
+  client; a client in a security context, and xwayland-satellite, gets no layer surface
+  (decision 31). Every shipped client
   that draws on the top or overlay layer or binds a privileged interface has its line in the shipped
   list, naming each interface it binds, and `verify.py allow-list` fails without it (#728; C1
   results, section 10, item 1).
@@ -948,50 +950,74 @@ compositor and that the own compositor did not yet offer:
     `GPL-3.0-only`, or reading every source and porting nothing.
 31. **The focus outline and the border of confined windows** (OS4; `doc_session.md` SN16, gap 2;
     #851; taken by the maintainer on 2026-10-31). The own compositor draws two marks, told apart
-    by shape as well as by colour, so that neither rests on colour alone:
+    by shape as well as by colour, so that neither rests on colour alone. Widths are logical
+    pixels, rounded to whole pixels of the output and never below one:
     - **The focus outline** marks the window with the keyboard focus, and no other. It is drawn
-      outside the window's geometry, as wide as the theme's `active_hint`, with rounded corners
-      that follow the window's, in the theme's `window_hint` when it is set and in its accent
-      otherwise (spike VL-S1, section 2.2). It follows the theme live, is not drawn when the
-      `active_hint` setting of `doc_settings.md` is off, and is not drawn on a maximised or
-      full-screen window, which leaves it no place on the output.
-    - **The border** marks every window of a client inside a security context, and of
-      xwayland-satellite, which the compositor confines as one (OS4). It is 1 px wide, with the
-      same corners, in the fixed colour `#808080`, 5.3:1 on black and 3.95:1 on white. It
-      follows no theme and no accent, since an accent must not be able to make it look like
-      the outline, and no setting turns it off. It lies against the window's geometry, outside
-      it, and inside it, over the client's content, on a maximised or full-screen window, as
-      OS4 asks of the latter.
-    - **Together.** The outline of a confined window keeps its place, and the border is drawn
-      over its inner pixel, so the focused window's mark does not change its size between a
-      confined client and the real prompt: a confined window with the focus shows a grey line
-      inside the accent, and the agent's window shows the accent alone.
+      outside the window's geometry, as wide as the theme's `active_hint`, with corners of the
+      `window` radius of `tokens.toml`, in the theme's `window_hint` when it is set and in its
+      accent otherwise (spike VL-S1, section 2.2). It follows the theme live, is not drawn when
+      the `active_hint` setting of `doc_settings.md` is off, and is not drawn on a maximised or
+      full-screen window, which leaves it no place on the output. It is no mark of trust, since
+      it falls on any focused window, so LP14's rule on the accent does not bind it, and AX8's
+      ring is a widget's, not a window's.
+    - **The border** marks every window and every popup of a client inside a security context,
+      and of xwayland-satellite, which the compositor confines as one (OS4). It is two lines of
+      1 px, `#000000` outside and `#ffffff` inside, so that whatever colour lies beside it, one
+      of the two stands at least 4.5:1 from that colour and a client cannot hide it by painting
+      its surroundings. It follows no theme and no accent, since an accent must not be able to
+      make it look like the outline, and no setting turns it off.
+    - **Where the border lies.** It surrounds the window's geometry or, when the surface tree
+      reaches more than 64 px beyond the geometry on any side, the tree's bounding box: a
+      client's shadow fits in that margin, by an estimate the rig checks, and a prompt does not.
+      The rectangle with the border around it is cut to the output's window area, or to the whole
+      output on a full-screen window, and the border follows the cut. It lies outside the window
+      where it fits and inside, over the client's content, where it does not, so a window as
+      large as the output shows it whether or not it asked to be maximised, and no client hides
+      it off the output or under the bar. Its corners take the same radius, and are square where
+      the cut falls. It is drawn above the window's surface tree and under the window's popups,
+      and a popup's border follows the same rule from the popup's geometry.
+    - **Together.** The outline stands outside the border, so a confined window with the focus
+      shows the accent around the two lines and the agent's window shows the accent alone. The
+      difference is one of shape, whatever the accent, and the two marks together are 2 px wider
+      on a confined window than the outline alone.
+    - **What a confined client cannot show unmarked.** A confined client gets no layer surface,
+      on the bottom and background layers either (OS4), since a surface there would stand
+      unmarked where no window covers it. A cursor surface is at most 256 px a side
+      (`cursor.rs`), too small for a prompt, and stays unmarked.
     - Each mark is stacked with its window, under whatever stands above that window, and
-      neither is drawn while the lock holds the session. A capture of an output shows them as
-      the output does, and a capture of a window shows neither. The magnifier and the colour
-      filters act on them as on the rest of the frame.
+      neither is drawn while the lock holds the session. One function builds that stack for
+      `draw_view` and for the DRM path of `udev.rs`, so that what the fixture reads is what a
+      display shows. A capture of an output shows the marks, without the magnifier and the colour
+      filters as every capture is, and a capture of a window shows neither. On the output the
+      magnifier and the colour filters act on them as on the rest of the frame.
     - The theme is read by one source file of the compositor,
       `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs`, which reads
       the mode, `window_hint`, `active_hint` and the accent of `CosmicTheme` and the
       `active_hint` setting of `com.system76.CosmicComp`, follows them live and writes nothing.
       A value it cannot read leaves the last one it read, logged, and before any was read the
       outline takes the factory accent of `tokens.toml`: the border needs no theme, and the
-      outline is never lost to a bad file. It is named in SH2's exceptions and `verify.py boundary`, and leaves when the
-      store moves with the compositor client.
+      outline is never lost to a bad file. It is named in SH2's exceptions and in the allow-list
+      of `verify.py boundary`, and leaves when the store moves with the compositor client.
     - The reveal key, Super+Alt+T, stays bound and does nothing until the compositor can draw
       the application's name, in a change of its own, and gap 2 of SN16 stays open until then:
       the border alone tells a confined window's imitation from the real prompt, and the key
       is what lets a user check it.
     The fixture tests that the focused window, and only it, is outlined, and with the setting
-    off is not; that a confined window is bordered in every state and an unconfined one is not;
-    that a window above covers a mark of the window below; and that a mark follows a theme
-    change without a new client. The entries of #851 leave
+    off is not; that a confined window is bordered in every state, on a grey backdrop, when it is
+    as large as the output without being maximised and when its geometry is smaller than its
+    buffer; that its popup is bordered and its layer surface refused; that an unconfined window
+    is not bordered; that a window above covers a mark of the window below; and that a mark
+    follows a theme change without a new client. The outline's entries of #851 leave
     `forge/test/shell/golden/athanor-differences.toml` when the golden report shows no
-    difference for them. Not taken: a border of 2 px in a bright fixed colour, easier to see but
-    on almost every window, since every launch has a security context (`doc_session_daemons.md` SD8), at a cost to Calmo;
-    one line for both marks with only the tone changed, which rests on colour alone; for the
-    outline, a fixed Calmo purple, which ignores the user's accent and `active_hint`; and the
-    reveal key now, which adds drawing text to the compositor to a change that does not need it.
+    difference for them, and a case that shows a confined window takes an entry of #851 for the
+    border, which cosmic-comp does not draw. Not taken: one grey line of 1 px in `#808080`, which
+    a grey backdrop hides and which, with the focus, tells the two apart by one pixel inside the
+    outline; a bright fixed colour, on almost every window, since every launch has a security
+    context (`doc_session_daemons.md` SD8), at a cost to Calmo; one line for both marks with only
+    the tone changed, which rests on colour alone; a border around layer surfaces, which would
+    frame a whole wallpaper; for the outline, a fixed Calmo purple, which ignores the user's
+    accent and `active_hint`; and the reveal key now, which adds drawing text to the compositor
+    to a change that does not need it.
 
 ## 8. Risks
 
