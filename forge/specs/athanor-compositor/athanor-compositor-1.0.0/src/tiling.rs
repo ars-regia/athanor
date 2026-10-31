@@ -29,6 +29,7 @@ impl Along {
     }
 }
 
+#[derive(Clone)]
 enum Node<T> {
     Tile(T),
     Split {
@@ -179,6 +180,7 @@ fn gapped(
 }
 
 /// What a workspace tiles.
+#[derive(Clone)]
 pub struct Tree<T> {
     root: Option<Node<T>>,
     /// The windows of the tree, the one focused last at the end.
@@ -209,6 +211,30 @@ impl<T: PartialEq + Clone> Tree<T> {
             Some((root, (near, along))) => root.split_tile(&near, window, along),
             None => Node::Tile(window),
         });
+    }
+
+    /// `insert` for a window without the keyboard: the next tile splits what the focus left.
+    pub fn insert_behind(&mut self, window: T, area: Rectangle<i32, Logical>) {
+        if self.holds(&window) {
+            return;
+        }
+        self.insert(window, area);
+        if let Some(window) = self.focused.pop() {
+            self.focused.insert(self.focused.len().saturating_sub(1), window);
+        }
+    }
+
+    /// The tile `insert` would give `window`, or the one it has, the tree staying as it is.
+    pub fn preview(
+        &self,
+        window: &T,
+        area: Rectangle<i32, Logical>,
+    ) -> Option<Rectangle<i32, Logical>> {
+        let mut after = self.clone();
+        after.insert(window.clone(), area);
+        let tiles = after.layout(area);
+        let tile = tiles.iter().find(|(tile, _)| *tile == window);
+        tile.map(|(_, at)| *at)
     }
 
     /// Takes `window` out; its sibling takes the space (D3). Another window changes nothing.
@@ -282,6 +308,47 @@ mod tests {
                 (3, rect(512, 312, 496, 296)),
             ],
         );
+    }
+
+    #[test]
+    fn a_preview_is_the_tile_insert_gives() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        assert_eq!(tree.preview(&1, whole), Some(rect(8, 8, 1000, 600)));
+        tree.insert(1, whole);
+        let before = tiles(&tree, whole);
+
+        let preview = tree.preview(&2, whole);
+
+        assert_eq!(tiles(&tree, whole), before, "the tree stays as it is");
+        assert!(!tree.holds(&2));
+        tree.insert(2, whole);
+        assert_eq!(preview, Some(rect(512, 8, 496, 600)));
+        assert_eq!(tree.preview(&2, whole), preview, "the tile it has");
+        assert_eq!(tiles(&tree, whole)[1], (2, rect(512, 8, 496, 600)));
+    }
+
+    #[test]
+    fn a_window_inserted_behind_leaves_the_split_where_it_was() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        tree.insert(1, whole);
+        tree.insert_behind(2, whole);
+        tree.insert(3, whole);
+        assert_eq!(
+            tiles(&tree, whole),
+            [
+                (1, rect(8, 8, 496, 296)),
+                (3, rect(8, 312, 496, 296)),
+                (2, rect(512, 8, 496, 600)),
+            ],
+        );
+
+        let mut alone = Tree::default();
+        alone.insert_behind(1, whole);
+        assert_eq!(tiles(&alone, whole), [(1, rect(8, 8, 1000, 600))]);
+        alone.insert_behind(1, whole);
+        assert_eq!(tiles(&alone, whole).len(), 1, "a window it holds stays");
     }
 
     #[test]
