@@ -4729,11 +4729,14 @@ fn set_group_switches_and_every_object_hears_it() {
     run.stop();
 }
 
-/// The session's layout group comes back from a lock as it went in (LP14).
+/// The lock leaves the session's layout group alone (LP14): the second group stays while locked
+/// and after the unlock, and the window the unlock focuses hears it. The test switches nothing
+/// on the lock: a group changed there, and any restoring of it, stays with #834.
 #[test]
 fn unlocking_restores_the_layout_group() {
     let mut run = Running::start(None);
     two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
     let mut bar = Local::connect(&mut run, None);
     let (_keyboard, group) = bar.keyboard_group(&mut run);
     group.set_group(1);
@@ -4763,13 +4766,19 @@ fn unlocking_restores_the_layout_group() {
     assert_eq!(holder.map(|client| client.id()), locker.id, "the lock has the keyboard");
     assert!(run.state.lock.is_some(), "the session is locked");
     assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1, "while locked");
+    window.roundtrip(&mut run);
+    window.client.modifier_groups.clear();
     lock.unlock_and_destroy();
     locker.roundtrip(&mut run);
     bar.roundtrip(&mut run);
+    window.pump(&mut run, "the window gets the keyboard back", |client, _| {
+        !client.modifier_groups.is_empty()
+    });
 
     assert!(run.state.lock.is_none(), "the session is unlocked");
     assert_eq!(bar.groups_of(&group), [0, 1], "the group stays");
     assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1);
+    assert_eq!(window.client.modifier_groups, [1], "the window hears it");
     run.stop();
 }
 
