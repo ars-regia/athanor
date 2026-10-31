@@ -48,8 +48,15 @@ class OsRelease(unittest.TestCase):
             [f"{verify.FEDORA_RELEASE}: names release 43, os-release VERSION_ID is 45"],
         )
 
-    def test_a_missing_file_fails(self):
-        self.assertEqual(len(verify.os_release_problems(self.root)), 1)
+    def test_a_missing_os_release_is_named(self):
+        (problem,) = verify.os_release_problems(self.root)
+        self.assertTrue(problem.startswith(f"{verify.OS_RELEASE}: cannot read"), problem)
+
+    def test_a_missing_fedora_release_is_named(self):
+        self.path.write_text("ID=athanor\nVERSION_ID=45\n")
+        (self.root / verify.FEDORA_RELEASE).unlink()
+        (problem,) = verify.os_release_problems(self.root)
+        self.assertTrue(problem.startswith(f"{verify.FEDORA_RELEASE}: cannot read"), problem)
 
 
 if __name__ == "__main__":

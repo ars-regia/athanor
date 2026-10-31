@@ -24,6 +24,13 @@ Release:        %{fedora_release}.athanor3
 """
 
 
+def setUpModule():
+    # The fixtures name their own release, so that a move of FEDORA_VERSION leaves them alone.
+    patch = mock.patch.object(bump, "fedora_version", return_value=45)
+    patch.start()
+    unittest.addModuleCleanup(patch.stop)
+
+
 def updates(*nvrs):
     return {"pages": 1, "updates": [{"builds": [{"nvr": nvr}]} for nvr in nvrs]}
 
