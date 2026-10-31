@@ -146,7 +146,7 @@ security context's listener is granted nothing, whatever its identity.
 | --- | --- |
 | `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
-| `zwlr_layer_shell_v1`, bottom and background layers | every client |
+| `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
 
 `data/globals` gives the class of every global the compositor can offer, and the fixture fails
@@ -239,8 +239,6 @@ What the check does not cover, and what revision 2 of `doc_own_stack.md` decided
   FUSE server, and a test with a stalled FUSE server (decision 18).
 - **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
-- The bottom and background layers of `wlr-layer-shell` stay offered inside a security context;
-  revision 2 keeps them open to every client (OS4).
 - Input-method, data control and the private interface are not offered yet; each joins the
   allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape
@@ -359,11 +357,17 @@ Started with a monitor plugged in that cannot be set up, and no other, the compo
 an error rather than show nothing; a monitor that cannot be set up later is logged as an error
 and tried again at the next scan of the connectors.
 
+The compositor draws two marks around windows (`src/marks.rs`, `doc_own_stack.md` decision 31):
+the outline of the window with the keyboard focus, from the theme, which `src/focus_theme.rs`
+reads and follows, and a border of three fixed lines on every window and popup of a client in a
+security context, and of xwayland-satellite. `marks::stack` builds the stack of a frame for
+`draw_view` and for the DRM path alike.
+
 The compositor keeps the keys of its bindings (`src/bindings.rs`, `doc_own_stack.md` OS13),
 which neither the focused client nor the input method's grab sees, press or release:
 Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compositor, and the
 session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
-with no effect until the border; Super+Q and Alt+F4 send `close` to the window with the
+with no effect until a change of its own (decision 31); Super+Q and Alt+F4 send `close` to the window with the
 keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
 layout group, the first after the last; Super+1 to Super+9 activate the n-th workspace of the
 focused window's output (the first output's when no window has the keyboard), its last when n is

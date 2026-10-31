@@ -73,7 +73,7 @@ where
 
 /// A renderer the colour pass can draw with: into an offscreen buffer, then shown through
 /// the pass.
-pub trait Filters: Renderer + ImportAll + Sized {
+pub trait Filters: Renderer + ImportAll + ImportMem + Sized {
     /// The offscreen buffer.
     type Offscreen: 'static;
 

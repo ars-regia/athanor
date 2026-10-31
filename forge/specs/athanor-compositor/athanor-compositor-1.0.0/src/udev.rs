@@ -10,6 +10,7 @@ use crate::capture::Target;
 use crate::a11y::Look;
 use crate::cursor::{pointer_elements, Cursor, PointerElement};
 use crate::look::FilterElement;
+use crate::marks::{Marks, Stacked};
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -42,7 +43,6 @@ use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{primary_gpu, UdevBackend, UdevEvent};
 use smithay::backend::SwapBuffersError;
 use smithay::desktop::layer_map_for_output;
-use smithay::desktop::space::{space_render_elements, SpaceRenderElements};
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::desktop::Window;
 use smithay::output::{Mode, Output};
@@ -83,7 +83,7 @@ type HeadOutput = DrmOutput<Allocator, Exporter, OutputPresentationFeedback, Drm
 
 smithay::backend::renderer::element::render_elements! {
     Element<=GlesRenderer>;
-    Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
+    Space=Stacked<GlesRenderer>,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Pointer=PointerElement<GlesRenderer>,
 }
@@ -381,11 +381,13 @@ impl Drm {
         &mut self,
         what: &Target,
         space: &smithay::desktop::Space<Window>,
+        marks: &Marks,
     ) -> Result<Vec<u8>, Error> {
         crate::capture::read_back::<_, GlesTexture>(
             gles(&mut self.gpus, &self.render_node)?,
             what,
             space,
+            marks,
         )
     }
 }
@@ -1081,6 +1083,7 @@ impl State {
     /// after that throttle.
     fn draw(&mut self, crtc: crtc::Handle) {
         let status = self.shown_cursor();
+        let marks = self.marks();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -1131,6 +1134,7 @@ impl State {
                 &self.space,
                 self.lock.as_ref(),
                 &popups,
+                &marks,
                 pointer.as_ref(),
                 &mut drm.cursor,
                 look,
@@ -1366,6 +1370,7 @@ fn render(
     space: &smithay::desktop::Space<Window>,
     lock: Option<&crate::lock::Lock>,
     popups: &[crate::input_method::PlacedPopup],
+    marks: &Marks,
     pointer: Option<&(
         smithay::utils::Point<f64, smithay::utils::Logical>,
         smithay::input::pointer::CursorImageStatus,
@@ -1418,9 +1423,8 @@ fn render(
                     .map(Element::Surface),
                 );
             }
-            let space_elements = space_render_elements(renderer, [space], output, 1.0)
-                .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
-            elements.extend(space_elements.into_iter().map(Element::Space));
+            let stacked = crate::marks::stack(renderer, space, output, marks);
+            elements.extend(stacked.into_iter().map(Element::Space));
         }
     }
     let zoomed = crate::look::zoomed(elements, look.zoom);
