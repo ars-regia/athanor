@@ -74,7 +74,7 @@ class ForbiddenGlobals(unittest.TestCase):
     def test_a_literal_list_beside_the_file_is_named(self):
         root = self.tree(
             "zwlr_layer_shell_v1\nathanor_toplevel_actions_v1\n",
-            reader="# forbidden-globals.txt\nPRIVILEGED=(a b)\n",
+            reader="# forbidden-globals.txt\n# PRIVILEGED = {x}\nPRIVILEGED+=(a b)\n",
         )
         self.assertEqual(
             len(verify.forbidden_globals_problems(root)), len(verify.FORBIDDEN_READERS)

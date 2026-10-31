@@ -2675,10 +2675,10 @@ def forbidden_globals_problems(root=None):
     problems = [f"{GLOBALS_FILE} has no privileged row: the list is checked against nothing"] if not gated else []
     problems += [f"{FORBIDDEN_GLOBALS} does not name {name}, a global of {GLOBALS_FILE} no confined "
                  "application may see" for name in sorted(gated - forbidden)]
-    problems += [f"{reader} does not read {FORBIDDEN_GLOBALS}: it checks a list of its own"
+    problems += [f"{reader} checks a list of its own in place of {FORBIDDEN_GLOBALS}"
                  for reader in FORBIDDEN_READERS
                  if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)
-                 or re.search(r"PRIVILEGED\s*=\s*[({]", read(root / reader))]
+                 or re.search(r"^\s*PRIVILEGED\s*\+?=\s*[\[({]", read(root / reader), re.MULTILINE)]
     return problems
 
 
