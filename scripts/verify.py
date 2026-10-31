@@ -2088,17 +2088,26 @@ def check_panics():
 # on 2026-10-25 (forge/test) and 2026-10-31; like BUDGET they only go down. A probe whose failure
 # is the answer (`kill -0 "$pid" 2> /dev/null`) counts too, until it is written so that the check
 # can tell it from a hidden crash.
-SHELL_BUDGETS = {"forge/test": 15, "forge/scripts": 15, "scripts": 43, "system": 7}
-# The same constructs in the steps of a workflow, with `continue-on-error`.
-WORKFLOW_DIR = ".github/workflows"
+SHELL_BUDGETS = {
+    "forge/build": 7,
+    "forge/builder": 1,
+    "forge/scripts": 15,
+    "forge/test": 15,
+    "forge/tools": 0,
+    "scripts": 43,
+    "system": 7,
+}
+# The same constructs in the steps of a workflow or of an action, with `continue-on-error`.
+WORKFLOW_DIRS = (".github/workflows", ".github/actions")
 WORKFLOW_BUDGET = 20
 # The guest's shell of the ISO test, held in the Python's byte strings.
 GUEST_SHELL_DIR = "forge/test/iso"
 GUEST_SHELL_FILE = "console.py"
-GUEST_SHELL_BUDGET = 6
+GUEST_SHELL_BUDGET = 8
 DEV_NULL = r"""["']?/dev/null["']?"""
 # Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
-# a quote that spans lines; text run through `eval` or `$(...)`.
+# a quote that spans lines; text run through `eval` or `$(...)`; a construct split across byte
+# strings that the guest's shell joins with `+`.
 HIDDEN_FAILURE = re.compile(
     rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
     r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
@@ -2176,8 +2185,11 @@ def hidden_failures(text):
 
 
 def shell_scripts(base):
-    """The shell scripts under `base`: a `.sh` file, or one whose first line names a shell."""
+    """The shell scripts under `base`: a `.sh` file, or one whose first line names a shell. A
+    link is read at its target, and a socket or a pipe a run left behind is no script."""
     for p in walk(base, ""):
+        if p.is_symlink() or not p.is_file():
+            continue
         if p.suffix == ".sh":
             yield p
             continue
@@ -2194,14 +2206,20 @@ def workflow_failures(text):
 
 
 def guest_failures(text):
-    """The line of each byte string of Python `text` holding shell that hides a failure, once
-    for each of its lines of shell."""
-    found = []
+    """`(found, opened)` of the byte strings of Python `text`: the line of each string holding
+    shell that hides a failure, once per construct, as one string chains many commands on a
+    line, and the lines of those with a here-document still open at the end."""
+    found, opened = [], []
     for node in ast.walk(ast.parse(text)):
         if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
             shell = node.value.decode("utf-8", "replace")
-            found += [node.lineno] * len(hidden_failures(shell))
-    return sorted(found)
+            lines, open_from = scan_shell(shell)
+            code = shell.split("\n")
+            for i in lines:
+                found += [node.lineno] * len(HIDDEN_FAILURE.findall(shell_code(code[i - 1])[0]))
+            if open_from:
+                opened.append(node.lineno)
+    return sorted(found), opened
 
 
 def over_budget(r, found, budget, constant, what):
@@ -2231,11 +2249,16 @@ def check_shell_failures():
                 r.fail(f"{rel(p)}:{opened}: unterminated here-document from line {opened}: "
                        "the scanner cannot check the rest")
         over_budget(r, found, budget, "SHELL_BUDGETS", tree)
-    found = [f"{rel(p)}:{i}" for p in sorted(walk(ROOT / WORKFLOW_DIR, ".yml"))
+    found = [f"{rel(p)}:{i}" for tree in WORKFLOW_DIRS
+             for p in sorted(walk(ROOT / tree, (".yml", ".yaml")))
              for i in workflow_failures(read(p))]
-    over_budget(r, found, WORKFLOW_BUDGET, "WORKFLOW_BUDGET", WORKFLOW_DIR)
-    found = [f"{rel(p)}:{i}" for p in walk(ROOT / GUEST_SHELL_DIR, GUEST_SHELL_FILE)
-             for i in guest_failures(read(p))]
+    over_budget(r, found, WORKFLOW_BUDGET, "WORKFLOW_BUDGET", "workflows")
+    found = []
+    for p in walk(ROOT / GUEST_SHELL_DIR, GUEST_SHELL_FILE):
+        lines, opened = guest_failures(read(p))
+        found += [f"{rel(p)}:{i}" for i in lines]
+        for i in opened:
+            r.fail(f"{rel(p)}:{i}: unterminated here-document: the scanner cannot check the rest")
     over_budget(r, found, GUEST_SHELL_BUDGET, "GUEST_SHELL_BUDGET", GUEST_SHELL_FILE)
     return r
 

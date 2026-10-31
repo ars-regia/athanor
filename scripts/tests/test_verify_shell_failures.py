@@ -3,6 +3,7 @@ that hides a failure, ignores comments, and the budget fails when exceeded
 (python3 -B -m unittest discover -s scripts/tests -v)."""
 
 import importlib.util
+import os
 import pathlib
 import tempfile
 import unittest
@@ -124,6 +125,9 @@ class BudgetTest(unittest.TestCase):
                 ("e", "\xff\xfe binary"),
             ]:
                 (root / name).write_text(text, encoding="latin-1")
+            (root / "dangling").symlink_to(root / "nothing")
+            (root / "link.sh").symlink_to(root / "a.sh")
+            os.mkfifo(root / "pipe")
             found = {p.name for p in verify.shell_scripts(root)}
         self.assertEqual(found, {"a.sh", "b", "c"})
 
@@ -140,7 +144,14 @@ class BudgetTest(unittest.TestCase):
 
     def test_a_guest_string_is_read_as_shell(self):
         text = 'A = [\n    b"a || true;"\n    b" b",\n    b"c",\n    "d || true",\n]\n'
-        self.assertEqual(verify.guest_failures(text), [2])
+        self.assertEqual(verify.guest_failures(text), ([2], []))
+
+    def test_each_construct_of_a_guest_string_counts(self):
+        text = 'A = b"a 2>/dev/null;" b" b 2>/dev/null;" b" c || true"\n'
+        self.assertEqual(verify.guest_failures(text), ([1, 1, 1], []))
+
+    def test_a_guest_here_document_left_open_is_reported(self):
+        self.assertEqual(verify.guest_failures('A = b"cat <<EOF\\nx"\n'), ([], [1]))
 
     def test_each_tree_keeps_its_own_budget(self):
         with tempfile.TemporaryDirectory() as tmp:
