@@ -289,9 +289,15 @@ fn ways(path: &Path) -> Vec<PathBuf> {
             .rev()
             .find_map(|place| Some((place, std::fs::read_link(place).ok()?)));
         let Some((link, to)) = link else { break };
-        let mut next = link.parent().unwrap_or(link).join(to);
-        // Part by part: a join of nothing would end the path in a slash, which reads no link.
+        // Part by part: a path that ends in a slash reads no link, and a join of nothing or a
+        // target written with one would end it so.
+        let mut next = link.parent().unwrap_or(link).to_path_buf();
+        next.extend(&to);
         next.extend(way.strip_prefix(link).unwrap_or(way));
+        // A loop of links: every way it has is here.
+        if ways.contains(&next) {
+            break;
+        }
         ways.push(next);
     }
     ways
@@ -468,7 +474,7 @@ impl Watch {
         }
         if rearm {
             if let Err(error) = self.arm() {
-                tracing::warn!(%error, "the xkb_config watch was lost: no live reload");
+                tracing::warn!(%error, "a configuration watch was lost: no live reload");
             }
             reload = true;
         }
@@ -820,7 +826,7 @@ mod tests {
     /// A chain of links in different directories is followed to its end, each one a way.
     #[test]
     fn the_ways_reach_the_end_of_a_chain() {
-        let root = scratch("ways-chain");
+        let root = scratch("ways-chain").canonicalize().expect("the scratch");
         let (a, b, c) = (root.join("a"), root.join("b"), root.join("c"));
         for dir in [&a, &b, &c] {
             std::fs::create_dir(dir).expect("a directory");
@@ -833,6 +839,30 @@ mod tests {
             ways(&a.join("one")),
             [a.join("one"), b.join("two"), end.clone()]
         );
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A target written with a slash at its end still reads the next link.
+    #[test]
+    fn the_ways_pass_a_target_that_ends_in_a_slash() {
+        let root = scratch("ways-slash").canonicalize().expect("the scratch");
+        std::fs::create_dir(root.join("end")).expect("the end");
+        std::os::unix::fs::symlink("end", root.join("two")).expect("the second link");
+        std::os::unix::fs::symlink("two/", root.join("one")).expect("the first link");
+        assert_eq!(
+            ways(&root.join("one")),
+            [root.join("one"), root.join("two"), root.join("end")]
+        );
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A loop of links gives each of its ways once.
+    #[test]
+    fn the_ways_stop_at_a_loop() {
+        let root = scratch("ways-loop").canonicalize().expect("the scratch");
+        std::os::unix::fs::symlink("b", root.join("a")).expect("a link");
+        std::os::unix::fs::symlink("a", root.join("b")).expect("the other");
+        assert_eq!(ways(&root.join("a")), [root.join("a"), root.join("b")]);
         std::fs::remove_dir_all(&root).expect("clean");
     }
 
