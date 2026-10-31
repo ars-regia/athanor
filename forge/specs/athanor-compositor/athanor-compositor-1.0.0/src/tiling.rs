@@ -1,13 +1,13 @@
 //! The layout of a tiled workspace (doc_own_stack.md OS12): a binary tree of what it tiles, whose
 //! tiles the area shares. The rules are cosmic-comp's, and the plan names them
 //! (`docs/superpowers/plans/2026-10-31-compositor-tiling.md`, D1 to D4): a new tile splits the
-//! focused one along its longer side and takes the second half, an end gives its sibling the
+//! one focused last along its longer side and takes the second half, an end gives its sibling the
 //! whole space, and a gap of 8 stands around and between the tiles. Nothing is kept in pixels:
 //! each layout starts from the area.
 
-use smithay::utils::{Logical, Rectangle};
+use smithay::utils::{Logical, Point, Rectangle};
 
-/// Around the tiled area and between two tiles (D4).
+/// On a side of a tile at the edge of the area, and between two tiles, half on each (D4).
 const GAP: i32 = 8;
 
 /// The side a split divides.
@@ -33,7 +33,7 @@ enum Node<T> {
     Tile(T),
     Split {
         along: Along,
-        /// What the first child takes of what the gap leaves.
+        /// What the first child takes of the side.
         share: f64,
         first: Box<Node<T>>,
         second: Box<Node<T>>,
@@ -113,27 +113,28 @@ impl<T: PartialEq> Node<T> {
 
     fn lay_out<'a>(
         &'a self,
+        place: Rectangle<i32, Logical>,
         area: Rectangle<i32, Logical>,
         tiles: &mut Vec<(&'a T, Rectangle<i32, Logical>)>,
     ) {
         match self {
-            Self::Tile(tile) => tiles.push((tile, area)),
+            Self::Tile(tile) => tiles.push((tile, gapped(place, area))),
             Self::Split {
                 along,
                 share,
                 first,
                 second,
             } => {
-                let (one, other) = divided(area, *along, *share);
-                first.lay_out(one, tiles);
-                second.lay_out(other, tiles);
+                let (one, other) = divided(place, *along, *share);
+                first.lay_out(one, area, tiles);
+                second.lay_out(other, area, tiles);
             }
         }
     }
 }
 
-/// `area` divided `along` a side, the gap between the two, no pixel lost to rounding. Each part
-/// keeps a pixel however small the area: a size of nothing would ask the client to choose.
+/// `area` divided `along` a side, no pixel lost to rounding. Each part keeps a pixel however small
+/// the area: a size of nothing would ask the client to choose.
 fn divided(
     area: Rectangle<i32, Logical>,
     along: Along,
@@ -143,62 +144,85 @@ fn divided(
     let (mut one, mut other) = (area, area);
     match along {
         Along::Width => {
-            let room = (area.size.w - GAP).max(2);
+            let room = area.size.w.max(2);
             one.size.w = part(room);
             other.size.w = room - one.size.w;
-            other.loc.x += one.size.w + GAP;
+            other.loc.x += one.size.w;
         }
         Along::Height => {
-            let room = (area.size.h - GAP).max(2);
+            let room = area.size.h.max(2);
             one.size.h = part(room);
             other.size.h = room - one.size.h;
-            other.loc.y += one.size.h + GAP;
+            other.loc.y += one.size.h;
         }
     }
     (one, other)
 }
 
-/// The area with the gap taken off every side.
-fn inset(mut area: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
-    area.loc += (GAP, GAP).into();
-    area.size = (
-        (area.size.w - GAP * 2).max(1),
-        (area.size.h - GAP * 2).max(1),
-    )
-        .into();
-    area
+/// The tile a `place` of `area` leaves: `GAP` off a side at the edge of the area, half of it off a
+/// side another tile shares. A tile of a nested split can so be a few pixels narrower than its
+/// sibling, as in the reference, and it keeps a pixel however small.
+fn gapped(
+    place: Rectangle<i32, Logical>,
+    area: Rectangle<i32, Logical>,
+) -> Rectangle<i32, Logical> {
+    let gap = |edge: bool| if edge { GAP } else { GAP / 2 };
+    let (left, top) = (
+        gap(place.loc.x == area.loc.x),
+        gap(place.loc.y == area.loc.y),
+    );
+    let right = gap(place.loc.x + place.size.w == area.loc.x + area.size.w);
+    let bottom = gap(place.loc.y + place.size.h == area.loc.y + area.size.h);
+    let size = (place.size.w - left - right, place.size.h - top - bottom);
+    let size = (size.0.max(1), size.1.max(1));
+    Rectangle::new(place.loc + Point::from((left, top)), size.into())
 }
 
 /// What a workspace tiles.
 pub struct Tree<T> {
     root: Option<Node<T>>,
+    /// The windows of the tree, the one focused last at the end.
+    focused: Vec<T>,
 }
 
 impl<T> Default for Tree<T> {
     fn default() -> Self {
-        Self { root: None }
+        Self {
+            root: None,
+            focused: Vec::new(),
+        }
     }
 }
 
-impl<T: PartialEq> Tree<T> {
-    /// Adds `window` beside `near`, the focused window (D2). With no such tile it splits the
-    /// root along the longer side of `area`.
-    pub fn insert(&mut self, window: T, near: Option<&T>, area: Rectangle<i32, Logical>) {
-        let beside = near.and_then(|near| {
-            let tiles = self.layout(area);
-            let (_, tile) = tiles.into_iter().find(|(tile, _)| *tile == near)?;
-            Some((near, Along::longer(tile)))
-        });
-        self.root = Some(match (self.root.take(), beside) {
-            (None, _) => Node::Tile(window),
-            (Some(root), Some((near, along))) => root.split_tile(near, window, along),
-            (Some(root), None) => Node::split(root, Node::Tile(window), Along::longer(area)),
+impl<T: PartialEq + Clone> Tree<T> {
+    /// Adds `window` beside the window focused last (D2); one it holds stays where it is.
+    pub fn insert(&mut self, window: T, area: Rectangle<i32, Logical>) {
+        if self.holds(&window) {
+            return;
+        }
+        let tiles = self.layout(area);
+        let near = self.focused.last();
+        let tile = tiles.iter().find(|(tile, _)| Some(*tile) == near);
+        let beside = tile.map(|(tile, at)| ((*tile).clone(), Along::longer(*at)));
+        self.focused.push(window.clone());
+        self.root = Some(match self.root.take().zip(beside) {
+            Some((root, (near, along))) => root.split_tile(&near, window, along),
+            None => Node::Tile(window),
         });
     }
 
     /// Takes `window` out; its sibling takes the space (D3). Another window changes nothing.
     pub fn remove(&mut self, window: &T) {
         self.root = self.root.take().and_then(|root| root.without(window));
+        self.focused.retain(|kept| kept != window);
+    }
+
+    /// Notes that the focus went to `window`, which the next tile will split.
+    pub fn focus(&mut self, window: &T) {
+        if let Some(index) = self.focused.iter().position(|kept| kept == window) {
+            let window = self.focused.remove(index);
+            self.focused.push(window);
+        }
     }
 
     pub fn holds(&self, window: &T) -> bool {
@@ -209,7 +233,7 @@ impl<T: PartialEq> Tree<T> {
     pub fn layout(&self, area: Rectangle<i32, Logical>) -> Vec<(&T, Rectangle<i32, Logical>)> {
         let mut tiles = Vec::new();
         if let Some(root) = &self.root {
-            root.lay_out(inset(area), &mut tiles);
+            root.lay_out(area, area, &mut tiles);
         }
         tiles
     }
@@ -235,7 +259,7 @@ mod tests {
     #[test]
     fn a_first_window_fills_the_area() {
         let mut tree = Tree::default();
-        tree.insert(1, None, area(1000, 600));
+        tree.insert(1, area(1000, 600));
         assert_eq!(tiles(&tree, area(1000, 600)), [(1, rect(8, 8, 984, 584))]);
     }
 
@@ -243,13 +267,13 @@ mod tests {
     fn a_new_window_splits_the_longer_side() {
         let whole = area(1016, 616);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
         assert_eq!(
             tiles(&tree, whole),
             [(1, rect(8, 8, 496, 600)), (2, rect(512, 8, 496, 600))],
         );
-        tree.insert(3, Some(&2), whole);
+        tree.insert(3, whole);
         assert_eq!(
             tiles(&tree, whole),
             [
@@ -261,18 +285,58 @@ mod tests {
     }
 
     #[test]
-    fn no_focus_splits_the_root() {
+    fn the_last_focused_tile_is_split() {
         let whole = area(1016, 616);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
-        tree.insert(3, Some(&9), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
+        tree.focus(&1);
+        tree.focus(&9);
+        tree.insert(3, whole);
         assert_eq!(
             tiles(&tree, whole),
             [
-                (1, rect(8, 8, 244, 600)),
-                (2, rect(260, 8, 244, 600)),
-                (3, rect(512, 8, 496, 600)),
+                (1, rect(8, 8, 496, 296)),
+                (3, rect(8, 312, 496, 296)),
+                (2, rect(512, 8, 496, 600)),
+            ],
+        );
+    }
+
+    #[test]
+    fn the_focus_goes_back_when_a_tile_ends() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        tree.insert(1, whole);
+        tree.insert(2, whole);
+        tree.insert(3, whole);
+        tree.focus(&1);
+        tree.remove(&1);
+        tree.insert(4, whole);
+        assert_eq!(
+            tiles(&tree, whole),
+            [
+                (2, rect(8, 8, 1000, 296)),
+                (3, rect(8, 312, 496, 296)),
+                (4, rect(512, 312, 496, 296)),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_nested_split_takes_the_gaps_of_the_reference() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        for window in 1..=4 {
+            tree.insert(window, whole);
+        }
+        assert_eq!(
+            tiles(&tree, whole),
+            [
+                (1, rect(8, 8, 496, 600)),
+                (2, rect(512, 8, 496, 296)),
+                (3, rect(512, 312, 246, 296)),
+                (4, rect(766, 312, 242, 296)),
             ],
         );
     }
@@ -281,9 +345,9 @@ mod tests {
     fn an_end_gives_the_sibling_its_space() {
         let whole = area(1016, 616);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
-        tree.insert(3, Some(&2), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
+        tree.insert(3, whole);
         tree.remove(&2);
         assert_eq!(
             tiles(&tree, whole),
@@ -298,8 +362,8 @@ mod tests {
     fn the_gaps_are_even() {
         let whole = area(1016, 616);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
         let shown = tiles(&tree, whole);
         let (one, other) = (shown[0].1, shown[1].1);
         assert_eq!(one.loc.x, 8);
@@ -311,8 +375,8 @@ mod tests {
     fn no_pixel_is_lost_to_rounding() {
         let whole = area(1017, 601);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
         let shown = tiles(&tree, whole);
         let (one, other) = (shown[0].1, shown[1].1);
         assert_eq!(one.size.w + 8 + other.size.w, 1017 - 16);
@@ -322,9 +386,8 @@ mod tests {
     fn a_small_area_leaves_every_tile_a_size() {
         let whole = area(20, 20);
         let mut tree = Tree::default();
-        tree.insert(0, None, whole);
-        for window in 1..6 {
-            tree.insert(window, Some(&(window - 1)), whole);
+        for window in 0..6 {
+            tree.insert(window, whole);
         }
         for (_, tile) in tiles(&tree, whole) {
             assert!(tile.size.w >= 1 && tile.size.h >= 1, "{tile:?}");
@@ -335,12 +398,23 @@ mod tests {
     fn a_window_it_does_not_hold_changes_nothing() {
         let whole = area(1016, 616);
         let mut tree = Tree::default();
-        tree.insert(1, None, whole);
-        tree.insert(2, Some(&1), whole);
+        tree.insert(1, whole);
+        tree.insert(2, whole);
         let before = tiles(&tree, whole);
         tree.remove(&7);
         assert_eq!(tiles(&tree, whole), before);
         assert!(tree.holds(&2));
         assert!(!tree.holds(&7));
+    }
+
+    #[test]
+    fn a_window_it_holds_is_not_added_twice() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        tree.insert(1, whole);
+        tree.insert(2, whole);
+        let before = tiles(&tree, whole);
+        tree.insert(1, whole);
+        assert_eq!(tiles(&tree, whole), before);
     }
 }
