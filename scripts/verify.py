@@ -2667,7 +2667,7 @@ FORBIDDEN_READERS = ("forge/test/shell/compositor_e2e.py", "scripts/devvm/compos
 def forbidden_globals_problems(root=None):
     """What `verify.py forbidden-globals` reports: a privileged or layer-gated row of
     data/globals that forge/test/shell/forbidden-globals.txt does not name, and a script of
-    FORBIDDEN_READERS that does not read that file."""
+    FORBIDDEN_READERS that does not read that file or keeps a literal list beside it."""
     root = Path(root or ROOT)
     forbidden = set(read(root / FORBIDDEN_GLOBALS).split())
     rows = [line.split() for line in read(root / GLOBALS_FILE).splitlines() if not line.startswith("#")]
@@ -2677,7 +2677,8 @@ def forbidden_globals_problems(root=None):
                  "application may see" for name in sorted(gated - forbidden)]
     problems += [f"{reader} does not read {FORBIDDEN_GLOBALS}: it checks a list of its own"
                  for reader in FORBIDDEN_READERS
-                 if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)]
+                 if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)
+                 or re.search(r"PRIVILEGED\s*=\s*[({]", read(root / reader))]
     return problems
 
 

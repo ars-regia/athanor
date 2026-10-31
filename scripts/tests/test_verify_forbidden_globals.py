@@ -71,6 +71,15 @@ class ForbiddenGlobals(unittest.TestCase):
         self.assertEqual(len(problems), len(verify.FORBIDDEN_READERS))
         self.assertIn(verify.FORBIDDEN_READERS[0], problems[0])
 
+    def test_a_literal_list_beside_the_file_is_named(self):
+        root = self.tree(
+            "zwlr_layer_shell_v1\nathanor_toplevel_actions_v1\n",
+            reader="# forbidden-globals.txt\nPRIVILEGED=(a b)\n",
+        )
+        self.assertEqual(
+            len(verify.forbidden_globals_problems(root)), len(verify.FORBIDDEN_READERS)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
