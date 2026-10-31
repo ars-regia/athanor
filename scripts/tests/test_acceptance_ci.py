@@ -109,7 +109,8 @@ class CiMode(unittest.TestCase):
 
     def test_the_default_base_is_pulled(self):
         self.assertEqual(
-            self.pull_base(), "pull --quiet ghcr.io/owner/athanor-system:latest\n"
+            self.pull_base(ACC_BASE=""),
+            "pull --quiet ghcr.io/owner/athanor-system:latest\n",
         )
 
     def test_a_base_the_caller_set_is_used_as_given(self):
