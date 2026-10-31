@@ -69,6 +69,8 @@ pub fn start(
     event_loop
         .handle()
         .insert_source(events, |event, _, state| match event {
+            // A host may report a minimised window as empty: nothing moves for that.
+            WinitEvent::Resized { size, .. } if size.is_empty() => {}
             WinitEvent::Resized { size, .. } => {
                 if let Backend::Nested(nested) = &state.backend {
                     let mode = Mode {

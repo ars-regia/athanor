@@ -2420,11 +2420,36 @@ fn a_window_follows_an_output_that_moves() {
     let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
     let area = run.state.space.output_geometry(&area).expect("placed");
     run.state.space.relocate_element(&window, (area.loc.x + 30, 30));
+    let pointed: Point<f64, Logical> = (f64::from(area.loc.x) + 30.0, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shift = OUTPUTS[0].width - OUTPUTS[0].width / 2;
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x + 30 - shift, 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let carried = pointed - Point::<i32, Logical>::from((shift, 0)).to_f64();
+    assert_eq!(pointer.current_location(), carried, "the pointer goes with it");
+    run.stop();
+}
+
+/// A window the user left over an edge of an output that moves stays over that edge.
+#[test]
+fn a_window_over_the_edge_of_an_output_that_moves_goes_with_it() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x - 20, 30));
 
     resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
 
     let shown = run.state.space.element_geometry(&window);
-    let moved = (area.loc.x + 30 - (OUTPUTS[0].width - OUTPUTS[0].width / 2), 30);
+    let moved = (area.loc.x - 20 - (OUTPUTS[0].width - OUTPUTS[0].width / 2), 30);
     assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
     run.stop();
 }

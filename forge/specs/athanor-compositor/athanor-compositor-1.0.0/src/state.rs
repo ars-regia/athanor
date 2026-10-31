@@ -555,7 +555,12 @@ impl State {
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
-            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+            let carried = changed.iter().find_map(|(output, was)| {
+                let shown = self.space.output_geometry(output)?;
+                was.to_f64().contains(at).then(|| at + (shown.loc - was.loc).to_f64())
+            });
+            let wanted = carried.unwrap_or(at);
+            if let Some(to) = crate::input::confine(&outputs, at, wanted).filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
             }
         }
@@ -578,10 +583,10 @@ impl State {
         changed.collect()
     }
 
-    /// Where the place `kept` of `window` goes after `changed`: if it lay whole on its home
-    /// output it follows that output and stays whole, inside what the output leaves when its
-    /// new edges cut it; otherwise nowhere, for a user may leave a window over an edge
-    /// (`grabs::kept_reachable`).
+    /// Where the place `kept` of `window` goes after `changed`: if it lay on its home output it
+    /// follows that output. If it lay whole there it stays whole, inside what the output leaves
+    /// when its new edges cut it; otherwise it stays over the edge, where a user may leave a
+    /// window (`grabs::kept_reachable`).
     fn stays_whole(
         &self,
         window: &Window,
@@ -592,11 +597,13 @@ impl State {
             let (_, was) = changed.iter().find(|(output, _)| *output == home)?;
             let shown = self.space.output_geometry(&home)?;
             let moved = Rectangle::new(kept.loc + (shown.loc - was.loc), kept.size);
-            was.contains_rect(kept).then_some((shown, moved))
+            was.overlaps(kept).then_some((shown, moved, was.contains_rect(kept)))
         });
         match (moved, self.home_area(window)) {
-            (Some((shown, moved)), _) if shown.contains_rect(moved) => moved.loc,
-            (Some((_, moved)), Some(area)) => inside(area, moved),
+            (Some((shown, moved, true)), Some(area)) if !shown.contains_rect(moved) => {
+                inside(area, moved)
+            }
+            (Some((_, moved, _)), _) => moved.loc,
             _ => kept.loc,
         }
     }
