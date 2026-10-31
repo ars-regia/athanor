@@ -7130,9 +7130,19 @@ fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
     run.stop();
 }
 
+/// The nested backend's output carries the transform that rights its frame, and reads as
+/// turning nothing.
+#[test]
+fn the_nested_output_turns_nothing() {
+    let display = smithay::reexports::wayland_server::Display::<State>::new().expect("a display");
+    let output = crate::winit::nested_output(&display.handle(), (800, 600).into(), 1.0);
+    assert_eq!(output.current_transform(), smithay::utils::Transform::Flipped180);
+    assert_eq!(crate::input::turn(&output), smithay::utils::Transform::Normal);
+}
+
 /// The transform of the nested backend's output rights its frame, and turns nothing: its device
-/// points where it did, and a configuration can neither change the transform nor be refused for
-/// repeating it.
+/// points where it did, its head reads as not turned, and a configuration can neither change the
+/// transform nor be refused for repeating what the head reads.
 #[test]
 fn os9_a_transform_that_rights_the_frame_is_no_turn() {
     let mut run = Running::start(None);
@@ -7149,11 +7159,12 @@ fn os9_a_transform_that_rights_the_frame_is_no_turn() {
     });
     let serial = control_center.client.output_serial.expect("a serial");
     let same = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
-        head.set_transform(wl_output::Transform::Flipped180)
+        head.set_transform(wl_output::Transform::Normal)
     });
     assert_eq!(same, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
     let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
-        head.set_transform(wl_output::Transform::Normal)
+        head.set_transform(wl_output::Transform::_90)
     });
     assert_eq!(turned, "failed");
     assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);

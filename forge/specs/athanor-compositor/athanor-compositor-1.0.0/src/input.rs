@@ -787,6 +787,15 @@ pub(crate) fn confine(
 /// it turns nothing the user sees, so a device points as it is and a configuration keeps it.
 pub struct RightsTheFrame;
 
+/// What the transform of `output` turns for the user.
+pub fn turn(output: &Output) -> Transform {
+    if output.user_data().get::<RightsTheFrame>().is_some() {
+        Transform::Normal
+    } else {
+        output.current_transform()
+    }
+}
+
 /// Where in `area`, which `output` shows, an absolute device points: the device reports
 /// `position` on the panel, which the transform turns under what the output shows.
 fn on_panel(
@@ -794,11 +803,7 @@ fn on_panel(
     area: Rectangle<i32, Logical>,
     position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
 ) -> Point<f64, Logical> {
-    let transform = if output.user_data().get::<RightsTheFrame>().is_some() {
-        Transform::Normal
-    } else {
-        output.current_transform()
-    };
+    let transform = turn(output);
     let panel = transform.invert().transform_size(area.size);
     transform.transform_point_in(position(panel), &panel.to_f64()) + area.loc.to_f64()
 }

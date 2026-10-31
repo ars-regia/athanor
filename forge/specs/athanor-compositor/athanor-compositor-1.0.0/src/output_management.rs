@@ -10,7 +10,7 @@
 // them, through the backends that can change them (the DRM backend's `use_mode`).
 
 use crate::identity::Privilege;
-use crate::input::RightsTheFrame;
+use crate::input::{turn, RightsTheFrame};
 use crate::state::{granted, State};
 use smithay::desktop::{layer_map_for_output, Space, Window};
 use smithay::output::{Mode, Output, Scale};
@@ -80,7 +80,7 @@ impl Sent {
             position: space
                 .output_geometry(output)
                 .map_or_else(Point::default, |area| area.loc),
-            transform: output.current_transform().into(),
+            transform: turn(output).into(),
             scale: output.current_scale().fractional_scale(),
         }
     }
@@ -364,7 +364,10 @@ impl State {
                 .map(|head| head.output.clone());
             match (output, change) {
                 (Some(output), Some(change)) if change.takes(&output, &self.space) => {
-                    changes.push((output, change.scale, change.transform));
+                    // A head shows what `turn` reads: the frame's own transform stays.
+                    let fixed = output.user_data().get::<RightsTheFrame>().is_some();
+                    let transform = change.transform.filter(|_| !fixed);
+                    changes.push((output, change.scale, transform));
                 }
                 _ => {
                     configuration.failed();
