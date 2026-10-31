@@ -439,25 +439,26 @@ fn window_elements<R>(
     }
 }
 
-/// The focused window, when `output` is the one it has whole and its client has answered: it
-/// stands above the top layer there, and on no other output it reaches.
+/// Whether `window` has the output showing `shown` whole and its client has answered a request
+/// for it, this one or an earlier one.
+pub fn whole_on(window: &Window, shown: Rectangle<i32, Logical>) -> bool {
+    full_screen_area(window) == Some(shown)
+        && window.toplevel().is_some_and(|toplevel| {
+            toplevel.with_committed_state(|state| {
+                state.is_some_and(|state| state.states.contains(xdg_toplevel::State::Fullscreen))
+            })
+        })
+}
+
+/// The focused window, when `output` is the one it has whole: it stands above the top layer
+/// there, and on no other output it reaches.
 pub fn lifted<'a>(
     focused: Option<&'a Window>,
     space: &Space<Window>,
     output: &Output,
 ) -> Option<&'a Window> {
     let shown = space.output_geometry(output)?;
-    focused.filter(|window| {
-        full_screen_area(window) == Some(shown)
-            && window.toplevel().is_some_and(|toplevel| {
-                toplevel.with_committed_state(|state| {
-                    state.is_some_and(|state| {
-                        state.states.contains(xdg_toplevel::State::Fullscreen)
-                    })
-                })
-            })
-            && space.element_location(window).is_some()
-    })
+    focused.filter(|window| whole_on(window, shown) && space.element_location(window).is_some())
 }
 
 /// The layer surfaces and the windows of `output`, front to back, with the windows' marks.

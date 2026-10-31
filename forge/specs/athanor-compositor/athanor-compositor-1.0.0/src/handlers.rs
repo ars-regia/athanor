@@ -123,8 +123,12 @@ impl CompositorHandler for State {
                 // it comes back (`unminimise`, `activate_workspace`).
                 if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
-                    self.relocated(&window);
+                    let landed = self.relocated(&window);
                     self.anchor_resized(&window);
+                    // Also what a full-screen window's answer lifts (`marks::lifted`).
+                    if landed {
+                        self.refresh_pointer();
+                    }
                 }
             }
         }
@@ -609,8 +613,9 @@ impl XdgShellHandler for State {
             self.workspaces_changed();
         }
         self.foreign_toplevel_destroyed(surface.wl_surface());
-        // The keyboard does not leave a destroyed window by itself.
+        // The keyboard does not leave a destroyed window by itself, nor does the pointer.
         self.refocus(surface.wl_surface());
+        self.refresh_pointer();
     }
 
     /// The window follows the pointer until every button is up. A maximised window is
@@ -695,12 +700,14 @@ impl XdgShellHandler for State {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.end_window_grab(&window);
             self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+            self.refresh_pointer();
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.leave_full_screen(&window);
+            self.refresh_pointer();
         }
     }
 
@@ -872,7 +879,7 @@ impl SeatHandler for State {
         // the first and the last read, and Smithay calls this holding the keyboard, which the
         // aids read.
         self.loop_handle.insert_idle(|state| {
-            // The focus decides what stands above the top layer (`marks::lifted`).
+            // The focus is one of what decides what stands above the top layer (`marks::lifted`).
             if state.space.elements().any(is_full_screen) {
                 state.refresh_pointer();
             }

@@ -174,7 +174,7 @@ fn unmaximising_while_full_screen_counts_when_it_leaves() {
     run.stop();
 }
 
-/// The lock covers a focused full-screen window, confined or not.
+/// The lock covers a focused full-screen window of a confined client.
 #[test]
 fn the_lock_covers_a_full_screen_window() {
     let mut run = Running::start(None);
@@ -354,11 +354,9 @@ fn a_larger_client_lifts_nothing_on_the_next_output() {
 
     assert_eq!(geometry(&run, &window).size, (width, height).into());
     let picture = run.state.capture(1).expect("a frame");
-    let black = picture
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .filter(|pixel| **pixel == BLACK);
+    let pixels = picture.as_chunks::<4>().0;
+    assert!(pixels.contains(&PAINT), "the client reaches the next output");
+    let black = pixels.iter().filter(|pixel| **pixel == BLACK);
     assert!(black.count() < 16, "no black over the next output");
     run.stop();
 }
@@ -428,6 +426,81 @@ fn a_focus_change_moves_the_pointer() {
     local.roundtrip(&mut run);
 
     assert_eq!(focused(&pointer), local.id, "the window shows");
+    run.stop();
+}
+
+/// A resting pointer follows what the request and its answer change: the answer takes it from
+/// the bar the window now hides, leaving gives it back before the client answers, and so does
+/// closing the window.
+#[test]
+fn the_resting_pointer_follows_the_window() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (bar, _surface) = bar(&mut run);
+    let (mut local, toplevel, _) = window(&mut run);
+    run.state
+        .pointer_to((5.0, 5.0).into(), smithay::backend::input::InputTime::now());
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let focused = |pointer: &smithay::input::pointer::PointerHandle<State>| {
+        pointer
+            .current_focus()
+            .and_then(|s| s.client())
+            .map(|c| c.id())
+    };
+    assert_eq!(focused(&pointer), bar.id, "the bar shows");
+
+    enter(&mut run, &mut local, &toplevel, None);
+    assert_eq!(focused(&pointer), local.id, "the answer hides the bar");
+
+    toplevel.unset_fullscreen();
+    local.roundtrip(&mut run);
+    assert_eq!(focused(&pointer), bar.id, "leaving shows the bar");
+
+    enter(&mut run, &mut local, &toplevel, None);
+    assert_eq!(focused(&pointer), local.id, "hidden again");
+    toplevel.destroy();
+    local.roundtrip(&mut run);
+    assert_eq!(focused(&pointer), bar.id, "closing shows the bar");
+    run.stop();
+}
+
+/// A window on an inactive workspace cannot bring itself to the one the user sees by naming an
+/// output.
+#[test]
+fn a_parked_window_stays_parked_when_it_names_an_output() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, window) = window(&mut run);
+    let named = local.output(0);
+    assert!(run.state.activate_workspace(workspaces_of(&run, 0)[1]));
+    assert!(run.state.is_parked(&window), "on another workspace");
+
+    toplevel.set_fullscreen(Some(&named));
+    local.roundtrip(&mut run);
+
+    assert!(run.state.is_parked(&window), "it stays there");
+    assert_eq!(run.state.space.element_location(&window), None);
+    run.stop();
+}
+
+/// The black around a smaller client hides what is below it from the pointer as well as from
+/// the eye, with the keyboard elsewhere too.
+#[test]
+fn the_black_takes_the_pointer_without_the_keyboard() {
+    let mut run = Running::start(None);
+    let fixture = clear_the_fixture(&mut run);
+    let (mut local, toplevel, window) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    paint(&mut run, &mut local, 100, 100, PAINT);
+    run.state.focus(&fixture);
+    run.state.space.raise_element(&window, false);
+    let (x, y) = (45, 45);
+    assert_eq!(at(&frame(&mut run), x, y), BLACK, "the black shows");
+
+    let (fx, fy) = (f64::from(x), f64::from(y));
+    assert!(run.state.under((fx, fy).into()).is_none(), "the black");
+    let middle = (f64::from(OUTPUT.0) / 2.0, f64::from(OUTPUT.1) / 2.0);
+    assert!(run.state.under(middle.into()).is_some(), "the window");
     run.stop();
 }
 

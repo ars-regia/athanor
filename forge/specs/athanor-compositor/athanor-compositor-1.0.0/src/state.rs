@@ -730,9 +730,11 @@ impl State {
     /// Gives `window` the `output` the client named, or its home output, whole: a configure
     /// with the `fullscreen` state and the output's size, and the window moves there at the
     /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
-    /// maximised window stays so, and returns to that.
+    /// maximised window stays so, and returns to that. A window on an inactive workspace stays
+    /// there, whichever output it names: only the user brings it to the one they see.
     pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
-        if let Some(id) = output.and_then(|output| self.active_workspace(&output)) {
+        let named = output.filter(|_| !self.is_parked(window));
+        if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
             // Before its first commit a window has no workspace yet.
             self.place_on_workspace(window);
             self.move_window_to(window, id);
@@ -904,19 +906,22 @@ impl State {
     }
 
     /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
-    /// waits for, so that the window moves with its new size, not before.
-    pub fn relocated(&mut self, window: &Window) {
+    /// waits for, so that the window moves with its new size, not before, and says whether it
+    /// did. A full-screen window then keeps to the middle of its output, at every call.
+    pub fn relocated(&mut self, window: &Window) -> bool {
+        let mut landed = false;
         let relocate = window.user_data().get::<Relocate>();
         if let Some(Destination { to, serial }) = relocate.and_then(|relocate| relocate.0.get()) {
             if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
                 if !answered(toplevel, serial) {
-                    return;
+                    return false;
                 }
             }
             if let Some(relocate) = relocate {
                 relocate.0.set(None);
             }
             self.space.relocate_element(window, to);
+            landed = true;
         }
         // A client smaller than its output stands in the middle of it, as
         // `xdg_toplevel.set_fullscreen` says.
@@ -924,6 +929,7 @@ impl State {
             let to = centred(area, window.geometry().size);
             self.space.relocate_element(window, to);
         }
+        landed
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -1075,7 +1081,8 @@ impl State {
             return None;
         }
         let output = self.space.output_under(pos).next()?;
-        let origin = self.space.output_geometry(output)?.loc;
+        let shown = self.space.output_geometry(output)?;
+        let origin = shown.loc;
         let map = layer_map_for_output(output);
         let focused = self.focused_window();
         let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
@@ -1098,16 +1105,24 @@ impl State {
         if lifted.is_some() {
             return front;
         }
-        let found = front
-            .or_else(|| on(Layer::Top))
-            .or_else(|| {
-                self.space
-                    .element_under(pos)
-                    .map(|(window, location)| (Under::Window(window.clone()), location))
-            })
+        let above = front.or_else(|| on(Layer::Top));
+        if above.is_some() {
+            return above;
+        }
+        let window = self.space.element_under(pos);
+        let black = self
+            .space
+            .elements()
+            .rev()
+            .take_while(|above| window.as_ref().is_none_or(|(window, _)| above != window))
+            .any(|above| crate::marks::whole_on(above, shown));
+        if black {
+            return None;
+        }
+        window
+            .map(|(window, location)| (Under::Window(window.clone()), location))
             .or_else(|| on(Layer::Bottom))
-            .or_else(|| on(Layer::Background));
-        found
+            .or_else(|| on(Layer::Background))
     }
 
     /// The surface under `pos`, with its origin in the space.
