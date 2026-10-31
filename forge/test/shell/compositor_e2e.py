@@ -30,12 +30,9 @@ LAUNCH = "/out/bin/cc-launch"
 WINDOW = Path(__file__).resolve().parent / "cc_window.py"
 FAKE_SYSTEMD = Path(__file__).resolve().parent / "fake_systemd.py"
 # What an application behind the security context must not see (doc_bar.md, BR2).
-PRIVILEGED = {
-    "zcosmic_toplevel_info_v1", "zcosmic_toplevel_manager_v1", "ext_workspace_manager_v1",
-    "zcosmic_workspace_manager_v2", "zwlr_layer_shell_v1", "ext_data_control_manager_v1",
-    "zwlr_data_control_manager_v1", "wp_security_context_manager_v1",
-    "zcosmic_keyboard_layout_manager_v1", "cosmic_a11y_manager_v1",
-}
+PRIVILEGED = set(
+    (Path(__file__).resolve().parent / "forbidden-globals.txt").read_text(encoding="utf-8").split()
+)
 FIRST, SECOND = "org.athanor.CcWindow1", "org.athanor.CcWindow2"
 # athanor-launcher's bus interface (doc_launcher.md, LA8), faked: "ready" once the name is
 # owned, then "Show" on each call; with the argument "silent" it never answers.
