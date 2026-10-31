@@ -784,8 +784,8 @@ amendment's audit:
       `athanor-differences.toml` with its cause and its issue, and fixed after the switch;
     - item 2 in full, but the requirements of OS5 that come with the magnifier, the colour
       filters and the overview: `athanor_a11y_v1`, the magnifier and the filters, and what
-      only the overview binds (a private interface that pins and reorders workspaces, which OS5
-      gains with the amendment that introduces it). The
+      only the overview binds (`athanor_workspace_manager_v1` of decision 32, which pins and
+      reorders workspaces and gives a window's workspaces, its place and the move). The
       bar's `athanor_workspace_tiling_v1` and `athanor_keyboard_group_v1` are in, without which
       item 2's counts do not hold;
     - item 3 but the magnifier and the colour filters, which stay with cosmic-comp's session
@@ -1077,12 +1077,15 @@ compositor and that the own compositor did not yet offer:
     - **`athanor_workspace_window_v1`,** one per window, keyed by
       `ext_foreign_toplevel_handle_v1`, sends `workspace_enter(ext_workspace_handle_v1)`,
       `workspace_leave(ext_workspace_handle_v1)` and `geometry(wl_output, x, y, width, height)`,
-      per frame as a difference, as the state object sends the state and the outputs. A window on
-      an inactive workspace or minimised reports the place it keeps, on the output of its
-      workspace's group. The workspace events go only to a client that holds that handle. Its
+      per frame as a difference, as the state object sends the state and the outputs; x and y
+      are relative to that output, and a rectangle of no size withdraws the window from it. A
+      window on an inactive workspace or minimised reports the place it keeps, on the output of
+      its workspace's group. The workspace events go only to a client that holds that handle. Its
       request `move_to_workspace(ext_workspace_handle_v1, wl_output)` moves the window.
-    - **Every request** is refused while the session is locked, and on a handle that went away,
-      with no protocol error and no change, as the requests of `athanor_toplevel_actions_v1` are.
+    - **Every request** is refused while the session is locked or paused, on a handle that went
+      away and on a window not mapped, with no protocol error and no change, as the requests of
+      `athanor_toplevel_actions_v1` are. Unlike those, the move takes a window on an inactive
+      workspace, which the overview shows.
     - **The client** binds that global only through one call, `Client::workspace_controls()`, as
       `window_actions()` binds the actions interface, and only the overview makes it.
     - **The patches of `doc_overview.md` decisions 4 and 5 are not written.** The three-finger
