@@ -216,7 +216,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI15 Shell surfaces
 
-- **File:** `shell-surfaces.yml`. **Purpose:** builds the shell programs in the rig image and runs their surface, AT-SPI and end-to-end tests (doc_shell.md, SH13); its job `control-center` builds the control center (`rig.sh build-control-center`), and its job `no-gtk` builds, lints and tests `athanor-apps`, `athanor-compositor-client`, `athanor-style` and `athanor-dock` without their `gtk` feature and fails when their tree still names a GTK crate (`rig.sh no-gtk`).
+- **File:** `shell-surfaces.yml`. **Purpose:** builds the shell programs in the rig image and runs their surface, AT-SPI and end-to-end tests (doc_shell.md, SH13); its job `control-center` builds the control center (`rig.sh build-control-center`), and its job `no-gtk` builds, lints and tests `athanor-apps`, `athanor-compositor-client`, `athanor-style` and `athanor-dock` without their `gtk` feature and fails when their tree still names a GTK crate (`rig.sh no-gtk`), then runs the toolkit's GPU tests on llvmpipe, which fail when no adapter is found.
 - **Triggers:** push to `iso-v0` on the shell crates (among them `system/athanor-controls`, `system/athanor-services` and `forge/specs/athanor-control-center`), `forge/test/shell/**` and the Cargo files; `workflow_call` from CI27 job `shell` when `changes.json` selects `shell` (the same paths, kept equal by `scripts/ci/tests/test_pr_workflow.py`); dispatch. **Outputs:** artifacts `shell-rig-<job>`.
 - **Secrets, variables:** none. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
 - **Scripts:** `forge/test/shell/rig.sh`.

@@ -150,6 +150,8 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: No GTK crate in their tree; clippy and tests without the gtk feature
         run: bash forge/test/shell/rig.sh no-gtk
+      - name: The toolkit's GPU tests on llvmpipe
+        run: bash forge/test/shell/rig.sh cargo test --locked -p athanor-toolkit --features gpu --lib -- --ignored
 
   shelld:
     name: Shell daemon, notifications and the tray watcher
