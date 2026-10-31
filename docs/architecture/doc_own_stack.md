@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. Revision 2 was amended on 2026-10-31 by decision 32, the private protocols of the overview, which amends OS5, the amendment approved by the maintainer with #903. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -239,14 +239,14 @@ own compositor, and what stays is the imitation inside a bordered window that de
 
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
-and row 4 (the reduced-motion switch, AX9) are behaviour the own compositor ships from its first
+is behaviour the own compositor ships from its first
 version, with one difference from cosmic-comp that the switch's pull request lists
 (`doc_session.md` SN13, step 6) beside those of decision 29: a layer surface with on-demand
 interactivity takes the keyboard on a click or on Ctrl+Alt+Tab (AX7), not when it maps as under
 cosmic-comp (#614), so the dock says nothing to Orca until Ctrl+Alt+Tab (the shell rig's Orca
 walk of the dock starts with that key, #841); the behaviour is not changed. Row 2 is a build detail of cosmic-comp's package and leaves with it. Row 3 (the vertical
 three-finger swipe) is behaviour of the own compositor too, and row 4 waits for it to have a
-slide to reduce: `doc_overview.md` decisions 4 and 5 are deferred (decision 32). Row 8's behaviour, an input method's
+slide to reduce: the patches of `doc_overview.md` decisions 4 and 5 are not written (decision 32). Row 8's behaviour, an input method's
 grab dropped while locked, is a requirement tested in the fixture of OS6 (#750). Row 9, the special
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
 S3 says what behaviour the namespace needs (OS9 plan, question 8).
@@ -275,8 +275,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   27); and a private
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
   (OS4), and its description is in the repository, versioned, before its first client. Decision
-  32 adds what the overview needs: versions 2 of the toplevel interfaces and a private
-  `athanor_workspace_manager_v1`.
+  32 adds what the overview needs: a private `athanor_workspace_manager_v1`, with a grant of its
+  own.
   *Amended on 2026-10-30 (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* `athanor_a11y_v1` is
   described in `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`, one privileged
   global, `athanor_a11y_manager_v1`, granted to the bar and, once it exists, to `athanor-a11y watch`,
@@ -1063,37 +1063,39 @@ compositor and that the own compositor did not yet offer:
     frame a whole wallpaper; for the outline, a fixed Calmo purple, which ignores the user's
     accent and `active_hint`; and the reveal key now, which adds drawing text to the compositor
     to a change that does not need it.
-32. **The private protocols of the overview, and its gesture** (OS5; `doc_overview.md` OV3 and
+32. **The private protocol of the overview, and its gesture** (OS5; `doc_overview.md` OV3 and
     decisions 4 and 5; taken by the maintainer with #903). Decision 19's set gives no window's
-    workspaces, no geometry, no move to a workspace, no pin and no reorder, which the overview
-    needs of the own compositor as of cosmic-comp:
-    - **`athanor_toplevel_state_v1` version 2** adds the events
-      `workspace_enter(ext_workspace_handle_v1)`, `workspace_leave(ext_workspace_handle_v1)` and
-      `geometry(wl_output, x, y, width, height)`, sent per frame as a difference, as the state
-      and the outputs are. A window on an inactive workspace or minimised reports the place it
-      keeps. The workspace events go only to a client that holds that handle.
-      `athanor_toplevel_manager_v1` goes to version 2 with it, since it creates the state object
-      at its own version. A client bound at version 1 gets none of the three.
-    - **`athanor_toplevel_actions_v1` version 2** adds
-      `move_to_workspace(handle, ext_workspace_handle_v1, wl_output)`. It is refused while the
-      session is locked, as the other actions are. A handle that went away is refused with no
-      protocol error and no change, since a client cannot tell in advance that it would.
-    - **`athanor_workspace_manager_v1`,** a new private global described in
-      `athanor-workspace-v1.xml`, gives per workspace an `athanor_workspace_v1` keyed by
-      `ext_workspace_handle_v1`, which carries the pinned state, the requests `pin`, `unpin`,
-      `move_before` and `move_after`, and the capabilities `pin` and `move`, sent at once. It is
-      privileged by a grant of its own, not the grant of `ext_workspace_manager_v1`.
-    - **The client** binds that global only through one call, `Client::workspace_controls()`,
-      as `window_actions()` binds the actions interface, and only the overview makes it. A client
-      that only reads workspaces never binds it, and no other client's grant widens.
+    workspaces, no place, no move to a workspace, no pin and no reorder, which the overview needs
+    of the own compositor as of cosmic-comp. One new private global carries them all, so that they
+    reach the overview and no other client:
+    - **`athanor_workspace_manager_v1`,** described in `athanor-workspace-v1.xml`, is privileged
+      by a grant of its own, not by the grant of `ext_workspace_manager_v1` or of the toplevel
+      interfaces, and only the overview's line in the allow-list holds it.
+    - **`athanor_workspace_v1`,** one per workspace, keyed by `ext_workspace_handle_v1`, carries
+      the pinned state, the requests `pin`, `unpin`, `move_before` and `move_after`, and the
+      capabilities `pin` and `move`, sent at once.
+    - **`athanor_workspace_window_v1`,** one per window, keyed by
+      `ext_foreign_toplevel_handle_v1`, sends `workspace_enter(ext_workspace_handle_v1)`,
+      `workspace_leave(ext_workspace_handle_v1)` and `geometry(wl_output, x, y, width, height)`,
+      per frame as a difference, as the state object sends the state and the outputs. A window on
+      an inactive workspace or minimised reports the place it keeps, on the output of its
+      workspace's group. The workspace events go only to a client that holds that handle. Its
+      request `move_to_workspace(ext_workspace_handle_v1, wl_output)` moves the window.
+    - **Every request** is refused while the session is locked, and on a handle that went away,
+      with no protocol error and no change, as the requests of `athanor_toplevel_actions_v1` are.
+    - **The client** binds that global only through one call, `Client::workspace_controls()`, as
+      `window_actions()` binds the actions interface, and only the overview makes it.
     - **The patches of `doc_overview.md` decisions 4 and 5 are not written.** The three-finger
       swipe and the reduced-motion switch are behaviour of the own compositor, register rows 3
       and 4: the swipe comes with the overview, and the switch once the own compositor has a slide
       to reduce. cosmic-comp's session keeps its four-finger switch and its 200 ms slide.
 
-    Not taken: one interface that also carries tiling, which halves the per-workspace objects but
-    gives the bar, which reads and toggles tiling, the overview's pin and reorder with its grant;
-    and writing the two patches, each to carry and rebase for a compositor this document replaces.
+    Not taken: version 2 of `athanor_toplevel_state_v1` and `athanor_toplevel_actions_v1`, since a
+    grant goes by global and not by version, so that the bar, the dock, the launcher and the
+    control center, which need neither, would receive every window's place or could move any
+    window; one interface that also carries tiling, which gives the bar, which reads and toggles
+    tiling, the overview's pin and reorder with its grant; and writing the two patches, each to
+    carry and rebase for a compositor this document replaces.
 
 ## 8. Risks
 

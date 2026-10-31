@@ -12,6 +12,8 @@
 
 `C` below is `forge/specs/athanor-compositor/athanor-compositor-1.0.0`; `O` is `forge/specs/athanor-overview/athanor-overview-1.0.0`; `src/` paths name their crate.
 
+**Amended by `doc_own_stack.md` decision 32 (#903), which holds where this plan differs, and which this plan calls "decision 29":** D3 and open question 1 give way to one interface with a grant of its own, `athanor-workspace-v1.xml`, so that Tasks 3, 4 and 5 add to that interface and not to version 2 of the toplevel interfaces, and no other client gets a window's place or the move; `move_to_workspace` is on `WorkspaceControls`; Task 2 is done (`C/src/workspace.rs`), but for pin and reorder, which are Task 5.
+
 ## Global Constraints
 
 - Only an approved revision is implemented (ADR-0074): revision 2 of `doc_overview.md` and revision 2 of `doc_own_stack.md` with its amendments. Task 1 writes the amendment the private protocols need (OS5: documented before written) and the notes that reconcile `doc_overview.md` with the own compositor; Task 1 lands after #810, and no task from Task 3 onward starts before the maintainer approves it.

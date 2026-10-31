@@ -170,7 +170,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
 
 **VL9. Motion and depth.**
 
-- **Three durations:** 100 ms for hover and press; 200 ms for popovers, panels, the on-screen display and the end-of-session dialogs appearing and leaving, and for the workspace slide, which keeps the compositor's own 200 ms with `EaseInOutCubic` (ruling of 2026-10-05; nothing changes that duration, and the reduced-motion patch of `doc_overview.md` is deferred by `doc_own_stack.md` decision 32); 300 ms for large changes: the launcher and the control center.
+- **Three durations:** 100 ms for hover and press; 200 ms for popovers, panels, the on-screen display and the end-of-session dialogs appearing and leaving, and for the workspace slide, which keeps the compositor's own 200 ms with `EaseInOutCubic` (ruling of 2026-10-05; nothing changes that duration, and the reduced-motion patch of `doc_overview.md` is not written, `doc_own_stack.md` decision 32); 300 ms for large changes: the launcher and the control center.
 - **Curves.** Applications and the GTK shell use libadwaita's `cubic-bezier(0.25, 0.46, 0.45, 0.94)`, so that they move alike; nothing bounces.
 - **The toolkit shell's entry curve is firmer** (maintainer decision, 2026-10-19).
 - **The toolkit shell's curve values** (proposed, revision 3): the entry curve, firmer than libadwaita's, is `cubic-bezier(0.2, 0, 0, 1)`, a surface leaves in two thirds of its entry time, and applications keep libadwaita's curve.
