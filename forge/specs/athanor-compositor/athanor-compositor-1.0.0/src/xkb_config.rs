@@ -17,7 +17,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Read};
 use std::os::fd::AsFd;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::PoisonError;
 
 /// The file, under the configuration root.
@@ -278,7 +278,7 @@ const LINKS: u8 = 8;
 
 /// `path`, then `path` with its first link followed, and so on: each is a way a change can
 /// come, a link in the middle of a chain or one left dangling included, and the last is where
-/// the path leads. The way up to a link holds no link, so that `..` in its target is lexical.
+/// the path leads. A `..` is left for the kernel: only it knows what stands before one.
 fn ways(path: &Path) -> Vec<PathBuf> {
     let mut ways = vec![path.to_path_buf()];
     for _ in 0..LINKS {
@@ -289,18 +289,9 @@ fn ways(path: &Path) -> Vec<PathBuf> {
             .rev()
             .find_map(|place| Some((place, std::fs::read_link(place).ok()?)));
         let Some((link, to)) = link else { break };
-        let mut place = link.parent().unwrap_or(link).to_path_buf();
-        for part in to.components() {
-            match part {
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    place.pop();
-                }
-                part => place.push(part),
-            }
-        }
-        let rest = way.strip_prefix(link).unwrap_or(way);
-        let next = place.join(rest);
+        let mut next = link.parent().unwrap_or(link).join(to);
+        // Part by part: a join of nothing would end the path in a slash, which reads no link.
+        next.extend(way.strip_prefix(link).unwrap_or(way));
         ways.push(next);
     }
     ways
@@ -387,9 +378,8 @@ impl Watch {
     }
 
     /// Moves the watches. The ancestors first, from the root down: a component replaced
-    /// between two watches is then seen going. An ancestor that cannot be watched, unreadable
-    /// or denied, leaves the events of the rest, which see less; with nothing watched at all
-    /// the path is lost.
+    /// between two watches is then seen going. A directory that cannot be watched leaves the
+    /// events of the rest, which see less; with nothing watched at all the path is lost.
     fn watch(&mut self) -> nix::Result<()> {
         let last = self.ancestors.drain(..).map(|(old, _)| old);
         let old: Vec<_> = last.chain(self.watched.take()).collect();
@@ -415,8 +405,11 @@ impl Watch {
                     Err(Errno::ENOENT | Errno::ENOTDIR) => {}
                     // Debug: a component searchable and not readable is ordinary, and each
                     // watch meets it along each way.
+                    Err(Errno::EACCES) => {
+                        tracing::debug!(?ancestor, "an xkb_config ancestor is not readable");
+                    }
                     Err(error) => {
-                        tracing::debug!(%error, ?ancestor, "an xkb_config ancestor is not watched");
+                        tracing::warn!(%error, ?ancestor, "an xkb_config ancestor is not watched");
                     }
                 }
             }
@@ -425,7 +418,7 @@ impl Watch {
             Ok(descriptor) => Some(descriptor),
             Err(Errno::ENOENT | Errno::ENOTDIR) => None,
             Err(error) => {
-                tracing::debug!(%error, dir = ?self.dir, "the xkb_config directory is not watched");
+                tracing::warn!(%error, dir = ?self.dir, "the xkb_config directory is not watched");
                 None
             }
         };
@@ -821,6 +814,49 @@ mod tests {
         assert!(watch.changed(), "the middle link was replaced");
         write(&file, PRETTY);
         assert!(watch.changed(), "the watch is on the second directory");
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// A chain of links in different directories is followed to its end, each one a way.
+    #[test]
+    fn the_ways_reach_the_end_of_a_chain() {
+        let root = scratch("ways-chain");
+        let (a, b, c) = (root.join("a"), root.join("b"), root.join("c"));
+        for dir in [&a, &b, &c] {
+            std::fs::create_dir(dir).expect("a directory");
+        }
+        let end = c.join("end");
+        std::fs::create_dir(&end).expect("the end");
+        std::os::unix::fs::symlink(&end, b.join("two")).expect("the second link");
+        std::os::unix::fs::symlink(b.join("two"), a.join("one")).expect("the first link");
+        assert_eq!(
+            ways(&a.join("one")),
+            [a.join("one"), b.join("two"), end.clone()]
+        );
+        std::fs::remove_dir_all(&root).expect("clean");
+    }
+
+    /// `..` means what the kernel says: past a link in a target, and in the path given.
+    #[test]
+    fn the_ways_leave_parent_components_to_the_kernel() {
+        let root = scratch("ways-parent");
+        let (deep, leaf) = (root.join("deep"), root.join("deep/leaf"));
+        let home = root.join("home");
+        for dir in [&leaf, &deep.join("n"), &home.join("x"), &root.join("out")] {
+            std::fs::create_dir_all(dir).expect("a directory");
+        }
+        std::os::unix::fs::symlink(&leaf, home.join("m")).expect("the inner link");
+        std::os::unix::fs::symlink("m/../n", home.join("past")).expect("the link past a link");
+        std::os::unix::fs::symlink("../out", home.join("l")).expect("the link out");
+        let ends = |path: &Path| {
+            let way = ways(path);
+            way.last().expect("a way").canonicalize().expect("the end")
+        };
+        assert_eq!(ends(&home.join("past")), deep.join("n").canonicalize().expect("n"));
+        assert_eq!(
+            ends(&home.join("x/../l")),
+            root.join("out").canonicalize().expect("out")
+        );
         std::fs::remove_dir_all(&root).expect("clean");
     }
 
