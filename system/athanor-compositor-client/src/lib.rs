@@ -34,6 +34,6 @@ pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
 pub use shortcuts::SETTINGS_PAGE_PREFIX;
 pub use model::{
-    Accessibility, Event, ScreenFilter, Tiling, Window, WindowId, WindowState, Workspace,
-    WorkspaceId,
+    Accessibility, Event, KeyboardAid, KeyboardAids, Modifier, ScreenFilter, Tiling, Window,
+    WindowId, WindowState, Workspace, WorkspaceId, MAX_AID_DELAY,
 };

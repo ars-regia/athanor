@@ -3,17 +3,18 @@
 //! `athanor_a11y_manager_v1`, which it offers to the bar alone, bound at the first
 //! `Client::watch_accessibility`, so a client that never watches never binds it. Every name of
 //! the latter in this crate is in this file; the rest of the crate sees one interface over both.
+//! The keyboard aids (AX11) are the latter's alone.
 
 use wayland_client::globals::GlobalList;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 
 use crate::connection::{bind, Client, Error, State};
-use crate::model::ScreenFilter;
+use crate::model::{Event as ClientEvent, KeyboardAid, KeyboardAids, ScreenFilter, MAX_AID_DELAY};
 use crate::protocols::a11y::client::cosmic_a11y_manager_v1::{
     self, CosmicA11yManagerV1, Filter as CosmicFilter,
 };
 use crate::protocols::athanor_a11y::client::athanor_a11y_manager_v1::{
-    self, AthanorA11yManagerV1, Filter as AthanorFilter,
+    self, Aid as AthanorAid, AthanorA11yManagerV1, Filter as AthanorFilter,
 };
 
 /// The version of `cosmic_a11y_manager_v1` that replaced the screen filter's messages.
@@ -47,7 +48,30 @@ impl Client {
     }
 }
 
+fn check_delays(aids: &KeyboardAids) -> Result<(), Error> {
+    if aids.slow_delay.max(aids.bounce_delay) > MAX_AID_DELAY {
+        return Err(Error::InvalidArgument(
+            "a keyboard aid's delay above 2000 ms",
+        ));
+    }
+    Ok(())
+}
+
 impl Manager {
+    /// Sends every setting of the keyboard aids. The compositor ends a connection that sends a
+    /// delay above `MAX_AID_DELAY`, so this refuses it first.
+    pub(crate) fn set_keyboard_aids(&self, aids: KeyboardAids) -> Result<(), Error> {
+        check_delays(&aids)?;
+        let Manager::Athanor(manager) = self else {
+            return Err(Error::Unavailable("athanor_a11y_manager_v1"));
+        };
+        manager.set_sticky_keys(athanor_state(aids.sticky), athanor_state(aids.two_key_off));
+        manager.set_slow_keys(athanor_state(aids.slow), aids.slow_delay);
+        manager.set_bounce_keys(athanor_state(aids.bounce), aids.bounce_delay);
+        manager.set_aid_gestures(athanor_state(aids.gestures));
+        Ok(())
+    }
+
     pub(crate) fn set_magnifier(&self, enabled: bool) {
         match self {
             Manager::Athanor(manager) => manager.set_magnifier(athanor_state(enabled)),
@@ -110,6 +134,15 @@ fn cosmic_state(enabled: bool) -> cosmic_a11y_manager_v1::ActiveState {
         cosmic_a11y_manager_v1::ActiveState::Enabled
     } else {
         cosmic_a11y_manager_v1::ActiveState::Disabled
+    }
+}
+
+fn keyboard_aid(aid: WEnum<AthanorAid>) -> Option<KeyboardAid> {
+    match aid {
+        WEnum::Value(AthanorAid::StickyKeys) => Some(KeyboardAid::Sticky),
+        WEnum::Value(AthanorAid::SlowKeys) => Some(KeyboardAid::Slow),
+        WEnum::Value(AthanorAid::BounceKeys) => Some(KeyboardAid::Bounce),
+        WEnum::Unknown(_) => None,
     }
 }
 
@@ -187,9 +220,55 @@ impl Dispatch<AthanorA11yManagerV1, ()> for State {
                     }
                 };
             }
-            // The keyboard aids' state is #865's.
-            _ => return,
+            Event::Modifiers { latched, locked } => {
+                next.latched = latched.into();
+                next.locked = locked.into();
+            }
+            Event::KeyRejected { aid } => {
+                state
+                    .events
+                    .extend(keyboard_aid(aid).map(ClientEvent::AidRejected));
+            }
+            Event::Gesture { aid } => {
+                state
+                    .events
+                    .extend(keyboard_aid(aid).map(ClientEvent::AidGesture));
+            }
+            Event::AidOff { aid } => {
+                state
+                    .events
+                    .extend(keyboard_aid(aid).map(ClientEvent::AidOff));
+            }
         }
         state.set_accessibility(next);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_delay_above_the_bound_never_reaches_the_compositor() {
+        let aids = |slow_delay, bounce_delay| KeyboardAids {
+            slow_delay,
+            bounce_delay,
+            ..KeyboardAids::default()
+        };
+        assert!(check_delays(&aids(MAX_AID_DELAY, MAX_AID_DELAY)).is_ok());
+        assert!(check_delays(&aids(MAX_AID_DELAY + 1, 0)).is_err());
+        assert!(check_delays(&aids(0, MAX_AID_DELAY + 1)).is_err());
+    }
+
+    #[test]
+    fn the_aids_are_named_as_the_protocol_numbers_them() {
+        assert_eq!(keyboard_aid(WEnum::Unknown(3)), None);
+        for (value, aid) in [
+            (AthanorAid::StickyKeys, KeyboardAid::Sticky),
+            (AthanorAid::SlowKeys, KeyboardAid::Slow),
+            (AthanorAid::BounceKeys, KeyboardAid::Bounce),
+        ] {
+            assert_eq!(keyboard_aid(WEnum::Value(value)), Some(aid));
+        }
     }
 }

@@ -217,7 +217,7 @@ def cosmic_comp():
     a11y = events(lines, "accessibility")
     expect("magnifier and screen filter arrive as accessibility changes",
            code == 0 and any("magnifier: true" in a for a in a11y) and any("Greyscale" in a for a in a11y)
-           and a11y[-1:] == ["Accessibility { magnifier: false, inverted: false, filter: None }"], lines)
+           and a11y[-1:] == ["Accessibility { magnifier: false, inverted: false, filter: None, latched: 0, locked: 0 }"], lines)
 
     code, lines = probe("close", SECOND, "watch", "2", "snapshot")
     apps = {window["app_id"] for window in snapshot(lines).get("windows", [])}

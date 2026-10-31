@@ -16,7 +16,9 @@ enum Seen {
     Magnifier(u32, f64),
     Filter(u32, u32),
     Modifiers(u32, u32),
-    Other,
+    Rejected(u32),
+    Gesture(u32),
+    AidOff(u32),
 }
 
 /// The events a manager was sent, in order.
@@ -38,7 +40,9 @@ impl Dispatch<AthanorA11yManagerV1, Log> for Client {
                 Seen::Filter(inverted.into(), filter.into())
             }
             Event::Modifiers { latched, locked } => Seen::Modifiers(latched.into(), locked.into()),
-            _ => Seen::Other,
+            Event::KeyRejected { aid } => Seen::Rejected(aid.into()),
+            Event::Gesture { aid } => Seen::Gesture(aid.into()),
+            Event::AidOff { aid } => Seen::AidOff(aid.into()),
         };
         log.lock().expect("the events").push(seen);
     }
@@ -933,6 +937,9 @@ fn a_delay_above_two_seconds_is_a_protocol_error() {
     manager.set_bounce_keys(ActiveState::Enabled, 2000);
     bar.roundtrip(&mut run);
     assert!(bar.connection.protocol_error().is_none(), "2000 is valid");
+    manager.set_slow_keys(ActiveState::Disabled, 0);
+    manager.set_bounce_keys(ActiveState::Disabled, 0);
+    bar.roundtrip(&mut run);
     manager.set_bounce_keys(ActiveState::Enabled, 2001);
     bar.connection.flush().expect("flush");
     let started = Instant::now();
@@ -953,6 +960,112 @@ fn a_delay_above_two_seconds_is_a_protocol_error() {
         error.code,
         athanor_a11y_manager_v1::Error::InvalidValue as u32
     );
+    for _ in 0..2 {
+        key(&mut run.state, KEY_A, true);
+        key(&mut run.state, KEY_A, false);
+    }
+    assert_eq!(run.state.aids.sent, [], "the request refused turned nothing on");
+    run.stop();
+}
+
+/// The requests reach the aids and the aids' events reach the manager, as the description
+/// numbers them: a modifier latched and let go, a key each of slow and bounce keys rejected, a
+/// gesture only once allowed, and sticky keys turned off by two-key-off.
+#[test]
+fn ax11_the_manager_sets_the_aids_and_is_told_what_they_do() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (manager, log) = manager(&mut bar, &mut run);
+    taken(&log);
+    let tap = |run: &mut Running, code| {
+        key(&mut run.state, code, true);
+        key(&mut run.state, code, false);
+    };
+
+    manager.set_sticky_keys(ActiveState::Enabled, ActiveState::Disabled);
+    bar.roundtrip(&mut run);
+    tap(&mut run, KEY_LEFTSHIFT);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Modifiers(1, 0)], "Shift latched");
+    manager.set_sticky_keys(ActiveState::Disabled, ActiveState::Disabled);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Modifiers(0, 0)], "and let go");
+
+    manager.set_slow_keys(ActiveState::Enabled, 200);
+    bar.roundtrip(&mut run);
+    tap(&mut run, KEY_A);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Rejected(1)], "slow keys");
+    manager.set_slow_keys(ActiveState::Disabled, 200);
+    manager.set_bounce_keys(ActiveState::Enabled, 200);
+    bar.roundtrip(&mut run);
+    tap(&mut run, KEY_A);
+    tap(&mut run, KEY_A);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Rejected(2)], "bounce keys");
+    manager.set_bounce_keys(ActiveState::Disabled, 0);
+
+    bar.roundtrip(&mut run);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [], "no gesture until the client allows it");
+    manager.set_aid_gestures(ActiveState::Enabled);
+    bar.roundtrip(&mut run);
+    for _ in 0..5 {
+        tap(&mut run, KEY_LEFTSHIFT);
+    }
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Gesture(0)], "the five presses");
+
+    manager.set_sticky_keys(ActiveState::Enabled, ActiveState::Enabled);
+    bar.roundtrip(&mut run);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_A]);
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::AidOff(0)], "two-key-off");
+    run.stop();
+}
+
+/// What a client set outlives it, and a manager bound later is told the modifiers held.
+#[test]
+fn ax11_a_new_manager_is_told_the_modifiers_held() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let (manager, _log) = manager(&mut bar, &mut run);
+    manager.set_sticky_keys(ActiveState::Enabled, ActiveState::Disabled);
+    bar.roundtrip(&mut run);
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    key(&mut run.state, KEY_LEFTSHIFT, false);
+    manager.destroy();
+    bar.roundtrip(&mut run);
+    let mut next = Local::connect(&mut run, None);
+    let (_manager, log) = self::manager(&mut next, &mut run);
+    assert_eq!(
+        taken(&log),
+        [AT_BIND[0], AT_BIND[1], Seen::Modifiers(1, 0)],
+        "the latch of the sticky keys the first client set"
+    );
+    run.stop();
+}
+
+/// A manager bound while the session is locked is told the modifiers when it unlocks.
+#[test]
+fn ax11_a_manager_bound_while_locked_is_told_at_the_unlock() {
+    let mut run = Running::start(None);
+    run.state.set_sticky_keys(true, false);
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    key(&mut run.state, KEY_LEFTSHIFT, false);
+    let (mut locker, lock) = lock_session(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_manager, log) = manager(&mut bar, &mut run);
+    assert_eq!(taken(&log), AT_BIND[..2], "nothing of the modifiers yet");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    bar.roundtrip(&mut run);
+    assert_eq!(taken(&log), [Seen::Modifiers(1, 0)], "and at the unlock");
     run.stop();
 }
 

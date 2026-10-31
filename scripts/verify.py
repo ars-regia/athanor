@@ -2492,6 +2492,11 @@ def build_flags(spec, package):
     return set(), True, False
 
 
+# The allow-list's mark of a trusted prompt, the one name of a line that is no interface
+# (doc_own_stack.md OS5, doc_accessibility.md AX11; identity.rs `MARK`).
+TRUSTED_PROMPT = "trusted-prompt"
+
+
 def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
     """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
     a crate of the tree, that asks for the top or overlay layer or names a privileged global
@@ -2538,7 +2543,7 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
             lines[words[0]].append(words[1:])
             problems += [f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
                          f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
-                         for name in words[2:] if name not in grantable]
+                         for name in words[2:] if name not in grantable and name != TRUSTED_PROMPT]
 
     bins = {}
     for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):

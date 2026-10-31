@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -277,9 +277,12 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   whose events send the magnifier's state and level and the filters' state, the latched and
   locked modifiers, a key the aids rejected, never which key, and a Shift gesture, none of these
   three while the session is locked or a trusted prompt has the focus, and an aid the compositor
-  turned off itself (AX10, AX11). The allow-list, `data/privileged-clients`, has no mark of a
-  trusted prompt today: the first code that serves the aids adds one, by which the compositor
-  knows such a prompt (#865; proposed with revision 3 of `doc_accessibility.md` and approved with it, AX11);
+  turned off itself (AX10, AX11). The compositor knows a trusted prompt by the mark
+  `trusted-prompt` on its line in the allow-list, `data/privileged-clients`, but no shipped line
+  carries it yet, so for a real prompt this silence does not hold until one does: cosmic-osd's
+  polkit prompt and gcr-prompter's keyring prompt have no mark, and `athanor-polkit-agent`, which
+  gets its own with its line, is not built (proposed with revision 3 of `doc_accessibility.md` and
+  approved with it, AX11; amended on 2026-10-30, #865);
 - the magnifier and the colour filters, the compositor's since #864 (`doc_accessibility.md` AX10)
   (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
@@ -313,7 +316,11 @@ windows is written in the plan that implements it, against cosmic-comp's as the 
 departure from it is an entry in the register. Any other model enters through the register (CO2).
 
 **OS13. Key bindings.** The compositor binds by default the keys the approved documents name: Super
-for the launcher and Super+A for the application library (`doc_launcher.md` LA8); Super+C and
+for the launcher, except while sticky keys are on, when Super alone latches and shows nothing and
+Super then A stays reachable (`doc_accessibility.md` AX11, maintainer decision, 2026-10-30), and
+Super+A, which opens the launcher until `athanor-library` exists, for the application library
+(`doc_launcher.md` LA8); when `athanor-library` arrives Super+A returns to it, and the path for
+sticky keys must be chosen again (amended on 2026-10-30, #865); Super+C and
 Super+N (`doc_control_center.md` CC9) and Super+V (CC10); Super+W and Super+1 to Super+0
 (`doc_overview.md` OV1, OV13), with OV13's Super+Shift and the same keys to move the window,
 Super+Ctrl with the arrows or h, j, k, l to step, Super+Shift+Ctrl to carry the window, and its
@@ -329,8 +336,9 @@ as their interface (OS5, `doc_settings.md`). While the session is locked only th
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
 (`doc_session.md` SN16, gap 7). Decision 28 leaves Super+W and `XF86LaunchA` unbound until the
-overview comes, Super+A
-until the application library ships, and Super+V until a client of data control collects; until then a fixture test shows each doing nothing, and
+overview comes, and Super+V until
+a client of data control collects (Super+A, which it left unbound until the application library
+ships, is bound as said above, amended on 2026-10-30, #865); until then a fixture test shows each doing nothing, and
 their own fixture tests come with them. Super+= and Super+- are bound since the own compositor has the magnifier (amended on 2026-10-30, #864). Until `athanor-osd` (`doc_osd.md` OD15) and `athanor-a11y`
 (`doc_accessibility.md` AX3) exist, the volume and display brightness keys and Super+Alt+S call
 cosmic-settings-daemon, as cosmic-comp's session does, from one source file of the compositor,
@@ -733,7 +741,12 @@ amendment's audit:
       (#870), and is closed only in the development session on tty3, where it was checked the
       same day on the reference laptop: the default session's check stays with #863 and this
       item (amended on 2026-10-30, #863). The aids' part of gap 4
-      is open until the aids land (#865), under gap 4's acceptance);
+      was open until the aids landed (#865), under gap 4's acceptance, and is closed only in
+      the development session on tty3, where it was checked on 2026-10-31 on the reference
+      laptop, but for two checks a person must do: a slow key and a bounce key pressed by hand
+      on a hardware keyboard, and the password typed by hand unlocking the session with the
+      aids on (`doc_session.md` SN16, gap 4). The default session's check stays with this item
+      (amended on 2026-10-31, #865));
     - item 1 for every difference that hides, moves or changes a control or a text, by any
       amount, but the controls this decision hides (the
       workspaces and applications buttons of the bar and of the dock, the clipboard
@@ -842,9 +855,11 @@ amendment's audit:
       compositor it is connected to: `athanor_toplevel_manager_v1`, which only the own
       compositor offers, selects `athanor-launcher`, and its absence cosmic-launcher.
       The Application library buttons of the bar and of the dock, which open
-      cosmic-app-library, are hidden under the own compositor and Super+A unbound (OS13), since the application library is a program of its
-      own, `athanor-library` (`doc_launcher.md`), not built yet; both come with it and its line
-      in the allow-list, after the switch, and the switch's pull request names the loss.
+      cosmic-app-library, are hidden under the own compositor, and Super+A opens the launcher (OS13,
+      amended on 2026-10-30, #865), since the application library is a program of its
+      own, `athanor-library` (`doc_launcher.md`), not built yet; the buttons and Super+A come with
+      it and its line in the allow-list, after the switch, when the path for sticky keys must be
+      chosen again, and the switch's pull request names the loss.
 
     The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
     an item of OS19: it follows the switch, and cosmic-workspaces' retirement moves from 1.1 to 1.0

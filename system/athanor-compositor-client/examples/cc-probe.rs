@@ -50,6 +50,9 @@ fn event(event: &Event) -> Value {
         Event::KeyboardLayouts(names) => json!({"keyboard_layouts": names}),
         Event::KeyboardGroup(group) => json!({"keyboard_group": group}),
         Event::Accessibility(a11y) => json!({"accessibility": format!("{a11y:?}")}),
+        Event::AidRejected(aid) => json!({"aid_rejected": format!("{aid:?}")}),
+        Event::AidGesture(aid) => json!({"aid_gesture": format!("{aid:?}")}),
+        Event::AidOff(aid) => json!({"aid_off": format!("{aid:?}")}),
     }
 }
 

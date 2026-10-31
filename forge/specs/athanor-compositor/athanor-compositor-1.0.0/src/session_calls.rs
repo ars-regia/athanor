@@ -27,7 +27,8 @@ pub(crate) struct Call {
     pub coalesce: bool,
 }
 
-/// Super alone: the launcher shows, or hides when shown (LA8,
+/// Super alone, and Super+A until `athanor-library` exists: the launcher shows, or hides when
+/// shown (LA8,
 /// `athanor-launcher-1.0.0/src/bus.rs`).
 pub(crate) const LAUNCHER: Call = Call {
     destination: "os.athanor.Launcher1",

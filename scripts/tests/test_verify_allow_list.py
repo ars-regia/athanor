@@ -4,6 +4,7 @@ names only an executable a spec installs (python3 -B -m unittest discover -s scr
 
 import importlib.util
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -194,6 +195,11 @@ class AllowList(unittest.TestCase):
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("/usr/bin/grim", out[0])
+
+    def test_a_line_may_mark_a_trusted_prompt(self):
+        self.package("athanor-dock", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/athanor-dock athanor-dock.service trusted-prompt\n")
+        self.assertEqual(self.problems(), [])
 
     def test_a_test_module_asking_for_the_top_layer_is_ignored(self):
         self.package(
@@ -879,6 +885,13 @@ class AllowList(unittest.TestCase):
                     "install -D -m 0755 target/release/athanor-dock %{buildroot}/usr/bin/athanor-dock\n",
                 )
                 self.assertEqual(len(self.problems()), 1)
+
+    def test_the_trusted_prompt_mark_is_the_compositors(self):
+        """verify.py reads the mark as identity.rs does: a line it accepts is a line honoured."""
+        source = (ROOT / "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/identity.rs")
+        mark = re.search(r'pub const MARK: &str = "([^"]+)";', source.read_text())
+        self.assertIsNotNone(mark, "identity.rs names no MARK")
+        self.assertEqual(mark.group(1), verify.TRUSTED_PROMPT)
 
 
 if __name__ == "__main__":

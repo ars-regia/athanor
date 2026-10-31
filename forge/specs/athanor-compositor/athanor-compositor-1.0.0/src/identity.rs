@@ -53,10 +53,14 @@ pub enum Privilege {
     /// `zwlr_data_control_manager_v1`: the same through the wlroots protocol, which
     /// wl-clipboard 2.2 speaks.
     WlrDataControl,
+    /// `trusted-prompt`, a mark and no global: the client's surfaces are trusted prompts, while
+    /// one of which has the keyboard focus the keyboard aids tell nothing of the keys typed
+    /// (doc_own_stack.md OS4 and OS5, doc_accessibility.md AX11).
+    TrustedPrompt,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 18] = [
+    const ALL: [(Self, &'static str); 19] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -81,6 +85,7 @@ impl Privilege {
         (Self::A11y, "athanor_a11y_manager_v1"),
         (Self::ExtDataControl, "ext_data_control_manager_v1"),
         (Self::WlrDataControl, "zwlr_data_control_manager_v1"),
+        (Self::TrustedPrompt, MARK),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -91,10 +96,16 @@ impl Privilege {
     }
 }
 
+/// The allow-list's mark of a trusted prompt, the one name of a line that is no interface.
+pub const MARK: &str = "trusted-prompt";
+
 /// The interface of every privileged global, as the allow-list names it.
 #[cfg(test)]
 pub(crate) fn names() -> impl Iterator<Item = &'static str> {
-    Privilege::ALL.iter().map(|(_, name)| *name)
+    Privilege::ALL
+        .iter()
+        .map(|(_, name)| *name)
+        .filter(|name| *name != MARK)
 }
 
 /// A process, as the compositor reads it at connect.
@@ -491,6 +502,21 @@ mod tests {
             ..bar()
         };
         assert!(list.grants(&no_unit, BAR_PID, &Files).is_empty());
+    }
+
+    /// The mark of a trusted prompt is granted as an interface is, on its line alone.
+    #[test]
+    fn the_trusted_prompt_mark_is_read_on_its_line() {
+        let line = "/usr/bin/athanor-bar athanor-bar.service trusted-prompt\n";
+        let list = AllowList::parse(line).expect("allow-list");
+        assert_eq!(
+            list.grants(&bar(), BAR_PID, &Files),
+            [Privilege::TrustedPrompt]
+        );
+        let other = AllowList::parse(BAR).expect("allow-list");
+        assert!(!other
+            .grants(&bar(), BAR_PID, &Files)
+            .contains(&Privilege::TrustedPrompt));
     }
 
     /// A file at the bar's path that is not the bar's file, as in a sandbox with its own `/usr`,

@@ -511,12 +511,10 @@ impl State {
             tracing::warn!(?path, "the seat has no keyboard: xkb_config is not applied");
             return;
         };
-        let (locked, group) = match &self.virtual_keymap {
-            Some(current) => (current.seat_modifiers[2], current.seat_modifiers[3]),
-            None => {
-                let mods = keyboard.modifier_state().serialized;
-                (mods.locked, mods.layout_effective)
-            }
+        let saved = self.virtual_keymap.as_ref().map(|current| current.seat_modifiers);
+        let [_, _, locked, group] = match saved {
+            Some(saved) => saved,
+            None => self.seat_modifiers(&keyboard),
         };
         let config = XkbConfig {
             rules: &settings.rules,
@@ -540,10 +538,13 @@ impl State {
             u32::try_from(xkb.layouts().count()).unwrap_or(u32::MAX)
         });
         let group = group.min(layouts.saturating_sub(1));
-        // Smithay replayed the held keys into the new state: their modifiers are kept.
+        // Smithay replayed the held keys into the new state: their modifiers are kept, and
+        // sticky keys' are set again under the new keymap.
         let held = keyboard.modifier_state().serialized;
+        let [depressed, latched, locked, group] =
+            self.with_sticky([held.depressed, held.latched, locked, group]);
         keyboard.with_xkb_state(self, |mut context| {
-            context.set_modifier_mask(held.depressed, held.latched, locked, group)
+            context.set_modifier_mask(depressed, latched, locked, group)
         });
         keyboard.change_repeat_info(settings.repeat_rate, settings.repeat_delay);
         self.repeat = (settings.repeat_rate, settings.repeat_delay);

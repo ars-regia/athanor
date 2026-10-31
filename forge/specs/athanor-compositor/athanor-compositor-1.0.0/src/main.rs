@@ -7,6 +7,7 @@
 #![deny(unsafe_code)]
 
 mod a11y;
+mod aids;
 mod bindings;
 mod capture;
 mod clipboard;

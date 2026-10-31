@@ -68,6 +68,7 @@ impl SessionLockHandler for State {
         self.lock_epoch
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.super_tap = None;
+        self.aids_drop_pending();
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();
@@ -82,6 +83,7 @@ impl SessionLockHandler for State {
             locker: Some(locker),
             surfaces: Vec::new(),
         });
+        self.aids_quiet_changed();
         self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
@@ -91,6 +93,8 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.aids_drop_pending();
+        self.aids_quiet_changed();
         self.focus_top();
         self.refresh_pointer();
         self.refresh_tools();
@@ -157,6 +161,7 @@ impl State {
         // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
         // confinement follows the keyboard (decision 30, `constraints.rs`).
         if surface.is_none() {
+            self.aids_focus_changed(None);
             self.loop_handle.insert_idle(|state| state.refresh_constraint());
         }
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
