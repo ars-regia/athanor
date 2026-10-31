@@ -306,27 +306,25 @@ def main():
     pss_float = pss_kb(pid)
     print(f"athanor-bar PSS (float): {pss_float} kB")
 
-    clock_setting = (
-        Path(os.environ["XDG_CONFIG_HOME"])
-        / "cosmic"
-        / "com.system76.CosmicAppletTime"
-        / "v1"
-        / "military_time"
-    )
+    def set_clock_format(value):
+        subprocess.run(
+            ["gsettings", "set", "org.gnome.desktop.interface", "clock-format", value],
+            check=True,
+        )
 
     def clock_buttons(pattern):
         return buttons_matching(app, Atspi, re.compile(pattern))
 
     check(
-        "the clock shows 24 hours as COSMIC says",
+        "the clock shows 24 hours as clock-format says",
         wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),
     )
-    clock_setting.write_text("false", encoding="utf-8")
+    set_clock_format("12h")
     check(
-        "the clock follows COSMIC's military_time live (BR3)",
+        "the clock follows clock-format live (BR3, LN8)",
         wait_for(lambda: clock_buttons(r", \d{1,2}:\d\d (AM|PM)$"), 3),
     )
-    clock_setting.write_text("true", encoding="utf-8")
+    set_clock_format("24h")
     check(
         "the clock returns to 24 hours",
         wait_for(lambda: clock_buttons(r", \d\d:\d\d$"), 3),

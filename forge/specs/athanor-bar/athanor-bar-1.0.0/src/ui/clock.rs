@@ -8,15 +8,18 @@ use std::path::Path;
 use std::rc::Rc;
 
 use athanor_bar::clock;
-use athanor_compositor_client::clock as cosmic_clock;
 use gtk4::accessible::Property;
 use gtk4::gio;
+use gtk4::gio::prelude::*;
 use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::popup::Popup;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
+
+const INTERFACE: &str = "org.gnome.desktop.interface";
+const CLOCK_FORMAT: &str = "clock-format";
 
 /// The zone identifier last read, and the zone it gave.
 type Zone = Rc<RefCell<Option<(Option<String>, glib::TimeZone)>>>;
@@ -27,13 +30,28 @@ struct ClockUi {
     zone: Zone,
     /// The last tick could not read or format the time: logged once, not every second.
     failed: Cell<bool>,
-    /// Whether the clock shows 24 hours (BR3): COSMIC's `military_time`, else the locale.
+    /// Whether the clock shows 24 hours (BR3): the user's `clock-format`, else the locale.
     hours24: Rc<Cell<bool>>,
-    _watch: Option<gio::FileMonitor>,
+    /// Keeps `clock-format` watched.
+    _interface: Option<gio::Settings>,
 }
 
-/// COSMIC's `military_time` when it is set, else the locale's own 12/24-hour convention.
-fn read_hours24() -> bool {
+/// The settings that hold `clock-format`, `None` without the key.
+fn interface_settings() -> Option<gio::Settings> {
+    let schema = gio::SettingsSchemaSource::default()?.lookup(INTERFACE, true);
+    if !schema.is_some_and(|schema| schema.has_key(CLOCK_FORMAT)) {
+        tracing::warn!("{INTERFACE} has no {CLOCK_FORMAT}; the clock follows the locale");
+        return None;
+    }
+    Some(gio::Settings::new(INTERFACE))
+}
+
+/// The user's `clock-format` when they set it, else the locale's own 12/24-hour convention:
+/// the key's default says nothing of the region (doc_languages.md, LN8).
+fn read_hours24(interface: Option<&gio::Settings>) -> bool {
+    let chosen = interface
+        .and_then(|interface| interface.user_value(CLOCK_FORMAT))
+        .and_then(|value| clock::clock_format(value.str()));
     let now = glib::DateTime::from_utc(2000, 1, 1, 13, 0, 0.0).ok();
     let format = |pattern| {
         now.as_ref()
@@ -41,7 +59,7 @@ fn read_hours24() -> bool {
             .map(|text| text.to_string())
             .unwrap_or_default()
     };
-    clock::twenty_four_hour(cosmic_clock::military_time(), &format("%X"), &format("%p"))
+    clock::twenty_four_hour(chosen, &format("%X"), &format("%p"))
 }
 
 fn current_zone(zone: &Zone) -> glib::TimeZone {
@@ -135,15 +153,20 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
             calendar.select_day(&now);
         }
     });
-    let hours24 = Rc::new(Cell::new(read_hours24()));
-    let watched = hours24.clone();
-    let watch = cosmic_clock::watch(move || watched.set(read_hours24()));
+    let interface = interface_settings();
+    let hours24 = Rc::new(Cell::new(read_hours24(interface.as_ref())));
+    if let Some(interface) = &interface {
+        let watched = hours24.clone();
+        interface.connect_changed(Some(CLOCK_FORMAT), move |interface, _| {
+            watched.set(read_hours24(Some(interface)));
+        });
+    }
     Some(Box::new(ClockUi {
         popup,
         label,
         zone,
         failed: Cell::new(false),
         hours24,
-        _watch: watch,
+        _interface: interface,
     }))
 }

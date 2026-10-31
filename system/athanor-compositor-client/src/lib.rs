@@ -7,7 +7,6 @@ mod a11y;
 mod actions;
 #[cfg(feature = "gtk")]
 mod capture;
-pub mod clock;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
