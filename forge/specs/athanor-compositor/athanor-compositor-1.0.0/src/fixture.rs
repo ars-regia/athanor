@@ -2357,6 +2357,33 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
     run.stop();
 }
 
+/// An output that loses logical size, as a higher scale makes it, leaves a window inside it
+/// that was inside it, and not only somewhere on it.
+#[test]
+fn an_output_that_shrinks_keeps_a_window_on_it_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let size = window.geometry().size;
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let at = (width - size.w, height - size.h);
+    run.state.space.relocate_element(&window, at);
+    let small = smithay::output::Mode {
+        size: (width - size.w / 2, height - size.h / 2).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(small), None, None, None);
+    run.state.arrange_outputs();
+    let moved = run
+        .state
+        .space
+        .element_geometry(&window)
+        .expect("the window is mapped");
+    let area = run.state.space.output_geometry(&first).expect("placed");
+    assert_eq!(moved.intersection(area), Some(moved), "whole: {moved:?} in {area:?}");
+    run.stop();
+}
+
 /// An output that takes another size (C1 task 8): the outputs side by side again leave no window
 /// outside them and no pointer outside them.
 #[test]

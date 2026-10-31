@@ -527,21 +527,20 @@ impl State {
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
-        let stranded: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|window| {
-                self.space
-                    .element_geometry(window)
-                    .is_some_and(|area| !self.shown_at_home(window, area))
-            })
-            .cloned()
-            .collect();
-        for window in stranded {
-            if let Some(area) = self.home_area(&window) {
-                let at = centred(area, window.geometry().size);
-                self.space.relocate_element(&window, at);
-            }
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for window in windows {
+            let (Some(area), Some(shown)) = (
+                self.home_area(&window),
+                self.space.element_geometry(&window),
+            ) else {
+                continue;
+            };
+            let at = if self.shown_at_home(&window, shown) {
+                inside(area, shown)
+            } else {
+                centred(area, shown.size)
+            };
+            self.space.relocate_element(&window, at);
         }
         self.fit_maximised();
         self.space.refresh();
@@ -1320,6 +1319,16 @@ struct Maximised(Cell<Option<Kept>>);
 struct Kept {
     before: Rectangle<i32, Logical>,
     area: Rectangle<i32, Logical>,
+}
+
+/// Where `window` lies inside `area`, moved no further than that takes; its top left stays in
+/// `area` when it does not fit.
+fn inside(area: Rectangle<i32, Logical>, window: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+    let right = area.loc.x + area.size.w - window.size.w;
+    let bottom = area.loc.y + area.size.h - window.size.h;
+    let x = window.loc.x.min(right).max(area.loc.x);
+    let y = window.loc.y.min(bottom).max(area.loc.y);
+    (x, y).into()
 }
 
 /// Where the geometry's top left goes for a window of `size` to be centred in `area`: a space
