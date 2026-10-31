@@ -8226,6 +8226,174 @@ fn os9_an_input_method_releasing_its_grab_leaves_a_popup_grab() {
     run.stop();
 }
 
+/// A popup's grab replaces the input method's while it lasts, and the next key after it ends
+/// reaches the input method without a new request.
+#[test]
+fn os9_a_popup_grab_suspends_the_input_method_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
+
+    assert!(
+        run.state.grab_serials.key_press.is_none(),
+        "a key the input method took is no client's serial"
+    );
+    let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let focused = focus(&run.state).expect("a focus");
+    assert!(
+        run.state.popups.find_popup(&focused).is_some(),
+        "the popup is granted its grab"
+    );
+    chord(&mut run.state, &[31]);
+    local.pump(&mut run, "the popup takes the key", |client, _| {
+        client.keys.contains(&31)
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [30], "the input method is suspended");
+
+    popup.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    chord(&mut run.state, &[32]);
+    ime.pump(&mut run, "the input method takes the key again", |_, _| {
+        method.keys() == [30, 32]
+    });
+    local.roundtrip(&mut run);
+    assert!(!local.client.keys.contains(&32), "the window saw no key");
+    run.stop();
+}
+
+/// A key another source holds is sent to no client, so it names no serial for the focused one.
+#[test]
+fn a_key_another_source_holds_names_no_serial() {
+    use smithay::backend::input::{InputTime, KeyState};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let press = |state: &mut State, source| {
+        state.key_input(38u32.into(), KeyState::Pressed, InputTime::now(), source);
+    };
+    press(&mut run.state, KeyboardSource::Physical);
+    assert!(run.state.grab_serials.key_press.is_some(), "a serial");
+    press(&mut run.state, KeyboardSource::Auxiliary(1));
+    assert!(run.state.grab_serials.key_press.is_none(), "no serial");
+    run.state.key_input(
+        38u32.into(),
+        KeyState::Released,
+        InputTime::now(),
+        KeyboardSource::Auxiliary(1),
+    );
+    assert!(run.state.grab_serials.key_release.is_none(), "none on the release");
+    run.stop();
+}
+
+/// A grab the input method asks for under a popup's waits for it: the popup keeps the keyboard.
+#[test]
+fn os9_an_input_method_grab_asked_under_a_popup_waits_for_it() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[31]);
+    local.pump(&mut run, "the popup takes the key", |client, _| {
+        client.keys.contains(&31)
+    });
+    ime.roundtrip(&mut run);
+    assert!(method.keys().is_empty(), "the popup's grab stayed");
+    popup.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    chord(&mut run.state, &[32]);
+    ime.pump(&mut run, "the input method takes the key", |_, _| {
+        method.keys() == [32]
+    });
+    run.stop();
+}
+
+/// A key pressed for the popup is released to whoever had it: the grab waits for no key held.
+#[test]
+fn os9_the_input_method_grab_comes_back_with_no_key_held() {
+    use smithay::backend::input::{InputTime, KeyState};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let key = |state: &mut State, key_state| {
+        state.key_input(38u32.into(), key_state, InputTime::now(), KeyboardSource::Physical);
+    };
+    key(&mut run.state, KeyState::Pressed);
+    keyboard.unset_grab(&mut run.state);
+    key(&mut run.state, KeyState::Released);
+    assert!(!keyboard.is_grabbed(), "the release stays off the grab");
+    chord(&mut run.state, &[31]);
+    assert!(keyboard.is_grabbed(), "the next key brings it back");
+    run.stop();
+}
+
+/// An exclusive surface that takes the keyboard and gives it back leaves the input method its
+/// grab: it serves the surface's keys and the window's after it.
+#[test]
+fn os9_an_exclusive_surface_suspends_the_input_method_grab() {
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the input method takes the surface's key", |_, _| {
+        method.keys() == [30]
+    });
+
+    drop(steps);
+    run.until("the exclusive client left", |state| {
+        focus(state).is_none_or(|surface| surface.client().map(|c| c.id()) != Some(shell_id.clone()))
+    });
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the input method takes the window's key", |_, _| {
+        method.keys() == [30, 31]
+    });
+    run.stop();
+}
+
 /// One input method per seat: a second is told it is unavailable, as the only event it gets,
 /// and the first goes on serving the focused text input.
 #[test]
@@ -10269,7 +10437,11 @@ fn a_window_dropped_on_another_output_takes_its_workspace() {
 
 /// Maps a popup of `parent`, a window of `local`, that grabs the seat with a key serial of
 /// `local`'s, as a menu opened from the keyboard does.
-fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::XdgSurface) {
+fn grabbing_popup(
+    local: &mut Local,
+    run: &mut Running,
+    parent: &xdg_surface::XdgSurface,
+) -> (xdg_popup::XdgPopup, wl_surface::WlSurface) {
     let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -10294,6 +10466,7 @@ fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::Xd
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
     local.roundtrip(run);
+    (popup, surface)
 }
 
 /// A popup of a window the user cannot see, on an inactive workspace or minimised, grabs

@@ -85,6 +85,10 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
+        self.end_finished_popup_grab();
+        if !past_grab {
+            self.resume_input_method_grab();
+        }
         // A hardware key is read under the seat's keymap, which its clients are sent first.
         if source == KeyboardSource::Physical {
             self.restore_seat_keymap();
@@ -93,8 +97,10 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let to = keyboard
+        // A key the input method's grab takes is no client's to name.
+        let mut to = keyboard
             .current_focus()
+            .filter(|_| past_grab || !self.input_method_grabbed())
             .and_then(|surface| surface.client());
         // Read before the filter, which runs with the keyboard held.
         let inhibited = self.shortcuts_inhibited();
@@ -208,8 +214,11 @@ impl State {
                 }
                 None
             }
-            // A key another source holds already: there is nothing to send.
-            None => None,
+            // A key another source holds already: there is nothing to send, so no serial.
+            None => {
+                to = None;
+                None
+            }
         };
         match filtered {
             // Sent to the client: a popup's grab may name its serial.

@@ -205,8 +205,10 @@ stays so after unlock: only a grab asked for while unlocked is sent the keymap, 
 and the current modifiers, then the keys. While locked the text inputs follow no surface, so
 the input method is neither activated for the lock surface nor told its text, and what it
 commits or pre-edits reaches no client. Releasing its grab ends that grab only, never one that
-replaced it; an exclusive layer surface taking the keyboard ends any grab, the input method's
-included.
+replaced it. A popup's grab replaces the input method's while it lasts, and an exclusive layer
+surface taking the keyboard takes it off; neither ends it: it is back for the next key pressed
+with no key held, without a new request, so that it serves the launcher's field and the window
+after it. Only the lock and the input method's own release end it.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
 changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
