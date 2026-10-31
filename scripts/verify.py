@@ -1088,13 +1088,13 @@ def gallery_problems(root):
 
 
 def toolkit_boundary_problems(root=None):
-    """The toolkit names no Athanor crate and no path in [dependencies] or [build-dependencies],
-    and its `license` is the set of licence files beside the manifest (ADR-0126)."""
+    """The toolkit names no Athanor crate, no path and no workspace dependency in [dependencies]
+    or [build-dependencies], and its `license` is the set of licence files beside the manifest
+    (ADR-0126)."""
     root = Path(root or ROOT)
     manifest = f"{TOOLKIT}/Cargo.toml"
     try:
         data = tomllib.loads(read(root / manifest))
-        workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {})
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{manifest}: cannot read ({err})"]
     tables = dependency_tables(data, ("dependencies", "build-dependencies"))
@@ -1103,8 +1103,8 @@ def toolkit_boundary_problems(root=None):
         for name, dep in deps.items():
             dep = dep if isinstance(dep, dict) else {}
             if dep.get("workspace"):
-                dep = workspace.get(name, {})
-                dep = dep if isinstance(dep, dict) else {}
+                out.append(f"{manifest}: [{table}] {name} is inherited from the workspace: "
+                           "the split leaves none, so write its version here")
             package = dep.get("package", name)
             if re.match(r"athanor[-_]", package):
                 out.append(f"{manifest}: [{table}] {name} is an Athanor crate: only dev-dependencies may be")
