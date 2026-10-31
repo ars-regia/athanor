@@ -211,6 +211,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let status = gtk4::Label::new(None);
     status.set_visible(false);
     let button = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    button.set_halign(gtk4::Align::Center);
     button.append(&icon);
     button.append(&status);
     let popup = Popup::new(bar, &button, &tr("Accessibility"));
