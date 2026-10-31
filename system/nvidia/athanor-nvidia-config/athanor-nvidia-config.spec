@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-nvidia-config
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Athanor configuration for the NVIDIA image variants
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -34,5 +34,8 @@ cp -a %{_sourcedir}/usr %{buildroot}/
 /usr/lib/udev/rules.d/71-nvidia-uaccess.rules
 
 %changelog
+* Sat Oct 31 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
+- Keep nvidia-powerd off desktops with ExecCondition= on the DMI chassis type: systemd
+  has no ConditionChassis=, so the drop-in did nothing and the udev rule started the daemon
 * Wed Sep 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - NVIDIA configuration moved out of athanor-base-config (doc_system_image.md, S4)
