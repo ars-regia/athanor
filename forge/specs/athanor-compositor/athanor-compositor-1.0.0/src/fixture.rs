@@ -2470,6 +2470,41 @@ fn an_output_that_grows_leaves_a_window_over_a_zone() {
     run.stop();
 }
 
+/// A shrink in width moves a window no further than that: over a bar's zone it stays.
+#[test]
+fn an_output_cut_on_one_side_leaves_the_other_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    let size = window.geometry().size;
+    let width = OUTPUTS[0].width;
+    run.state.space.relocate_element(&window, (width - size.w - 10, 5));
+
+    resize_first(&mut run, width - 50, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let cut = (width - 50 - size.w, 5);
+    assert_eq!(shown.map(|shown| shown.loc), Some(cut.into()));
+    run.stop();
+}
+
+/// The pointer stays on an output that shrinks, whatever the next output takes of its place.
+#[test]
+fn the_pointer_stays_on_an_output_that_shrinks() {
+    let mut run = Running::start(None);
+    let pointed: Point<f64, Logical> = (f64::from(OUTPUTS[0].width) - 10.0, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let first = run.state.space.output_geometry(&first).expect("placed");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(first.to_f64().contains(pointer.current_location()));
+    run.stop();
+}
+
 /// A window the user left over an edge stays there.
 #[test]
 fn an_output_that_shrinks_leaves_a_window_over_its_edge() {

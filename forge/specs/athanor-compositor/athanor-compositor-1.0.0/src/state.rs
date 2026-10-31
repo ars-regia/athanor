@@ -534,6 +534,7 @@ impl State {
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
         let changed = self.changed_outputs();
+        let mut moved = !changed.is_empty();
         let windows: Vec<Window> = self.space.elements().cloned().collect();
         for window in windows {
             let (Some(area), Some(shown)) = (
@@ -548,6 +549,7 @@ impl State {
             } else {
                 centred(area, shown.size)
             };
+            moved |= at != shown.loc;
             self.space.relocate_element(&window, at);
         }
         self.fit_kept_places(&changed);
@@ -557,14 +559,18 @@ impl State {
             let at = pointer.current_location();
             let carried = changed.iter().find_map(|(output, was)| {
                 let shown = self.space.output_geometry(output)?;
-                was.to_f64().contains(at).then(|| at + (shown.loc - was.loc).to_f64())
+                let wanted = at + (shown.loc - was.loc).to_f64();
+                let on = was.to_f64().contains(at);
+                on.then(|| crate::input::confine(&[shown], at, wanted)).flatten()
             });
-            let wanted = carried.unwrap_or(at);
-            if let Some(to) = crate::input::confine(&outputs, at, wanted).filter(|to| *to != at) {
+            let to = carried.or_else(|| crate::input::confine(&outputs, at, at));
+            if let Some(to) = to.filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
             }
         }
-        self.refresh_pointer();
+        if moved {
+            self.refresh_pointer();
+        }
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
         }
@@ -584,9 +590,10 @@ impl State {
     }
 
     /// Where the place `kept` of `window` goes after `changed`: if it lay on its home output it
-    /// follows that output. If it lay whole there it stays whole, inside what the output leaves
-    /// when its new edges cut it; otherwise it stays over the edge, where a user may leave a
-    /// window (`grabs::kept_reachable`).
+    /// follows that output. If it lay whole there it stays whole: along a side the output's new
+    /// edges cut, it goes inside what the output leaves, and along the other it stays where the
+    /// user left it. Otherwise it stays over the edge, where a user may leave a window
+    /// (`grabs::kept_reachable`).
     fn stays_whole(
         &self,
         window: &Window,
@@ -601,7 +608,15 @@ impl State {
         });
         match (moved, self.home_area(window)) {
             (Some((shown, moved, true)), Some(area)) if !shown.contains_rect(moved) => {
-                inside(area, moved)
+                let fits = |at: i32, size: i32, from: i32, room: i32| {
+                    at >= from && at + size <= from + room
+                };
+                let kept = inside(area, moved);
+                let x = fits(moved.loc.x, moved.size.w, shown.loc.x, shown.size.w);
+                let y = fits(moved.loc.y, moved.size.h, shown.loc.y, shown.size.h);
+                let x = if x { moved.loc.x } else { kept.x };
+                let y = if y { moved.loc.y } else { kept.y };
+                (x, y).into()
             }
             (Some((_, moved, _)), _) => moved.loc,
             _ => kept.loc,
