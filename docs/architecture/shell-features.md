@@ -1,6 +1,6 @@
 # Shell feature register
 
-Version 1, frozen on 2026-10-04.
+Version 2, proposed on 2026-10-31: it adds the Window management surface and changes no entry of version 1, frozen on 2026-10-04.
 
 This register is defined by ST3 of [doc_shell_standard.md](doc_shell_standard.md). An entry is required when any reference offers the feature in a default installation. Each entry names its surface, and the gate of a surface requires every entry of its own. The register is versioned: a feature that a reference adds later goes into the next version without moving a gate under way. An entry is excluded only by the maintainer, with the reason written here; the expected reasons are a zero-trust conflict, or a feature that exists only on a compositor Athanor does not run.
 
@@ -10,7 +10,7 @@ References and the versions each research used:
 - Windows 11 26H2 (build 26300)
 - GNOME 51
 - Plasma 6.7
-- COSMIC epoch-1.6.0
+- COSMIC epoch-1.6.0; epoch-1.11.0, the release cosmic-comp comes from, for Window management
 - DMS v1.6.2 (DankMaterialShell)
 - Noctalia v5.2.1
 - Caelestia v2.5.0
@@ -436,6 +436,19 @@ Statuses in the Athanor column:
 | F-greeter-21 | Login settings page (greeter theme, auto-login) | [Plasma](https://kde.org/announcements/plasma/6/6.6.0/), [DMS](https://github.com/AvengeMedia/DankMaterialShell/blob/v1.6.2/quickshell/Common/SettingsTabs.qml) | missing | not in cosmic-settings |
 | F-greeter-22 | Lock screen look before sign-in with widgets | [Windows 11](https://support.microsoft.com/en-us/servicing/os/windows-11/2026/08/kb5120998-windows-11-24h2-25h2-update) | missing | not in forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/ui.rs |
 
+## Window management
+
+This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entries are the automatic tiling of the default session and what that departs from in cosmic-comp, whose tiling is the reference (`doc_own_stack.md` OS12). The rest of the surface, scrolling layouts, window rules and gestures among them, is research CO2 leaves open, and F-overview-15 moves here with it. The bar's button for this entry is F-bar-34.
+
+| Id | Feature | Sources | Athanor | Note |
+|---|---|---|---|---|
+| F-windows-01 | Automatic tiling of a workspace: a tree of tiles, a new window splitting the tile focused last, dialogs above the tiles, turned on and off per workspace | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs) | missing | cosmic-comp's session has it; the default session's compositor does not (#894, `doc_own_stack.md` OS12) |
+| F-windows-02 | A minimised tile keeps its place in the tree | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/mod.rs#L3563) | excluded (proposed) | a window that is minimised or moved leaves the tree and returns as a new window does, so that the tree holds no place without a window |
+| F-windows-03 | Stacks of tiles, as tabs in one tile | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2132) | excluded (proposed) | a stack needs the tiling keys and a tab bar drawn by the compositor, and the own compositor leaves title bars to its clients (`doc_own_stack.md` decision 23) |
+| F-windows-04 | Lifting a tile into a preview with drop zones, and resizing from a press in the gap between tiles | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2666) | excluded (proposed) | the preview and its indicators are drawn by the compositor; here dropping a tile on another swaps them, a drop elsewhere puts it back, and a client's resize moves the split nearest that edge |
+| F-windows-05 | A full-screen window gives up its tile, and the neighbours grow behind it | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/mod.rs#L5079) | excluded (proposed) | the window keeps its tile: the neighbours, hidden on that output, are not resized for nothing, and the window returns with no state to restore |
+| F-windows-06 | A list of applications that always float | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/data/tiling-exceptions.ron) | excluded (proposed) | about 35 pairs of regular expressions on the application id and the title: the compositor reads no COSMIC setting and has no regular expressions, and a list of applications is not a rule of the layout; dialogs and windows of one size float by rule |
+
 ## Counts
 
 ### Bar
@@ -547,3 +560,14 @@ Statuses in the Athanor column:
 | excluded (proposed) | 0 |
 | excluded | 0 |
 | total | 22 |
+
+### Window management
+
+| Status | Entries |
+|---|---|
+| have | 0 |
+| partial | 0 |
+| missing | 1 |
+| excluded (proposed) | 5 |
+| excluded | 0 |
+| total | 6 |

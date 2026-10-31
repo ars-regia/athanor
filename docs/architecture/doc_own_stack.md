@@ -44,7 +44,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-10-30 (#862): OS5 and decision 28, with revision 3 of `doc_accessibility.md`,
   approved by the maintainer with it (#867).
 - Amended on 2026-10-31: decision 31, with OS4, OS17, OS19, `doc_session.md` SN16 and
-  `doc_shell.md` SH2's exceptions.
+  `doc_shell.md` SH2's exceptions; OS5, the tiling manager, with version 2 of the register.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -268,7 +268,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   windows, with a private `athanor_toplevel_state_v1` keyed by its handle for the state and the
   outputs of a window and a manager interface for activate, minimise, unminimise and close;
   `ext_workspace_manager_v1` for workspaces, with a private `athanor_workspace_tiling_v1` for the
-  tiling state; a private `athanor_keyboard_group_v1` for the keyboard group, made for a `wl_keyboard`
+  tiling state, made for a workspace by the global `athanor_workspace_tiling_manager_v1`; a private `athanor_keyboard_group_v1` for the keyboard group, made for a `wl_keyboard`
   by the global `athanor_keyboard_group_manager_v1`, its layouts read from LN9's store (decision
   27); and a private
   `athanor_a11y_v1` for the magnifier and the colour filters. Each private protocol is privileged
