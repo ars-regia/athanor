@@ -62,6 +62,7 @@ class CasesTest(unittest.TestCase):
         keys = []
         for line in (gallery / "strings.tsv").read_text().splitlines():
             self.assertEqual(len(line.split("\t")), 3, line)
+            self.assertTrue(all(cell.strip() for cell in line.split("\t")), line)
             keys.append(line.split("\t")[0])
         self.assertEqual(len(set(keys)), len(keys))
         for page in cases.GALLERY_PAGES:
