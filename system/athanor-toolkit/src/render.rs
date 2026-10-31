@@ -469,7 +469,16 @@ pub fn paint<C: Canvas>(
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
                 let size = mark_size(is_switch, t.font_size);
                 let mark = mark_rect(r, ui.rtl, size, is_switch);
-                let fill = if active { t.accent } else { t.surface };
+                let (fill, ink) = if active {
+                    (t.accent, t.on_accent)
+                } else {
+                    (t.surface, t.text)
+                };
+                let fill = if hover == Some(id) {
+                    mix(fill, ink, HOVER)
+                } else {
+                    fill
+                };
                 let radius = if is_switch { mark.h / 2.0 } else { mark.h / 4.0 };
                 ctx.set_paint(color(fill));
                 ctx.fill_path(&rounded(mark, 0.0, radius));
@@ -674,6 +683,38 @@ mod tests {
         // Half a pixel rounds away from zero; integer scales multiply.
         assert_eq!(physical(101.0, 1.5)?, 152);
         assert_eq!(physical(99.5, 2.0)?, 200);
+        Ok(())
+    }
+
+    #[test]
+    fn a_hovered_check_or_switch_changes_its_mark() -> Result<(), Error> {
+        for (is_switch, active) in [(false, false), (false, true), (true, false), (true, true)] {
+            let label = "Wi-Fi".to_owned();
+            let mut ui = crate::Ui::new("Hover", crate::Theme::default(), false);
+            let kind = if is_switch {
+                crate::Kind::Switch { label, active }
+            } else {
+                crate::Kind::Check { label, active }
+            };
+            let id = ui.add(crate::Ui::ROOT, kind);
+            let plain = render(&mut ui, 1.0)?;
+            let r = ui.widget(id).rect;
+            ui.pointer_motion(r.x + r.w / 2.0, r.y + r.h / 2.0);
+            let (t, (w, h)) = (&ui.theme, mark_size(is_switch, ui.theme.font_size));
+            let (fill, ink) = if active {
+                (t.accent, t.on_accent)
+            } else {
+                (t.surface, t.text)
+            };
+            let (fill, m) = (mix(fill, ink, HOVER).0, mark_rect(r, false, (w, h), is_switch));
+            // A corner of the mark's fill, clear of the knob and the tick.
+            let (x, y) = (m.x + m.w * if active { 0.25 } else { 0.75 }, m.y + m.h * 0.8);
+            let hovered = render(&mut ui, 1.0)?;
+            let i = 4 * (usize::from(hovered.width()) * y as usize + x as usize);
+            assert_eq!(hovered.data_as_u8_slice()[i..i + 4].to_vec(), fill.to_vec());
+            ui.pointer_leave();
+            assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
+        }
         Ok(())
     }
 
