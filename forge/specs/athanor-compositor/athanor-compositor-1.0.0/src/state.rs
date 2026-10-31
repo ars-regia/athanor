@@ -659,7 +659,7 @@ impl State {
         let maximised = window.user_data().get_or_insert(Maximised::default);
         let before = match maximised.0.get() {
             Some(kept) => kept.before,
-            None => self.space.element_geometry(window).unwrap_or_default(),
+            None => self.settled_geometry(window),
         };
         maximised.0.set(Some(Kept { before, area }));
         toplevel.with_pending_state(|state| {
@@ -717,19 +717,37 @@ impl State {
             .is_initial_configure_sent()
             .then(|| toplevel.send_configure());
         if !kept.is_empty() {
-            let to = match self
-                .home_area(window)
-                .filter(|_| !self.shown_at_home(window, kept))
-            {
-                Some(area) => centred(area, kept.size),
-                None => kept.loc,
-            };
-            relocate(window, to, serial);
+            relocate(window, self.kept_place(window, kept), serial);
         } else if crate::handlers::shown(window) {
             place_again(window, serial);
         } else if let Some(moving) = window.user_data().get::<Relocate>() {
             // Asked before the window was placed: nothing to go back to, and `place` places it.
             moving.0.set(None);
+        }
+    }
+
+    /// Where a window goes back to `kept`: there, or the middle of its `home_area` when its home
+    /// output no longer shows that place.
+    fn kept_place(&self, window: &Window, kept: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+        match self
+            .home_area(window)
+            .filter(|_| !self.shown_at_home(window, kept))
+        {
+            Some(area) => centred(area, kept.size),
+            None => kept.loc,
+        }
+    }
+
+    /// A window that unmapped has asked for nothing (`xdg_toplevel`): it is neither full-screen
+    /// nor maximised any more, and it draws again at the place it had.
+    pub fn forget_requests(&self, window: &Window) {
+        let data = window.user_data();
+        let maximised = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        let full = data.get::<FullScreen>().and_then(|kept| kept.0.take());
+        match maximised.or(full) {
+            Some(Kept { before, .. }) if before.is_empty() => place_again(window, None),
+            Some(Kept { before, .. }) => relocate(window, self.kept_place(window, before), None),
+            None => {}
         }
     }
 
@@ -779,6 +797,10 @@ impl State {
             .user_data()
             .get::<Relocate>()
             .and_then(|relocate| relocate.0.get());
+        if let Some(Destination { to: None, .. }) = moving {
+            // On its way to where `placed` puts it: it has no place to keep.
+            return Rectangle::default();
+        }
         if let Some(Destination { to: Some(to), .. }) = moving {
             let asked = window
                 .toplevel()
@@ -1498,18 +1520,6 @@ fn place_again(window: &Window, serial: Option<Serial>) {
         .set(Some(Destination { to: None, serial }));
 }
 
-/// A window that unmapped has asked for nothing (`xdg_toplevel`): it is neither full-screen nor
-/// maximised any more, and it draws again at the place it had.
-pub fn forget_requests(window: &Window) {
-    let data = window.user_data();
-    let maximised = data.get::<Maximised>().and_then(|kept| kept.0.take());
-    let full = data.get::<FullScreen>().and_then(|kept| kept.0.take());
-    match maximised.or(full) {
-        Some(Kept { before, .. }) if before.is_empty() => place_again(window, None),
-        Some(Kept { before, .. }) => relocate(window, before.loc, None),
-        None => {}
-    }
-}
 
 /// A maximised window's geometry before it was maximised, and the area it was maximised to.
 #[derive(Default)]

@@ -126,7 +126,7 @@ impl CompositorHandler for State {
                         .toplevel()
                         .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
                 if unmapped {
-                    crate::state::forget_requests(&window);
+                    self.forget_requests(&window);
                 }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).

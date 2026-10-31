@@ -6,7 +6,7 @@
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
-use smithay::desktop::Window;
+use smithay::desktop::{find_popup_root_surface, Window};
 use smithay::input::keyboard::KeyboardSource;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
@@ -207,7 +207,10 @@ impl State {
             while let Some(parent) = get_parent(&surface) {
                 surface = parent;
             }
-            surface
+            match self.popups.find_popup(&surface) {
+                Some(popup) => find_popup_root_surface(&popup).unwrap_or(surface),
+                None => surface,
+            }
         });
         if root.as_ref() == window.toplevel().map(|toplevel| toplevel.wl_surface()) {
             self.refresh_pointer();

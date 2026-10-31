@@ -588,6 +588,16 @@ fn a_window_that_unmaps_keeps_no_request() {
 /// window is, clear of the bar.
 #[test]
 fn a_window_born_full_screen_is_placed_when_it_leaves() {
+    born_full_screen(false);
+}
+
+/// The same when it asks again before it answers leaving, which gives it no place either.
+#[test]
+fn a_window_born_full_screen_is_placed_when_it_asks_again() {
+    born_full_screen(true);
+}
+
+fn born_full_screen(asks_again: bool) {
     let mut run = Running::start(None);
     clear_the_fixture(&mut run);
     let (_bar, _surface) = bar(&mut run);
@@ -605,6 +615,10 @@ fn a_window_born_full_screen_is_placed_when_it_leaves() {
     let window = window_of(&run, local.id.as_ref().expect("an id"));
     assert_eq!(geometry(&run, &window).loc, (0, 0).into());
 
+    if asks_again {
+        toplevel.unset_fullscreen();
+        answer(&mut run, &mut local, |_| toplevel.set_fullscreen(None));
+    }
     let (width, height, states) = answer(&mut run, &mut local, |_| toplevel.unset_fullscreen());
     assert!(!states.contains(&FULLSCREEN));
     assert_eq!((width, height), (0, 0), "the client picks its size");
@@ -785,6 +799,56 @@ fn the_client_under_the_pointer_hears_nothing_of_another_window() {
     pointed.roundtrip(&mut run);
 
     assert_eq!(pointed.client.pointer_motions, heard);
+    run.stop();
+}
+
+/// A popup moves with its window, so the client with the pointer on it hears of the move.
+#[test]
+fn a_move_reaches_the_client_on_a_popup_of_the_window() {
+    use xdg_positioner::{Anchor, Gravity};
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let parent = local.another(&mut run, "parent");
+    let window = local.server_window(&run, &parent.surface);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(WIDTH, HEIGHT);
+    positioner.set_anchor_rect(WIDTH - 1, 0, 1, 1);
+    positioner.set_anchor(Anchor::TopRight);
+    positioner.set_gravity(Gravity::BottomRight);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    xdg.get_popup(Some(&parent.xdg), &positioner, &qh, ());
+    local.client.configure = None;
+    surface.commit();
+    local.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(local.client.configure.take().expect("a configure"));
+    let (buffer, _) = local.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let root = window.toplevel().expect("a toplevel").wl_surface().clone();
+    let (_, offset) = smithay::desktop::PopupManager::popups_for_surface(&root)
+        .next()
+        .expect("the popup");
+    let on_popup = geometry(&run, &window).loc + offset + Point::from((WIDTH / 2, HEIGHT / 2));
+    run.state.pointer_to(on_popup.to_f64(), smithay::backend::input::InputTime::now());
+    local.roundtrip(&mut run);
+    let heard = local.client.pointer_motions;
+
+    let moved = geometry(&run, &window).loc + Point::from((5, 5));
+    run.state.space.relocate_element(&window, moved);
+    run.state.repoint_moved(&window);
+    local.roundtrip(&mut run);
+
+    assert!(local.client.pointer_motions > heard, "it hears of the move");
     run.stop();
 }
 
