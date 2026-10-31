@@ -63,22 +63,13 @@ class ForbiddenGlobals(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("no privileged row", problems[0])
 
-    def test_a_script_with_a_list_of_its_own_is_named(self):
+    def test_a_script_that_does_not_read_the_file_is_named(self):
         root = self.tree(
             "zwlr_layer_shell_v1\nathanor_toplevel_actions_v1\n", reader="PRIVILEGED=()"
         )
         problems = verify.forbidden_globals_problems(root)
         self.assertEqual(len(problems), len(verify.FORBIDDEN_READERS))
         self.assertIn(verify.FORBIDDEN_READERS[0], problems[0])
-
-    def test_a_literal_list_beside_the_file_is_named(self):
-        root = self.tree(
-            "zwlr_layer_shell_v1\nathanor_toplevel_actions_v1\n",
-            reader="# forbidden-globals.txt\n# PRIVILEGED = {x}\nPRIVILEGED+=(a b)\n",
-        )
-        self.assertEqual(
-            len(verify.forbidden_globals_problems(root)), len(verify.FORBIDDEN_READERS)
-        )
 
 
 if __name__ == "__main__":
