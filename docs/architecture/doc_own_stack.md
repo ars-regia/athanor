@@ -995,7 +995,10 @@ compositor and that the own compositor did not yet offer:
       a full-screen window, and the border follows the cut. It lies outside the window where it
       fits and inside, over the client's content, where it does not, so a window as large as the
       output shows it whether or not it asked to be maximised, and no client hides it off the
-      output or under the bar. Its corners are concentric with the same radius, and square where the cut
+      output or under the bar. What a window paints past the cut, in a layer surface's zone that
+      no layer surface covers, stands outside the border: a risk this decision accepts, a strip
+      as wide as the zone, since a border cut to the output would run under the bar. Its corners
+      are concentric with the same radius, and square where the cut
       falls. It is drawn above the window's surface tree and under the window's popups,
       and a popup's border follows the same rule from the popup's geometry, so a popup that covers
       its window's border carries its own. It is cut to the output alone, since a client can place
