@@ -1,6 +1,6 @@
 # Shell feature register
 
-Version 2, proposed on 2026-10-31: it adds the Window management surface and changes no entry of version 1, frozen on 2026-10-04.
+Version 2, frozen on its approval with #902: it adds the Window management surface and changes no entry of version 1, frozen on 2026-10-04.
 
 This register is defined by ST3 of [doc_shell_standard.md](doc_shell_standard.md). An entry is required when any reference offers the feature in a default installation. Each entry names its surface, and the gate of a surface requires every entry of its own. The register is versioned: a feature that a reference adds later goes into the next version without moving a gate under way. An entry is excluded only by the maintainer, with the reason written here; the expected reasons are a zero-trust conflict, or a feature that exists only on a compositor Athanor does not run.
 
