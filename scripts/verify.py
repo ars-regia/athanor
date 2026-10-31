@@ -2656,6 +2656,39 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
     return problems
 
 
+# What an application behind a security context must not see, one list for the acceptance
+# scripts: the compositor's own privileged and layer-gated rows, and the names cosmic-comp has
+# for the same powers, which no table of the tree carries (#886).
+FORBIDDEN_GLOBALS = "forge/test/shell/forbidden-globals.txt"
+FORBIDDEN_READERS = ("forge/test/shell/compositor_e2e.py", "scripts/devvm/compositor-acceptance.sh",
+                     "scripts/devvm/dock-acceptance.sh", "scripts/devvm/launcher-acceptance.sh")
+
+
+def forbidden_globals_problems(root=None):
+    """What `verify.py forbidden-globals` reports: a privileged or layer-gated row of
+    data/globals that forge/test/shell/forbidden-globals.txt does not name, and a script of
+    FORBIDDEN_READERS that does not read that file."""
+    root = Path(root or ROOT)
+    forbidden = set(read(root / FORBIDDEN_GLOBALS).split())
+    rows = [line.split() for line in read(root / GLOBALS_FILE).splitlines() if not line.startswith("#")]
+    gated = {row[0] for row in rows if len(row) == 2 and row[1] in ("privileged", "layer-gated")}
+    problems = [f"{GLOBALS_FILE} has no privileged row: the list is checked against nothing"] if not gated else []
+    problems += [f"{FORBIDDEN_GLOBALS} does not name {name}, a global of {GLOBALS_FILE} no confined "
+                 "application may see" for name in sorted(gated - forbidden)]
+    problems += [f"{reader} does not read {FORBIDDEN_GLOBALS}"
+                 for reader in FORBIDDEN_READERS
+                 if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)]
+    return problems
+
+
+@check("forbidden-globals", "The acceptance scripts forbid every global the compositor privileges")
+def check_forbidden_globals():
+    r = Result()
+    for problem in forbidden_globals_problems():
+        r.fail(problem)
+    return r
+
+
 @check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
 def check_allow_list():
     r, notes = Result(), []

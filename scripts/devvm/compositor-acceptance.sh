@@ -20,10 +20,7 @@ BIN=$ROOT/.scratch/shell-rig/bin
 SHOTS=$ROOT/.scratch/compositor-acceptance
 STAGES=(deploy restricted terminal openers)
 # Globals only the main socket offers: an application behind the context sees none of them.
-PRIVILEGED=(zcosmic_toplevel_info_v1 zcosmic_toplevel_manager_v1 ext_workspace_manager_v1
-    zcosmic_workspace_manager_v2 zwlr_layer_shell_v1 ext_data_control_manager_v1
-    zwlr_data_control_manager_v1 wp_security_context_manager_v1
-    zcosmic_keyboard_layout_manager_v1 cosmic_a11y_manager_v1)
+mapfile -t PRIVILEGED < "$ROOT/forge/test/shell/forbidden-globals.txt"
 STAGE=
 
 # Runs a command as the session user, with the session's bus and compositor.
