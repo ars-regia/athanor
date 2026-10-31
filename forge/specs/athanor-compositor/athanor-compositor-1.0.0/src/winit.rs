@@ -69,6 +69,8 @@ pub fn start(
     event_loop
         .handle()
         .insert_source(events, |event, _, state| match event {
+            // A host may report a minimised window as empty: nothing moves for that.
+            WinitEvent::Resized { size, .. } if size.is_empty() => {}
             WinitEvent::Resized { size, .. } => {
                 if let Backend::Nested(nested) = &state.backend {
                     let mode = Mode {
@@ -81,7 +83,7 @@ pub fn start(
                     nested.output.set_preferred(mode);
                     layer_map_for_output(&nested.output).arrange();
                 }
-                state.output_heads_changed();
+                state.arrange_outputs();
             }
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => state.redraw(),

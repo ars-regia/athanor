@@ -504,6 +504,10 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        if let Some(shown) = self.space.output_geometry(output) {
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            known.0.set(shown);
+        }
         self.output_heads_changed();
         self.workspaces_changed();
     }
@@ -519,43 +523,139 @@ impl State {
     }
 
     /// After the outputs changed (one went, or took another size): the windows their home output
-    /// (`State::home_output`) no longer shows are centred on it and the maximised ones fitted to
-    /// it again, the pointer is brought back onto the outputs and the lock surfaces take the size
-    /// of their output.
+    /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
+    /// home output follows that output and stays whole (`stays_whole`), the maximised ones are
+    /// fitted to it again, the pointer is brought back onto the outputs and the lock surfaces take
+    /// the size of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
-        let stranded: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|window| {
-                self.space
-                    .element_geometry(window)
-                    .is_some_and(|area| !self.shown_at_home(window, area))
-            })
-            .cloned()
-            .collect();
-        for window in stranded {
-            if let Some(area) = self.home_area(&window) {
-                let at = centred(area, window.geometry().size);
-                self.space.relocate_element(&window, at);
-            }
+        let changed = self.changed_outputs();
+        let mut moved = !changed.is_empty();
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for window in windows {
+            let (Some(area), Some(shown)) = (
+                self.home_area(&window),
+                self.space.element_geometry(&window),
+            ) else {
+                continue;
+            };
+            let place = Rectangle::new(self.stays_whole(&window, shown, &changed), shown.size);
+            let at = if self.shown_at_home(&window, place) {
+                place.loc
+            } else {
+                centred(area, shown.size)
+            };
+            moved |= at != shown.loc;
+            self.space.relocate_element(&window, at);
         }
+        self.fit_kept_places(&changed);
         self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
-            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+            let carried = changed.iter().find_map(|(output, was)| {
+                let shown = self.space.output_geometry(output)?;
+                let wanted = at + (shown.loc - was.loc).to_f64();
+                let on = was.to_f64().contains(at);
+                on.then(|| crate::input::confine(&[shown], at, wanted)).flatten()
+            });
+            let to = carried.or_else(|| crate::input::confine(&outputs, at, at));
+            if let Some(to) = to.filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
+            } else if moved {
+                self.refresh_pointer();
             }
         }
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
         }
         self.output_heads_changed();
+    }
+
+    /// The outputs that took another size or place since this was last asked, each with where
+    /// it was before.
+    fn changed_outputs(&self) -> Vec<(Output, Rectangle<i32, Logical>)> {
+        let changed = self.space.outputs().filter_map(|output| {
+            let shown = self.space.output_geometry(output)?;
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            let was = known.0.replace(shown);
+            (was != shown).then(|| (output.clone(), was))
+        });
+        changed.collect()
+    }
+
+    /// Where the place `kept` of `window` goes after `changed`: if it lay on its home output it
+    /// follows that output. If it lay whole there it stays whole: along a side the output's new
+    /// edges cut, it goes inside what the output leaves, and along the other it stays where the
+    /// user left it. Otherwise it stays over the edge, where a user may leave a window
+    /// (`grabs::kept_reachable`).
+    fn stays_whole(
+        &self,
+        window: &Window,
+        kept: Rectangle<i32, Logical>,
+        changed: &[(Output, Rectangle<i32, Logical>)],
+    ) -> Point<i32, Logical> {
+        let moved = self.home_output(window).and_then(|home| {
+            let (_, was) = changed.iter().find(|(output, _)| *output == home)?;
+            let shown = self.space.output_geometry(&home)?;
+            let moved = Rectangle::new(kept.loc + (shown.loc - was.loc), kept.size);
+            was.overlaps(kept).then_some((shown, moved, was.contains_rect(kept)))
+        });
+        match (moved, self.home_area(window)) {
+            (Some((shown, moved, true)), Some(area)) if !shown.contains_rect(moved) => {
+                let fits = |at: i32, size: i32, from: i32, room: i32| {
+                    at >= from && at + size <= from + room
+                };
+                let kept = inside(area, moved);
+                let x = fits(moved.loc.x, moved.size.w, shown.loc.x, shown.size.w);
+                let y = fits(moved.loc.y, moved.size.h, shown.loc.y, shown.size.h);
+                let x = if x { moved.loc.x } else { kept.x };
+                let y = if y { moved.loc.y } else { kept.y };
+                (x, y).into()
+            }
+            (Some((_, moved, _)), _) => moved.loc,
+            _ => kept.loc,
+        }
+    }
+
+    /// `stays_whole` for the places a window comes back to, or is on its way to.
+    fn fit_kept_places(&mut self, changed: &[(Output, Rectangle<i32, Logical>)]) {
+        let away = self.parked.iter().chain(&self.minimised).map(|(window, _)| window);
+        let windows: Vec<Window> = self.space.elements().chain(away).cloned().collect();
+        for window in windows {
+            let data = window.user_data();
+            if let Some(maximised) = data.get::<Maximised>() {
+                if let Some(mut kept) = maximised.0.get() {
+                    kept.before.loc = self.stays_whole(&window, kept.before, changed);
+                    maximised.0.set(Some(kept));
+                }
+            }
+            if let Some(relocate) = data.get::<Relocate>() {
+                if let Some(mut moving) = relocate.0.get() {
+                    let asked = window
+                        .toplevel()
+                        .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+                    let size = asked.unwrap_or_else(|| window.geometry().size);
+                    let place = Rectangle::new(moving.to, size);
+                    moving.to = self.stays_whole(&window, place, changed);
+                    relocate.0.set(Some(moving));
+                }
+            }
+        }
+        for index in 0..self.parked.len() {
+            let (window, at) = self.parked[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.parked[index].1 = self.stays_whole(&window, kept, changed);
+        }
+        for index in 0..self.minimised.len() {
+            let (window, at) = self.minimised[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.minimised[index].1 = self.stays_whole(&window, kept, changed);
+        }
     }
 
     /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
@@ -1326,10 +1426,24 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
 #[derive(Default)]
 struct Maximised(Cell<Option<Kept>>);
 
+/// Where an output was when `map_output` or `changed_outputs` last saw it.
+#[derive(Default)]
+struct KnownArea(Cell<Rectangle<i32, Logical>>);
+
 #[derive(Clone, Copy)]
 struct Kept {
     before: Rectangle<i32, Logical>,
     area: Rectangle<i32, Logical>,
+}
+
+/// Where `window` lies inside `area`, moved no further than that takes; its top left stays in
+/// `area` when it does not fit.
+fn inside(area: Rectangle<i32, Logical>, window: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+    let right = area.loc.x + area.size.w - window.size.w;
+    let bottom = area.loc.y + area.size.h - window.size.h;
+    let x = window.loc.x.min(right).max(area.loc.x);
+    let y = window.loc.y.min(bottom).max(area.loc.y);
+    (x, y).into()
 }
 
 /// Where the geometry's top left goes for a window of `size` to be centred in `area`: a space
