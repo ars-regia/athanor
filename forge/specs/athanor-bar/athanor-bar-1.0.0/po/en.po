@@ -347,10 +347,15 @@ msgstr "Control center"
 
 #: src/ui/input.rs:41
 #, rust-format
+msgid "Layout {number}"
+msgstr "Layout {number}"
+
+#: src/ui/input.rs:44
+#, rust-format
 msgid "Input source: {name}"
 msgstr "Input source: {name}"
 
-#: src/ui/input.rs:86
+#: src/ui/input.rs:92
 msgid "Input source"
 msgstr "Input source"
 

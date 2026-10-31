@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        17%{?dist}
+Release:        19%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,13 +73,23 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
-* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-19
 - The bar sends the keys of org.gnome.desktop.a11y.keyboard to athanor-compositor at its start and
   at each change, a delay out of bounds clamped and logged, and writes stickykeys-enable false
   when two-key-off turns sticky keys off. The accessibility button shows the latched and locked
   modifiers and a rejected key, and announces each over AT-SPI at polite priority; a Shift
   gesture's offer is announced too, shown for 30 seconds, and accepted from the accessibility
   menu. No sound is played. (doc_accessibility.md AX11, #865)
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
+- The input-source button takes the seat's layouts from athanor-keyboard-group-v1 version 2, so
+  a virtual keyboard's keymap no longer hides it under the keyboard focus, and a layout with
+  no name reads "Layout 2" in place of a blank entry (#876).
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- Settings and its pages, from the image's desktop entries, start on the main socket until
+  cosmic-settings leaves the image, since the output manager cosmic-randr waits on reaches no
+  security context (doc_bar.md BR2, #880).
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - The accessibility menu's magnifier, inversion and filter rows are shown under

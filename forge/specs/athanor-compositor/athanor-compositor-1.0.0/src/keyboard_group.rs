@@ -7,11 +7,11 @@ use crate::identity::Privilege;
 use crate::state::{granted, State};
 use protocol::athanor_keyboard_group_manager_v1::{self, AthanorKeyboardGroupManagerV1};
 use protocol::athanor_keyboard_group_v1::{self, AthanorKeyboardGroupV1};
-use smithay::input::keyboard::{KeyboardHandle, Layout};
+use smithay::input::keyboard::{KeyboardHandle, Layout, Xkb};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
-use std::sync::PoisonError;
+use std::sync::{Mutex, PoisonError};
 
 /// The server side of the description, laid out as `wayland-protocols` lays out its own.
 #[allow(
@@ -54,7 +54,7 @@ pub struct GroupObject {
 
 /// Offers the manager to the clients the allow-list grants it.
 pub fn global(dh: &DisplayHandle) {
-    dh.create_global::<State, AthanorKeyboardGroupManagerV1, _>(1, KeyboardGroups);
+    dh.create_global::<State, AthanorKeyboardGroupManagerV1, _>(2, KeyboardGroups);
 }
 
 impl GlobalDispatch2<AthanorKeyboardGroupManagerV1, State> for KeyboardGroups {
@@ -101,6 +101,7 @@ impl Dispatch2<AthanorKeyboardGroupManagerV1, State> for KeyboardGroups {
                         "a second keyboard group object of the same keyboard",
                     );
                 } else if live {
+                    send_layouts(&object, &state.seat_layouts());
                     object.group(state.seat_group());
                     state.keyboard_groups.push(object);
                 }
@@ -135,6 +136,21 @@ impl Dispatch2<AthanorKeyboardGroupV1, State> for GroupObject {
     }
 }
 
+/// Sends `object` the names of the seat's layouts, when its version has the event.
+fn send_layouts(object: &AthanorKeyboardGroupV1, names: &[String]) {
+    if object.version() >= athanor_keyboard_group_v1::EVT_LAYOUTS_SINCE {
+        object.layouts(lines_of(names));
+    }
+}
+
+/// One line per name. Ended, not joined: a last name that is empty still counts as a group.
+fn lines_of(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| name.replace(['\n', '\r'], " ") + "\n")
+        .collect()
+}
+
 impl State {
     /// The seat's own layout group: the one saved while a virtual keyboard's keymap is current,
     /// whose modifiers never move it, else the keyboard's.
@@ -145,6 +161,27 @@ impl State {
         self.seat.get_keyboard().map_or(0, |keyboard| {
             keyboard.modifier_state().serialized.layout_effective
         })
+    }
+
+    /// The names of the seat's own layouts: the ones saved while a virtual keyboard's keymap is
+    /// current, which names its own or none, else the keyboard's.
+    fn seat_layouts(&mut self) -> Vec<String> {
+        if let Some(current) = &self.virtual_keymap {
+            return current.seat_layouts.clone();
+        }
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return Vec::new();
+        };
+        keyboard.with_xkb_state(self, |context| layout_names(context.xkb()))
+    }
+
+    /// Sends the names of the seat's layouts to every live object: where the seat's configuration
+    /// changes, and never for a virtual keyboard's keymap.
+    pub fn send_keyboard_layouts(&mut self) {
+        let names = self.seat_layouts();
+        for object in &self.keyboard_groups {
+            send_layouts(object, &names);
+        }
     }
 
     /// Sends the seat's group to every live object when it differs from the last one sent: where
@@ -195,5 +232,24 @@ impl State {
             let xkb = context.xkb().lock().unwrap_or_else(PoisonError::into_inner);
             xkb.layouts().count()
         })
+    }
+}
+
+/// The names of the layouts of `xkb`'s keymap.
+pub(crate) fn layout_names(xkb: &Mutex<Xkb>) -> Vec<String> {
+    let xkb = xkb.lock().unwrap_or_else(PoisonError::into_inner);
+    xkb.layouts()
+        .map(|layout| xkb.layout_name(layout).to_owned())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_cannot_add_a_line() {
+        let names = ["A\r\nB".to_owned(), String::new(), "C\r".to_owned()];
+        assert_eq!(lines_of(&names), "A  B\n\nC \n");
     }
 }

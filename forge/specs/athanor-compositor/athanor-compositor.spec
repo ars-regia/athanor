@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        12%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,7 +52,7 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
-* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - Apply sticky, slow and bounce keys in front of every key's reader, the bindings, the
   focused client and the keyboard monitor, slow and bounce keys to the hardware keyboards
   only and sticky keys to a virtual keyboard's keys too; the protected keys pass slow and
@@ -61,6 +61,15 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
   them and tells the modifiers held, a key rejected, a gesture and an aid turned off
 - Bind Super+A to the launcher until athanor-library exists, so that Super then A opens it
   under sticky keys (doc_accessibility.md AX11, #865)
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- athanor-keyboard-group-v1 version 2 names the seat's layouts, which a virtual keyboard's
+  keymap sent to every wl_keyboard no longer hides from the bar: Tab reaches past the input
+  source under wtype (#876)
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- Grant the output manager to cosmic-randr in the units of Settings, which shows no window
+  while it waits on it (#880)
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - The magnifier and the colour filters (doc_accessibility.md AX10, revision 3): the

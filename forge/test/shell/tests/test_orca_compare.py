@@ -156,6 +156,32 @@ class HiddenTest(unittest.TestCase):
                 self.assertEqual(failures, [], (surface, lang))
                 self.assertEqual(sum(" hidden; decision 28 hides " in line for line in lines), 2)
 
+    def test_the_bar_walk_exempts_the_tiling_button_it_lacks(self):
+        for lang, golden in (("en", "orca-bar.txt"), ("it", "orca-bar-it.txt")):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                exempt = compare.own_exemptions("float", "-", lang)
+                absent = {f"{name} button." for name in exempt}
+                self.assertEqual(len(absent), 3)
+                spoken = [u for u in reference if u not in absent]
+                lines, failures = compare.compare(reference, spoken, exempt)
+                self.assertEqual(failures, [])
+                self.assertIn(
+                    f"'{compare.TILING[lang]} button.': hidden; "
+                    "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)",
+                    lines,
+                )
+                self.assertEqual(
+                    compare.compare(reference, reference, exempt)[1][2:],
+                    [
+                        f"'{compare.TILING[lang]} button.': spoken, but exempt: "
+                        "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)"
+                    ],
+                )
+
+    def test_a_walk_with_no_bar_exempts_no_tiling_button(self):
+        self.assertNotIn("Tiling collapsed", compare.own_exemptions(None, "visible", "en"))
+
     def test_an_exemption_for_a_spoken_or_absent_button_fails(self):
         reference = (GOLDEN / "orca-dock.txt").read_text().splitlines()
         exempt = gr.exemptions(None, "visible", "en")

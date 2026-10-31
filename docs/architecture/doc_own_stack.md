@@ -163,7 +163,9 @@ is a barrier against it.
 - **Privileged protocols by identity.** wlr-layer-shell's top and overlay layers,
   ext-foreign-toplevel-list, ext-image-copy-capture with its window and output sources,
   input-method, virtual keyboard and pointer, data control, ext-session-lock, ext-workspace (OS9
-  plan, question 7), wlr-output-management, granted to the control center only (question 10), and
+  plan, question 7), wlr-output-management, granted to the control center (question 10) and, until
+  cosmic-settings leaves the image (`doc_settings.md`), to cosmic-randr in the units of Settings,
+  which waits on it at start-up (amended on 2026-10-30, #880), and
   the compositor's private interface are granted to a client only when both the executable of its
   process, a file under `/usr` in the read-only image, and the systemd unit it runs in match an
   allow-list under `/usr`. Both are read from the connection's peer credentials and pidfd when it
@@ -184,7 +186,8 @@ is a barrier against it.
   prevented.
 - **No privileged protocol through a security context.** A client that connects through
   `security-context-v1`, as every application launched through the shell does
-  (`doc_session_daemons.md` SD8), receives the standard globals only, whatever its executable or
+  (`doc_session_daemons.md` SD8), Settings excepted until it leaves the image (`doc_bar.md` BR2,
+  amended on 2026-10-30, #880), receives the standard globals only, whatever its executable or
   unit.
 - **The trusted path** follows LP13 as ADR-0092 amended it: the compositor borders the windows of
   clients that carry a security context, and the real prompt is told apart by the absence of that

@@ -355,10 +355,15 @@ msgstr ""
 
 #: src/ui/input.rs:41
 #, rust-format
+msgid "Layout {number}"
+msgstr ""
+
+#: src/ui/input.rs:44
+#, rust-format
 msgid "Input source: {name}"
 msgstr ""
 
-#: src/ui/input.rs:86
+#: src/ui/input.rs:92
 msgid "Input source"
 msgstr ""
 

@@ -43,6 +43,7 @@ class AllowList(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
         self.write(verify.GLOBALS_FILE, GLOBALS)
+        self.write(verify.PACKAGES_JSON, '{"upstream_desktop": ["cosmic-idle", "cosmic-osd"]}\n')
         self.lines("")
 
     def tearDown(self):
@@ -539,16 +540,37 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
         self.assertIn("installed by no spec", out[0])
 
-    def test_the_upstream_clients_are_the_locker_the_idle_daemon_and_the_osd(self):
-        # doc_session.md revision 4, SN12 and SN15.
+    def test_the_upstream_clients_are_the_locker_idle_daemon_osd_and_randr(self):
+        # doc_session.md revision 4, SN12 and SN15; cosmic-randr, doc_own_stack.md OS4.
         self.assertEqual(
             verify.UPSTREAM,
             {
                 "/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
                 "/usr/bin/cosmic-idle": "cosmic-idle.scope",
                 "/usr/bin/cosmic-osd": "cosmic-osd.service",
+                "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service",
             },
         )
+
+    def test_an_upstream_client_the_image_no_longer_installs_fails(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.lines("/usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1\n")
+        self.assertEqual(self.problems(OSD), [])
+        self.write(
+            verify.PACKAGES_JSON,
+            '{"upstream_desktop": [], "cross_compile_targets": {"cosmic-osd": "x"}}\n',
+        )
+        out = self.problems(OSD)
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("no longer installs it", out[0])
+        (self.root / verify.PACKAGES_JSON).unlink()
+        self.assertEqual(len(self.problems(OSD)), 1)
+
+    def test_the_settings_exception_does_not_outlive_its_client(self):
+        self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
+        self.write(f"{CLIENT}/src/launch.rs", "fn keeps_main_socket() {}\n")
+        out = self.problems()
+        self.assertTrue(any("keeps_main_socket outlives" in line for line in out), out)
 
     def test_an_upstream_line_no_spec_installs_passes(self):
         self.package("athanor-bar", files={"src/main.rs": "fn main() {}\n"})
