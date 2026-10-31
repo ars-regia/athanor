@@ -116,10 +116,7 @@ class BudgetTest(unittest.TestCase):
 
     def test_a_script_is_known_by_its_first_line(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp) / "tree"
-            root.mkdir()
-            (pathlib.Path(tmp) / "elsewhere.sh").write_text("true\n")
-            (root / "out.sh").symlink_to(pathlib.Path(tmp) / "elsewhere.sh")
+            root = pathlib.Path(tmp)
             for name, text in [
                 ("a.sh", "true\n"),
                 ("b", "#!/usr/bin/env bash\n"),
@@ -132,7 +129,7 @@ class BudgetTest(unittest.TestCase):
             (root / "link.sh").symlink_to(root / "a.sh")
             os.mkfifo(root / "pipe")
             found = {p.name for p in verify.shell_scripts(root)}
-        self.assertEqual(found, {"a.sh", "b", "c", "out.sh"})
+        self.assertEqual(found, {"a.sh", "b", "c"})
 
     def test_a_workflow_line_is_read_as_shell(self):
         text = "\n".join([
@@ -155,6 +152,22 @@ class BudgetTest(unittest.TestCase):
 
     def test_a_guest_here_document_left_open_is_reported(self):
         self.assertEqual(verify.guest_failures('A = b"cat <<EOF\\nx"\n'), ([], [1]))
+
+    def test_a_link_to_a_file_or_a_directory_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            tree = root / "forge" / "scripts"
+            tree.mkdir(parents=True)
+            (root / "s.sh").write_text("a || true\n")
+            (tree / "file.sh").symlink_to(root / "s.sh")
+            (tree / "dir").symlink_to(root)
+            with mock.patch.object(verify, "ROOT", root), mock.patch.dict(
+                verify.SHELL_BUDGETS, {"forge/scripts": 0}, clear=True
+            ):
+                r = verify.check_shell_failures()
+        problems = [problem for problem in r.problems if "a link hides" in problem]
+        self.assertEqual(len(problems), 2)
+        self.assertIn("forge/scripts/dir", problems[0])
 
     def test_each_tree_keeps_its_own_budget(self):
         with tempfile.TemporaryDirectory() as tmp:
