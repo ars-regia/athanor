@@ -466,6 +466,26 @@ fn ax11_an_aid_turned_off_twice_while_locked_is_told_once() {
     run.stop();
 }
 
+/// The end of a lock is told even when no lock surface ever took the keyboard: the bar, which
+/// may have bound in the meantime, learns the modifiers.
+#[test]
+fn ax11_the_end_of_a_lock_with_no_surface_is_told() {
+    let mut run = Running::start(None);
+    let mut locker = Local::connect(&mut run, None);
+    let locks: ExtSessionLockManagerV1 = locker.bind(1);
+    let lock = locks.lock(&locker.queue.handle(), ());
+    locker.pump(&mut run, "the session is locked", |client, _| {
+        client.locked
+    });
+    assert_eq!(told(&mut run), []);
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    assert_eq!(told(&mut run), [modifiers(0, 0)]);
+    run.stop();
+}
+
 /// Under a keyboard-shortcuts inhibitor the aids work as without one.
 #[test]
 fn ax11_the_aids_work_under_a_shortcuts_inhibitor() {

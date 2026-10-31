@@ -83,6 +83,7 @@ impl SessionLockHandler for State {
             locker: Some(locker),
             surfaces: Vec::new(),
         });
+        self.aids_quiet_changed();
         self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
