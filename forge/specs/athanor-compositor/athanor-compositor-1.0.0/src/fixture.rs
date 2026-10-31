@@ -2359,6 +2359,264 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
     run.stop();
 }
 
+/// The first output takes the logical size `(width, height)`, as a higher scale gives it.
+fn resize_first(run: &mut Running, width: i32, height: i32) {
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let mode = smithay::output::Mode {
+        size: (width, height).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(mode), None, None, None);
+    run.state.arrange_outputs();
+}
+
+/// The corner of the first output for a window of `size`, and that corner on the same output
+/// after `resize_first` took half of `size` off it, with that smaller size.
+fn corners(size: (i32, i32)) -> ((i32, i32), (i32, i32), (i32, i32)) {
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let small = (width - size.0 / 2, height - size.1 / 2);
+    let corner = (width - size.0, height - size.1);
+    (corner, (small.0 - size.0, small.1 - size.1), small)
+}
+
+/// An output that loses logical size, as a higher scale makes it, leaves a window inside it
+/// that was inside it, moved no further than that takes.
+#[test]
+fn an_output_that_shrinks_keeps_a_window_on_it_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+
+    resize_first(&mut run, small.0, small.1);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// A window whose place the change leaves whole does not move.
+#[test]
+fn an_output_that_shrinks_leaves_a_window_it_does_not_reach() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (_, _, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, (10, 20));
+
+    resize_first(&mut run, small.0, small.1);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some((10, 20).into()));
+    run.stop();
+}
+
+/// A window on an output the change only moves moves with it, whole.
+#[test]
+fn a_window_follows_an_output_that_moves() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x + 30, 30));
+    let pointed: Point<f64, Logical> = (f64::from(area.loc.x) + 30.0, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shift = OUTPUTS[0].width - OUTPUTS[0].width / 2;
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x + 30 - shift, 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let carried = pointed - Point::<i32, Logical>::from((shift, 0)).to_f64();
+    assert_eq!(pointer.current_location(), carried, "the pointer goes with it");
+    run.stop();
+}
+
+/// A window the user left over an edge of an output that moves stays over that edge.
+#[test]
+fn a_window_over_the_edge_of_an_output_that_moves_goes_with_it() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x - 20, 30));
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x - 20 - (OUTPUTS[0].width - OUTPUTS[0].width / 2), 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// A window under a bar's zone that the change leaves whole stays where the user put it.
+#[test]
+fn an_output_that_grows_leaves_a_window_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    run.state.space.relocate_element(&window, (10, 5));
+
+    resize_first(&mut run, OUTPUTS[0].width + 100, OUTPUTS[0].height + 100);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some((10, 5).into()));
+    run.stop();
+}
+
+/// A shrink in width moves a window no further than that: over a bar's zone it stays.
+#[test]
+fn an_output_cut_on_one_side_leaves_the_other_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    let size = window.geometry().size;
+    let width = OUTPUTS[0].width;
+    run.state.space.relocate_element(&window, (width - size.w - 10, 5));
+
+    resize_first(&mut run, width - 50, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let cut = (width - 50 - size.w, 5);
+    assert_eq!(shown.map(|shown| shown.loc), Some(cut.into()));
+    run.stop();
+}
+
+/// The pointer stays on an output that shrinks, whatever the next output takes of its place.
+#[test]
+fn the_pointer_stays_on_an_output_that_shrinks() {
+    let mut run = Running::start(None);
+    // Where the next output comes to stand.
+    let pointed: Point<f64, Logical> = (f64::from(OUTPUTS[0].width) * 0.8, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let first = run.state.space.output_geometry(&first).expect("placed");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(first.to_f64().contains(pointer.current_location()));
+    run.stop();
+}
+
+/// A window the user left over an edge stays there.
+#[test]
+fn an_output_that_shrinks_leaves_a_window_over_its_edge() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let over = (width / 2, height - size.h / 2);
+    run.state.space.relocate_element(&window, over);
+
+    resize_first(&mut run, width, height - 4);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(over.into()));
+    run.stop();
+}
+
+/// A window on an inactive workspace comes back whole.
+#[test]
+fn an_output_that_shrinks_keeps_a_window_out_of_the_space_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+    run.state.switch_to(2);
+    assert!(run.state.is_parked(&window));
+
+    resize_first(&mut run, small.0, small.1);
+
+    run.state.switch_to(1);
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+
+    run.stop();
+}
+
+/// A minimised window comes back whole.
+#[test]
+fn an_output_that_shrinks_keeps_a_minimised_window_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+    assert!(run.state.minimise(&window));
+
+    resize_first(&mut run, small.0, small.1);
+
+    assert!(run.state.unminimise(&window));
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// The place a maximised window goes back to stays whole on the output.
+#[test]
+fn an_output_that_shrinks_keeps_a_maximised_windows_place_whole() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of_client(&run, &id);
+    let (corner, moved, small) = corners((WIDTH, HEIGHT));
+    run.state.space.relocate_element(&window, corner);
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+
+    resize_first(&mut run, small.0, small.1);
+    local.redraw(&mut run);
+    toplevel.unset_maximized();
+    local.redraw(&mut run);
+
+    assert_eq!(location_of(&run, &id), moved.into());
+    run.stop();
+}
+
+/// A move the client has not answered yet lands inside the output that shrank meanwhile.
+#[test]
+fn an_output_that_shrinks_keeps_a_move_on_its_way_whole() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of_client(&run, &id);
+    let (corner, moved, small) = corners((WIDTH, HEIGHT));
+    run.state.space.relocate_element(&window, corner);
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+    toplevel.unset_maximized();
+    local.roundtrip(&mut run);
+
+    resize_first(&mut run, small.0, small.1);
+    local.redraw(&mut run);
+
+    assert_eq!(location_of(&run, &id), moved.into());
+    run.stop();
+}
+
+/// The window of the client `id`.
+fn window_of_client(run: &Running, id: &ClientId) -> smithay::desktop::Window {
+    let mut windows = run.state.space.elements();
+    let found = windows.find(|window| {
+        let client = window.toplevel().and_then(|toplevel| toplevel.wl_surface().client());
+        client.map(|client| client.id()).as_ref() == Some(id)
+    });
+    found.expect("the client's window").clone()
+}
+
 /// An output that takes another size (C1 task 8): the outputs side by side again leave no window
 /// outside them and no pointer outside them.
 #[test]
@@ -4728,6 +4986,59 @@ fn set_group_switches_and_every_object_hears_it() {
     second.roundtrip(&mut run);
     first.roundtrip(&mut run);
     assert_eq!(first.groups_of(&one), [0, 1, 0], "back to the first");
+    run.stop();
+}
+
+/// The lock leaves the session's layout group alone (LP14): the second group stays while locked
+/// and after the unlock, and the window the unlock focuses hears it. The test switches nothing
+/// on the lock: a group changed there, and any restoring of it, stays with #834.
+#[test]
+fn unlocking_leaves_the_layout_group() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, group) = bar.keyboard_group(&mut run);
+    group.set_group(1);
+    bar.roundtrip(&mut run);
+
+    let mut locker = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let lock = locks.lock(&qh, ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(&mut run, "the lock surface is configured", |client, _| {
+        client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    locker.roundtrip(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let holder = keyboard.current_focus().and_then(|focus| focus.client());
+    assert_eq!(holder.map(|client| client.id()), locker.id, "the lock has the keyboard");
+    assert!(run.state.lock.is_some(), "the session is locked");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1, "while locked");
+    window.roundtrip(&mut run);
+    window.client.modifier_groups.clear();
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    bar.roundtrip(&mut run);
+    window.pump(&mut run, "the window gets the keyboard back", |client, _| {
+        !client.modifier_groups.is_empty()
+    });
+
+    assert!(run.state.lock.is_none(), "the session is unlocked");
+    assert_eq!(bar.groups_of(&group), [0, 1], "the group stays");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1);
+    assert_eq!(window.client.modifier_groups, [1], "the window hears it");
     run.stop();
 }
 

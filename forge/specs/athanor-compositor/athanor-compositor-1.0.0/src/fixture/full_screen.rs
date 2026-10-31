@@ -964,3 +964,25 @@ fn a_confined_window_keeps_its_border_inside_the_edge() {
     assert_eq!(at(&picture, 3, middle), PAINT, "the client inside it");
     run.stop();
 }
+
+/// The place a full-screen window goes back to stays whole on the output.
+#[test]
+fn an_output_that_shrinks_keeps_a_full_screen_windows_place_whole() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of_client(&run, &id);
+    let (corner, moved, small) = corners((WIDTH, HEIGHT));
+    run.state.space.relocate_element(&window, corner);
+    toplevel.set_fullscreen(None);
+    local.redraw(&mut run);
+
+    resize_first(&mut run, small.0, small.1);
+    local.redraw(&mut run);
+    toplevel.unset_fullscreen();
+    local.redraw(&mut run);
+
+    assert_eq!(location_of(&run, &id), moved.into());
+    run.stop();
+}
