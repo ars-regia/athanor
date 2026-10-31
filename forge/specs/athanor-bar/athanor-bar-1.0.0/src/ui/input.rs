@@ -37,10 +37,13 @@ impl ModuleUi for InputUi {
         if *self.shown.borrow() == (layouts.clone(), group) {
             return;
         }
+        let labels = keyboard::labels(&layouts, |number| {
+            tr_with("Layout {number}", "number", &number.to_string())
+        });
         let name = tr_with(
             "Input source: {name}",
             "name",
-            keyboard::active(&layouts, group).unwrap_or(""),
+            keyboard::active(&labels, group).unwrap_or(""),
         );
         self.popup.button.set_tooltip_text(Some(&name));
         self.popup.button.update_property(&[Property::Label(&name)]);
@@ -50,7 +53,7 @@ impl ModuleUi for InputUi {
             self.list.remove(&child);
         }
         let mut first: Option<gtk4::CheckButton> = None;
-        for (index, layout) in layouts.iter().enumerate() {
+        for (index, layout) in labels.iter().enumerate() {
             let check = gtk4::CheckButton::with_label(layout);
             check.set_group(first.as_ref());
             expose_choose_action(&check);

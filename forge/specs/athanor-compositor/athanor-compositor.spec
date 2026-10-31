@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,6 +52,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- athanor-keyboard-group-v1 version 2 names the seat's layouts, which a virtual keyboard's
+  keymap sent to every wl_keyboard no longer hides from the bar: Tab reaches past the input
+  source under wtype (#876)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Grant the output manager to cosmic-randr in the units of Settings, which shows no window
   while it waits on it (#880)

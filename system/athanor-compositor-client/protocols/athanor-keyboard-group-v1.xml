@@ -24,17 +24,17 @@
   </copyright>
 
   <description summary="the keyboard layout group of a seat's keyboard">
-    The active layout group of a keyboard, and the request that changes it, for the shell's
-    input-source switch. The names of the groups are not in this protocol: they are those of
-    the keymap the keyboard's wl_keyboard.keymap event sent. The compositor offers the manager
-    only to the clients it trusts with it; it is Athanor's own protocol (doc_own_stack.md OS5,
-    decision 19).
+    The names of a seat's layouts, the active layout group of its keyboard, and the request
+    that changes it, for the shell's input-source switch. wl_keyboard.keymap cannot name them:
+    it goes to every wl_keyboard, unfocused ones included, each time a virtual keyboard's own
+    keymap takes the seat's place for its keys. The compositor offers the manager only to the
+    clients it trusts with it; it is Athanor's own protocol (doc_own_stack.md OS5, decision 19).
 
     A new version adds interfaces, requests, events or enum entries; a client binds the
     version it knows.
   </description>
 
-  <interface name="athanor_keyboard_group_manager_v1" version="1">
+  <interface name="athanor_keyboard_group_manager_v1" version="2">
     <description summary="the keyboard group of keyboards">
       Makes the keyboard group object of a wl_keyboard.
     </description>
@@ -52,7 +52,8 @@
 
     <request name="get_keyboard_group">
       <description summary="the keyboard group of a keyboard">
-        Makes the keyboard group object of a wl_keyboard. The current group is sent at once.
+        Makes the keyboard group object of a wl_keyboard. The seat's layouts and the current
+        group are sent at once.
 
         An object made for the keyboard of a seat the compositor does not drive is inert: it
         sends nothing and ignores its requests. A second keyboard group object of the same
@@ -63,7 +64,7 @@
     </request>
   </interface>
 
-  <interface name="athanor_keyboard_group_v1" version="1">
+  <interface name="athanor_keyboard_group_v1" version="2">
     <description summary="the layout group of a keyboard">
       The active layout group of a keyboard, sent when the object is made and at each change,
       whether or not the client has the keyboard focus, a new keymap included.
@@ -71,9 +72,21 @@
 
     <event name="group">
       <description summary="the active layout group">
-        The index of the active layout group in the keymap last sent by wl_keyboard.keymap.
+        The index of the active layout group among the seat's own layouts, whichever keymap
+        wl_keyboard.keymap last sent.
       </description>
       <arg name="group" type="uint"/>
+    </event>
+
+    <event name="layouts" since="2">
+      <description summary="the names of the seat's layouts">
+        The names of the seat's own layouts, in group order, each one ended by a newline, so
+        that the lines are as many as the groups: a layout with no name is an empty line, and a
+        newline or a carriage return inside a name is sent as a space. Sent when the object is made and each time the
+        seat's configuration is applied, whether or not it changed them. A virtual keyboard's
+        keymap changes neither the seat's layouts nor this list.
+      </description>
+      <arg name="names" type="string"/>
     </event>
 
     <request name="set_group">

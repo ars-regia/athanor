@@ -5,6 +5,7 @@
 //! the clients the allow-list grants them, take the same path (OS4, OS9 task 6).
 
 use crate::bindings;
+use crate::keyboard_group::layout_names;
 use crate::keyboard_monitor::Taken;
 use crate::state::{identity_of, State, Under};
 use smithay::backend::input::{
@@ -485,12 +486,17 @@ impl State {
         if current.is_some_and(|current| current.device == *device && current.keymap == keymap) {
             return true;
         }
-        let (seat_keymap, seat_modifiers) = match current {
-            Some(current) => (current.seat_keymap.clone(), current.seat_modifiers),
+        let (seat_keymap, seat_layouts, seat_modifiers) = match current {
+            Some(current) => (
+                current.seat_keymap.clone(),
+                current.seat_layouts.clone(),
+                current.seat_modifiers,
+            ),
             None => {
                 let saved = keyboard.modifier_state().serialized;
                 (
                     keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                    keyboard.with_xkb_state(self, |context| layout_names(context.xkb())),
                     [
                         saved.depressed,
                         saved.latched,
@@ -515,6 +521,7 @@ impl State {
             device: device.clone(),
             keymap,
             seat_keymap,
+            seat_layouts,
             seat_modifiers,
         });
         self.input_method_keymap_changed();
@@ -540,6 +547,7 @@ impl State {
             if let Err(error) = keyboard.set_xkb_config(self, XkbConfig::default()) {
                 tracing::error!(?error, "the default keymap did not load");
             }
+            self.send_keyboard_layouts();
         }
         // A new keymap starts with no modifier locked: the seat's Caps Lock and layout return.
         let [depressed, latched, locked, layout] = current.seat_modifiers;
@@ -558,6 +566,8 @@ pub struct VirtualKeymap {
     /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
     /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
     seat_keymap: String,
+    /// The names of the seat's layouts, which the current keymap no longer has.
+    pub(crate) seat_layouts: Vec<String>,
     pub(crate) seat_modifiers: [u32; 4],
 }
 

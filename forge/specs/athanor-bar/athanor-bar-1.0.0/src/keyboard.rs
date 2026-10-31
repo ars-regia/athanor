@@ -12,6 +12,16 @@ pub fn active(layouts: &[String], group: u32) -> Option<&str> {
         .map(String::as_str)
 }
 
+/// The layouts as a person reads them: a symbols file may name none, and a blank entry is no
+/// choice, so `unnamed` words the place of such a layout, counted from 1.
+pub fn labels(layouts: &[String], unnamed: impl Fn(usize) -> String) -> Vec<String> {
+    let label = |(index, name): (usize, &String)| match name.trim() {
+        "" => unnamed(index + 1),
+        _ => name.clone(),
+    };
+    layouts.iter().enumerate().map(label).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -20,11 +30,24 @@ mod tests {
         list.iter().map(|name| name.to_string()).collect()
     }
 
+    fn labels_of(list: &[&str]) -> Vec<String> {
+        labels(&names(list), |n| format!("Layout {n}"))
+    }
+
     #[test]
     fn shown_only_with_something_to_switch_between() {
         assert!(!shown(&names(&[])));
         assert!(!shown(&names(&["English (US)"])));
         assert!(shown(&names(&["English (US)", "Italian"])));
+    }
+
+    #[test]
+    fn an_unnamed_layout_is_labelled_by_its_place() {
+        let labels = labels_of(&["English (US)", ""]);
+        assert_eq!(labels, ["English (US)", "Layout 2"]);
+        assert!(shown(&labels));
+        let labels = labels_of(&["", "Italian", " "]);
+        assert_eq!(labels, ["Layout 1", "Italian", "Layout 3"]);
     }
 
     #[test]

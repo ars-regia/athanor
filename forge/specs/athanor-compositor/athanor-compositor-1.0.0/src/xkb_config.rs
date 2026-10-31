@@ -550,6 +550,7 @@ impl State {
         tracing::info!(?path, layout = %settings.layout, "keymap from xkb_config");
         self.input_method_repeat_changed();
         self.input_method_keymap_changed();
+        self.send_keyboard_layouts();
         self.send_keyboard_group();
     }
 }
