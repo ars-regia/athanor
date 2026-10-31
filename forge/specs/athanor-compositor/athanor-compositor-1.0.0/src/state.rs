@@ -588,14 +588,6 @@ impl State {
         waiting
     }
 
-    /// The area of the first output: where the pointer moves.
-    pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
-        self.space
-            .outputs()
-            .next()
-            .and_then(|output| self.space.output_geometry(output))
-    }
-
     /// What the layer surfaces' exclusive zones leave of the first output (`window_area_on`):
     /// where the fixture's windows are kept, maximised and restored.
     #[cfg(test)]

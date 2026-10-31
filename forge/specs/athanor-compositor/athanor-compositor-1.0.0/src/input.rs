@@ -17,8 +17,9 @@ use smithay::input::keyboard::{
     FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER};
 use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardBackend, VirtualKeyboardDevice, VirtualKeyboardHandler,
     VirtualKeyboardSpecialEvent,
@@ -317,11 +318,10 @@ impl State {
                 );
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
-                let Some(area) = self.output_area() else {
+                let location = self.on_first_panel(|panel| event.position_transformed(panel));
+                let Some(location) = location else {
                     return;
                 };
-                let location =
-                    self.unzoomed(event.position_transformed(area.size) + area.loc.to_f64());
                 self.pointer_moved_to(event.device().id(), location, event.time());
             }
             // A mouse or a touchpad on a console: moved by its delta, kept on the outputs.
@@ -421,6 +421,17 @@ impl State {
     }
 
     /// Where the outputs are in the space.
+    /// Where in the space an absolute device points on the first output: it reports `position`
+    /// on the panel, which the output's transform turns under what the output shows.
+    pub(crate) fn on_first_panel(
+        &self,
+        position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
+        let output = self.space.outputs().next()?;
+        let area = self.space.output_geometry(output)?;
+        Some(self.unzoomed(on_panel(output, area, position)))
+    }
+
     pub(crate) fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
         self.space
             .outputs()
@@ -727,8 +738,9 @@ impl VirtualPointerHandler for State {
         self.activity();
         self.request_redraw();
         let outputs = self.output_areas();
-        let area = match event.device().output() {
-            Some(output) => self.space.output_geometry(&output),
+        let named = event.device().output();
+        let area = match &named {
+            Some(output) => self.space.output_geometry(output),
             None => outputs.iter().copied().reduce(|all, area| all.merge(area)),
         };
         let (Some(area), Some(pointer)) = (area, self.seat.get_pointer()) else {
@@ -736,10 +748,11 @@ impl VirtualPointerHandler for State {
         };
         // Clamped first: the far edge, x == x_extent, maps to the first column past the area,
         // which a neighbouring output holds.
-        let to = self.unzoomed(clamp_into(
-            area,
-            event.position_transformed(area.size) + area.loc.to_f64(),
-        ));
+        let shown = match &named {
+            Some(output) => on_panel(output, area, |panel| event.position_transformed(panel)),
+            None => event.position_transformed(area.size) + area.loc.to_f64(),
+        };
+        let to = self.unzoomed(clamp_into(area, shown));
         if let Some(location) = confine(&outputs, pointer.current_location(), to) {
             self.pointer_moved_to(event.device().id(), location, event.time());
         }
@@ -768,6 +781,18 @@ pub(crate) fn confine(
         .find(|area| area.to_f64().contains(from))
         .or_else(|| outputs.first())?;
     Some(clamp_into(*area, to))
+}
+
+/// Where in `area`, which `output` shows, an absolute device points: the device reports
+/// `position` on the panel, which the transform turns under what the output shows.
+fn on_panel(
+    output: &Output,
+    area: Rectangle<i32, Logical>,
+    position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
+) -> Point<f64, Logical> {
+    let transform = output.current_transform();
+    let panel = transform.invert().transform_size(area.size);
+    transform.transform_point_in(position(panel), &panel.to_f64()) + area.loc.to_f64()
 }
 
 /// The point of `area` nearest `to`: from its first pixel to its last, never its far edge.

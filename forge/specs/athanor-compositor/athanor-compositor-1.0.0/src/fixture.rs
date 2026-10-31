@@ -6371,9 +6371,9 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
 
     let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
         head.set_scale(1.5);
-        head.set_transform(wl_output::Transform::_90);
+        head.set_position(7, 7);
     });
-    assert_eq!(turned, "failed", "a transform");
+    assert_eq!(turned, "failed", "a position");
     let stale = serial.wrapping_add(1);
     let late = control_center.configure(&mut run, &manager, stale, "headless-0", |head| {
         head.set_scale(1.5)
@@ -6409,6 +6409,43 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
     });
     control_center.pump(&mut run, "the window is told the new scale", |client, _| {
         client.fractional_scale == Some(180)
+    });
+    run.stop();
+}
+
+/// A configuration turns an output: its logical size turns with it, the next output follows,
+/// and the frame keeps the panel's size.
+#[test]
+fn os9_a_configuration_turns_an_output() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::_90)
+    });
+
+    assert_eq!(turned, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::_90);
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    assert_eq!(area.size, (height, width).into());
+    let next = run.state.space.output_geometry(&second).expect("mapped");
+    assert_eq!(next.loc.x, height, "the next output follows");
+    let frame = run.state.capture(0).expect("the next frame");
+    assert_eq!(frame.len(), (width * height * 4) as usize);
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
     });
     run.stop();
 }
@@ -7023,6 +7060,33 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
 /// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
 /// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
 /// beside it, which `confine` alone accepts. The height is one both outputs have.
+#[test]
+fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer_with_output(
+        Some(&seat),
+        Some(&output),
+        &local.queue.handle(),
+        (),
+    );
+    pointer.motion_absolute(0, 25, 10, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let pointed = run.state.on_first_panel(|panel| {
+        (f64::from(panel.w) / 4.0, f64::from(panel.h) / 10.0).into()
+    });
+    let at = run.state.seat.get_pointer().expect("a pointer").current_location();
+    assert_eq!(Some(at), pointed);
+    run.stop();
+}
+
 #[test]
 fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
     let mut run = Running::start(None);
