@@ -38,6 +38,7 @@ mod session_calls;
 mod shutdown;
 mod state;
 mod tablet;
+mod tiling;
 mod toplevel_state;
 mod xkb_config;
 mod udev;
