@@ -2493,7 +2493,8 @@ fn an_output_cut_on_one_side_leaves_the_other_over_a_zone() {
 #[test]
 fn the_pointer_stays_on_an_output_that_shrinks() {
     let mut run = Running::start(None);
-    let pointed: Point<f64, Logical> = (f64::from(OUTPUTS[0].width) - 10.0, 30.0).into();
+    // Where the next output comes to stand.
+    let pointed: Point<f64, Logical> = (f64::from(OUTPUTS[0].width) * 0.8, 30.0).into();
     run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
 
     resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);

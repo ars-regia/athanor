@@ -566,10 +566,9 @@ impl State {
             let to = carried.or_else(|| crate::input::confine(&outputs, at, at));
             if let Some(to) = to.filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
+            } else if moved {
+                self.refresh_pointer();
             }
-        }
-        if moved {
-            self.refresh_pointer();
         }
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
