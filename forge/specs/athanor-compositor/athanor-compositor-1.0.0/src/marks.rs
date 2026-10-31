@@ -4,7 +4,7 @@
 //! DRM path alike. Corners are small bitmaps, not a shader, because the renderers include Pixman.
 
 use crate::focus_theme::Outline;
-use crate::state::{inset, laid_out, unconfined};
+use crate::state::{full_screen_area, inset, laid_out, unconfined};
 use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
 };
@@ -50,6 +50,9 @@ smithay::backend::renderer::element::render_elements! {
     Line=SolidColorRenderElement,
     Corner=MemoryRenderBufferRenderElement<R>,
 }
+
+/// The black behind a full-screen window, whose element is `surface`'s for its whole life.
+struct Backdrop(Id);
 
 /// What the marks of one frame need from the session, read before the backend is borrowed.
 pub struct Marks {
@@ -420,6 +423,41 @@ fn window_elements<R>(
         );
     }
     elements.extend(surface_tree(renderer, surface, drawn_at, place));
+    if full_screen && full_screen_area(window) == Some(place.output) {
+        // A client smaller than its output: nothing of the session shows below it.
+        let id = with_states(surface, |states| {
+            let backdrop = states.data_map.get_or_insert(|| Backdrop(Id::new()));
+            backdrop.0.clone()
+        });
+        elements.push(Stacked::Line(SolidColorRenderElement::new(
+            id,
+            place.physical(place.output),
+            CommitCounter::default(),
+            Color32F::new(0.0, 0.0, 0.0, 1.0),
+            Kind::Unspecified,
+        )));
+    }
+}
+
+/// The focused window, when `output` is the one it has whole and its client has answered: it
+/// stands above the top layer there, and on no other output it reaches.
+pub fn lifted<'a>(
+    focused: Option<&'a Window>,
+    space: &Space<Window>,
+    output: &Output,
+) -> Option<&'a Window> {
+    let shown = space.output_geometry(output)?;
+    focused.filter(|window| {
+        full_screen_area(window) == Some(shown)
+            && window.toplevel().is_some_and(|toplevel| {
+                toplevel.with_committed_state(|state| {
+                    state.is_some_and(|state| {
+                        state.states.contains(xdg_toplevel::State::Fullscreen)
+                    })
+                })
+            })
+            && space.element_location(window).is_some()
+    })
 }
 
 /// The layer surfaces and the windows of `output`, front to back, with the windows' marks.
@@ -453,22 +491,34 @@ where
             }
         }
     };
-    layers(renderer, upper, &mut elements);
-    if let Some(geometry) = space.output_geometry(output) {
+    let (overlay, top): (Vec<&LayerSurface>, Vec<&LayerSurface>) = upper
+        .into_iter()
+        .partition(|layer| layer.layer() == Layer::Overlay);
+    let lifted = lifted(marks.focused.as_ref(), space, output);
+    let places = space.output_geometry(output).map(|geometry| {
         // As `State::window_area_on`, which would take the map's lock again.
         let area = laid_out(output).map(|size| inset(geometry, size, map.non_exclusive_zone()));
-        let place = Place {
+        Place {
             origin: geometry.loc,
             scale,
             output: geometry,
             area: area.unwrap_or(geometry),
-        };
-        for window in space.elements().rev() {
+        }
+    });
+    layers(renderer, overlay, &mut elements);
+    if let Some((window, place)) = lifted.zip(places.as_ref()) {
+        if let Some(located) = space.element_geometry(window) {
+            window_elements(renderer, &mut elements, window, located, marks, place);
+        }
+    }
+    layers(renderer, top, &mut elements);
+    if let Some(place) = &places {
+        for window in space.elements().rev().filter(|window| Some(*window) != lifted) {
             let overlaps = space
                 .element_bbox(window)
-                .is_some_and(|bbox| geometry.overlaps(bbox));
+                .is_some_and(|bbox| place.output.overlaps(bbox));
             if let Some(located) = space.element_geometry(window).filter(|_| overlaps) {
-                window_elements(renderer, &mut elements, window, located, marks, &place);
+                window_elements(renderer, &mut elements, window, located, marks, place);
             }
         }
     }

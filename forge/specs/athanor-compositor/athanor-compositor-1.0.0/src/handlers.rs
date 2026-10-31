@@ -2,7 +2,7 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{ClientState, State};
+use crate::state::{is_full_screen, ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
@@ -457,7 +457,10 @@ impl State {
             return None;
         }
         let start = pointer.grab_start_data()?;
-        let window = self.window_for(surface.wl_surface())?;
+        // A full-screen window has no place to be dragged from.
+        let window = self
+            .window_for(surface.wl_surface())
+            .filter(|window| !is_full_screen(window))?;
         Some((pointer, start, window))
     }
 
@@ -661,8 +664,15 @@ impl XdgShellHandler for State {
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
+    /// A full-screen window keeps its output, and is told what it has.
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
             self.end_window_grab(&window);
             self.maximise(&window);
         }
@@ -670,7 +680,27 @@ impl XdgShellHandler for State {
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                self.forget_maximised(&window);
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
             self.restore(&window);
+        }
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            self.end_window_grab(&window);
+            self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            self.leave_full_screen(&window);
         }
     }
 
@@ -842,6 +872,10 @@ impl SeatHandler for State {
         // the first and the last read, and Smithay calls this holding the keyboard, which the
         // aids read.
         self.loop_handle.insert_idle(|state| {
+            // The focus decides what stands above the top layer (`marks::lifted`).
+            if state.space.elements().any(is_full_screen) {
+                state.refresh_pointer();
+            }
             state.refresh_constraint();
             state.aids_quiet_changed();
         });

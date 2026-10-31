@@ -683,6 +683,33 @@ impl State {
         let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
         toplevel.with_pending_state(|state| {
             state.states.unset(xdg_toplevel::State::Maximized);
+        });
+        self.back_to(window, kept);
+        Some(kept)
+    }
+
+    /// A full-screen window no longer maximised leaves full-screen for the place it had before
+    /// it was.
+    pub fn forget_maximised(&self, window: &Window) {
+        let data = window.user_data();
+        let kept = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        if let (Some(Kept { before, .. }), Some(full)) = (kept, data.get::<FullScreen>()) {
+            full.0.set(full.0.get().map(|kept| Kept { before, ..kept }));
+        }
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+            });
+        }
+    }
+
+    /// A configure with the size `kept` had, and the window moves back at the commit that
+    /// answers it, centred in its `home_area` when its home output no longer shows that place.
+    fn back_to(&mut self, window: &Window, kept: Rectangle<i32, Logical>) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
             state.size = (!kept.is_empty()).then_some(kept.size);
         });
         let serial = toplevel
@@ -698,7 +725,85 @@ impl State {
             };
             relocate(window, to, serial);
         }
-        Some(kept)
+    }
+
+    /// Gives `window` the `output` the client named, or its home output, whole: a configure
+    /// with the `fullscreen` state and the output's size, and the window moves there at the
+    /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
+    /// maximised window stays so, and returns to that.
+    pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
+        if let Some(id) = output.and_then(|output| self.active_workspace(&output)) {
+            // Before its first commit a window has no workspace yet.
+            self.place_on_workspace(window);
+            self.move_window_to(window, id);
+        }
+        let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_output_area(window))
+        else {
+            return;
+        };
+        let before = self.settled_geometry(window);
+        let full = window.user_data().get_or_insert(FullScreen::default);
+        let before = full.0.get().map_or(before, |kept| kept.before);
+        full.0.set(Some(Kept { before, area }));
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Fullscreen);
+            state.size = Some(area.size);
+        });
+        // Before its first commit the initial configure carries the state.
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        relocate(window, area.loc, serial);
+    }
+
+    /// Where `window` stands, or will once a move on its way lands, at the size that move
+    /// asked; out of the space, where it comes back.
+    fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
+        let size = window.geometry().size;
+        let moving = window
+            .user_data()
+            .get::<Relocate>()
+            .and_then(|relocate| relocate.0.get());
+        if let Some(Destination { to, .. }) = moving {
+            let asked = window
+                .toplevel()
+                .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+            return Rectangle::new(to, asked.unwrap_or(size));
+        }
+        self.space.element_geometry(window).unwrap_or_else(|| {
+            self.minimised
+                .iter()
+                .chain(self.parked.iter())
+                .find(|(kept, _)| kept == window)
+                .map(|(_, at)| Rectangle::new(*at, size))
+                .unwrap_or_default()
+        })
+    }
+
+    /// Ends `full_screen`: the window returns to where it was, or to its maximised size.
+    pub fn leave_full_screen(&mut self, window: &Window) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(kept) = window
+            .user_data()
+            .get::<FullScreen>()
+            .and_then(|full| full.0.take())
+        else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Fullscreen);
+        });
+        let maximised = window
+            .user_data()
+            .get::<Maximised>()
+            .is_some_and(|maximised| maximised.0.get().is_some());
+        if maximised {
+            self.maximise(window);
+        } else {
+            self.back_to(window, kept.before);
+        }
     }
 
     /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,
@@ -757,13 +862,17 @@ impl State {
         true
     }
 
-    /// Fits the maximised windows to their `home_area` again, after the layer surfaces'
-    /// exclusive zones or the outputs changed it.
+    /// Fits the maximised windows to their `home_area` again, and the full-screen ones to their
+    /// output, after the layer surfaces' exclusive zones or the outputs changed it.
     pub fn fit_maximised(&mut self) {
         let stale: Vec<Window> = self
             .space
             .elements()
             .filter(|window| {
+                let full = window.user_data().get::<FullScreen>();
+                if let Some(kept) = full.and_then(|full| full.0.get()) {
+                    return self.home_output_area(window) != Some(kept.area);
+                }
                 window
                     .user_data()
                     .get::<Maximised>()
@@ -774,7 +883,11 @@ impl State {
             .cloned()
             .collect();
         for window in &stale {
-            self.maximise(window);
+            if is_full_screen(window) {
+                self.full_screen(window, None);
+            } else {
+                self.maximise(window);
+            }
         }
     }
 
@@ -793,19 +906,24 @@ impl State {
     /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
     /// waits for, so that the window moves with its new size, not before.
     pub fn relocated(&mut self, window: &Window) {
-        let Some(relocate) = window.user_data().get::<Relocate>() else {
-            return;
-        };
-        let Some(Destination { to, serial }) = relocate.0.get() else {
-            return;
-        };
-        if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
-            if !answered(toplevel, serial) {
-                return;
+        let relocate = window.user_data().get::<Relocate>();
+        if let Some(Destination { to, serial }) = relocate.and_then(|relocate| relocate.0.get()) {
+            if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
+                if !answered(toplevel, serial) {
+                    return;
+                }
             }
+            if let Some(relocate) = relocate {
+                relocate.0.set(None);
+            }
+            self.space.relocate_element(window, to);
         }
-        relocate.0.set(None);
-        self.space.relocate_element(window, to);
+        // A client smaller than its output stands in the middle of it, as
+        // `xdg_toplevel.set_fullscreen` says.
+        if let Some(area) = full_screen_area(window) {
+            let to = centred(area, window.geometry().size);
+            self.space.relocate_element(window, to);
+        }
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -959,6 +1077,13 @@ impl State {
         let output = self.space.output_under(pos).next()?;
         let origin = self.space.output_geometry(output)?.loc;
         let map = layer_map_for_output(output);
+        let focused = self.focused_window();
+        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
+        let above_top = lifted.and_then(|window| {
+            let location = self.space.element_location(window)? - window.geometry().loc;
+            window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+            Some((Under::Window(window.clone()), location))
+        });
         // The top surface of `layer` with input at `pos`: one whose input region leaves `pos`
         // out lets the click through to what is below.
         let on = |layer| {
@@ -968,7 +1093,12 @@ impl State {
                 Some((Under::Layer(surface.clone()), location))
             })
         };
-        let found = on(Layer::Overlay)
+        let front = on(Layer::Overlay).or(above_top);
+        // The black around a smaller client hides what is below as well.
+        if lifted.is_some() {
+            return front;
+        }
+        let found = front
             .or_else(|| on(Layer::Top))
             .or_else(|| {
                 self.space
@@ -1325,6 +1455,21 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
 /// A maximised window's geometry before it was maximised, and the area it was maximised to.
 #[derive(Default)]
 struct Maximised(Cell<Option<Kept>>);
+
+/// As `Maximised`, for a full-screen window and its output.
+#[derive(Default)]
+struct FullScreen(Cell<Option<Kept>>);
+
+/// The output `window` has whole, from the request to the request that ends it
+/// (`State::full_screen`).
+pub fn full_screen_area(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    let full = window.user_data().get::<FullScreen>()?;
+    Some(full.0.get()?.area)
+}
+
+pub fn is_full_screen(window: &Window) -> bool {
+    full_screen_area(window).is_some()
+}
 
 #[derive(Clone, Copy)]
 struct Kept {

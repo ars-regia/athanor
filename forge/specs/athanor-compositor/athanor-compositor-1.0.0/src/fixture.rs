@@ -5250,6 +5250,10 @@ mod a11y;
 #[cfg(test)]
 mod marks;
 
+// OS12: `xdg_toplevel.set_fullscreen`.
+#[cfg(test)]
+mod full_screen;
+
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
     run.state
