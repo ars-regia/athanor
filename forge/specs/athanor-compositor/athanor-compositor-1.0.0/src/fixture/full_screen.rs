@@ -503,6 +503,156 @@ fn a_minimised_window_stays_on_its_workspace_when_it_names_an_output() {
     run.stop();
 }
 
+/// Nor can it from a minimise on the workspace the user sees.
+#[test]
+fn a_minimised_window_stays_on_its_output_when_it_names_another() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, window) = window(&mut run);
+    let named = local.output(1);
+    let home = run.state.workspace_of(&window);
+    toplevel.set_minimized();
+    local.roundtrip(&mut run);
+    assert!(run.state.is_minimised(&window));
+
+    toplevel.set_fullscreen(Some(&named));
+    local.roundtrip(&mut run);
+
+    assert_eq!(run.state.workspace_of(&window), home);
+    run.stop();
+}
+
+/// A client that unmaps its full-screen window leaves no black and no lift behind it.
+#[test]
+fn a_full_screen_window_that_hides_leaves_nothing_behind() {
+    let mut run = Running::start(None);
+    let fixture = clear_the_fixture(&mut run);
+    let (shelf, _surface) = bar(&mut run);
+    let (mut local, toplevel, hidden) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    let picture = frame(&mut run);
+    assert_eq!(at(&picture, 45, 45), PAINT, "over the fixture's window");
+
+    let (surface, _) = local.window.as_ref().expect("a window");
+    surface.attach(None, 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+
+    // The focus raised the fixture's window; a launcher holding the keyboard would not have.
+    run.state.space.raise_element(&hidden, false);
+    assert_ne!(at(&frame(&mut run), 45, 45), PAINT, "it hid");
+    assert_ne!(at(&frame(&mut run), 45, 45), BLACK, "the fixture's window shows");
+    assert_eq!(client_under(&run, 5.0, 5.0), shelf.id, "the bar");
+    let (x, y) = (f64::from(geometry(&run, &fixture).loc.x + 5), 45.0);
+    assert!(run.state.under((x, y).into()).is_some(), "the fixture's window");
+    run.stop();
+}
+
+/// A dialog of a full-screen window stays above it and in reach, when the user clicks the window
+/// too.
+#[test]
+fn a_dialog_stays_above_its_full_screen_window() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, window) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    let created = local.create(&mut run);
+    created.toplevel.set_parent(Some(&toplevel));
+    let dialog = local.map(&mut run, &created);
+
+    run.state.focus(&window);
+    local.roundtrip(&mut run);
+
+    let inside = geometry(&run, &dialog).loc + Point::from((5, 5));
+    assert_ne!(at(&frame(&mut run), inside.x, inside.y), PAINT, "the dialog shows");
+    let under = run.state.under(inside.to_f64());
+    let reached = under.is_some_and(|(under, _)| matches!(under, Under::Window(at) if at == dialog));
+    assert!(reached, "the pointer reaches it");
+    run.stop();
+}
+
+/// A request taken back before the first commit leaves the window where it is placed.
+#[test]
+fn a_request_taken_back_before_the_first_commit_leaves_no_move() {
+    taken_back(false);
+}
+
+/// The same after the first commit, when the request has a configure to wait for.
+#[test]
+fn a_request_taken_back_before_the_first_buffer_leaves_no_move() {
+    taken_back(true);
+}
+
+fn taken_back(after_first_commit: bool) {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let toplevel = xdg.get_toplevel(&qh, ());
+    if after_first_commit {
+        surface.commit();
+        local.roundtrip(&mut run);
+    }
+    toplevel.set_fullscreen(None);
+    toplevel.unset_fullscreen();
+    if !after_first_commit {
+        surface.commit();
+    }
+    local.roundtrip(&mut run);
+    local.window = Some((surface, xdg));
+
+    let (_, _, states) = local.redraw(&mut run);
+    assert!(!states.contains(&FULLSCREEN));
+    paint(&mut run, &mut local, 200, 200, PAINT);
+
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    assert_ne!(geometry(&run, &window).loc, (0, 0).into());
+    run.stop();
+}
+
+/// A request that changes nothing is answered all the same.
+#[test]
+fn leaving_outside_full_screen_is_answered() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, toplevel, _window) = window(&mut run);
+    local.roundtrip(&mut run);
+    local.client.configure = None;
+
+    toplevel.unset_fullscreen();
+
+    let (_, _, states) = local.redraw(&mut run);
+    assert!(!states.contains(&FULLSCREEN));
+    run.stop();
+}
+
+/// A full-screen window elsewhere does not make a change of the keyboard a motion for the client
+/// under the pointer.
+#[test]
+fn a_focus_change_tells_the_client_under_the_pointer_nothing() {
+    let mut run = Running::start(None);
+    let fixture = clear_the_fixture(&mut run);
+    let (mut pointed, _kept, under) = window(&mut run);
+    let (mut other, toplevel, _elsewhere) = window(&mut run);
+    let named = other.output(1);
+    enter(&mut run, &mut other, &toplevel, Some(&named));
+    let inside = geometry(&run, &under).loc + Point::from((5, 5));
+    run.state.pointer_to(inside.to_f64(), smithay::backend::input::InputTime::now());
+    pointed.roundtrip(&mut run);
+    let heard = pointed.client.pointer_motions;
+
+    run.state.focus(&fixture);
+    other.roundtrip(&mut run);
+    pointed.roundtrip(&mut run);
+
+    assert_eq!(pointed.client.pointer_motions, heard);
+    run.stop();
+}
+
 /// What another window asks, or its end, tells the client under the pointer nothing when that
 /// client stays there.
 #[test]

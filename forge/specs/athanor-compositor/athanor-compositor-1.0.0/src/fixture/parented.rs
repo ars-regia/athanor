@@ -8,16 +8,16 @@ use wayland_protocols::xdg::foreign::zv2::client::{
 };
 
 /// A toplevel of `Local::create`.
-struct Created {
+pub(super) struct Created {
     surface: wl_surface::WlSurface,
-    toplevel: xdg_toplevel::XdgToplevel,
+    pub(super) toplevel: xdg_toplevel::XdgToplevel,
     _xdg: xdg_surface::XdgSurface,
 }
 
 impl Local {
     /// A toplevel with its first configure acknowledged and no buffer yet, so that a parent can
     /// be set before the compositor places it.
-    fn create(&mut self, run: &mut Running) -> Created {
+    pub(super) fn create(&mut self, run: &mut Running) -> Created {
         let compositor: wl_compositor::WlCompositor = self.bind(4);
         let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
         let qh = self.queue.handle();
@@ -38,7 +38,7 @@ impl Local {
     }
 
     /// Draws the first buffer of `created`: `place` decides its place and focus.
-    fn map(&mut self, run: &mut Running, created: &Created) -> smithay::desktop::Window {
+    pub(super) fn map(&mut self, run: &mut Running, created: &Created) -> smithay::desktop::Window {
         let shm: wl_shm::WlShm = self.bind(1);
         let (buffer, _) = self.buffer(&shm, WIDTH, HEIGHT, [0, 0, 0, 255]);
         created.surface.attach(Some(&buffer), 0, 0);

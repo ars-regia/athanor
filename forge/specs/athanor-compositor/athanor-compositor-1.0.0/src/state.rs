@@ -724,24 +724,33 @@ impl State {
                 None => kept.loc,
             };
             relocate(window, to, serial);
+        } else if let Some(moving) = window.user_data().get::<Relocate>() {
+            // Asked before the window was placed: nothing to go back to, and `place` places it.
+            moving.0.set(None);
         }
     }
 
     /// Gives `window` the `output` the client named, or its home output, whole: a configure
     /// with the `fullscreen` state and the output's size, and the window moves there at the
     /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
-    /// maximised window stays so, and returns to that. A window on an inactive workspace stays
-    /// there, whichever output it names, minimised or not: only the user brings it to the one
-    /// they see.
+    /// maximised window stays so, and returns to that. A window on an inactive workspace or
+    /// minimised stays there, whichever output it names: only the user brings it to the one they
+    /// see.
     pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
-        let named = output.filter(|_| self.on_active_workspace(window));
+        let visible = self.on_active_workspace(window) && !self.is_minimised(window);
+        let named = output.filter(|_| visible);
         if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
             // Before its first commit a window has no workspace yet.
             self.place_on_workspace(window);
             self.move_window_to(window, id);
         }
-        let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_output_area(window))
-        else {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(area) = self.home_output_area(window) else {
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_configure();
+            }
             return;
         };
         let before = self.settled_geometry(window);

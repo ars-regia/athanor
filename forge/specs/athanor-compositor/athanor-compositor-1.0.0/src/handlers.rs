@@ -709,6 +709,12 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            if !is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
             self.leave_full_screen(&window);
             self.repoint();
         }
@@ -884,7 +890,7 @@ impl SeatHandler for State {
         self.loop_handle.insert_idle(|state| {
             // The focus is one of what decides what stands above the top layer (`marks::lifted`).
             if state.space.elements().any(is_full_screen) {
-                state.refresh_pointer();
+                state.repoint();
             }
             state.refresh_constraint();
             state.aids_quiet_changed();
