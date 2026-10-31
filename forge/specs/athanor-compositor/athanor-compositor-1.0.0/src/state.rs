@@ -790,7 +790,7 @@ impl State {
     }
 
     /// Where `window` stands, or will once a move on its way lands, at the size that move
-    /// asked; out of the space, where it comes back.
+    /// asked; out of the space, where it comes back; empty on its way to where `placed` puts it.
     fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
         let size = window.geometry().size;
         let moving = window
@@ -798,7 +798,6 @@ impl State {
             .get::<Relocate>()
             .and_then(|relocate| relocate.0.get());
         if let Some(Destination { to: None, .. }) = moving {
-            // On its way to where `placed` puts it: it has no place to keep.
             return Rectangle::default();
         }
         if let Some(Destination { to: Some(to), .. }) = moving {
@@ -1519,7 +1518,6 @@ fn place_again(window: &Window, serial: Option<Serial>) {
         .0
         .set(Some(Destination { to: None, serial }));
 }
-
 
 /// A maximised window's geometry before it was maximised, and the area it was maximised to.
 #[derive(Default)]

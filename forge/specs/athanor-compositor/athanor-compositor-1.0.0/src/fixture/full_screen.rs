@@ -584,6 +584,27 @@ fn a_window_that_unmaps_keeps_no_request() {
     }
 }
 
+/// A window carried to another output while full-screen stays there when it unmaps: the place it
+/// kept is on the output it left.
+#[test]
+fn a_window_that_unmaps_stays_on_the_output_it_moved_to() {
+    let mut run = Running::start(None);
+    let (mut local, toplevel, window) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    let (second, area) = second_output(&run);
+    let there = run.state.active_workspace(&second).expect("a workspace");
+    assert!(run.state.move_window_to(&window, there));
+
+    let (surface, _) = local.window.clone().expect("a window");
+    surface.attach(None, 0, 0);
+    surface.commit();
+    local.redraw(&mut run);
+
+    let place = geometry(&run, &window);
+    assert!(area.contains(place.loc), "{place:?} is on {area:?}");
+    run.stop();
+}
+
 /// A window full-screen from its first buffer has no place to return to, and is placed as a new
 /// window is, clear of the bar.
 #[test]
