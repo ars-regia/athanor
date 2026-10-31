@@ -15,22 +15,22 @@
 ## Global Constraints
 
 - Only an approved revision is implemented (ADR-0074). The register entries of this plan need the maintainer's approval before the code they cover: Task 1 is their pull request, and no other task lands before it.
-- Base: #898 and #899 are not merged as this plan is written. Task 3 starts from `origin/iso-v0` once both are: Task 5 keeps a tile through #899's `FullScreen` record and runs after #898's `fit_to_outputs`.
+- Base: #898 and #899 are not merged as this plan is written. Tasks 3 to 5 need both: Task 5 keeps a tile through #899's `FullScreen` record and `full_screen`, and runs after #898's `fit_to_outputs`. The branch merges `origin/iso-v0` once they are in.
 - The COSMIC boundary (`doc_shell.md` SH2, `verify.py boundary`): the compositor reads no COSMIC setting. The gaps are a constant here.
 - `panic = "abort"`: no new `unwrap()`, `expect()` or `panic!` outside tests. A tree that does not hold a window has no tile for it: that window is floating.
 - The compositor's cargo runs in the rig (`forge/test/shell/rig.sh`), `-j 4`, on the first four cores of the desktop or on the laptop.
-- Clippy runs with `-D warnings`, so code without a caller outside the tests does not build. Tasks 2, 3 and 4 land together, in one pull request: the protocol is their caller. Task 8 lands last, because only the bar's client makes the toggle reachable, and by then dialogs and drags are handled.
+- Clippy runs with `-D warnings`, so code without a caller outside the tests does not build. Tasks 2 to 5 land together, in one pull request: the protocol calls the tree, `Tree::remove` and `Tree::holds` have no caller before Task 5, and without Task 5 a window's end would leave a tile behind. Task 8 lands last, because only the bar's client makes the toggle reachable, and by then dialogs and drags are handled.
 - Out of scope: the tiling keys, which `2026-10-28-compositor-key-bindings.md` leaves unbound; stacks and focus by direction, which have no way in without those keys (D10); saving the state between sessions.
 
 Decisions recorded in this plan, each to be named in the pull request that implements it:
 
 - **D1, one binary tree per workspace (plan's choice).** Each split has an orientation and the first child's share of it. cosmic-comp keeps groups of any width with sizes in pixels (`tiling`, `Data::Group`), but a new window only ever splits a tile in two; the wider groups come from moves this plan does not offer.
-- **D2, where a new tile goes (`tiling::map_internal`, `map_to_tree`, `new_group`).** The tile split is that of the window on the workspace focused last, wherever the keyboard is now: a launcher that opens an application leaves the split where it was. Here that is the topmost tile in the space's order, which a focus raises. The tile is split along its longer side, side by side when it is strictly wider than high, in equal halves, and the new window takes the second. An empty workspace gives the window the whole area. With tiles but none to name the root is split, the new window last.
+- **D2, where a new tile goes (`tiling::map_internal`, `map_to_tree`, `new_group`).** The tile split is that of the window on the workspace focused last, wherever the keyboard is now: a launcher that opens an application leaves the split where it was. Here the tree keeps its windows in the order they were focused (`Tree::focus`, from `State::focus`), as `workspace` keeps a focus stack: the space's order cannot serve, since `park` takes a workspace's windows out of the space and a move to a workspace not shown would find no tile. The tile is split along its longer side, side by side when it is strictly wider than high, in equal halves, and the new window takes the second. An empty workspace gives the window the whole area. With tiles but none to name the root is split, the new window last. An empty tree is measured by the area here and by the output there, which only a nearly square output can tell apart.
 - **D3, what an end leaves (`tiling::unmap_internal`).** The sibling takes the parent's place and its whole space.
-- **D4, gaps of 8 (`tiling::update_positions`, with the `(0, 8)` of `system/athanor-style/calmo/generated/cosmic/variants.json`).** `Tree::layout` keeps 8 logical pixels at the edge of the area and between two tiles. cosmic-comp's sum is the same: an outer gap of 0, 8 on a free side of a tile, and 4 on each side of a shared edge. The area passed in is `State::window_area_on` unchanged: maximise, a drag's clamp and the centring on another output read that function too, and must not lose the gap.
-- **D5, what stays floating (`layout::is_dialog`).** A new window with a parent, a modal one, and one whose minimum and maximum size are equal and set. It stands above the tiles. `layout::has_floating_exception` adds a list of application ids from cosmic-comp's configuration: Task 6 reads its defaults and either takes them as a constant or adds a register entry.
-- **D6, maximised and full screen.** A maximised window keeps its tile, and a layout skips it (`workspace` keeps it mapped in tiling). A full-screen window keeps its tile as well, and that is a departure (register entry R4): `shell::fullscreen_request` unmaps the tile, the neighbours grow behind the window, and `tiling::remap` splits again on its return. Here the neighbours, hidden on that output, do not change, and the window returns to its tile with no state to restore.
-- **D7, the toggle (`workspace::set_tiling`).** Off is the default of a new workspace. On tiles every floating window of the workspace, a dialog included: `set_tiling` has no filter, and D5 applies to new windows only. A maximised window stays maximised through both. Off returns each window to the place and size it had floating (`floating::unmap` keeps `last_geometry` and `floating::map_internal` reads it), and one that was born tiled is placed by `state::placed`.
+- **D4, gaps of 8 (`tiling::update_positions`, with the `(0, 8)` of `system/athanor-style/calmo/generated/cosmic/variants.json`).** `Tree::layout` divides the area whole, then takes from each tile 8 logical pixels on a side at the area's edge and 4 on a side it shares, as `update_positions` does: an outer gap of 0, 8 on a free side, 4 on each side of a shared edge. Two tiles of a nested split can so differ by a few pixels, there as here. The area passed in is `State::window_area_on` unchanged: maximise, a drag's clamp and the centring on another output read that function too, and must not lose the gap.
+- **D5, what stays floating (`layout::is_dialog`).** A new window with a parent, a modal one, and one whose minimum and maximum size are equal and set. It stands above the tiles. `layout::has_floating_exception` adds about 35 pairs of regular expressions on the application id and the title, from cosmic-comp's `data/tiling-exceptions.ron`, each naming an application. They are not taken (register entry R5): the compositor reads no COSMIC setting and has no regular expressions, and a list of applications is not a rule of the layout.
+- **D6, maximised and full screen.** A maximised window keeps its tile, and a layout skips it (`workspace` keeps it mapped in tiling). A full-screen window keeps its tile as well, and that is a departure (register entry R4): `shell::fullscreen_request` unmaps the tile, the neighbours grow behind the window, and `tiling::remap` splits again on its return. Here the neighbours, hidden on that output, do not change, and the window returns to its tile with no state to restore. A new tile restores every maximised window of its workspace, as `shell::map_window` does.
+- **D7, the toggle (`workspace::set_tiling`).** Off is the default of a new workspace. On tiles every floating window of the workspace, a dialog included, the topmost first, each by D2: `set_tiling` walks `floating::mapped` with no filter, and D5 applies to new windows only. A maximised window stays maximised through both. Off returns each window to the place and size it had floating (`floating::unmap` keeps `last_geometry` and `floating::map_internal` reads it), and one that was born tiled is placed by `state::placed`. A workspace that `workspaces_changed` drops loses the state with its id.
 - **D8, tiled states.** A tile gets `tiled_left`, `tiled_right`, `tiled_top` and `tiled_bottom` with its size, so that a client squares its corners. A window that leaves the tree loses them in the configure that gives it its floating size.
 - **D9, minimise and workspace moves (register entry R1).** A window that leaves by minimise, or moves to another workspace, leaves the tree; it comes back by D2. cosmic-comp keeps a minimised window's place (`workspace`, `MinimizedWindow::Tiling`).
 - **D10, no stacks (register entry R2).** A stack needs the tiling keys and a tab bar drawn by the compositor, and the own compositor draws no decoration.
@@ -39,7 +39,7 @@ Decisions recorded in this plan, each to be named in the pull request that imple
 
 ## Review Focus
 
-1. Every path that ends a window's place on a workspace also leaves its tree: destroy, minimise, a move, a drag to another output (`settle`), an output's removal (`workspaces_changed`). Task 5, `no_end_leaves_a_tile_behind`.
+1. Every path that ends a window's place on a workspace also leaves its tree: destroy, a null buffer, minimise, a move, a drag to another output (`settle`), an output's removal (`workspaces_changed`). A window enters at `place`, so one that never draws holds no tile. Task 5, `no_end_leaves_a_tile_behind`.
 2. A layout never waits on a client: a client that does not answer keeps its old geometry, and the next layout replaces the `Relocate`, as a maximise does today. Task 5.
 3. A dialog stays above its parent's tile, and a child never splits a tile. Task 6.
 4. The manager is refused to any client but the bar. Task 4.
@@ -49,18 +49,19 @@ Decisions recorded in this plan, each to be named in the pull request that imple
 
 ### Task 1: the register
 
-**Files:** `docs/architecture/shell-features.md`, `docs/architecture/doc_session.md`, `docs/architecture/doc_own_stack.md`.
+**Files:** `docs/architecture/shell-features.md`, `docs/architecture/doc_own_stack.md`.
 
-- [ ] R1, R2, R3 and R4 as entries of the Window management surface CO2 proposes, under `doc_shell_standard.md` ST3. These are approved documents: the pull request needs the maintainer's review, one decision per entry.
-- [ ] SN16 and decision 28 name tiling as a gap of the switch.
+- [ ] Version 2 of the register, as ST3 and ST10 ask: the version line, COSMIC epoch-1.11.0 among the references for this surface, since ST3 names the release cosmic-comp comes from, a `## Window management` section and its `### Window management` table under `## Counts`. It opens the surface with the entries below, and says that the rest of it, scrolling layouts, window rules and gestures among them, is research CO2 leaves open. F-overview-15 and F-bar-34 stay where they are: the first moves with that research, and the second's note is about the applet's settings.
+- [ ] Six rows, each with a link at `epoch-1.11.0`: `F-windows-01`, automatic tiling of a workspace, `missing`; and as `excluded (proposed)`, each with its reason from the decision named, `F-windows-02` a minimised tile keeps its place (R1, D9), `F-windows-03` stacks of tiles (R2, D10), `F-windows-04` a lifted tile's drop zones, and a press in the gap between tiles (R3, D11), `F-windows-05` a full-screen window gives up its tile (R4, D6), `F-windows-06` the per-application floating list (R5, D5). The Counts table: `missing` 1, `excluded (proposed)` 5, total 6. The pull request needs the maintainer's review, one decision per entry; each decided one becomes `excluded`, with its date, or a task of this plan.
+- [ ] OS5 of `doc_own_stack.md`, amended: the global `athanor_workspace_tiling_manager_v1` makes `athanor_workspace_tiling_v1`, as it says of the keyboard group, with the date in the document's list of amendments. OS19 item 2 already keeps the protocol in the switch, and its counts of 8 and 6 widgets include the toggle, so no gap is added to SN16 or decision 28: #894 is an open condition of that item.
 - [ ] `python3 scripts/verify.py docs`, then `git diff --numstat` to see that only these lines changed.
 
 ### Task 2: the tree and its layout
 
 **Files:** create `C/src/tiling.rs`, with its unit tests; `mod tiling;` in `C/src/main.rs`.
 
-- [ ] Write the failing tests first: `a_first_window_fills_the_area`, `a_new_window_splits_the_longer_side`, `no_focus_splits_the_root`, `an_end_gives_the_sibling_its_space`, `the_gaps_are_even`, `no_pixel_is_lost_to_rounding` (an odd size), `a_small_area_leaves_every_tile_a_size`, `a_window_it_does_not_hold_changes_nothing`.
-- [ ] `Tree<T: PartialEq>`, with `insert(window, near: Option<&T>, area)`, `remove(&T)`, `holds(&T)`, and `layout(area) -> Vec<(&T, Rectangle)>`, in which D4 is applied. A window's area is computed from the root each time; nothing is stored in pixels. Task 7 adds `swap` and the shares' change.
+- [ ] Write the failing tests first: `a_first_window_fills_the_area`, `a_new_window_splits_the_longer_side`, `no_focus_splits_the_root`, `an_end_gives_the_sibling_its_space`, `the_gaps_are_even`, `no_pixel_is_lost_to_rounding` (an odd size), `a_small_area_leaves_every_tile_a_size`, `a_window_it_does_not_hold_changes_nothing`, `a_window_it_holds_is_not_added_twice`, `a_nested_split_takes_the_gaps_of_the_reference`, `the_last_focused_tile_is_split`.
+- [ ] `Tree<T: PartialEq>`, with `insert(window, area)`, `focus(&T)`, `remove(&T)`, `holds(&T)`, and `layout(area) -> Vec<(&T, Rectangle)>`, in which D4 is applied. A window already held is not added again. A window's area is computed from the root each time; nothing is stored in pixels. Task 7 adds `swap` and the shares' change.
 - [ ] `rig.sh cargo test --locked -j 4 -p athanor-compositor tiling`.
 
 ### Task 3: the workspace state and the toggle
@@ -73,25 +74,24 @@ Decisions recorded in this plan, each to be named in the pull request that imple
 
 ### Task 4: `athanor_workspace_tiling_v1`
 
-**Files:** `system/athanor-compositor-client/protocols/athanor-workspace-tiling-v1.xml` and that directory's `README.md`; `C/src/workspace_tiling.rs` (new), `mod workspace_tiling;` in `C/src/main.rs`; `C/src/identity.rs`; `C/src/workspace.rs` (from a `Handle` to its `WorkspaceId`); `C/data/globals`; `C/data/privileged-clients`, on the bar's line; `forge/test/shell/rig-privileged-clients`; the `# repo-input:` lines of `forge/specs/athanor-compositor/athanor-compositor.spec`; the client bindings of `C/src/fixture.rs`.
+**Files:** `system/athanor-compositor-client/protocols/athanor-workspace-tiling-v1.xml` and that directory's `README.md`; `C/src/workspace_tiling.rs` (new), `mod workspace_tiling;` in `C/src/main.rs`; `C/src/state.rs` (the global, beside `keyboard_group::global`, and the live objects); `C/src/identity.rs` (`Privilege::ALL` and `SHELL_CLIENTS`, whose lengths change); `C/README.md`, the globals; `C/src/workspace.rs` (from a `Handle` to its `WorkspaceId`, a private field today); `C/data/globals`; `C/data/privileged-clients`, on the bar's line; `forge/test/shell/rig-privileged-clients`; the privileged list and the count of `compositor-globals` in `forge/test/shell/rig.sh`; the `# repo-input:` lines of `forge/specs/athanor-compositor/athanor-compositor.spec`; the client bindings of `C/src/fixture.rs`.
 
-- [ ] The description first, reviewed as an interface. The server lays out as `src/keyboard_group.rs` does, with the cross-protocol `use` lines of `src/toplevel_state.rs`, since `get_tiling` names an interface of `ext_workspace_v1`. The `state` event goes at creation and on every change, from any source.
+- [ ] The description first, reviewed as an interface; an own protocol is in the directory's `README.md`, not in `SHA256SUMS`. The server lays out as `src/keyboard_group.rs` does, with the cross-protocol `use` lines of `src/toplevel_state.rs`, since `get_tiling` names an interface of `ext_workspace_v1`. The `state` event goes at creation and on every change, from any source.
 - [ ] Tests: `os4_only_the_bar_is_granted_tiling`, `the_tiling_state_follows_the_toggle`, `a_workspace_gone_ends_its_tiling_object`.
 
 ### Task 5: the window paths
 
 **Files:** `C/src/handlers.rs`, `C/src/workspace.rs`, `C/src/state.rs`, `C/src/fixture/tiling.rs`.
 
-- [ ] Tests: `no_end_leaves_a_tile_behind`, `a_full_screen_tile_returns_to_its_tile`, `a_tile_fits_a_changed_output`, `a_client_slow_to_answer_keeps_its_place`, `a_bar_zone_narrows_the_tiles`, `a_new_window_first_shows_at_its_tile`.
-- [ ] A new window on a tiled workspace enters by D2 in the branch of `commit` that sends the initial configure, so that the first configure carries the tile's size and the window is never seen at the centre; `place` then maps it at the tile.
-- [ ] `toplevel_destroyed`, `minimise`, `move_window_to` and `settle` leave the tree and lay out again; the last two enter the target's tree by D2. So do the re-homing of `workspaces_changed` and `unminimise`. `fit_to_outputs` lays out again.
+- [ ] Tests: `no_end_leaves_a_tile_behind`, `a_window_that_never_draws_holds_no_tile`, `a_hidden_tile_gives_up_its_place`, `a_full_screen_tile_returns_to_its_tile`, `a_new_tile_restores_a_maximised_window`, `a_tile_fits_a_changed_output`, `a_client_slow_to_answer_keeps_its_place`, `a_bar_zone_narrows_the_tiles`, `a_new_window_first_shows_at_its_tile`, `a_move_to_a_workspace_not_shown_splits_its_last_focused_tile`.
+- [ ] A new window on a tiled workspace is sent, in the branch of `commit` that sends the initial configure, the size of the tile it would take by D2, which `Tree::insert` and `Tree::remove` read and leave as they were, so that it is never seen at the centre. It enters at `place`, as `shell::map_window` tiles at map: a client that dies or never draws has no tile to leave. A window that enters beside another still on its way gets the layout's configure.
+- [ ] `toplevel_destroyed`, a null buffer (`handlers::shown`), `minimise`, `move_window_to` and `settle` leave the tree and lay out again; the last two enter the target's tree by D2. So do the re-homing of `workspaces_changed`, `unminimise` and a hidden window's next draw. `fit_to_outputs` lays out again, and an output's removal lays out after `workspaces_changed`, since `remove_output` fits first.
 - [ ] `full_screen`, `leave_full_screen`, `maximise`, `restore`: D6. A layout skips a window in either state, and its end returns it to the tile.
 
 ### Task 6: dialogs
 
 **Files:** `C/src/handlers.rs`, `C/src/fixture/tiling.rs`.
 
-- [ ] Read `has_floating_exception`'s defaults in `cosmic-settings-config`, and record the outcome under D5.
 - [ ] D5 at the window's entry and at a change of parent or size limits: `a_dialog_floats_above_its_parent`, `a_window_of_one_size_floats`, `a_window_that_gains_a_parent_leaves_its_tile`.
 
 ### Task 7: the pointer
@@ -102,11 +102,11 @@ Decisions recorded in this plan, each to be named in the pull request that imple
 
 ### Task 8: the client and the bar
 
-**Files:** `system/athanor-compositor-client/src/connection.rs`, `src/protocols.rs` and a new client module, as for the keyboard group; the bar's tiling switch under `forge/specs/athanor-bar/athanor-bar-1.0.0/src/`.
+**Files:** `system/athanor-compositor-client/src/connection.rs`, `src/protocols.rs` and a new client module, as for the keyboard group; the bar's tiling switch under `forge/specs/athanor-bar/athanor-bar-1.0.0/src/`; `ON_DEMAND` and `CLIENT_BINDS` in `scripts/verify.py` and `scripts/tests/test_verify_allow_list.py`, since the binaries that link the client are not all granted the manager.
 
 - [ ] Under the own compositor (`own_compositor`) `set_tiling` and `Workspace::tiling` go through the private interface; `zcosmic_workspace_handle_v2` stays for cosmic-comp's session.
 - [ ] `forge/test/shell/rig.sh compositor-e2e`, with a tiling case; `RIG_COMPOSITOR=athanor rig.sh golden-report chooser bar dock`, and the same without `RIG_COMPOSITOR`, for the bar's toggle. `python3 scripts/verify.py allow-list`.
-- [ ] SN16 and decision 28: tiling closed, in the pull request that closes it.
+- [ ] `F-windows-01` becomes `have`, with the Counts table, in the pull request that makes it true.
 
 ## Not verified by this plan
 
