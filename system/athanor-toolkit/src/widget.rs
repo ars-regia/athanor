@@ -53,8 +53,8 @@ impl Rect {
 pub enum Kind {
     /// Children stacked top to bottom, aligned to the start edge.
     Column,
-    /// Children side by side in reading order, left to right or right to left, all as wide as
-    /// the widest, as a homogeneous GTK box. In a column or a group it fills the width.
+    /// Children side by side in reading order, left to right or right to left, with equal
+    /// shares of the row, as a homogeneous GTK box. In a column or a group it fills the width.
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),

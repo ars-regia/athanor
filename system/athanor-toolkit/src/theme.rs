@@ -17,13 +17,13 @@ impl Rgba {
 pub struct Theme {
     /// The window's background.
     pub background: Rgba,
-    /// The fill of controls: buttons, fields and unselected toggles.
+    /// The fill of controls: buttons and unselected toggles.
     pub surface: Rgba,
     /// The colour of text on the background.
     pub text: Rgba,
     /// The colour of the active toggle and of the primary marks.
     pub accent: Rgba,
-    /// Text and marks drawn on the accent.
+    /// Text and marks drawn on the accent, and the fill of text fields.
     pub on_accent: Rgba,
     /// The outline of controls.
     pub border: Rgba,
@@ -45,7 +45,7 @@ pub struct Theme {
     pub radius: f32,
     /// The thickness of the focus ring.
     pub focus_width: f32,
-    /// The width of a text field, before its text widens it.
+    /// The width of a text field, which clips its text.
     pub field_width: f32,
     /// The fill behind an island's children: Calmo's `bar` token, light variant.
     pub island: Rgba,
