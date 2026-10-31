@@ -35,7 +35,7 @@ cp -a %{_sourcedir}/usr %{buildroot}/
 
 %changelog
 * Sat Oct 31 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
-- Keep nvidia-powerd off desktops with ExecCondition= on the DMI chassis type: systemd
+- Keep nvidia-powerd off desktops with ConditionFirmware= on the DMI chassis type: systemd
   has no ConditionChassis=, so the drop-in did nothing and the udev rule started the daemon
 * Wed Sep 16 2026 Athanor Forge <forge@athanor.os> - 1.0.0-1
 - NVIDIA configuration moved out of athanor-base-config (doc_system_image.md, S4)
