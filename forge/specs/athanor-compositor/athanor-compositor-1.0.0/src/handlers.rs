@@ -828,6 +828,8 @@ impl SeatHandler for State {
     /// The text inputs follow the keyboard too, except while the session is locked
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // The focus outline moves.
+        self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
         self.aids_focus_changed(focused);
         set_primary_focus(&self.display_handle, seat, client.clone());

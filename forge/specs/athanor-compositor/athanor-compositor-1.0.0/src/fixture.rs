@@ -2540,6 +2540,11 @@ impl Local {
     /// Maps a bar: a surface on the top layer along the output's top edge, `height` high, with
     /// an exclusive zone of its height.
     fn bar(&mut self, run: &mut Running, height: i32) -> wl_surface::WlSurface {
+        self.zoned_bar(run, height, height)
+    }
+
+    /// A bar of `height` that holds an exclusive zone of `zone`.
+    fn zoned_bar(&mut self, run: &mut Running, height: i32, zone: i32) -> wl_surface::WlSurface {
         use zwlr_layer_surface_v1::Anchor;
         let compositor: wl_compositor::WlCompositor = self.bind(4);
         let shm: wl_shm::WlShm = self.bind(1);
@@ -2556,7 +2561,7 @@ impl Local {
         );
         layer.set_anchor(Anchor::Top | Anchor::Left | Anchor::Right);
         layer.set_size(0, height.unsigned_abs());
-        layer.set_exclusive_zone(height);
+        layer.set_exclusive_zone(zone);
         assert!(self.answer(run, &surface), "the bar is configured");
         let (serial, width, _) = self.client.layer_configure.expect("a configure");
         layer.ack_configure(serial);
@@ -2663,7 +2668,7 @@ enum Class {
     Standard,
     /// Offered to every client outside a security context.
     Unconfined,
-    /// Offered to every client; its top and overlay layers only to the allow-list's.
+    /// Offered outside a security context; its top and overlay layers only to the allow-list's.
     LayerGated,
     /// Offered only to the allow-list's clients, each by its own line.
     Privileged,
@@ -3297,8 +3302,8 @@ fn task_pointer_a_cursor_surface_gets_its_frame_callbacks() {
 
 /// The bar sees every global of `data/globals` once, but `wl_output`, once per output, and
 /// `zwlr_output_manager_v1`, which its line does not name, not at all; a client inside a
-/// security context sees only the standard and layer-gated ones (spike Q4: the privileged ones
-/// are refused to sandboxes).
+/// security context sees only the standard ones (spike Q4: the privileged ones are refused to
+/// sandboxes; decision 31: so is the layer shell).
 #[test]
 fn task4_standard_globals_are_offered() {
     let mut run = Running::start(None);
@@ -3319,7 +3324,7 @@ fn task4_standard_globals_are_offered() {
     let context = sandbox(&run);
     let sandboxed = Local::connect(&mut run, Some(context));
     for (global, class) in classified() {
-        let expected = matches!(class, Class::Standard | Class::LayerGated)
+        let expected = matches!(class, Class::Standard)
             && !RENDER_NODE_GLOBALS.contains(&global);
         assert_eq!(
             sandboxed.sees(global),
@@ -4502,8 +4507,8 @@ fn task5_top_layers_are_closed_to_a_client_not_granted_them() {
 /// Each client is offered exactly the globals `data/globals` gives its class of client (OS4,
 /// OS5): the bar every one but the output manager, which its line does not name; the control
 /// center the unprivileged ones and the output manager; a client with no line the unprivileged
-/// ones; a client inside a security context the standard and layer-gated ones. An offered global
-/// with no row fails with its name.
+/// ones; a client inside a security context the standard ones. An offered global with no row
+/// fails with its name.
 #[test]
 fn os9_every_global_is_classified() {
     let classes = classified();
@@ -4529,7 +4534,7 @@ fn os9_every_global_is_classified() {
 
     let context = sandbox(&run);
     let sandboxed = Local::connect(&mut run, Some(context));
-    let standard = rows(|class| matches!(class, Class::Standard | Class::LayerGated));
+    let standard = rows(|class| matches!(class, Class::Standard));
     offered(&sandboxed, "a client inside a security context", standard);
 
     let control_center = Local::control_center(&mut run);
@@ -5284,6 +5289,10 @@ mod constraints;
 // AX10: the magnifier and the colour filters (athanor-a11y-v1, `a11y.rs`, `look.rs`).
 #[cfg(test)]
 mod a11y;
+
+// Decision 31: the focus outline and the border of confined windows.
+#[cfg(test)]
+mod marks;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
@@ -9858,7 +9867,7 @@ fn x11_the_satellite_gets_the_standard_globals() {
     let wayland = dir.join(format!("athanor-x11-{number}"));
     let stream = UnixStream::connect(&wayland).expect("the satellite's socket");
     let satellite = Local::over(&mut run, stream, None);
-    let standard = rows(|class| matches!(class, Class::Standard | Class::LayerGated));
+    let standard = rows(|class| matches!(class, Class::Standard));
     assert_eq!(satellite.listed(), standard);
     drop(satellite);
     run.stop();
