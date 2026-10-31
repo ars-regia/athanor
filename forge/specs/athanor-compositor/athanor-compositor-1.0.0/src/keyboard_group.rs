@@ -139,14 +139,16 @@ impl Dispatch2<AthanorKeyboardGroupV1, State> for GroupObject {
 /// Sends `object` the names of the seat's layouts, when its version has the event.
 fn send_layouts(object: &AthanorKeyboardGroupV1, names: &[String]) {
     if object.version() >= athanor_keyboard_group_v1::EVT_LAYOUTS_SINCE {
-        // Ended, not joined: a last name that is empty still counts as a group.
-        object.layouts(
-            names
-                .iter()
-                .map(|name| name.replace(['\n', '\r'], " ") + "\n")
-                .collect(),
-        );
+        object.layouts(lines_of(names));
     }
+}
+
+/// One line per name. Ended, not joined: a last name that is empty still counts as a group.
+fn lines_of(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| name.replace(['\n', '\r'], " ") + "\n")
+        .collect()
 }
 
 impl State {
@@ -239,4 +241,15 @@ pub(crate) fn layout_names(xkb: &Mutex<Xkb>) -> Vec<String> {
     xkb.layouts()
         .map(|layout| xkb.layout_name(layout).to_owned())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_cannot_add_a_line() {
+        let names = ["A\r\nB".to_owned(), String::new(), "C\r".to_owned()];
+        assert_eq!(lines_of(&names), "A  B\n\nC \n");
+    }
 }
