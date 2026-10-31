@@ -1,6 +1,6 @@
 # Shell feature register
 
-Version 2, frozen on its approval with #902: it adds the Window management surface and changes no entry of version 1, frozen on 2026-10-04.
+Version 2, frozen on its approval with #902: it adds the Window management surface and changes no entry of version 1, which was frozen on 2026-10-04.
 
 This register is defined by ST3 of [doc_shell_standard.md](doc_shell_standard.md). An entry is required when any reference offers the feature in a default installation. Each entry names its surface, and the gate of a surface requires every entry of its own. The register is versioned: a feature that a reference adds later goes into the next version without moving a gate under way. An entry is excluded only by the maintainer, with the reason written here; the expected reasons are a zero-trust conflict, or a feature that exists only on a compositor Athanor does not run.
 
@@ -438,16 +438,19 @@ Statuses in the Athanor column:
 
 ## Window management
 
-This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entries are the automatic tiling of the default session and what that departs from in cosmic-comp, whose tiling is the reference (`doc_own_stack.md` OS12). The rest of the surface, scrolling layouts, window rules and gestures among them, is research CO2 leaves open, and F-overview-15 moves here with it. The bar's button for this entry is F-bar-34.
+This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entries are the automatic tiling of the default session and what that departs from in cosmic-comp, whose tiling is the reference (`doc_own_stack.md` OS12). The rest of the surface, scrolling layouts, window rules and gestures among them, is research CO2 leaves open, and F-overview-15 moves here with it. The bar's button for this entry is F-bar-34. The shape of the tree is no entry: a new window splits a tile in two in both, cosmic-comp's wider groups come only from the moves of F-windows-08, and here every window has its turn in the order of focus, so the split of the root cosmic-comp falls back on has no place.
 
 | Id | Feature | Sources | Athanor | Note |
 |---|---|---|---|---|
 | F-windows-01 | Automatic tiling of a workspace: a tree of tiles, a new window splitting the tile focused last, dialogs above the tiles, turned on and off per workspace | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs) | missing | cosmic-comp's session has it; the default session's compositor does not (#894, `doc_own_stack.md` OS12) |
 | F-windows-02 | A minimised tile keeps its place in the tree | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/mod.rs#L3563) | excluded (proposed) | a window that is minimised or moved leaves the tree and returns as a new window does, so that the tree holds no place without a window |
-| F-windows-03 | Stacks of tiles, as tabs in one tile | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2132) | excluded (proposed) | a stack needs the tiling keys and a tab bar drawn by the compositor, and the own compositor leaves title bars to its clients (`doc_own_stack.md` decision 23) |
-| F-windows-04 | Lifting a tile into a preview with drop zones, and resizing from a press in the gap between tiles | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2666) | excluded (proposed) | the preview and its indicators are drawn by the compositor; here dropping a tile on another swaps them, a drop elsewhere puts it back, and a client's resize moves the split nearest that edge |
+| F-windows-03 | Stacks of tiles, as tabs in one tile | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2132) | excluded (proposed) | a stack needs the tiling keys and a tab bar drawn by the compositor, and the own compositor leaves title bars to its clients (`doc_own_stack.md` decision 30) |
+| F-windows-04 | Lifting a tile into a preview with drop zones | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2666) | excluded (proposed) | the preview and its indicators are drawn by the compositor; here dropping a tile on another swaps them and a drop elsewhere puts it back |
 | F-windows-05 | A full-screen window gives up its tile, and the neighbours grow behind it | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/mod.rs#L5079) | excluded (proposed) | the window keeps its tile: the neighbours, hidden on that output, are not resized for nothing, and the window returns with no state to restore |
-| F-windows-06 | A list of applications that always float | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/data/tiling-exceptions.ron) | excluded (proposed) | about 35 pairs of regular expressions on the application id and the title: the compositor reads no COSMIC setting and has no regular expressions, and a list of applications is not a rule of the layout; dialogs and windows of one size float by rule |
+| F-windows-06 | A list of applications that always float | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/data/tiling-exceptions.ron) | excluded (proposed) | about 35 pairs of regular expressions on the application id and the title: the compositor has no regular expressions, and a list of applications is not a rule of the layout; dialogs and windows of one size float by rule |
+| F-windows-07 | Resizing from a press in the gap between tiles | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L3359) | excluded (proposed) | the gap belongs to no client, so a press there needs pointer handling of the compositor's own; here a client's resize moves the split nearest that edge |
+| F-windows-08 | Tiling keys: focus by direction, moving a tile among the others, changing a split's orientation | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L1507) | missing | `doc_own_stack.md` decision 29 leaves unbound every key of COSMIC that no approved document names; each of these needs its key decided, and without them the order of focus alone shapes the tree |
+| F-windows-09 | Gaps between tiles taken from the theme | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L4324) | excluded (proposed) | the gaps are a constant, the 8 logical pixels of the Calmo theme: following the theme needs a COSMIC setting read, which `doc_shell.md` SH2 allows only by a decision |
 
 ## Counts
 
@@ -567,7 +570,7 @@ This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entrie
 |---|---|
 | have | 0 |
 | partial | 0 |
-| missing | 1 |
-| excluded (proposed) | 5 |
+| missing | 2 |
+| excluded (proposed) | 7 |
 | excluded | 0 |
-| total | 6 |
+| total | 9 |
