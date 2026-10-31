@@ -340,6 +340,9 @@ impl Surface {
             });
             hider.show(false);
             self.hider.replace(Some(hider));
+            if self.window.is_active() {
+                feed(&self.hider, Event::KeyboardIn);
+            }
         }
         self.window.set_child(Some(&stack));
         self.row = row;
