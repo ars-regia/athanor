@@ -936,6 +936,18 @@ impl Application for Dock {
         );
     }
 
+    fn keyboard(&mut self, shell: &mut Shell, surface: SurfaceId, focused: bool) {
+        self.feed(
+            shell,
+            surface,
+            if focused {
+                Hide::KeyboardIn
+            } else {
+                Hide::KeyboardOut
+            },
+        );
+    }
+
     fn drawn(&mut self, shell: &mut Shell, _surface: SurfaceId) {
         self.notify_ready(shell);
     }

@@ -921,7 +921,7 @@ dock-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable ${session_unit[*]}"
     ;;
 notifications-e2e)
     stage_greeter_icons
