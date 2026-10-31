@@ -305,7 +305,7 @@ fn surface_origin(space: &Space<Window>, surface: &WlSurface) -> Option<Point<i3
         .elements()
         .find(|window| window.toplevel().is_some_and(|t| t.wl_surface() == surface));
     if let Some(window) = window {
-        return space.element_location(window);
+        return Some(space.element_location(window)? - window.geometry().loc);
     }
     space.outputs().find_map(|output| {
         let area = space.output_geometry(output)?;

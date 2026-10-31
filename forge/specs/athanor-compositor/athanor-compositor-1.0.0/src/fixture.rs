@@ -6847,6 +6847,7 @@ fn focused_window(run: &mut Running) -> (Local, smithay::desktop::Window) {
         let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
         client.keymaps > 0 && focus.and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
     });
+    local.window = Some((surface, xdg));
     (local, window)
 }
 
@@ -8247,6 +8248,30 @@ fn os9_a_negative_cursor_rectangle_is_empty() {
     let (_surface, popup) = method.popup(&mut ime, &mut run);
     let rectangle = ["5", "6", "0", "0"].map(String::from).to_vec();
     assert_eq!(popup.events(), [("text_input_rectangle", rectangle)]);
+    run.stop();
+}
+
+/// An input method's popup opens under the cursor rectangle, which is relative to the surface,
+/// so on a window with a client-side shadow it is placed from the surface's origin, not from the
+/// geometry's top left the space holds.
+#[test]
+fn os9_a_popup_lands_under_the_cursor_of_a_shadowed_window() {
+    let mut run = Running::start(None);
+    let (mut window, field, mut ime, method) = composing(&mut run);
+    let geometry = shadowed(&mut run, &mut window);
+    let at = |n: i32| Argument::Int(n);
+    field.send("set_cursor_rectangle", vec![at(40), at(30), at(2), at(20)]);
+    field.send("commit", vec![]);
+    window.roundtrip(&mut run);
+    let (_surface, _popup) = method.popup(&mut ime, &mut run);
+    let id = window.id.clone().expect("an id");
+    let origin = location_of(&run, &id) - geometry.loc;
+    let output = run.state.space.outputs().next().expect("an output");
+    let area = run.state.space.output_geometry(output).expect("an area");
+    let placed = run.state.composing.popups_on(&run.state.space, output);
+    let expected = origin + Point::from((40, 30 + 20)) - area.loc;
+    assert_eq!(placed.len(), 1, "the popup is placed");
+    assert_eq!(placed[0].1, expected);
     run.stop();
 }
 
