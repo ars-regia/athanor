@@ -10,6 +10,7 @@
 // them, through the backends that can change them (the DRM backend's `use_mode`).
 
 use crate::identity::Privilege;
+use crate::input::RightsTheFrame;
 use crate::state::{granted, State};
 use smithay::desktop::{layer_map_for_output, Space, Window};
 use smithay::output::{Mode, Output, Scale};
@@ -398,8 +399,10 @@ impl Change {
                 mode.size == wanted.size && (wanted.refresh == 0 || mode.refresh == wanted.refresh)
             })
         });
+        let fixed = output.user_data().get::<RightsTheFrame>().is_some();
         !self.mode_gone
             && mode
+            && self.transform.is_none_or(|wanted| !fixed || wanted == now.transform)
             && self.position.is_none_or(|at| at == now.position)
             && self.scale.is_none_or(|scale| SCALES.contains(&scale))
             && self

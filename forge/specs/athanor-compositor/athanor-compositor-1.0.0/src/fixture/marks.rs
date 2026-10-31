@@ -88,8 +88,28 @@ fn a_panel_turned_270_shows_what_a_device_points_at() {
 }
 
 #[test]
+fn a_panel_turned_180_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::_180);
+}
+
+#[test]
 fn a_flipped_panel_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped);
+}
+
+#[test]
+fn a_flipped_panel_turned_90_shows_what_a_device_points_at() {
     a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped90);
+}
+
+#[test]
+fn a_flipped_panel_turned_180_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped180);
+}
+
+#[test]
+fn a_flipped_panel_turned_270_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped270);
 }
 
 /// The fixture's window, moved away from `AT` so that nothing lies around either.

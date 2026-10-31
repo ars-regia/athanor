@@ -19,7 +19,7 @@ use smithay::input::keyboard::{
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Size, Transform, SERIAL_COUNTER};
 use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardBackend, VirtualKeyboardDevice, VirtualKeyboardHandler,
     VirtualKeyboardSpecialEvent,
@@ -420,7 +420,6 @@ impl State {
         true
     }
 
-    /// Where the outputs are in the space.
     /// Where in the space an absolute device points on the first output: it reports `position`
     /// on the panel, which the output's transform turns under what the output shows.
     pub(crate) fn on_first_panel(
@@ -429,9 +428,10 @@ impl State {
     ) -> Option<Point<f64, Logical>> {
         let output = self.space.outputs().next()?;
         let area = self.space.output_geometry(output)?;
-        Some(self.unzoomed(on_panel(output, area, position)))
+        Some(self.unzoomed(clamp_into(area, on_panel(output, area, position))))
     }
 
+    /// Where the outputs are in the space.
     pub(crate) fn output_areas(&self) -> Vec<Rectangle<i32, Logical>> {
         self.space
             .outputs()
@@ -783,6 +783,10 @@ pub(crate) fn confine(
     Some(clamp_into(*area, to))
 }
 
+/// On an output whose transform only rights a frame the backend draws upside down (`winit.rs`):
+/// it turns nothing the user sees, so a device points as it is and a configuration keeps it.
+pub struct RightsTheFrame;
+
 /// Where in `area`, which `output` shows, an absolute device points: the device reports
 /// `position` on the panel, which the transform turns under what the output shows.
 fn on_panel(
@@ -790,7 +794,11 @@ fn on_panel(
     area: Rectangle<i32, Logical>,
     position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
 ) -> Point<f64, Logical> {
-    let transform = output.current_transform();
+    let transform = if output.user_data().get::<RightsTheFrame>().is_some() {
+        Transform::Normal
+    } else {
+        output.current_transform()
+    };
     let panel = transform.invert().transform_size(area.size);
     transform.transform_point_in(position(panel), &panel.to_f64()) + area.loc.to_f64()
 }

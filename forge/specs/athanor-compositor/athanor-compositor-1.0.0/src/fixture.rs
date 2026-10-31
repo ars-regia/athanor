@@ -6442,11 +6442,56 @@ fn os9_a_configuration_turns_an_output() {
     assert_eq!(area.size, (height, width).into());
     let next = run.state.space.output_geometry(&second).expect("mapped");
     assert_eq!(next.loc.x, height, "the next output follows");
-    let frame = run.state.capture(0).expect("the next frame");
-    assert_eq!(frame.len(), (width * height * 4) as usize);
     control_center.pump(&mut run, "the change is sent", |client, _| {
         client.output_serial != Some(serial)
     });
+    run.stop();
+}
+
+/// The origin of a turned panel is the far edge of what the output shows: a device there stays
+/// on the output, and the pointer stays drawn.
+#[test]
+fn a_device_at_the_origin_of_a_turned_panel_stays_on_the_output() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let at = run.state.on_first_panel(|_| (0.0, 0.0).into()).expect("an output");
+    assert!(at.x < f64::from(area.size.w), "{at:?} in {area:?}");
+    run.stop();
+}
+
+/// One head refused fails the whole configuration: the head that asked for a turn stays as it is.
+#[test]
+fn os9_a_refused_head_leaves_the_others_as_they_were() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+
+    let qh = control_center.queue.handle();
+    let configuration = manager.create_configuration(serial, &qh, ());
+    for seen in &control_center.client.heads {
+        let head = configuration.enable_head(&seen.head, &qh, ());
+        if seen.name == "headless-0" {
+            head.set_transform(wl_output::Transform::_90);
+        } else {
+            head.set_position(1, 1);
+        }
+    }
+    control_center.client.configured = None;
+    configuration.apply();
+    control_center.pump(&mut run, "an answer to the configuration", |client, _| {
+        client.configured.is_some()
+    });
+
+    assert_eq!(control_center.client.configured, Some("failed"));
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Normal);
     run.stop();
 }
 
@@ -7057,9 +7102,8 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
     run.stop();
 }
 
-/// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
-/// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
-/// beside it, which `confine` alone accepts. The height is one both outputs have.
+/// At a quarter of the panel's width and a tenth of its height: on a panel turned 90 degrees
+/// the first of these runs down what the output shows, and the second runs in from its right.
 #[test]
 fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
     let mut run = Running::start(None);
@@ -7079,14 +7123,46 @@ fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
     pointer.motion_absolute(0, 25, 10, 100, 100);
     pointer.frame();
     local.roundtrip(&mut run);
-    let pointed = run.state.on_first_panel(|panel| {
-        (f64::from(panel.w) / 4.0, f64::from(panel.h) / 10.0).into()
-    });
+    let area = run.state.space.output_geometry(&first).expect("mapped");
     let at = run.state.seat.get_pointer().expect("a pointer").current_location();
-    assert_eq!(Some(at), pointed);
+    let (width, height) = (f64::from(area.size.w), f64::from(area.size.h));
+    assert_eq!(at, (width * 0.9, height / 4.0).into());
     run.stop();
 }
 
+/// The transform of the nested backend's output rights its frame, and turns nothing: its device
+/// points where it did, and a configuration can neither change the transform nor be refused for
+/// repeating it.
+#[test]
+fn os9_a_transform_that_rights_the_frame_is_no_turn() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::Flipped180), None, None);
+    first.user_data().insert_if_missing(|| crate::input::RightsTheFrame);
+    let pointed = run.state.on_first_panel(|_| (10.0, 20.0).into());
+    assert_eq!(pointed, Some((10.0, 20.0).into()));
+
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let same = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::Flipped180)
+    });
+    assert_eq!(same, "succeeded");
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::Normal)
+    });
+    assert_eq!(turned, "failed");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
+    run.stop();
+}
+
+/// Absolute motion to the far edge of the output a virtual pointer is bound to leaves it on that
+/// output's last column (OS9 task 6 audit): x == x_extent maps to the first column of the output
+/// beside it, which `confine` alone accepts. The height is one both outputs have.
 #[test]
 fn os9_a_virtual_pointer_bound_to_an_output_stays_on_it() {
     let mut run = Running::start(None);

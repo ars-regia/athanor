@@ -2,6 +2,7 @@
 //! resizes and the redraws that paint the space.
 
 use crate::headless::report_frame_times;
+use crate::input::RightsTheFrame;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -48,6 +49,7 @@ pub fn start(
         Transform::Flipped180,
         scale,
     );
+    output.user_data().insert_if_missing(|| RightsTheFrame);
     let formats = backend.renderer().dmabuf_formats();
     let pass = crate::look::prepare(backend.renderer());
     let nested = Nested {
