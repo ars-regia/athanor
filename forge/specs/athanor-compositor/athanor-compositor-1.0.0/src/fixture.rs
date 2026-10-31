@@ -2410,7 +2410,42 @@ fn an_output_that_shrinks_leaves_a_window_it_does_not_reach() {
     run.stop();
 }
 
-/// A window the user left over an edge stays there, on the output that changes and on another.
+/// A window on an output the change only moves moves with it, whole.
+#[test]
+fn a_window_follows_an_output_that_moves() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x + 30, 30));
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x + 30 - (OUTPUTS[0].width - OUTPUTS[0].width / 2), 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// A window under a bar's zone that the change leaves whole stays where the user put it.
+#[test]
+fn an_output_that_grows_leaves_a_window_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    run.state.space.relocate_element(&window, (10, 5));
+
+    resize_first(&mut run, OUTPUTS[0].width + 100, OUTPUTS[0].height + 100);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some((10, 5).into()));
+    run.stop();
+}
+
+/// A window the user left over an edge stays there.
 #[test]
 fn an_output_that_shrinks_leaves_a_window_over_its_edge() {
     let mut run = Running::start(None);

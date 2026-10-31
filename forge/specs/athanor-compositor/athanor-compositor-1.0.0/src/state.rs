@@ -504,7 +504,10 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
-        self.resized_outputs();
+        if let Some(shown) = self.space.output_geometry(output) {
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            known.0.set(shown);
+        }
         self.output_heads_changed();
         self.workspaces_changed();
     }
@@ -520,17 +523,17 @@ impl State {
     }
 
     /// After the outputs changed (one went, or took another size): the windows their home output
-    /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on an
-    /// output that changed size stays whole (`stays_whole`), the maximised ones are fitted to it
-    /// again, the pointer is brought back onto the outputs and the lock surfaces take the size of
-    /// their output.
+    /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
+    /// home output follows that output and stays whole (`stays_whole`), the maximised ones are
+    /// fitted to it again, the pointer is brought back onto the outputs and the lock surfaces take
+    /// the size of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
-        let resized = self.resized_outputs();
+        let changed = self.changed_outputs();
         let windows: Vec<Window> = self.space.elements().cloned().collect();
         for window in windows {
             let (Some(area), Some(shown)) = (
@@ -539,14 +542,15 @@ impl State {
             ) else {
                 continue;
             };
-            let at = if self.shown_at_home(&window, shown) {
-                self.stays_whole(&window, shown, &resized)
+            let place = Rectangle::new(self.stays_whole(&window, shown, &changed), shown.size);
+            let at = if self.shown_at_home(&window, place) {
+                place.loc
             } else {
                 centred(area, shown.size)
             };
             self.space.relocate_element(&window, at);
         }
-        self.fit_kept_places(&resized);
+        self.fit_kept_places(&changed);
         self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
@@ -562,46 +566,50 @@ impl State {
         self.output_heads_changed();
     }
 
-    /// The outputs whose size changed since this was last asked, each with what it showed
-    /// before.
-    fn resized_outputs(&self) -> Vec<(Output, Rectangle<i32, Logical>)> {
-        let resized = self.space.outputs().filter_map(|output| {
+    /// The outputs that took another size or place since this was last asked, each with where
+    /// it was before.
+    fn changed_outputs(&self) -> Vec<(Output, Rectangle<i32, Logical>)> {
+        let changed = self.space.outputs().filter_map(|output| {
             let shown = self.space.output_geometry(output)?;
-            let known = output.user_data().get_or_insert(KnownSize::default);
-            let was = known.0.replace(shown.size);
-            (was != shown.size).then(|| (output.clone(), Rectangle::new(shown.loc, was)))
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            let was = known.0.replace(shown);
+            (was != shown).then(|| (output.clone(), was))
         });
-        resized.collect()
+        changed.collect()
     }
 
-    /// Where the place `kept` of `window` goes after `resized`: inside what its home output
-    /// leaves, if it lay whole on that output, and otherwise nowhere, for a user may leave a
-    /// window over an edge (`grabs::kept_reachable`).
+    /// Where the place `kept` of `window` goes after `changed`: if it lay whole on its home
+    /// output it follows that output and stays whole, inside what the output leaves when its
+    /// new edges cut it; otherwise nowhere, for a user may leave a window over an edge
+    /// (`grabs::kept_reachable`).
     fn stays_whole(
         &self,
         window: &Window,
         kept: Rectangle<i32, Logical>,
-        resized: &[(Output, Rectangle<i32, Logical>)],
+        changed: &[(Output, Rectangle<i32, Logical>)],
     ) -> Point<i32, Logical> {
-        let was_whole = self.home_output(window).is_some_and(|home| {
-            let mut resized = resized.iter();
-            resized.any(|(output, was)| *output == home && was.contains_rect(kept))
+        let moved = self.home_output(window).and_then(|home| {
+            let (_, was) = changed.iter().find(|(output, _)| *output == home)?;
+            let shown = self.space.output_geometry(&home)?;
+            let moved = Rectangle::new(kept.loc + (shown.loc - was.loc), kept.size);
+            was.contains_rect(kept).then_some((shown, moved))
         });
-        match self.home_area(window) {
-            Some(area) if was_whole => inside(area, kept),
+        match (moved, self.home_area(window)) {
+            (Some((shown, moved)), _) if shown.contains_rect(moved) => moved.loc,
+            (Some((_, moved)), Some(area)) => inside(area, moved),
             _ => kept.loc,
         }
     }
 
     /// `stays_whole` for the places a window comes back to, or is on its way to.
-    fn fit_kept_places(&mut self, resized: &[(Output, Rectangle<i32, Logical>)]) {
+    fn fit_kept_places(&mut self, changed: &[(Output, Rectangle<i32, Logical>)]) {
         let away = self.parked.iter().chain(&self.minimised).map(|(window, _)| window);
         let windows: Vec<Window> = self.space.elements().chain(away).cloned().collect();
         for window in windows {
             let data = window.user_data();
             if let Some(maximised) = data.get::<Maximised>() {
                 if let Some(mut kept) = maximised.0.get() {
-                    kept.before.loc = self.stays_whole(&window, kept.before, resized);
+                    kept.before.loc = self.stays_whole(&window, kept.before, changed);
                     maximised.0.set(Some(kept));
                 }
             }
@@ -612,7 +620,7 @@ impl State {
                         .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
                     let size = asked.unwrap_or_else(|| window.geometry().size);
                     let place = Rectangle::new(moving.to, size);
-                    moving.to = self.stays_whole(&window, place, resized);
+                    moving.to = self.stays_whole(&window, place, changed);
                     relocate.0.set(Some(moving));
                 }
             }
@@ -620,12 +628,12 @@ impl State {
         for index in 0..self.parked.len() {
             let (window, at) = self.parked[index].clone();
             let kept = Rectangle::new(at, window.geometry().size);
-            self.parked[index].1 = self.stays_whole(&window, kept, resized);
+            self.parked[index].1 = self.stays_whole(&window, kept, changed);
         }
         for index in 0..self.minimised.len() {
             let (window, at) = self.minimised[index].clone();
             let kept = Rectangle::new(at, window.geometry().size);
-            self.minimised[index].1 = self.stays_whole(&window, kept, resized);
+            self.minimised[index].1 = self.stays_whole(&window, kept, changed);
         }
     }
 
@@ -1397,9 +1405,9 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
 #[derive(Default)]
 struct Maximised(Cell<Option<Kept>>);
 
-/// The size an output had when `resized_outputs` last saw it.
+/// Where an output was when `map_output` or `changed_outputs` last saw it.
 #[derive(Default)]
-struct KnownSize(Cell<Size<i32, Logical>>);
+struct KnownArea(Cell<Rectangle<i32, Logical>>);
 
 #[derive(Clone, Copy)]
 struct Kept {
