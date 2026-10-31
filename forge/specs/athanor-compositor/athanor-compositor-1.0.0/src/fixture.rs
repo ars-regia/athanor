@@ -4733,7 +4733,7 @@ fn set_group_switches_and_every_object_hears_it() {
 /// and after the unlock, and the window the unlock focuses hears it. The test switches nothing
 /// on the lock: a group changed there, and any restoring of it, stays with #834.
 #[test]
-fn unlocking_restores_the_layout_group() {
+fn unlocking_leaves_the_layout_group() {
     let mut run = Running::start(None);
     two_layouts(&mut run);
     let (mut window, _) = focused_window(&mut run);
