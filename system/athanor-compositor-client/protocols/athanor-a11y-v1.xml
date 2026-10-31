@@ -41,7 +41,8 @@
     While the session is locked the aids keep working, on the lock surface too, since their
     user types the password with them. The keys the compositor always keeps, the protected keys
     of doc_own_stack.md decision 30 (the reveal key, Super+Escape, Super+Alt+Escape, Ctrl+Alt+Tab,
-    Super+Alt+A, Super+Alt+S and the switch to a text console), pass slow keys and bounce keys
+    Super+Alt+A, Super+Alt+S, Super+=, Super+- and the switch to a text console), pass slow keys
+    and bounce keys
     unfiltered, so that no setting of the aids makes the lock surface unusable. While the
     session is locked, and while a surface the compositor identifies by its client's line in
     the allow-list as a trusted prompt has the keyboard focus, the modifiers, key_rejected and
