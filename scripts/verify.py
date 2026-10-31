@@ -2186,9 +2186,13 @@ def hidden_failures(text):
 
 def shell_scripts(base):
     """The shell scripts under `base`: a `.sh` file, or one whose first line names a shell. A
-    link is read at its target, and a socket or a pipe a run left behind is no script."""
+    link into these trees is read at its target, one out of them here, and a socket or a pipe
+    a run left behind is no script."""
+    trees = [base.resolve(), *((ROOT / tree).resolve() for tree in SHELL_BUDGETS)]
     for p in walk(base, ""):
-        if p.is_symlink() or not p.is_file():
+        if not p.is_file():
+            continue
+        if p.is_symlink() and any(p.resolve().is_relative_to(tree) for tree in trees):
             continue
         if p.suffix == ".sh":
             yield p

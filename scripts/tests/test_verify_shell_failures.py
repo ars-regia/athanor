@@ -116,7 +116,10 @@ class BudgetTest(unittest.TestCase):
 
     def test_a_script_is_known_by_its_first_line(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
+            root = pathlib.Path(tmp) / "tree"
+            root.mkdir()
+            (pathlib.Path(tmp) / "elsewhere.sh").write_text("true\n")
+            (root / "out.sh").symlink_to(pathlib.Path(tmp) / "elsewhere.sh")
             for name, text in [
                 ("a.sh", "true\n"),
                 ("b", "#!/usr/bin/env bash\n"),
@@ -129,7 +132,7 @@ class BudgetTest(unittest.TestCase):
             (root / "link.sh").symlink_to(root / "a.sh")
             os.mkfifo(root / "pipe")
             found = {p.name for p in verify.shell_scripts(root)}
-        self.assertEqual(found, {"a.sh", "b", "c"})
+        self.assertEqual(found, {"a.sh", "b", "c", "out.sh"})
 
     def test_a_workflow_line_is_read_as_shell(self):
         text = "\n".join([
