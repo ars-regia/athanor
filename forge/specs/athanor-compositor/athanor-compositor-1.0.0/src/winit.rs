@@ -2,6 +2,7 @@
 //! resizes and the redraws that paint the space.
 
 use crate::headless::report_frame_times;
+use crate::input::RightsTheFrame;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -12,8 +13,8 @@ use smithay::desktop::layer_map_for_output;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::EventLoop;
-use smithay::reexports::wayland_server::Display;
-use smithay::utils::Transform;
+use smithay::reexports::wayland_server::{Display, DisplayHandle};
+use smithay::utils::{Physical, Size, Transform};
 use std::time::{Duration, Instant};
 
 /// The output's refresh, in mHz: the parent compositor paces the redraws.
@@ -38,16 +39,7 @@ pub fn start(
 ) -> Result<State, Error> {
     let (mut backend, events) = smithay::backend::winit::init::<GlesRenderer>()?;
     let dh = display.handle();
-    // Flipped180: the winit backend's framebuffer is upside down.
-    let output = new_output(
-        &dh,
-        "athanor-0",
-        "Nested",
-        backend.window_size(),
-        REFRESH,
-        Transform::Flipped180,
-        scale,
-    );
+    let output = nested_output(&dh, backend.window_size(), scale);
     let formats = backend.renderer().dmabuf_formats();
     let pass = crate::look::prepare(backend.renderer());
     let nested = Nested {
@@ -189,6 +181,14 @@ impl State {
             }
         }
     }
+}
+
+/// The nested output. Flipped180: the winit backend's framebuffer is upside down.
+pub(crate) fn nested_output(dh: &DisplayHandle, size: Size<i32, Physical>, scale: f64) -> Output {
+    let flipped = Transform::Flipped180;
+    let output = new_output(dh, "athanor-0", "Nested", size, REFRESH, flipped, scale);
+    output.user_data().insert_if_missing(|| RightsTheFrame);
+    output
 }
 
 fn request_redraw(state: &State) {

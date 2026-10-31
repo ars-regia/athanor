@@ -6371,9 +6371,9 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
 
     let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
         head.set_scale(1.5);
-        head.set_transform(wl_output::Transform::_90);
+        head.set_position(7, 7);
     });
-    assert_eq!(turned, "failed", "a transform");
+    assert_eq!(turned, "failed", "a position");
     let stale = serial.wrapping_add(1);
     let late = control_center.configure(&mut run, &manager, stale, "headless-0", |head| {
         head.set_scale(1.5)
@@ -6410,6 +6410,88 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
     control_center.pump(&mut run, "the window is told the new scale", |client, _| {
         client.fractional_scale == Some(180)
     });
+    run.stop();
+}
+
+/// A configuration turns an output: its logical size turns with it, the next output follows,
+/// and the frame keeps the panel's size.
+#[test]
+fn os9_a_configuration_turns_an_output() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::_90)
+    });
+
+    assert_eq!(turned, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::_90);
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    assert_eq!(area.size, (height, width).into());
+    let next = run.state.space.output_geometry(&second).expect("mapped");
+    assert_eq!(next.loc.x, height, "the next output follows");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    run.stop();
+}
+
+/// The origin of a turned panel is the far edge of what the output shows: a device there stays
+/// on the output, and the pointer stays drawn.
+#[test]
+fn a_device_at_the_origin_of_a_turned_panel_stays_on_the_output() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let at = run.state.on_first_panel(|_| (0.0, 0.0).into()).expect("an output");
+    assert!(at.x < f64::from(area.size.w), "{at:?} in {area:?}");
+    run.stop();
+}
+
+/// One head refused fails the whole configuration: the head that asked for a turn stays as it is.
+#[test]
+fn os9_a_refused_head_leaves_the_others_as_they_were() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+
+    let qh = control_center.queue.handle();
+    let configuration = manager.create_configuration(serial, &qh, ());
+    for seen in &control_center.client.heads {
+        let head = configuration.enable_head(&seen.head, &qh, ());
+        if seen.name == "headless-0" {
+            head.set_transform(wl_output::Transform::_90);
+        } else {
+            head.set_position(1, 1);
+        }
+    }
+    control_center.client.configured = None;
+    configuration.apply();
+    control_center.pump(&mut run, "an answer to the configuration", |client, _| {
+        client.configured.is_some()
+    });
+
+    assert_eq!(control_center.client.configured, Some("failed"));
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Normal);
     run.stop();
 }
 
@@ -7017,6 +7099,75 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
         [&0x110, &0x2ff],
         "both buttons are held"
     );
+    run.stop();
+}
+
+/// At a quarter of the panel's width and a tenth of its height: on a panel turned 90 degrees
+/// the first of these runs down what the output shows, and the second runs in from its right.
+#[test]
+fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer_with_output(
+        Some(&seat),
+        Some(&output),
+        &local.queue.handle(),
+        (),
+    );
+    pointer.motion_absolute(0, 25, 10, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let at = run.state.seat.get_pointer().expect("a pointer").current_location();
+    let (width, height) = (f64::from(area.size.w), f64::from(area.size.h));
+    assert_eq!(at, (width * 0.9, height / 4.0).into());
+    run.stop();
+}
+
+/// The nested backend's output carries the transform that rights its frame, and reads as
+/// turning nothing.
+#[test]
+fn the_nested_output_turns_nothing() {
+    let display = smithay::reexports::wayland_server::Display::<State>::new().expect("a display");
+    let output = crate::winit::nested_output(&display.handle(), (800, 600).into(), 1.0);
+    assert_eq!(output.current_transform(), smithay::utils::Transform::Flipped180);
+    assert_eq!(crate::input::turn(&output), smithay::utils::Transform::Normal);
+}
+
+/// The transform of the nested backend's output rights its frame, and turns nothing: its device
+/// points where it did, its head reads as not turned, and a configuration can neither change the
+/// transform nor be refused for repeating what the head reads.
+#[test]
+fn os9_a_transform_that_rights_the_frame_is_no_turn() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::Flipped180), None, None);
+    first.user_data().insert_if_missing(|| crate::input::RightsTheFrame);
+    let pointed = run.state.on_first_panel(|_| (10.0, 20.0).into());
+    assert_eq!(pointed, Some((10.0, 20.0).into()));
+
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let same = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::Normal)
+    });
+    assert_eq!(same, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::_90)
+    });
+    assert_eq!(turned, "failed");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
     run.stop();
 }
 

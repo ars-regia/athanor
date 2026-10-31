@@ -1,15 +1,16 @@
 //! wlr-output-management (doc_own_stack.md OS4 and OS5; open question 10 of the OS9 plan): the
 //! outputs as heads, with their modes, position, transform and scale, and configurations that
-//! set an output's scale. It is privileged: the allow-list grants it to the control center. The
+//! set an output's scale and transform. It is privileged: the allow-list grants it to the control center. The
 //! pinned Smithay has no server for it, so the compositor serves it here.
 //!
 //! A configuration must name every head, as the protocol asks. It succeeds when it changes
-//! nothing but scales, each from 1 to 4 as `--scale` takes them; one that disables a head or asks
-//! for another mode, position, transform or adaptive sync than the head has fails.
-// ponytail: scale only; modes, positions, transforms and disabled outputs when a client needs
+//! nothing but scales, each from 1 to 4 as `--scale` takes them, and transforms; one that disables
+//! a head or asks for another mode, position or adaptive sync than the head has fails.
+// ponytail: scale and transform only; modes, positions and disabled outputs when a client needs
 // them, through the backends that can change them (the DRM backend's `use_mode`).
 
 use crate::identity::Privilege;
+use crate::input::{turn, RightsTheFrame};
 use crate::state::{granted, State};
 use smithay::desktop::{layer_map_for_output, Space, Window};
 use smithay::output::{Mode, Output, Scale};
@@ -79,7 +80,7 @@ impl Sent {
             position: space
                 .output_geometry(output)
                 .map_or_else(Point::default, |area| area.loc),
-            transform: output.current_transform().into(),
+            transform: turn(output).into(),
             scale: output.current_scale().fractional_scale(),
         }
     }
@@ -354,7 +355,7 @@ impl State {
             );
             return;
         }
-        let mut scales = Vec::new();
+        let mut changes = Vec::new();
         for (named, change) in &pending.heads {
             let output = manager
                 .heads
@@ -362,8 +363,11 @@ impl State {
                 .find(|head| head.head == *named)
                 .map(|head| head.output.clone());
             match (output, change) {
-                (Some(output), Some(change)) if change.only_scale(&output, &self.space) => {
-                    scales.push((output, change.scale));
+                (Some(output), Some(change)) if change.takes(&output, &self.space) => {
+                    // A head shows what `turn` reads: the frame's own transform stays.
+                    let fixed = output.user_data().get::<RightsTheFrame>().is_some();
+                    let transform = change.transform.filter(|_| !fixed);
+                    changes.push((output, change.scale, transform));
                 }
                 _ => {
                     configuration.failed();
@@ -372,9 +376,11 @@ impl State {
             }
         }
         if apply {
-            for (output, scale) in scales {
-                if let Some(scale) = scale {
-                    output.change_current_state(None, None, Some(Scale::Fractional(scale)), None);
+            for (output, scale, transform) in changes {
+                if scale.is_some() || transform.is_some() {
+                    let scale = scale.map(Scale::Fractional);
+                    let transform = transform.map(Into::into);
+                    output.change_current_state(None, transform, scale, None);
                     layer_map_for_output(&output).arrange();
                 }
             }
@@ -387,18 +393,20 @@ impl State {
 }
 
 impl Change {
-    /// Whether this asks for nothing `output` does not have but a scale the compositor takes.
-    fn only_scale(&self, output: &Output, space: &Space<Window>) -> bool {
+    /// Whether this asks for nothing `output` does not have but a scale the compositor takes and
+    /// a transform.
+    fn takes(&self, output: &Output, space: &Space<Window>) -> bool {
         let now = Sent::of(output, space);
         let mode = self.mode.is_none_or(|wanted| {
             now.mode.is_some_and(|mode| {
                 mode.size == wanted.size && (wanted.refresh == 0 || mode.refresh == wanted.refresh)
             })
         });
+        let fixed = output.user_data().get::<RightsTheFrame>().is_some();
         !self.mode_gone
             && mode
+            && self.transform.is_none_or(|wanted| !fixed || wanted == now.transform)
             && self.position.is_none_or(|at| at == now.position)
-            && self.transform.is_none_or(|t| t == now.transform)
             && self.scale.is_none_or(|scale| SCALES.contains(&scale))
             && self
                 .adaptive_sync

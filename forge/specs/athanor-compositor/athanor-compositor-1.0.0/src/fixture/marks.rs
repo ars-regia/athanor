@@ -54,6 +54,64 @@ fn paint(run: &mut Running, local: &mut Local, width: i32, height: i32, bgrx: [u
     local.roundtrip(run);
 }
 
+/// The point an absolute device names on a turned panel is what the panel shows there.
+fn a_panel_shows_what_a_device_points_at(transform: smithay::utils::Transform) {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(transform), None, None);
+    run.state.arrange_outputs();
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    paint(&mut run, &mut local, 40, 40, [0, 0, 255, 255]);
+
+    let (x, y) = (OUTPUTS[0].width / 4, OUTPUTS[0].height / 10);
+    let pointed = run.state.on_first_panel(|panel| {
+        assert_eq!(panel, (OUTPUTS[0].width, OUTPUTS[0].height).into());
+        (f64::from(x), f64::from(y)).into()
+    });
+    let pointed = pointed.expect("an output");
+    focused_at(&mut run, &local, (pointed.x as i32 - 20, pointed.y as i32 - 20));
+
+    assert_eq!(at(&frame(&mut run), x, y), [255, 0, 0, 255]);
+    run.stop();
+}
+
+#[test]
+fn a_panel_turned_90_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::_90);
+}
+
+#[test]
+fn a_panel_turned_270_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::_270);
+}
+
+#[test]
+fn a_panel_turned_180_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::_180);
+}
+
+#[test]
+fn a_flipped_panel_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped);
+}
+
+#[test]
+fn a_flipped_panel_turned_90_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped90);
+}
+
+#[test]
+fn a_flipped_panel_turned_180_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped180);
+}
+
+#[test]
+fn a_flipped_panel_turned_270_shows_what_a_device_points_at() {
+    a_panel_shows_what_a_device_points_at(smithay::utils::Transform::Flipped270);
+}
+
 /// The fixture's window, moved away from `AT` so that nothing lies around either.
 fn clear_the_fixture(run: &mut Running) -> smithay::desktop::Window {
     let (window, _) = fixture_window(run);
