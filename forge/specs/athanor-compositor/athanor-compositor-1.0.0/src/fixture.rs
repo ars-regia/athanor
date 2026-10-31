@@ -8243,6 +8243,10 @@ fn os9_a_popup_grab_suspends_the_input_method_grab() {
         method.keys() == [30]
     });
 
+    assert!(
+        run.state.grab_serials.key_press.is_none(),
+        "a key the input method took is no client's serial"
+    );
     let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     let focused = focus(&run.state).expect("a focus");
@@ -8266,6 +8270,34 @@ fn os9_a_popup_grab_suspends_the_input_method_grab() {
     });
     local.roundtrip(&mut run);
     assert!(!local.client.keys.contains(&32), "the window saw no key");
+    run.stop();
+}
+
+/// A grab the input method asks for under a popup's waits for it: the popup keeps the keyboard.
+#[test]
+fn os9_an_input_method_grab_asked_under_a_popup_waits_for_it() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[31]);
+    local.pump(&mut run, "the popup takes the key", |client, _| {
+        client.keys.contains(&31)
+    });
+    ime.roundtrip(&mut run);
+    assert!(method.keys().is_empty(), "the popup's grab stayed");
+    popup.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    chord(&mut run.state, &[32]);
+    ime.pump(&mut run, "the input method takes the key", |_, _| {
+        method.keys() == [32]
+    });
     run.stop();
 }
 

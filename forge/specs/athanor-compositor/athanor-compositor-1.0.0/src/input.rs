@@ -85,6 +85,7 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
+        self.end_finished_popup_grab();
         if !past_grab {
             self.resume_input_method_grab();
         }
@@ -96,8 +97,10 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        // A key the input method's grab takes is no client's to name.
         let to = keyboard
             .current_focus()
+            .filter(|_| past_grab || !self.input_method_grabbed())
             .and_then(|surface| surface.client());
         // Read before the filter, which runs with the keyboard held.
         let inhibited = self.shortcuts_inhibited();

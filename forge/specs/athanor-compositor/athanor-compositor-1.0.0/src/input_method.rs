@@ -145,7 +145,7 @@ impl State {
         }
     }
 
-    /// Sends the seat's keymap and modifiers to the input method's grab, if one is installed:
+    /// Sends the seat's keymap and modifiers to the input method's grab, if it has one:
     /// after the seat's keymap changes, before the key read under it.
     pub fn input_method_keymap_changed(&mut self) {
         if self
@@ -158,7 +158,7 @@ impl State {
         }
     }
 
-    /// Sends the seat's repeat to the input method's grab, if one is installed.
+    /// Sends the seat's repeat to the input method's grab, if it has one.
     pub fn input_method_repeat_changed(&self) {
         if let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.as_ref()) {
             let (rate, delay) = self.repeat;
@@ -166,8 +166,8 @@ impl State {
         }
     }
 
-    /// Sends the seat's modifiers to the input method's grab, if one is installed: none is
-    /// while the session is locked.
+    /// Sends the seat's modifiers to the input method's grab, if it has one: none has while
+    /// the session is locked.
     pub fn input_method_modifiers(&self) {
         let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.as_ref()) else {
             return;
@@ -220,14 +220,16 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        // Set first: replacing an earlier grab of the input method unsets that one.
-        keyboard.set_grab(
-            self,
-            ImGrab {
-                object: grab.clone(),
-            },
-            SERIAL_COUNTER.next_serial(),
-        );
+        // Over its own earlier grab, never a popup's: `resume_input_method_grab` waits for that.
+        if !keyboard.is_grabbed() || self.input_method_grabbed() {
+            keyboard.set_grab(
+                self,
+                ImGrab {
+                    object: grab.clone(),
+                },
+                SERIAL_COUNTER.next_serial(),
+            );
+        }
         let Some(method) = &mut self.composing.method else {
             return;
         };
@@ -240,9 +242,7 @@ impl State {
     /// Puts the input method's grab back on the keyboard, before a key is handled: a popup's
     /// grab or the move of the keyboard to an exclusive surface took it off. It waits for no key
     /// held, so that a key pressed for the popup is not released to the input method, and it is
-    /// never put back over another grab. A popup's grab outlives its popup until the next frame
-    /// cleans it up and the keyboard is touched: both happen here, or this key would be the one
-    /// that ends it, for the focused surface.
+    /// never put back over another grab.
     pub fn resume_input_method_grab(&mut self) {
         let Some(grab) = self.composing.method.as_ref().and_then(|m| m.grab.clone()) else {
             return;
@@ -250,22 +250,37 @@ impl State {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
-        if !keyboard.pressed_keys().is_empty() {
-            return;
-        }
-        let root = keyboard.with_grab(|_, current| {
-            let popup = current.is::<PopupKeyboardGrab<State>>();
-            popup.then(|| current.start_data().focus.clone()).flatten()
-        });
-        if let Some(Some(root)) = root {
-            self.popups.cleanup();
-            keyboard.set_focus(self, Some(root), SERIAL_COUNTER.next_serial());
-        }
-        if keyboard.is_grabbed() {
+        if keyboard.is_grabbed() || !keyboard.pressed_keys().is_empty() {
             return;
         }
         keyboard.set_grab(self, ImGrab { object: grab }, SERIAL_COUNTER.next_serial());
         self.send_keyboard_to_grab();
+    }
+
+    /// Ends a popup's grab whose popup went, with the input method's grab suspended under it. It
+    /// outlives its popup until the next frame cleans it up and the keyboard is touched: both
+    /// happen here, or this key would be the one that ends it, for the focused surface.
+    pub fn end_finished_popup_grab(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if self.composing.method.as_ref().is_none_or(|m| m.grab.is_none())
+            || !keyboard.pressed_keys().is_empty()
+        {
+            return;
+        }
+        let root = keyboard.with_grab(|_, current| {
+            let popup = current.is::<PopupKeyboardGrab<State>>();
+            popup.then(|| current.start_data().focus.clone())
+        });
+        let Some(Some(root)) = root else {
+            return;
+        };
+        self.popups.cleanup();
+        match root.filter(|root| root.is_alive()) {
+            Some(root) => keyboard.set_focus(self, Some(root), SERIAL_COUNTER.next_serial()),
+            None => keyboard.unset_grab(self),
+        }
     }
 
     /// Whether the keyboard's grab is the input method's, which a popup's grab may replace.
