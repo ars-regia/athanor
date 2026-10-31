@@ -6,6 +6,7 @@
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
+use smithay::desktop::Window;
 use smithay::input::keyboard::KeyboardSource;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
@@ -13,6 +14,7 @@ use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_se
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::SERIAL_COUNTER;
+use smithay::wayland::compositor::get_parent;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
@@ -194,6 +196,23 @@ impl State {
         let under = self.surface_under(pointer.current_location());
         if under.map(|(surface, _)| surface) != pointer.current_focus() {
             self.refresh_pointer();
+        }
+    }
+
+    /// `repoint` for `window`, which moved: its own client hears of it under the pointer, as
+    /// no other does while what is under the pointer stays.
+    pub(crate) fn repoint_moved(&mut self, window: &Window) {
+        let focus = self.seat.get_pointer().and_then(|pointer| pointer.current_focus());
+        let root = focus.map(|mut surface| {
+            while let Some(parent) = get_parent(&surface) {
+                surface = parent;
+            }
+            surface
+        });
+        if root.as_ref() == window.toplevel().map(|toplevel| toplevel.wl_surface()) {
+            self.refresh_pointer();
+        } else {
+            self.repoint();
         }
     }
 

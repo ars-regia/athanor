@@ -119,6 +119,15 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
+                // Only a null buffer takes a placed window back to before its initial configure,
+                // and the end of this function sends a new one.
+                let unmapped = window.user_data().get::<Placed>().is_some()
+                    && window
+                        .toplevel()
+                        .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
+                if unmapped {
+                    crate::state::forget_requests(&window);
+                }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).
                 if !self.is_minimised(&window) && !self.is_parked(&window) {
@@ -128,8 +137,8 @@ impl CompositorHandler for State {
                     // Also what a full-screen window's answer lifts (`marks::lifted`), which an
                     // answer to an earlier configure does as well.
                     if landed {
-                        self.refresh_pointer();
-                    } else if is_full_screen(&window) {
+                        self.repoint_moved(&window);
+                    } else if unmapped || is_full_screen(&window) {
                         self.repoint();
                     }
                 }

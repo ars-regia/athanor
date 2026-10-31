@@ -358,6 +358,12 @@ fn a_larger_client_lifts_nothing_on_the_next_output() {
     assert!(pixels.contains(&PAINT), "the client reaches the next output");
     let black = pixels.iter().filter(|pixel| **pixel == BLACK);
     assert!(black.count() < 16, "no black over the next output");
+    let (second, area) = second_output(&run);
+    let lifted = |output| crate::marks::lifted(Some(&window), &run.state.space, output).is_some();
+    let first = run.state.space.outputs().find(|output| **output != second);
+    assert!(lifted(first.expect("the first output")), "above the top layer of its own output");
+    assert!(area.overlaps(geometry(&run, &window)), "the client reaches the next output");
+    assert!(!lifted(&second), "and stands above nothing there");
     run.stop();
 }
 
@@ -548,6 +554,104 @@ fn a_full_screen_window_that_hides_leaves_nothing_behind() {
     run.stop();
 }
 
+/// A window that unmaps has asked for nothing: it draws again as a window at the place it had,
+/// and nothing takes it back to what it asked for before.
+#[test]
+fn a_window_that_unmaps_keeps_no_request() {
+    for maximised in [false, true] {
+        let mut run = Running::start(None);
+        let (mut local, toplevel, window) = window(&mut run);
+        let before = geometry(&run, &window);
+        if maximised {
+            answer(&mut run, &mut local, |_| toplevel.set_maximized());
+        } else {
+            enter(&mut run, &mut local, &toplevel, None);
+        }
+
+        let (surface, _) = local.window.clone().expect("a window");
+        surface.attach(None, 0, 0);
+        surface.commit();
+        let (width, height, states) = local.redraw(&mut run);
+
+        assert!(!states.contains(&FULLSCREEN) && !states.contains(&MAXIMIZED));
+        assert_eq!((width, height), (0, 0), "the client picks its size");
+        assert!(!crate::state::is_full_screen(&window));
+        assert_eq!(geometry(&run, &window), before);
+        run.state.fit_maximised();
+        local.roundtrip(&mut run);
+        assert!(local.client.configure.is_none(), "nothing takes it back");
+        run.stop();
+    }
+}
+
+/// A window full-screen from its first buffer has no place to return to, and is placed as a new
+/// window is, clear of the bar.
+#[test]
+fn a_window_born_full_screen_is_placed_when_it_leaves() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (_bar, _surface) = bar(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
+    let qh = local.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let toplevel = xdg.get_toplevel(&qh, ());
+    toplevel.set_fullscreen(None);
+    surface.commit();
+    local.window = Some((surface, xdg));
+    local.redraw(&mut run);
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    assert_eq!(geometry(&run, &window).loc, (0, 0).into());
+
+    let (width, height, states) = answer(&mut run, &mut local, |_| toplevel.unset_fullscreen());
+    assert!(!states.contains(&FULLSCREEN));
+    assert_eq!((width, height), (0, 0), "the client picks its size");
+    paint(&mut run, &mut local, 200, 200, PAINT);
+
+    let shown = geometry(&run, &window);
+    assert_eq!(shown.size, (200, 200).into());
+    assert!(shown.loc.y >= BAR, "clear of the bar, at {shown:?}");
+    assert_ne!(shown.loc.x, 0, "placed, at {shown:?}");
+    run.stop();
+}
+
+/// A full-screen window has no place to be dragged from.
+#[test]
+fn a_full_screen_window_cannot_be_moved() {
+    let mut run = Running::start(None);
+    let (mut local, toplevel, _window) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+    let seat = local.seat.clone().expect("a seat");
+    press(&mut run, Point::from((20.0, 20.0)));
+    local.pump(&mut run, "the press", |client, _| client.button.is_some());
+
+    toplevel._move(&seat, local.client.button.expect("a press"));
+    local.roundtrip(&mut run);
+
+    assert!(!moving(&run));
+    run.stop();
+}
+
+/// A maximise request of a full-screen window waits behind it and is answered all the same.
+#[test]
+fn a_full_screen_window_answers_a_maximise_request() {
+    let mut run = Running::start(None);
+    let (mut local, toplevel, _window) = window(&mut run);
+    enter(&mut run, &mut local, &toplevel, None);
+
+    for answered in [
+        answer(&mut run, &mut local, |_| toplevel.set_maximized()),
+        answer(&mut run, &mut local, |_| toplevel.unset_maximized()),
+    ] {
+        let (width, height, states) = answered;
+        assert_eq!((width, height), OUTPUT);
+        assert!(states.contains(&FULLSCREEN) && !states.contains(&MAXIMIZED));
+    }
+    run.stop();
+}
+
 /// A dialog of a full-screen window stays above it and in reach, when the user clicks the window
 /// too.
 #[test]
@@ -663,6 +767,8 @@ fn the_client_under_the_pointer_hears_nothing_of_another_window() {
     let (mut other, toplevel, elsewhere) = window(&mut run);
     let (_, area) = second_output(&run);
     run.state.space.relocate_element(&elsewhere, area.loc);
+    let named = other.output(1);
+    enter(&mut run, &mut other, &toplevel, Some(&named));
     let location = run.state.space.element_geometry(&under).expect("mapped").loc;
     let inside = (location.x + 5, location.y + 5);
     run.state.pointer_to(
@@ -672,8 +778,8 @@ fn the_client_under_the_pointer_hears_nothing_of_another_window() {
     pointed.roundtrip(&mut run);
     let heard = pointed.client.pointer_motions;
 
-    toplevel.unset_fullscreen();
-    other.roundtrip(&mut run);
+    // Its answer lands a move, and none of it is under the pointer.
+    answer(&mut run, &mut other, |_| toplevel.unset_fullscreen());
     toplevel.destroy();
     other.roundtrip(&mut run);
     pointed.roundtrip(&mut run);

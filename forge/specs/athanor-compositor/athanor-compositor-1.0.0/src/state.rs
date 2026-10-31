@@ -677,7 +677,7 @@ impl State {
     /// size it had, and the window moves back at the commit that answers it, centred in its
     /// `home_area` when its home output no longer shows that place. The geometry it had, or
     /// `None` when it is not maximised. A window maximised before it had a size picks its own
-    /// and stays where it is.
+    /// and is placed as a new window is.
     pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let toplevel = window.toplevel()?;
         let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
@@ -705,6 +705,7 @@ impl State {
 
     /// A configure with the size `kept` had, and the window moves back at the commit that
     /// answers it, centred in its `home_area` when its home output no longer shows that place.
+    /// A window drawn with no earlier place is placed at that commit, as a new window is.
     fn back_to(&mut self, window: &Window, kept: Rectangle<i32, Logical>) {
         let Some(toplevel) = window.toplevel() else {
             return;
@@ -724,6 +725,8 @@ impl State {
                 None => kept.loc,
             };
             relocate(window, to, serial);
+        } else if crate::handlers::shown(window) {
+            place_again(window, serial);
         } else if let Some(moving) = window.user_data().get::<Relocate>() {
             // Asked before the window was placed: nothing to go back to, and `place` places it.
             moving.0.set(None);
@@ -776,7 +779,7 @@ impl State {
             .user_data()
             .get::<Relocate>()
             .and_then(|relocate| relocate.0.get());
-        if let Some(Destination { to, .. }) = moving {
+        if let Some(Destination { to: Some(to), .. }) = moving {
             let asked = window
                 .toplevel()
                 .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
@@ -927,11 +930,15 @@ impl State {
                     return false;
                 }
             }
-            if let Some(relocate) = relocate {
+            let to = to.or_else(|| {
+                let area = self.home_area(window)?;
+                crate::handlers::shown(window).then(|| placed(area, window.geometry()))
+            });
+            if let (Some(relocate), Some(to)) = (relocate, to) {
                 relocate.0.set(None);
+                self.space.relocate_element(window, to);
+                landed = true;
             }
-            self.space.relocate_element(window, to);
-            landed = true;
         }
         // A client smaller than its output stands in the middle of it, as
         // `xdg_toplevel.set_fullscreen` says.
@@ -1458,7 +1465,8 @@ pub struct Relocate(Cell<Option<Destination>>);
 
 #[derive(Clone, Copy)]
 struct Destination {
-    to: Point<i32, Logical>,
+    /// `None` is where `placed` puts the window at the size it then has.
+    to: Option<Point<i32, Logical>>,
     serial: Option<Serial>,
 }
 
@@ -1475,7 +1483,32 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
         .user_data()
         .get_or_insert(Relocate::default)
         .0
-        .set(Some(Destination { to, serial }));
+        .set(Some(Destination {
+            to: Some(to),
+            serial,
+        }));
+}
+
+/// `relocate` to where `placed` puts the window at the size it then has.
+fn place_again(window: &Window, serial: Option<Serial>) {
+    window
+        .user_data()
+        .get_or_insert(Relocate::default)
+        .0
+        .set(Some(Destination { to: None, serial }));
+}
+
+/// A window that unmapped has asked for nothing (`xdg_toplevel`): it is neither full-screen nor
+/// maximised any more, and it draws again at the place it had.
+pub fn forget_requests(window: &Window) {
+    let data = window.user_data();
+    let maximised = data.get::<Maximised>().and_then(|kept| kept.0.take());
+    let full = data.get::<FullScreen>().and_then(|kept| kept.0.take());
+    match maximised.or(full) {
+        Some(Kept { before, .. }) if before.is_empty() => place_again(window, None),
+        Some(Kept { before, .. }) => relocate(window, before.loc, None),
+        None => {}
+    }
 }
 
 /// A maximised window's geometry before it was maximised, and the area it was maximised to.
