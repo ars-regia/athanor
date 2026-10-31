@@ -1,6 +1,7 @@
 # The clients granted athanor-compositor's privileged globals (doc_own_stack.md OS4), installed
 # as /usr/share/athanor/compositor/privileged-clients. One grant per line:
 #   <executable under /usr> <systemd unit> <interface>...
+# A unit ending in *@.service names every instance of a template with that prefix.
 # zwlr_layer_shell_v1 grants its top and overlay layers; the bottom and background layers are
 # every unconfined client's. A missing, unreadable or malformed file grants nothing.
 /usr/bin/athanor-bar athanor-bar.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1
@@ -13,3 +14,6 @@
 /usr/bin/cosmic-greeter cosmic-greeter-locker.scope ext_session_lock_manager_v1
 /usr/bin/cosmic-idle cosmic-idle.scope zwlr_output_power_manager_v1 zwlr_layer_shell_v1
 /usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1
+# Settings waits at start-up on cosmic-randr, which waits for this global (#880); the launcher
+# starts Settings and each of its pages in a unit of its own. The line leaves with cosmic-settings.
+/usr/bin/cosmic-randr app-athanor-com.system76.CosmicSettings*@.service zwlr_output_manager_v1

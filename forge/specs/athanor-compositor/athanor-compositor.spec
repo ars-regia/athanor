@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,6 +52,10 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- Grant the output manager to cosmic-randr in the units of Settings, which shows no window
+  while it waits on it (#880)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - The magnifier and the colour filters (doc_accessibility.md AX10, revision 3): the
   privileged athanor_a11y_manager_v1 for the bar, Super+= and Super+- to zoom, Super with

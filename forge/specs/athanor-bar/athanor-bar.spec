@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        17%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- Settings and its pages, from the image's desktop entries, start on the main socket until
+  cosmic-settings leaves the image, since the output manager cosmic-randr waits on reaches no
+  security context (doc_bar.md BR2, #880).
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - The accessibility menu's magnifier, inversion and filter rows are shown under
   athanor-compositor too, through its athanor_a11y_manager_v1, and under cosmic-comp through

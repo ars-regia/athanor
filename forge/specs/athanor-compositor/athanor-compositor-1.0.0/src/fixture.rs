@@ -6183,7 +6183,7 @@ fn a_destroyed_state_object_is_forgotten() {
 /// mapped there is told as its preferred scale; a configuration that asks for more than a scale
 /// fails, and one on a stale serial is cancelled.
 #[test]
-fn os9_the_output_manager_is_granted_to_the_control_center_only() {
+fn os9_the_output_manager_is_granted_to_the_control_center() {
     const MANAGER: &str = "zwlr_output_manager_v1";
     let mut run = Running::start(None);
     let bar = Local::connect(&mut run, None);

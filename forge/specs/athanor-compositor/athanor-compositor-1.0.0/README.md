@@ -128,7 +128,7 @@ unit is the first component of the cgroup v2 path that is not a slice, below the
 for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub-cgroup after
 another unit. The allow-list, `/usr/share/athanor/compositor/privileged-clients`
 (`data/privileged-clients`), has one grant per line, `<executable> <unit> <interface>...`; the
-executable is a path under `/usr`, the unit a service or a scope, each interface one of the
+executable is a path under `/usr`, the unit a service, a scope or a family of template units, `<prefix>*@.service`, each interface one of the
 privileged globals the compositor offers. A grant needs the executable's path, the unit, and
 the file: `stat` of `/proc/<pid>/exe` and `stat` of the allow-list's path in the compositor's
 mount namespace must name the same device and inode, since a sandbox whose own `/usr` holds a
@@ -152,7 +152,8 @@ security context's listener is granted nothing, whatever its identity.
 `data/globals` gives the class of every global the compositor can offer, and the fixture fails
 on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
-plan): the bar's line carries the workspaces, and the output manager is the control center's.
+plan): the bar's line carries the workspaces, and the output manager is the control center's,
+and cosmic-randr's in the units of Settings until it leaves the image.
 `zwlr_output_power_manager_v1` turns a screen off and is the idle daemon's: a client it reached
 could blank the session.
 `athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
