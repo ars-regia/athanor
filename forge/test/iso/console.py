@@ -408,7 +408,9 @@ SESSION_DIAGNOSTICS = (
 # seconds -- the interval after which run 34581940472 still had no window -- and answers
 # ALIVE only if the unit is still active and its journal holds no Rust panic and no
 # abort or core dump. The screenshot taken on the answer is what shows the window.
-SETTINGS_UNIT = b"athanor-settings-probe"
+# The launcher's name for an application's unit: cosmic-settings blocks on cosmic-randr, which
+# athanor-compositor serves only in the units of Settings (data/privileged-clients).
+SETTINGS_UNIT = b"app-athanor-com.system76.CosmicSettings@probe"
 SETTINGS_APP = b"com.system76.CosmicSettings"
 SETTINGS_WATCH = b"20"
 SETTINGS_CRASH = b"panicked at|code=dumped|status=6/ABRT"

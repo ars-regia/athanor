@@ -57,6 +57,10 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
   keymap sent to every wl_keyboard no longer hides from the bar: Tab reaches past the input
   source under wtype (#876)
 
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- Grant the output manager to cosmic-randr in the units of Settings, which shows no window
+  while it waits on it (#880)
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - The magnifier and the colour filters (doc_accessibility.md AX10, revision 3): the
   privileged athanor_a11y_manager_v1 for the bar, Super+= and Super+- to zoom, Super with

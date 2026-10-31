@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -58,6 +58,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
+- Settings and its pages, from the image's desktop entries, start on the main socket until
+  cosmic-settings leaves the image, since the output manager cosmic-randr waits on reaches no
+  security context (doc_bar.md BR2, #880).
+
 * Wed Oct 28 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
 - athanor-control-center-shortcut.service gains ConditionEnvironment=!ATHANOR_OWN_COMPOSITOR:
   the session on the own compositor does not read cosmic-comp's shortcuts (doc_session.md,
