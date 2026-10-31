@@ -4,18 +4,29 @@
 /// The keymaps cosmic-comp sends are tens of kilobytes; anything beyond this is refused.
 pub(crate) const MAX_KEYMAP: u32 = 1 << 20;
 
-/// The `name[GroupN]` values of the `xkb_symbols` section, ordered by N. libxkbcommon
-/// writes `name[Group1]="English (US)";`; a bare index (`name[1]`) is accepted too.
-/// Lines that do not parse are skipped, and a group named twice keeps its first name.
+/// More groups than a keymap holds: a higher index is not a group, and allocates nothing.
+const MAX_GROUPS: usize = 32;
+
+/// The `name[GroupN]` values of the `xkb_symbols` section, one entry per group up to the
+/// last one named, empty for a group with no name, so that an entry's place is its group.
+/// libxkbcommon writes `name[Group1]="English (US)";`; a bare index (`name[1]`) is accepted
+/// too. Lines that do not parse are skipped, and a group named twice keeps its first name.
 pub fn layout_names(keymap: &str) -> Vec<String> {
     let symbols = keymap.find("xkb_symbols").map_or("", |at| &keymap[at..]);
-    let mut names: Vec<(u32, String)> = symbols.lines().filter_map(group_name).collect();
-    names.sort_by_key(|(group, _)| *group);
-    names.dedup_by_key(|(group, _)| *group);
-    names.into_iter().map(|(_, name)| name).collect()
+    let mut names: Vec<Option<String>> = Vec::new();
+    for (group, name) in symbols.lines().filter_map(group_name) {
+        let Some(place) = group.checked_sub(1).filter(|place| *place < MAX_GROUPS) else {
+            continue;
+        };
+        if names.len() <= place {
+            names.resize(place + 1, None);
+        }
+        names[place].get_or_insert(name);
+    }
+    names.into_iter().map(Option::unwrap_or_default).collect()
 }
 
-fn group_name(line: &str) -> Option<(u32, String)> {
+fn group_name(line: &str) -> Option<(usize, String)> {
     let rest = line.trim().strip_prefix("name[")?;
     let (group, rest) = rest.split_once(']')?;
     let group = group.trim();
@@ -24,7 +35,7 @@ fn group_name(line: &str) -> Option<(u32, String)> {
         (Some(prefix), Some(digits)) if prefix.eq_ignore_ascii_case("group") => digits,
         _ => group,
     };
-    let index = digits.parse::<u32>().ok()?;
+    let index = digits.parse::<usize>().ok()?;
     let value = rest
         .trim_start()
         .strip_prefix('=')?
@@ -73,6 +84,18 @@ xkb_symbols "pc+us+it:2+inet(evdev)" {
     fn malformed_lines_are_skipped_and_the_first_name_of_a_group_wins() {
         let keymap = "xkb_symbols \"x\" {\n name[Group1]=\"A\";\n name[Group1]=\"B\";\n name[GroupX]=\"C\";\n name[Group3]=\"unterminated;\n name[Group4] \"no equals\";\n name[Grouü1]=\"D\";\n};";
         assert_eq!(layout_names(keymap), ["A"]);
+    }
+
+    #[test]
+    fn a_group_with_no_name_keeps_its_place() {
+        let keymap = "xkb_symbols \"x\" {\n name[Group2]=\"Italian\";\n};";
+        assert_eq!(layout_names(keymap), ["", "Italian"]);
+    }
+
+    #[test]
+    fn an_index_that_is_no_group_is_skipped() {
+        let keymap = "xkb_symbols \"x\" {\n name[Group0]=\"A\";\n name[Group33]=\"B\";\n name[Group4294967295]=\"C\";\n name[Group1]=\"D\";\n};";
+        assert_eq!(layout_names(keymap), ["D"]);
     }
 
     #[test]
