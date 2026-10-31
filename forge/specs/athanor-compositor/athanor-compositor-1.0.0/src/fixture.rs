@@ -4754,11 +4754,15 @@ fn unlocking_restores_the_layout_group() {
     surface.commit();
     locker.roundtrip(&mut run);
     let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
-    assert!(keyboard.current_focus().is_some(), "the lock has the keyboard");
+    let holder = keyboard.current_focus().and_then(|focus| focus.client());
+    assert_eq!(holder.map(|client| client.id()), locker.id, "the lock has the keyboard");
+    assert!(run.state.lock.is_some(), "the session is locked");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1, "while locked");
     lock.unlock_and_destroy();
     locker.roundtrip(&mut run);
     bar.roundtrip(&mut run);
 
+    assert!(run.state.lock.is_none(), "the session is unlocked");
     assert_eq!(bar.groups_of(&group), [0, 1], "the group stays");
     assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1);
     run.stop();
