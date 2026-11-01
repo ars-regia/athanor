@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        31%{?dist}
+Release:        32%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -12,8 +12,6 @@ Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
 Requires:       wayland-utils
-# The readiness gate unsets the import list that athanor-system-config ships (doc_session.md, SN2).
-Requires:       athanor-system-config
 # athanor-appearance-reset reads and resets the GNOME appearance keys.
 Requires:       dconf bash
 
@@ -47,6 +45,12 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.1-32
+- The readiness gate's ExecStop= unsets only the names of the display, WAYLAND_DISPLAY,
+  DISPLAY, XDG_SESSION_TYPE and XDG_SESSION_CLASS, so the user manager keeps its LANG after
+  a logout (doc_session.md, SN2, #825). It no longer reads athanor-system-config's import
+  list, so the package no longer requires athanor-system-config.
+
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.1-31
 - athanor-desktop.service, the readiness gate, is PartOf=graphical-session.target and its
   ExecStop= unsets the variables of athanor-system-config's import list, all but
