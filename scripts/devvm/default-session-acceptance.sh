@@ -115,13 +115,10 @@ DROP_IN=default-session-acceptance.conf
 WINDOW_UNIT=default-session-acceptance-window
 APP_A=os.athanor.SessionAcceptanceA
 APP_B=os.athanor.SessionAcceptanceB
-# What the session's end removes from the user manager: SN2's import list
-# (/usr/share/athanor-system-config/session-import) less XDG_CURRENT_DESKTOP, and what only
-# the own compositor's session sets.
-REMOVED=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS LANG LANGUAGE LC_NUMERIC
-    LC_TIME LC_MONETARY LC_PAPER LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT XCURSOR_SIZE
-    XCURSOR_THEME ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT
-    XKB_DEFAULT_OPTIONS)
+# What the session's end removes from the user manager: the names of the display (SN2), and
+# what only the own compositor's session sets.
+REMOVED=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS ATHANOR_OWN_COMPOSITOR
+    XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS)
 # The session's units, none of which is active once it ended (item 2).
 SESSION_UNITS=(athanor-session.target "$COMPOSITOR" "$GATE" athanor-shelld.service
     athanor-bar.service athanor-dock.service "${SCOPES[@]}")

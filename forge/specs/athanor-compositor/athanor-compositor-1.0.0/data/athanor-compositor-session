@@ -59,8 +59,8 @@ rm -f "$MARKER"
 # SN2's import list, the one file athanor-desktop and the readiness gate read, read with
 # step 1, after its cleanup and before the exit handler that needs it. The compositor sets
 # WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end removes
-# all but XDG_CURRENT_DESKTOP, whose value comes from environment.d too (step 3). A list the
-# reader refuses fails as step 1 does, with nothing of this session started, and greetd
+# the names that describe the display, as the gate does (SN2, step 3). A list the reader
+# refuses fails as step 1 does, with nothing of this session started, and greetd
 # returns to the greeter: athanor-desktop refuses the same list, so a hand-off could not
 # start either.
 if ! names=$(session_import_names /usr/share/athanor-system-config/session-import); then
@@ -68,15 +68,11 @@ if ! names=$(session_import_names /usr/share/athanor-system-config/session-impor
     exit 1
 fi
 IMPORTED=
-REMOVED=
+REMOVED="WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS"
 for name in $names; do
     case $name in
         WAYLAND_DISPLAY | DISPLAY) ;;
         *) IMPORTED="$IMPORTED $name" ;;
-    esac
-    case $name in
-        XDG_CURRENT_DESKTOP) ;;
-        *) REMOVED="$REMOVED $name" ;;
     esac
 done
 
