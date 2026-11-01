@@ -35,15 +35,14 @@ def updateinfo(*updates, package=("openssl", "3.5.1")):
 
 
 class Fake(rc.Sources):
-    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45", kernels=None):
+    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45", kernels=("0:7.2.5-300.azoth.fc45",) * 2):
         self.repo_root = root
         self.ids = {f"{REPO}@{OLD}": was, f"{REPO}@{NEW}": now}
         self.pkgs = {
             f"{REPO}@{OLD}": {"openssl": f"0:{old}"},
             f"{REPO}@{NEW}": {"openssl": f"0:{new}"},
         }
-        if kernels:
-            self.pkgs[f"{REPO}@{OLD}"]["kernel"], self.pkgs[f"{REPO}@{NEW}"]["kernel"] = kernels
+        self.pkgs[f"{REPO}@{OLD}"]["kernel"], self.pkgs[f"{REPO}@{NEW}"]["kernel"] = kernels
         self.info, self.fail = info if info is not None else updateinfo(), fail
 
     def packages(self, ref):
@@ -185,12 +184,12 @@ class Derive(unittest.TestCase):
         got = self.derive(base, head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45")))
         self.assertEqual(got["advisories"], ["CVE-2026-0001", "FEDORA-2026-aaaa"])
 
-    def kernel_change(self, base, head, fixed, release="300.fc45"):
+    def kernel_change(self, base, head, fixed, kind="security", package="kernel", kernels=("7.2.5", "7.2.11")):
         return self.derive(
             base,
             head,
-            kernels=("0:7.2.5-300.azoth.fc45", "0:7.2.11-300.azoth.fc45"),
-            info=updateinfo(("FEDORA-2026-kkkk", "security", release), package=("kernel", fixed)),
+            kernels=tuple(f"0:{v}-300.azoth.fc45" for v in kernels),
+            info=updateinfo(("FEDORA-2026-kkkk", kind, "300.fc45"), package=(package, fixed)),
         )
 
     def test_a_kernel_change_that_closes_an_advisory_needs_a_class_file(self):
@@ -218,6 +217,27 @@ class Derive(unittest.TestCase):
         for fixed in ("7.2.4", "7.2.5", "7.2.12"):
             with self.subTest(fixed=fixed):
                 self.assertEqual(self.kernel_change(head, head, fixed)["class"], "feature")
+
+    def test_a_kernel_advisory_that_is_no_security_fix_asks_for_nothing(self):
+        got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kind="bugfix")
+        self.assertEqual(got["class"], "feature")
+
+    def test_a_kernel_downgrade_closes_nothing(self):
+        got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kernels=("7.2.11", "7.2.5"))
+        self.assertEqual(got["class"], "feature")
+
+    def test_a_kernel_subpackage_neither_asks_nor_claims(self):
+        head = self.commit()
+        got = self.derive(
+            head,
+            head,
+            kernels=("0:7.2.5-300.azoth.fc45", "0:7.2.11-300.azoth.fc45"),
+            info=updateinfo(("FEDORA-2026-kkkk", "security", "300.fc45"), package=("kernel-core", "7.2.9")),
+        )
+        self.assertEqual((got["class"], got["advisories"]), ("feature", []))
+        old, new = {"kernel-core": "0:1-1"}, {"kernel-core": "0:3-1"}
+        self.assertEqual(rc.fedora_half(old, new, [rc.Advisory("A", "security", {"kernel-core": "0:2-1"})]), [])
+        self.assertEqual(rc.fedora_half({"kernelshark": "0:1-1"}, {"kernelshark": "0:3-1"}, [rc.Advisory("A", "security", {"kernelshark": "0:2-1"})]), ["A"])
 
     def test_a_kernel_advisory_never_sets_the_class(self):
         self.assertEqual(rc.fedora_half({"kernel": "0:1-1"}, {"kernel": "0:3-1"}, [rc.Advisory("A", "security", {"kernel": "0:2-1"})]), [])
@@ -260,7 +280,7 @@ class GitHalf(Derive):
 
 
 class Podman(unittest.TestCase):
-    listing = "filesystem 0:3-1\nglibc 0:2-1\nopenssl 0:3-1\n"
+    listing = "filesystem 0:3-1\nglibc 0:2-1\nkernel 0:7-1\nopenssl 0:3-1\n"
 
     def setUp(self):
         self.calls, self.fail = [], {}
@@ -300,8 +320,8 @@ class Podman(unittest.TestCase):
             self.sources().packages("img")
 
     def test_a_missing_sanity_package_fails(self):
-        self.listing = "openssl 0:3-1\nglibc 0:2-1\n"
-        with self.assertRaisesRegex(rc.ClassError, "filesystem"):
+        self.listing = "openssl 0:3-1\nglibc 0:2-1\nfilesystem 0:3-1\n"
+        with self.assertRaisesRegex(rc.ClassError, "kernel"):
             self.sources().packages("img")
 
     def test_a_missing_sqlite_file_fails_before_rpm_runs(self):

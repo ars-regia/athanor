@@ -30,8 +30,8 @@
   Amended 2026-10-21 ([ADR-0127](../decisions/0127-release-attestation-and-ut13-details.md)): the release attestation of PB4b, the class derivation of PL55
   and the cosign installer of `sign-images` (PL11, section 15).
   Amended 2026-11-01 (#655), by the maintainer's decision: PL55 takes the Azoth
-  kernel out of the Fedora half and requires a `release-class.toml` file for a security fix
-  of a package Athanor builds.
+  kernel out of the Fedora half, requires a `release-class.toml` file for a security fix of
+  a package Athanor builds, and has `candidate` check that file for the kernel.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -699,8 +699,9 @@ or images that expire (section 5), and never from a dispatch input:
 
 The class is security if any source says so, and the advisory ids are their union. A
 release that carries a security fix to a package Athanor builds states it in a
-`release-class.toml` file of the git half, since no Fedora advisory does: the maintainer
-adds the file, and for the kernel `candidate` checks it. With a labelled baseline and the
+`release-class.toml` file of the git half: the maintainer adds the file, and for the kernel
+`candidate` checks it. The other packages Athanor builds under a Fedora name stay in the
+Fedora half above, and nothing checks their file. With a labelled baseline and the
 same `VERSION_ID`, a kernel change that closes a Fedora advisory of `type="security"` for
 `kernel`, one whose upstream version is newer than the `:latest` one and not newer than the
 candidate's, fails `candidate` unless a `security` file for that repository is in the range.

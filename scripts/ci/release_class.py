@@ -26,7 +26,7 @@ from typing import NamedTuple
 CLASS_DIR = "release/class/"
 CLASS_NAME = re.compile(r"release/class/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.toml")
 ADVISORY_ID = re.compile(r"[A-Za-z0-9._-]+")
-SANITY = ("filesystem", "glibc")  # every Fedora image has them: an empty list is a failed read
+SANITY = ("filesystem", "glibc", "kernel")  # every image has them: an empty list is a failed read
 TIMEOUT = 900  # seconds for one external command; a pull of an image is the longest
 MAX_FILESIZE = 256 * 1024 * 1024  # bytes of one download from a Fedora mirror
 METALINK = "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f{}&arch=x86_64"
@@ -269,8 +269,6 @@ def kernel_half(old, new, advisories):
     """Ids of the security advisories of Fedora's kernel that the change of the Azoth kernel
     closes, by upstream version alone. They never set the class: a release that closes one
     states it in a release-class.toml file (PL55, #655)."""
-    if "kernel" not in old or "kernel" not in new:
-        return []
     before, after = evr(old["kernel"])[1], evr(new["kernel"])[1]
     return sorted(
         a.id
