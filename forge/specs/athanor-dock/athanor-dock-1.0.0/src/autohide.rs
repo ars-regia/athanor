@@ -1,7 +1,8 @@
 //! The auto-hide knob (doc_bar.md, BR7): "no exclusive zone; it appears after a short
 //! delay when the pointer reaches a strip a few pixels wide on its edge." A state machine
-//! with no GTK type: the surface feeds it pointer, hold and timer events, runs the one
-//! timer it asks for, and draws the dock while `shown`.
+//! with no GTK type: the surface feeds it pointer, keyboard, hold and timer events, runs the
+//! one timer it asks for, and draws the dock while `shown`. The keyboard on the dock reveals
+//! it at once and keeps it, as the pointer's hover does: where the focus is shows (AX7).
 
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ pub enum Phase {
     /// The pointer is on the strip; the dock shows when the timer fires.
     Revealing,
     Shown,
-    /// The pointer left; the dock hides when the timer fires.
+    /// Neither pointer nor keyboard is on it; the dock hides when the timer fires.
     Hiding,
 }
 
@@ -30,6 +31,8 @@ pub enum Phase {
 pub enum Event {
     PointerIn,
     PointerOut,
+    KeyboardIn,
+    KeyboardOut,
     /// A menu or a drag of the dock started (`true`) or ended (`false`), on any output.
     Held(bool),
     /// The timer last started ran out.
@@ -48,6 +51,7 @@ pub enum Timer {
 pub struct AutoHide {
     phase: Phase,
     pointer: bool,
+    keyboard: bool,
     held: bool,
 }
 
@@ -67,22 +71,27 @@ impl AutoHide {
         match event {
             Event::PointerIn => self.pointer = true,
             Event::PointerOut => self.pointer = false,
+            Event::KeyboardIn => self.keyboard = true,
+            Event::KeyboardOut => self.keyboard = false,
             Event::Held(held) => self.held = held,
             Event::Timer => {}
         }
+        let kept = self.pointer || self.keyboard || self.held;
         let (phase, timer) = match (self.phase, event) {
             (Phase::Hidden, Event::PointerIn) => (Phase::Revealing, Timer::Start(REVEAL_DELAY)),
             (Phase::Hiding, Event::PointerIn) => (Phase::Shown, Timer::Cancel),
             (Phase::Revealing, Event::PointerOut) => (Phase::Hidden, Timer::Cancel),
-            (Phase::Shown, Event::PointerOut) if !self.held => {
+            (Phase::Hidden | Phase::Revealing | Phase::Hiding, Event::KeyboardIn) => {
+                (Phase::Shown, Timer::Cancel)
+            }
+            (Phase::Shown, Event::PointerOut | Event::KeyboardOut | Event::Held(false))
+                if !kept =>
+            {
                 (Phase::Hiding, Timer::Start(HIDE_DELAY))
             }
             // A hold only keeps a dock that is on screen: one that is still revealing
             // waits for its delay, so a hold on another output reveals nothing here.
             (Phase::Hiding, Event::Held(true)) => (Phase::Shown, Timer::Cancel),
-            (Phase::Shown, Event::Held(false)) if !self.pointer => {
-                (Phase::Hiding, Timer::Start(HIDE_DELAY))
-            }
             (Phase::Revealing, Event::Timer) => (Phase::Shown, Timer::Keep),
             (Phase::Hiding, Event::Timer) => (Phase::Hidden, Timer::Keep),
             (phase, _) => (phase, Timer::Keep),
@@ -211,6 +220,59 @@ mod tests {
         ]);
         assert_eq!(timers.last(), Some(&Timer::Cancel));
         assert_eq!(state.phase(), Phase::Shown);
+    }
+
+    #[test]
+    fn the_keyboard_shows_the_dock_at_once_and_it_hides_after_it_leaves() {
+        let (state, timers) = fed(&[Event::KeyboardIn]);
+        assert!(state.shown());
+        assert_eq!(timers, [Timer::Cancel]);
+        let (state, timers) = fed(&[Event::KeyboardIn, Event::KeyboardOut]);
+        assert_eq!(state.phase(), Phase::Hiding);
+        assert_eq!(timers[1], Timer::Start(HIDE_DELAY));
+        let (state, _) = fed(&[Event::KeyboardIn, Event::KeyboardOut, Event::Timer]);
+        assert_eq!(state.phase(), Phase::Hidden);
+    }
+
+    #[test]
+    fn the_keyboard_keeps_the_dock_the_pointer_left() {
+        let (state, _) = fed(&[
+            Event::PointerIn,
+            Event::Timer,
+            Event::KeyboardIn,
+            Event::PointerOut,
+        ]);
+        assert_eq!(state.phase(), Phase::Shown);
+        let (state, _) = fed(&[
+            Event::PointerIn,
+            Event::Timer,
+            Event::KeyboardIn,
+            Event::KeyboardOut,
+        ]);
+        assert_eq!(state.phase(), Phase::Shown, "the pointer still keeps it");
+    }
+
+    #[test]
+    fn the_keyboard_arriving_cancels_a_reveal_or_a_hide() {
+        let (state, timers) = fed(&[Event::PointerIn, Event::KeyboardIn]);
+        assert_eq!(state.phase(), Phase::Shown);
+        assert_eq!(timers[1], Timer::Cancel);
+        let (state, timers) = fed(&[Event::KeyboardIn, Event::KeyboardOut, Event::KeyboardIn]);
+        assert_eq!(state.phase(), Phase::Shown);
+        assert_eq!(timers[2], Timer::Cancel);
+    }
+
+    #[test]
+    fn a_menu_of_the_dock_taking_the_keyboard_keeps_it_until_it_closes() {
+        let (state, _) = fed(&[Event::KeyboardIn, Event::Held(true), Event::KeyboardOut]);
+        assert_eq!(state.phase(), Phase::Shown);
+        let (state, _) = fed(&[
+            Event::KeyboardIn,
+            Event::Held(true),
+            Event::KeyboardOut,
+            Event::Held(false),
+        ]);
+        assert_eq!(state.phase(), Phase::Hiding);
     }
 
     #[test]

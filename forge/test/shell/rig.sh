@@ -26,6 +26,7 @@
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
+#   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
@@ -242,6 +243,9 @@ seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp
     else
         echo "org.gnome.desktop.interface color-scheme default"
     fi > "$1.gsettings"
+    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
+    # switch to 12 hours by locale.
+    echo "org.gnome.desktop.interface clock-format 24h" >> "$1.gsettings"
 }
 
 variant_env=()
@@ -270,13 +274,10 @@ atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text sca
 
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     seed_layout "$1" "$2" "$3" "$4"
-    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicAppletTime/v1"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1"
     printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
         > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
     seed_scheme "$1" "$5"
-    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
-    # switch to 12 hours by locale.
-    printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
     printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 
@@ -781,6 +782,11 @@ cargo)
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
+toolkit-gpu)
+    bash "$0" cargo test --locked -p athanor-toolkit --features gpu --lib -- --ignored | tee "$out/toolkit-gpu.log"
+    # Cargo exits 0 when no test ran: a renamed test must not leave a green run of nothing.
+    grep -q 'test result: ok\. [1-9]' "$out/toolkit-gpu.log"
+    ;;
 seal-bin)
     shift
     [ "$#" -gt 0 ] || { echo "rig.sh: seal-bin needs a binary name" >&2; exit 2; }
@@ -921,7 +927,7 @@ dock-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable ${session_unit[*]}"
     ;;
 notifications-e2e)
     stage_greeter_icons
