@@ -2,6 +2,10 @@ Screen reader on.
 Athanor
 Password for Rig password text.
 Sign in button.
+High contrast toggle button not pressed.
+Suspend button.
+Restart button.
+Shut down button.
 Back to the list button.
 Password for Rig password text.
 Screen reader off.

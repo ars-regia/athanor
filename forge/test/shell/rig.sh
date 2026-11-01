@@ -1410,13 +1410,11 @@ orca)
     greeter)
         # The card of the rig's one account opens with the password focused. Seven controls are
         # focusable: Back to the list, the password, Sign in, High contrast, Suspend, Restart,
-        # Shut down (the seal and the layout chip take no focus). Tab goes round the first three
-        # only, the password, Sign in and Back to the list (#751), so three Tabs end on the
-        # password; seven once Tab reaches them all.
+        # Shut down (the seal and the layout chip take no focus), so seven Tabs end on the password.
         stage_greeter_icons
         in_rig "$(rig_image)" "${with_account[@]}" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             RIG_DATA_OVERLAY=/out/greeter-icons \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*3" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-greeter -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client athanor-greeter-ui"
         ;;
