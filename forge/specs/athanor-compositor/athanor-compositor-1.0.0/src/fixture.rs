@@ -313,6 +313,7 @@ struct Client {
     fractional_scale: Option<u32>,
     /// The serial of the last `wl_pointer.enter` the client was sent.
     pointer_enter: Option<u32>,
+    pointer_motions: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
@@ -676,6 +677,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
     ) {
         match event {
             wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
+            wl_pointer::Event::Motion { .. } => client.pointer_motions += 1,
             wl_pointer::Event::Button {
                 serial,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
@@ -5560,6 +5562,10 @@ mod a11y;
 // Decision 31: the focus outline and the border of confined windows.
 #[cfg(test)]
 mod marks;
+
+// OS12: `xdg_toplevel.set_fullscreen`.
+#[cfg(test)]
+mod full_screen;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {

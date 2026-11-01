@@ -4,7 +4,6 @@
 use super::*;
 use crate::focus_theme;
 use smithay::desktop::PopupManager;
-use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as Configured;
 use wayland_client::protocol::wl_subcompositor;
 
 /// The factory accent, which the outline takes before a theme is read, as wide as
@@ -19,11 +18,11 @@ const BORDER: i32 = 3;
 /// Where the tests put a window: on the first output, clear of its edges.
 const AT: (i32, i32) = (400, 300);
 
-fn frame(run: &mut Running) -> Vec<u8> {
+pub(super) fn frame(run: &mut Running) -> Vec<u8> {
     run.state.capture(0).expect("a frame")
 }
 
-fn at(frame: &[u8], x: i32, y: i32) -> [u8; 4] {
+pub(super) fn at(frame: &[u8], x: i32, y: i32) -> [u8; 4] {
     pixel(frame, OUTPUTS[0].width, x, y)
 }
 
@@ -35,7 +34,7 @@ fn focused_at(run: &mut Running, local: &Local, (x, y): (i32, i32)) {
 }
 
 /// A new window of a client inside a security context, at `AT` and with the keyboard.
-fn confined(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
+pub(super) fn confined(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
     let context = sandbox(run);
     let mut local = Local::connect(run, Some(context));
     let toplevel = local.toplevel(run);
@@ -44,7 +43,7 @@ fn confined(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
 }
 
 /// Draws a buffer of `width` by `height` pixels of `bgrx` on the client's window.
-fn paint(run: &mut Running, local: &mut Local, width: i32, height: i32, bgrx: [u8; 4]) {
+pub(super) fn paint(run: &mut Running, local: &mut Local, width: i32, height: i32, bgrx: [u8; 4]) {
     let shm: wl_shm::WlShm = local.bind(1);
     let (buffer, _) = local.buffer(&shm, width, height, bgrx);
     let (surface, _) = local.window.clone().expect("a window");
@@ -55,7 +54,7 @@ fn paint(run: &mut Running, local: &mut Local, width: i32, height: i32, bgrx: [u
 }
 
 /// The fixture's window, moved away from `AT` so that nothing lies around either.
-fn clear_the_fixture(run: &mut Running) -> smithay::desktop::Window {
+pub(super) fn clear_the_fixture(run: &mut Running) -> smithay::desktop::Window {
     let (window, _) = fixture_window(run);
     run.state.space.map_element(window.clone(), (40, 40), false);
     window
@@ -148,14 +147,9 @@ fn a_confined_window_is_bordered_in_every_state() {
     }
     assert_eq!(at(&shown, 0, 400), BLACK, "the outer line, not the outline");
 
-    let window = window_of(&run, local.id.as_ref().expect("an id"));
-    let surface = window.toplevel().expect("a toplevel");
-    surface.with_pending_state(|state| {
-        state.states.unset(Configured::Maximized);
-        state.states.set(Configured::Fullscreen);
-    });
-    surface.send_configure();
+    local.roundtrip(&mut run);
     local.client.configure = None;
+    toplevel.set_fullscreen(None);
     local.redraw(&mut run);
     let shown = frame(&mut run);
     assert_eq!(at(&shown, 1, 400), WHITE, "full-screen");
@@ -316,17 +310,24 @@ fn no_mark_is_drawn_while_the_lock_holds() {
     let beside = (x - 2, y + HEIGHT / 2);
     assert_eq!(at(&frame(&mut run), beside.0, beside.1), WHITE, "before");
 
-    let mut locker = Local::connect(&mut run, None);
+    let _locker = lock_the_session(&mut run);
+    assert_eq!(at(&frame(&mut run), beside.0, beside.1), RED, "the lock");
+    run.stop();
+}
+
+/// Locks the session with a client that paints `RED`, which stays connected while it lives.
+pub(super) fn lock_the_session(run: &mut Running) -> Local {
+    let mut locker = Local::connect(run, None);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
     let compositor: wl_compositor::WlCompositor = locker.bind(4);
     let shm: wl_shm::WlShm = locker.bind(1);
     let output: wl_output::WlOutput = locker.bind(4);
     let qh = locker.queue.handle();
     let lock = locks.lock(&qh, ());
-    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    locker.pump(run, "the session is locked", |client, _| client.locked);
     let surface = compositor.create_surface(&qh, ());
     let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
-    locker.pump(&mut run, "the lock surface is configured", |client, _| {
+    locker.pump(run, "the lock surface is configured", |client, _| {
         client.lock_configure.is_some()
     });
     let (serial, width, height) = locker.client.lock_configure.expect("a configure");
@@ -334,9 +335,8 @@ fn no_mark_is_drawn_while_the_lock_holds() {
     let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 255, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
-    locker.roundtrip(&mut run);
-    assert_eq!(at(&frame(&mut run), beside.0, beside.1), RED, "the lock");
-    run.stop();
+    locker.roundtrip(run);
+    locker
 }
 
 /// Neither the grey between black and white nor a white edge on a dark backdrop hides the white
