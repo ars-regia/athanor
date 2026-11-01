@@ -330,8 +330,7 @@ impl State {
         &self,
         event: &impl AbsolutePositionEvent<I>,
     ) -> Option<Point<f64, Logical>> {
-        let area = self.output_area()?;
-        Some(self.unzoomed(event.position_transformed(area.size) + area.loc.to_f64()))
+        self.on_first_panel(|panel| event.position_transformed(panel))
     }
 
     /// Reads a device or tablet event of the backend. Other events are not a tablet's and are

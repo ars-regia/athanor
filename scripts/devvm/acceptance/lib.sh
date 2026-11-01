@@ -40,6 +40,12 @@ ACC_BASE=${ACC_BASE:-$SYSTEM_IMAGE:latest}
 ACC_RPM_DIR=${ACC_RPM_DIR:-$ROOT/RPMS_OUT}
 REPO=$ACC_REGISTRY/athanor-system
 UPDATE1=(os.athanor.Update1 /os/athanor/Update1 os.athanor.Update1)
+
+# The default base is the published tag, and the copy on this host may be of any age (#531): a
+# failed pull ends the run. A base the caller set is used as given.
+pull_base() {
+  [[ $ACC_BASE != "$SYSTEM_IMAGE:latest" ]] || podman pull --quiet "$ACC_BASE" > /dev/null
+}
 mkdir -p "$ACC_STATE"
 
 # The 31 GB host does not run the 12 GB runner guest and this 8 GB VM together. Only a job on

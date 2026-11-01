@@ -313,6 +313,7 @@ struct Client {
     fractional_scale: Option<u32>,
     /// The serial of the last `wl_pointer.enter` the client was sent.
     pointer_enter: Option<u32>,
+    pointer_motions: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
@@ -676,6 +677,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
     ) {
         match event {
             wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
+            wl_pointer::Event::Motion { .. } => client.pointer_motions += 1,
             wl_pointer::Event::Button {
                 serial,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
@@ -2355,6 +2357,264 @@ fn task8_a_window_on_an_output_that_goes_moves_onto_the_first() {
         "centred on the first output"
     );
     run.stop();
+}
+
+/// The first output takes the logical size `(width, height)`, as a higher scale gives it.
+fn resize_first(run: &mut Running, width: i32, height: i32) {
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let mode = smithay::output::Mode {
+        size: (width, height).into(),
+        refresh: 60_000,
+    };
+    first.change_current_state(Some(mode), None, None, None);
+    run.state.arrange_outputs();
+}
+
+/// The corner of the first output for a window of `size`, and that corner on the same output
+/// after `resize_first` took half of `size` off it, with that smaller size.
+fn corners(size: (i32, i32)) -> ((i32, i32), (i32, i32), (i32, i32)) {
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let small = (width - size.0 / 2, height - size.1 / 2);
+    let corner = (width - size.0, height - size.1);
+    (corner, (small.0 - size.0, small.1 - size.1), small)
+}
+
+/// An output that loses logical size, as a higher scale makes it, leaves a window inside it
+/// that was inside it, moved no further than that takes.
+#[test]
+fn an_output_that_shrinks_keeps_a_window_on_it_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+
+    resize_first(&mut run, small.0, small.1);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// A window whose place the change leaves whole does not move.
+#[test]
+fn an_output_that_shrinks_leaves_a_window_it_does_not_reach() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (_, _, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, (10, 20));
+
+    resize_first(&mut run, small.0, small.1);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some((10, 20).into()));
+    run.stop();
+}
+
+/// A window on an output the change only moves moves with it, whole.
+#[test]
+fn a_window_follows_an_output_that_moves() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x + 30, 30));
+    let pointed: Point<f64, Logical> = (f64::from(area.loc.x) + 30.0, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shift = OUTPUTS[0].width - OUTPUTS[0].width / 2;
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x + 30 - shift, 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let carried = pointed - Point::<i32, Logical>::from((shift, 0)).to_f64();
+    assert_eq!(pointer.current_location(), carried, "the pointer goes with it");
+    run.stop();
+}
+
+/// A window the user left over an edge of an output that moves stays over that edge.
+#[test]
+fn a_window_over_the_edge_of_an_output_that_moves_goes_with_it() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let second = workspaces_of(&run, 1)[0];
+    assert!(run.state.move_window_to(&window, second));
+    let area = run.state.space.outputs().nth(1).cloned().expect("a second output");
+    let area = run.state.space.output_geometry(&area).expect("placed");
+    run.state.space.relocate_element(&window, (area.loc.x - 20, 30));
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let moved = (area.loc.x - 20 - (OUTPUTS[0].width - OUTPUTS[0].width / 2), 30);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// A window under a bar's zone that the change leaves whole stays where the user put it.
+#[test]
+fn an_output_that_grows_leaves_a_window_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    run.state.space.relocate_element(&window, (10, 5));
+
+    resize_first(&mut run, OUTPUTS[0].width + 100, OUTPUTS[0].height + 100);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some((10, 5).into()));
+    run.stop();
+}
+
+/// A shrink in width moves a window no further than that: over a bar's zone it stays.
+#[test]
+fn an_output_cut_on_one_side_leaves_the_other_over_a_zone() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 40);
+    let size = window.geometry().size;
+    let width = OUTPUTS[0].width;
+    run.state.space.relocate_element(&window, (width - size.w - 10, 5));
+
+    resize_first(&mut run, width - 50, OUTPUTS[0].height);
+
+    let shown = run.state.space.element_geometry(&window);
+    let cut = (width - 50 - size.w, 5);
+    assert_eq!(shown.map(|shown| shown.loc), Some(cut.into()));
+    run.stop();
+}
+
+/// The pointer stays on an output that shrinks, whatever the next output takes of its place.
+#[test]
+fn the_pointer_stays_on_an_output_that_shrinks() {
+    let mut run = Running::start(None);
+    // Where the next output comes to stand.
+    let pointed: Point<f64, Logical> = (f64::from(OUTPUTS[0].width) * 0.8, 30.0).into();
+    run.state.pointer_to(pointed, smithay::backend::input::InputTime::now());
+
+    resize_first(&mut run, OUTPUTS[0].width / 2, OUTPUTS[0].height);
+
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    let first = run.state.space.output_geometry(&first).expect("placed");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(first.to_f64().contains(pointer.current_location()));
+    run.stop();
+}
+
+/// A window the user left over an edge stays there.
+#[test]
+fn an_output_that_shrinks_leaves_a_window_over_its_edge() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let over = (width / 2, height - size.h / 2);
+    run.state.space.relocate_element(&window, over);
+
+    resize_first(&mut run, width, height - 4);
+
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(over.into()));
+    run.stop();
+}
+
+/// A window on an inactive workspace comes back whole.
+#[test]
+fn an_output_that_shrinks_keeps_a_window_out_of_the_space_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+    run.state.switch_to(2);
+    assert!(run.state.is_parked(&window));
+
+    resize_first(&mut run, small.0, small.1);
+
+    run.state.switch_to(1);
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+
+    run.stop();
+}
+
+/// A minimised window comes back whole.
+#[test]
+fn an_output_that_shrinks_keeps_a_minimised_window_whole() {
+    let mut run = Running::start(None);
+    let (window, _) = fixture_window(&run);
+    let size = window.geometry().size;
+    let (corner, moved, small) = corners((size.w, size.h));
+    run.state.space.relocate_element(&window, corner);
+    assert!(run.state.minimise(&window));
+
+    resize_first(&mut run, small.0, small.1);
+
+    assert!(run.state.unminimise(&window));
+    let shown = run.state.space.element_geometry(&window);
+    assert_eq!(shown.map(|shown| shown.loc), Some(moved.into()));
+    run.stop();
+}
+
+/// The place a maximised window goes back to stays whole on the output.
+#[test]
+fn an_output_that_shrinks_keeps_a_maximised_windows_place_whole() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of_client(&run, &id);
+    let (corner, moved, small) = corners((WIDTH, HEIGHT));
+    run.state.space.relocate_element(&window, corner);
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+
+    resize_first(&mut run, small.0, small.1);
+    local.redraw(&mut run);
+    toplevel.unset_maximized();
+    local.redraw(&mut run);
+
+    assert_eq!(location_of(&run, &id), moved.into());
+    run.stop();
+}
+
+/// A move the client has not answered yet lands inside the output that shrank meanwhile.
+#[test]
+fn an_output_that_shrinks_keeps_a_move_on_its_way_whole() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    let toplevel = local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let window = window_of_client(&run, &id);
+    let (corner, moved, small) = corners((WIDTH, HEIGHT));
+    run.state.space.relocate_element(&window, corner);
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+    toplevel.unset_maximized();
+    local.roundtrip(&mut run);
+
+    resize_first(&mut run, small.0, small.1);
+    local.redraw(&mut run);
+
+    assert_eq!(location_of(&run, &id), moved.into());
+    run.stop();
+}
+
+/// The window of the client `id`.
+fn window_of_client(run: &Running, id: &ClientId) -> smithay::desktop::Window {
+    let mut windows = run.state.space.elements();
+    let found = windows.find(|window| {
+        let client = window.toplevel().and_then(|toplevel| toplevel.wl_surface().client());
+        client.map(|client| client.id()).as_ref() == Some(id)
+    });
+    found.expect("the client's window").clone()
 }
 
 /// An output that takes another size (C1 task 8): the outputs side by side again leave no window
@@ -4729,6 +4989,59 @@ fn set_group_switches_and_every_object_hears_it() {
     run.stop();
 }
 
+/// The lock leaves the session's layout group alone (LP14): the second group stays while locked
+/// and after the unlock, and the window the unlock focuses hears it. The test switches nothing
+/// on the lock: a group changed there, and any restoring of it, stays with #834.
+#[test]
+fn unlocking_leaves_the_layout_group() {
+    let mut run = Running::start(None);
+    two_layouts(&mut run);
+    let (mut window, _) = focused_window(&mut run);
+    let mut bar = Local::connect(&mut run, None);
+    let (_keyboard, group) = bar.keyboard_group(&mut run);
+    group.set_group(1);
+    bar.roundtrip(&mut run);
+
+    let mut locker = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let output: wl_output::WlOutput = locker.bind(4);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let lock = locks.lock(&qh, ());
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    let surface = compositor.create_surface(&qh, ());
+    let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+    locker.pump(&mut run, "the lock surface is configured", |client, _| {
+        client.lock_configure.is_some()
+    });
+    let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+    lock_surface.ack_configure(serial);
+    let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    locker.roundtrip(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let holder = keyboard.current_focus().and_then(|focus| focus.client());
+    assert_eq!(holder.map(|client| client.id()), locker.id, "the lock has the keyboard");
+    assert!(run.state.lock.is_some(), "the session is locked");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1, "while locked");
+    window.roundtrip(&mut run);
+    window.client.modifier_groups.clear();
+    lock.unlock_and_destroy();
+    locker.roundtrip(&mut run);
+    bar.roundtrip(&mut run);
+    window.pump(&mut run, "the window gets the keyboard back", |client, _| {
+        !client.modifier_groups.is_empty()
+    });
+
+    assert!(run.state.lock.is_none(), "the session is unlocked");
+    assert_eq!(bar.groups_of(&group), [0, 1], "the group stays");
+    assert_eq!(keyboard.modifier_state().serialized.layout_effective, 1);
+    assert_eq!(window.client.modifier_groups, [1], "the window hears it");
+    run.stop();
+}
+
 /// A group at or beyond the keymap's layouts changes nothing.
 #[test]
 fn a_group_beyond_the_layouts_is_ignored() {
@@ -5249,6 +5562,10 @@ mod a11y;
 // Decision 31: the focus outline and the border of confined windows.
 #[cfg(test)]
 mod marks;
+
+// OS12: `xdg_toplevel.set_fullscreen`.
+#[cfg(test)]
+mod full_screen;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
@@ -6371,9 +6688,9 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
 
     let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
         head.set_scale(1.5);
-        head.set_transform(wl_output::Transform::_90);
+        head.set_position(7, 7);
     });
-    assert_eq!(turned, "failed", "a transform");
+    assert_eq!(turned, "failed", "a position");
     let stale = serial.wrapping_add(1);
     let late = control_center.configure(&mut run, &manager, stale, "headless-0", |head| {
         head.set_scale(1.5)
@@ -6410,6 +6727,88 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
     control_center.pump(&mut run, "the window is told the new scale", |client, _| {
         client.fractional_scale == Some(180)
     });
+    run.stop();
+}
+
+/// A configuration turns an output: its logical size turns with it, the next output follows,
+/// and the frame keeps the panel's size.
+#[test]
+fn os9_a_configuration_turns_an_output() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::_90)
+    });
+
+    assert_eq!(turned, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::_90);
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    assert_eq!(area.size, (height, width).into());
+    let next = run.state.space.output_geometry(&second).expect("mapped");
+    assert_eq!(next.loc.x, height, "the next output follows");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    run.stop();
+}
+
+/// The origin of a turned panel is the far edge of what the output shows: a device there stays
+/// on the output, and the pointer stays drawn.
+#[test]
+fn a_device_at_the_origin_of_a_turned_panel_stays_on_the_output() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let at = run.state.on_first_panel(|_| (0.0, 0.0).into()).expect("an output");
+    assert!(at.x < f64::from(area.size.w), "{at:?} in {area:?}");
+    run.stop();
+}
+
+/// One head refused fails the whole configuration: the head that asked for a turn stays as it is.
+#[test]
+fn os9_a_refused_head_leaves_the_others_as_they_were() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+
+    let qh = control_center.queue.handle();
+    let configuration = manager.create_configuration(serial, &qh, ());
+    for seen in &control_center.client.heads {
+        let head = configuration.enable_head(&seen.head, &qh, ());
+        if seen.name == "headless-0" {
+            head.set_transform(wl_output::Transform::_90);
+        } else {
+            head.set_position(1, 1);
+        }
+    }
+    control_center.client.configured = None;
+    configuration.apply();
+    control_center.pump(&mut run, "an answer to the configuration", |client, _| {
+        client.configured.is_some()
+    });
+
+    assert_eq!(control_center.client.configured, Some("failed"));
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Normal);
     run.stop();
 }
 
@@ -7017,6 +7416,75 @@ fn os9_a_virtual_pointer_code_outside_the_buttons_is_dropped() {
         [&0x110, &0x2ff],
         "both buttons are held"
     );
+    run.stop();
+}
+
+/// At a quarter of the panel's width and a tenth of its height: on a panel turned 90 degrees
+/// the first of these runs down what the output shows, and the second runs in from its right.
+#[test]
+fn os9_a_virtual_pointer_on_a_turned_output_points_at_the_panel() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::_90), None, None);
+    run.state.arrange_outputs();
+    let mut local = Local::connect(&mut run, None);
+    let seat: wl_seat::WlSeat = local.bind(1);
+    let output: wl_output::WlOutput = local.bind(4);
+    let manager: zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1 = local.bind(2);
+    let pointer = manager.create_virtual_pointer_with_output(
+        Some(&seat),
+        Some(&output),
+        &local.queue.handle(),
+        (),
+    );
+    pointer.motion_absolute(0, 25, 10, 100, 100);
+    pointer.frame();
+    local.roundtrip(&mut run);
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let at = run.state.seat.get_pointer().expect("a pointer").current_location();
+    let (width, height) = (f64::from(area.size.w), f64::from(area.size.h));
+    assert_eq!(at, (width * 0.9, height / 4.0).into());
+    run.stop();
+}
+
+/// The nested backend's output carries the transform that rights its frame, and reads as
+/// turning nothing.
+#[test]
+fn the_nested_output_turns_nothing() {
+    let display = smithay::reexports::wayland_server::Display::<State>::new().expect("a display");
+    let output = crate::winit::nested_output(&display.handle(), (800, 600).into(), 1.0);
+    assert_eq!(output.current_transform(), smithay::utils::Transform::Flipped180);
+    assert_eq!(crate::input::turn(&output), smithay::utils::Transform::Normal);
+}
+
+/// The transform of the nested backend's output rights its frame, and turns nothing: its device
+/// points where it did, its head reads as not turned, and a configuration can neither change the
+/// transform nor be refused for repeating what the head reads.
+#[test]
+fn os9_a_transform_that_rights_the_frame_is_no_turn() {
+    let mut run = Running::start(None);
+    let first = run.state.space.outputs().next().cloned().expect("an output");
+    first.change_current_state(None, Some(smithay::utils::Transform::Flipped180), None, None);
+    first.user_data().insert_if_missing(|| crate::input::RightsTheFrame);
+    let pointed = run.state.on_first_panel(|_| (10.0, 20.0).into());
+    assert_eq!(pointed, Some((10.0, 20.0).into()));
+
+    let mut control_center = Local::control_center(&mut run);
+    let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let same = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::Normal)
+    });
+    assert_eq!(same, "succeeded");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
+    let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_transform(wl_output::Transform::_90)
+    });
+    assert_eq!(turned, "failed");
+    assert_eq!(first.current_transform(), smithay::utils::Transform::Flipped180);
     run.stop();
 }
 
@@ -8223,6 +8691,174 @@ fn os9_an_input_method_releasing_its_grab_leaves_a_popup_grab() {
         .join()
         .expect("the shell's client thread")
         .expect("the shell's client");
+    run.stop();
+}
+
+/// A popup's grab replaces the input method's while it lasts, and the next key after it ends
+/// reaches the input method without a new request.
+#[test]
+fn os9_a_popup_grab_suspends_the_input_method_grab() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the grab takes the key", |_, _| {
+        method.keys() == [30]
+    });
+
+    assert!(
+        run.state.grab_serials.key_press.is_none(),
+        "a key the input method took is no client's serial"
+    );
+    let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let focused = focus(&run.state).expect("a focus");
+    assert!(
+        run.state.popups.find_popup(&focused).is_some(),
+        "the popup is granted its grab"
+    );
+    chord(&mut run.state, &[31]);
+    local.pump(&mut run, "the popup takes the key", |client, _| {
+        client.keys.contains(&31)
+    });
+    ime.roundtrip(&mut run);
+    assert_eq!(method.keys(), [30], "the input method is suspended");
+
+    popup.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    chord(&mut run.state, &[32]);
+    ime.pump(&mut run, "the input method takes the key again", |_, _| {
+        method.keys() == [30, 32]
+    });
+    local.roundtrip(&mut run);
+    assert!(!local.client.keys.contains(&32), "the window saw no key");
+    run.stop();
+}
+
+/// A key another source holds is sent to no client, so it names no serial for the focused one.
+#[test]
+fn a_key_another_source_holds_names_no_serial() {
+    use smithay::backend::input::{InputTime, KeyState};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let press = |state: &mut State, source| {
+        state.key_input(38u32.into(), KeyState::Pressed, InputTime::now(), source);
+    };
+    press(&mut run.state, KeyboardSource::Physical);
+    assert!(run.state.grab_serials.key_press.is_some(), "a serial");
+    press(&mut run.state, KeyboardSource::Auxiliary(1));
+    assert!(run.state.grab_serials.key_press.is_none(), "no serial");
+    run.state.key_input(
+        38u32.into(),
+        KeyState::Released,
+        InputTime::now(),
+        KeyboardSource::Auxiliary(1),
+    );
+    assert!(run.state.grab_serials.key_release.is_none(), "none on the release");
+    run.stop();
+}
+
+/// A grab the input method asks for under a popup's waits for it: the popup keeps the keyboard.
+#[test]
+fn os9_an_input_method_grab_asked_under_a_popup_waits_for_it() {
+    let mut run = Running::start(None);
+    let (mut local, _) = focused_window(&mut run);
+    let menu = local.another(&mut run, "menu");
+    let window = local.server_window(&run, &menu.surface);
+    run.state.focus(&window);
+    let (popup, surface) = grabbing_popup(&mut local, &mut run, &menu.xdg);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    chord(&mut run.state, &[31]);
+    local.pump(&mut run, "the popup takes the key", |client, _| {
+        client.keys.contains(&31)
+    });
+    ime.roundtrip(&mut run);
+    assert!(method.keys().is_empty(), "the popup's grab stayed");
+    popup.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    chord(&mut run.state, &[32]);
+    ime.pump(&mut run, "the input method takes the key", |_, _| {
+        method.keys() == [32]
+    });
+    run.stop();
+}
+
+/// A key pressed for the popup is released to whoever had it: the grab waits for no key held.
+#[test]
+fn os9_the_input_method_grab_comes_back_with_no_key_held() {
+    use smithay::backend::input::{InputTime, KeyState};
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let key = |state: &mut State, key_state| {
+        state.key_input(38u32.into(), key_state, InputTime::now(), KeyboardSource::Physical);
+    };
+    key(&mut run.state, KeyState::Pressed);
+    keyboard.unset_grab(&mut run.state);
+    key(&mut run.state, KeyState::Released);
+    assert!(!keyboard.is_grabbed(), "the release stays off the grab");
+    chord(&mut run.state, &[31]);
+    assert!(keyboard.is_grabbed(), "the next key brings it back");
+    run.stop();
+}
+
+/// An exclusive surface that takes the keyboard and gives it back leaves the input method its
+/// grab: it serves the surface's keys and the window's after it.
+#[test]
+fn os9_an_exclusive_surface_suspends_the_input_method_grab() {
+    let mut run = Running::start(None);
+    let (_window, _) = focused_window(&mut run);
+    let mut ime = Local::connect(&mut run, None);
+    let mut method = SimulatedInputMethod::new(&mut ime, &mut run);
+    method.grab_keyboard(&mut ime, &mut run);
+
+    let (server_end, client_end) = UnixStream::pair().expect("socket pair");
+    let client_state = run.state.client_state(&server_end, None);
+    let shell_id = run
+        .state
+        .display_handle
+        .insert_client(server_end, client_state)
+        .expect("client")
+        .id();
+    let (steps, steps_rx) = mpsc::channel();
+    let shell = std::thread::spawn(move || {
+        shell_client(client_end, &steps_rx).map_err(|error| error.to_string())
+    });
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    steps.send(Step::Exclusive).expect("the shell's client");
+    run.until("the exclusive surface takes the keyboard", |state| {
+        focus(state)
+            .is_some_and(|surface| surface.client().map(|c| c.id()) == Some(shell_id.clone()))
+    });
+    chord(&mut run.state, &[30]);
+    ime.pump(&mut run, "the input method takes the surface's key", |_, _| {
+        method.keys() == [30]
+    });
+
+    drop(steps);
+    run.until("the exclusive client left", |state| {
+        focus(state).is_none_or(|surface| surface.client().map(|c| c.id()) != Some(shell_id.clone()))
+    });
+    shell
+        .join()
+        .expect("the shell's client thread")
+        .expect("the shell's client");
+    chord(&mut run.state, &[31]);
+    ime.pump(&mut run, "the input method takes the window's key", |_, _| {
+        method.keys() == [30, 31]
+    });
     run.stop();
 }
 
@@ -10269,7 +10905,11 @@ fn a_window_dropped_on_another_output_takes_its_workspace() {
 
 /// Maps a popup of `parent`, a window of `local`, that grabs the seat with a key serial of
 /// `local`'s, as a menu opened from the keyboard does.
-fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::XdgSurface) {
+fn grabbing_popup(
+    local: &mut Local,
+    run: &mut Running,
+    parent: &xdg_surface::XdgSurface,
+) -> (xdg_popup::XdgPopup, wl_surface::WlSurface) {
     let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -10294,6 +10934,7 @@ fn grabbing_popup(local: &mut Local, run: &mut Running, parent: &xdg_surface::Xd
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
     local.roundtrip(run);
+    (popup, surface)
 }
 
 /// A popup of a window the user cannot see, on an inactive workspace or minimised, grabs

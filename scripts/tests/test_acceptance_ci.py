@@ -16,6 +16,7 @@ import tempfile
 import unittest
 
 RUN = pathlib.Path(__file__).resolve().parents[1] / "devvm" / "acceptance" / "run.sh"
+LIB = RUN.with_name("lib.sh")
 CHECK_RS = (
     pathlib.Path(__file__).resolve().parents[2]
     / "forge/specs/athanor-update/athanor-update-1.0.0/src/check.rs"
@@ -95,6 +96,25 @@ class CiMode(unittest.TestCase):
             timeout=timeout,
             check=False,
         )
+
+    def pull_base(self, **env):
+        asked = self.dir / "podman-asked"
+        self.stub("podman", f'echo "$*" >> {asked}')
+        subprocess.run(
+            ["bash", "-c", f"source {LIB}; pull_base"],
+            env={**self.env, **self.ci, "ACC_CI": "1", **env},
+            check=True,
+        )
+        return asked.read_text() if asked.exists() else ""
+
+    def test_the_default_base_is_pulled(self):
+        self.assertEqual(
+            self.pull_base(ACC_BASE=""),
+            "pull --quiet ghcr.io/owner/athanor-system:latest\n",
+        )
+
+    def test_a_base_the_caller_set_is_used_as_given(self):
+        self.assertEqual(self.pull_base(ACC_BASE="localhost:5000/acc/a:1"), "")
 
     def test_ci_mode_refuses_outside_ci(self):
         result = self.run_sh(

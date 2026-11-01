@@ -161,8 +161,8 @@ on windows: the control center is granted the first, the bar, the dock and the l
 `athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
 keyboard's layout group: the bar alone is granted it, for its input-source switch. The layouts, options and repeat come from
 cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
-before the first client and again after each change of it (an inotify watch of its directory,
-or of the nearest existing ancestor while the directory is missing), so one file drives the
+before the first client and again after each change of it (an inotify watch of its directory
+and of every ancestor of it, along each link on the way), so one file drives the
 keymap under both compositors. The seat keeps its group, clamped to the new layouts, and its
 Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
 most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
@@ -205,12 +205,15 @@ stays so after unlock: only a grab asked for while unlocked is sent the keymap, 
 and the current modifiers, then the keys. While locked the text inputs follow no surface, so
 the input method is neither activated for the lock surface nor told its text, and what it
 commits or pre-edits reaches no client. Releasing its grab ends that grab only, never one that
-replaced it; an exclusive layer surface taking the keyboard ends any grab, the input method's
-included.
+replaced it. A popup's grab replaces the input method's while it lasts, and an exclusive layer
+surface taking the keyboard takes it off; neither ends it: it is back for the next key pressed
+with no key held, without a new request, so that it serves the launcher's field and the window
+after it. Only the lock and the input method's own release end it.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
-changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
-position, transform or adaptive sync fails.
+changes nothing but scales from 1 to 4 and transforms; one that disables a head or asks for
+another mode, position or adaptive sync fails, and so does another transform of the nested
+output, whose transform rights the backend's frame.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
 and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped

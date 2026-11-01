@@ -12,6 +12,8 @@
 
 `C` below is `forge/specs/athanor-compositor/athanor-compositor-1.0.0`; `O` is `forge/specs/athanor-overview/athanor-overview-1.0.0`; `src/` paths name their crate.
 
+**Amended by `doc_own_stack.md` decision 32 (#903), which holds where this plan differs, and which this plan calls "decision 29":** D3, D4 and open question 1 give way to one interface with a grant of its own, `athanor-workspace-v1.xml`, in place of version 2 of the toplevel interfaces, so that no other client gets a window's place or the move. Task 5 therefore runs first and creates the interface, its grant and its global; Tasks 3 and 4 then add the window's events and the move to it, in the same file. Under athanor-compositor Tasks 6 and 7 read those events, and Task 9 moves a window, through `Client::workspace_controls()` of Task 8, on a `WorkspaceControls` in `src/workspace_controls.rs`, so that Task 8 comes before them for that compositor. That object exists under every compositor and binds nothing where the compositor offers no such global. Task 9's `move_to_workspace` is on it, not in `src/actions.rs`: under cosmic-comp its move is `move_to_ext_workspace`, under sway it refuses the move naming the missing global, as Task 9 tests, and pin and reorder stay as the capabilities say. `set_sticky` stays in `src/actions.rs`. Task 2 is done (`C/src/workspace.rs`), but for pin and reorder, which are Task 5.
+
 ## Global Constraints
 
 - Only an approved revision is implemented (ADR-0074): revision 2 of `doc_overview.md` and revision 2 of `doc_own_stack.md` with its amendments. Task 1 writes the amendment the private protocols need (OS5: documented before written) and the notes that reconcile `doc_overview.md` with the own compositor; Task 1 lands after #810, and no task from Task 3 onward starts before the maintainer approves it.
@@ -121,6 +123,8 @@ git commit -m "feat(compositor): dynamic workspaces per output with an empty one
 
 ### Task 3: Toplevel state version 2: workspaces and geometry
 
+**Superseded in part by the amendment above:** the events go on `athanor_workspace_window_v1` in `athanor-workspace-v1.xml`, and `athanor-toplevel-state-v1.xml` stays at version 1.
+
 **Files:**
 - Modify: `system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml` (version 2: events `workspace_enter`, `workspace_leave`, `geometry`, per decision 29; `athanor_toplevel_manager_v1` goes to version 2 as well, since `get_toplevel_state` creates the state object at the manager's version), `system/athanor-compositor-client/protocols/README.md`, `C/src/toplevel_state.rs` (sent per frame as a diff, as the state and outputs are; `send_toplevel_state` takes the geometry and the outputs of a window outside the space, on an inactive workspace or minimised, from the place it keeps, since `space.element_bbox` is `None` for it; `workspace_enter` and `workspace_leave` only for a workspace whose handle the client holds through its bound `ext_workspace_manager_v1`, as outputs are sent only once bound), `system/athanor-compositor-client/src/protocols.rs` (the `toplevel_state` module's dependencies gain `wayland_protocols::ext::workspace::v1`, as `toplevel_info`'s list it), `system/athanor-compositor-client/src/connection.rs` (its `Dispatch<AthanorToplevelStateV1>` matches `Event` exhaustively, so the three events get arms that ignore them until Tasks 6 and 7; the manager's bind at `connection.rs:838` goes from `1..=1` to `1..=2`, without which the client never receives them)
 - Test: `C/src/fixture.rs`
@@ -138,6 +142,8 @@ git commit -m "feat(compositor): report a window's workspaces and geometry in th
 ```
 
 ### Task 4: Toplevel actions version 2: move to a workspace
+
+**Superseded in part by the amendment above:** the move goes on `athanor_workspace_window_v1` in `athanor-workspace-v1.xml`, and the actions interface stays at version 1.
 
 **Files:**
 - Modify: the actions interface in the same description (version 2: `move_to_workspace`), `C/src/toplevel_state.rs` (the actions' dispatch)
@@ -210,7 +216,7 @@ git commit -m "feat(compositor-client): report each window's geometry per output
 
 **Files:** `src/model.rs` (`Workspace.capabilities: WorkspaceCapabilities { activate, move_, pin, rename }`, `Workspace.pinned: bool`, `Workspace.coordinates` per D5), `src/connection.rs` (cosmic-comp: ext-workspace and `zcosmic_workspace_handle_v2` capabilities and state; athanor: ext-workspace only), `src/workspace_controls.rs` (athanor: `Client::workspace_controls()` and Task 5's interface, D3), `examples/cc-probe.rs` (calls `workspace_controls()` before its snapshot), `forge/test/shell/rig-privileged-clients` (cc-probe's line gains `athanor_workspace_manager_v1`), `src/protocols.rs` (a module for `athanor-workspace-v1.xml`, depending on `ext::workspace::v1`), `scripts/tests/test_verify_allow_list.py` (`GLOBALS` gains the row `athanor_workspace_manager_v1 privileged`, and `client()` the file `workspace_controls.rs`), `src/lib.rs` (`mod workspace_controls;`), `scripts/verify.py` (`ON_DEMAND` and `CLIENT_BINDS`), `C/data/privileged-clients` (only where a target's grant changes); test as Task 6.
 
-- [ ] **Step 1: Write the failing tests:** `rename` is false on the cosmic-comp the rig image carries (`rpm -q cosmic-comp`, recorded in the commit message) and on athanor-compositor (OV15 decision 7); `pinned` follows, under athanor-compositor once `workspace_controls()` has been called and false before it; the snapshot lists workspaces in compositor order; `workspace_controls()` returns nothing and changes nothing where the compositor offers no `athanor_workspace_manager_v1` (cosmic-comp, sway), so cc-probe calls it under every compositor; in `test_verify_allow_list.py`, only a target that calls `workspace_controls` needs the grant, as the `window_actions` test has it.
+- [ ] **Step 1: Write the failing tests:** `rename` is false on the cosmic-comp the rig image carries (`rpm -q cosmic-comp`, recorded in the commit message) and on athanor-compositor (OV15 decision 7); `pinned` follows, under athanor-compositor once `workspace_controls()` has been called and false before it; the snapshot lists workspaces in compositor order; `workspace_controls()` binds nothing and changes nothing where the compositor offers no `athanor_workspace_manager_v1` (cosmic-comp, sway), so cc-probe calls it under every compositor; in `test_verify_allow_list.py`, only a target that calls `workspace_controls` needs the grant, as the `window_actions` test has it.
 - [ ] **Step 2: Run them to see them fail.** Expected: FAIL.
 - [ ] **Step 3: Implement.** The private workspace global is bound by the first call of `Client::workspace_controls()`, with its names only in `src/workspace_controls.rs`, registered in `ON_DEMAND` and `CLIENT_BINDS` (as `actions.rs`); never at connect (D3).
 - [ ] **Step 4: Run all** (Task 6, Step 4), `python3 scripts/verify.py allow-list` and `python3 -B -m unittest discover -s scripts/tests`: pass, the bar's, dock's, launcher's and control centre's lines granted what their code now names, or unchanged when bound lazily.
@@ -222,6 +228,8 @@ git commit -m "feat(compositor-client): report a workspace's capabilities, pin a
 ```
 
 ### Task 9: `Client::activate_workspace` and `WindowActions::move_to_workspace`
+
+**Superseded in part by the amendment above:** `move_to_workspace` is on `WorkspaceControls` in `src/workspace_controls.rs`, with the amendment's branch for each of athanor-compositor, cosmic-comp and sway, and no bind of the actions interface widens.
 
 **Files:** `src/connection.rs` (`activate_workspace`: ext-workspace `activate` and `commit`), `src/actions.rs` (`move_to_workspace(WindowId, WorkspaceId)`: cosmic `move_to_ext_workspace` with the workspace's output where `zcosmic_toplevel_manager_v1` is bound at version 4 or later, refused with the global and the version named when it is bound below, else Task 4's request; the actions' bind goes from `1..=1` to `1..=2`, and `move_to_workspace` is refused, with the version named, when the bound version is below 2; `set_sticky(WindowId)`: cosmic `set_sticky` where `zcosmic_toplevel_manager_v1` is bound at version 3 or later, else refused with the global named, athanor-compositor having no sticky windows, D6), `examples/cc-probe.rs` (`workspace <n>`, `move <app_id> <n>`, `sticky <app_id>`), `forge/test/shell/compositor_e2e.py`.
 
