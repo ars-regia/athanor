@@ -73,3 +73,5 @@ disabled = ["unbound-anchor.timer"]
 
 [trust]
 reason = "signature" # the channel under test is the signed :stable of the acceptance registry
+schema = 2 # athanor-trust-state (UT7)
+automatic_security_updates = true # the opt-out of UT13 is off by default; the stage `optout` turns it back on
