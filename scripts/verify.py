@@ -1029,11 +1029,13 @@ def os_release_problems(root=None):
     at 43 when os-release moved to 45.
     """
     root = root or ROOT
-    try:
-        text = read(root / OS_RELEASE)
-        release = read(root / FEDORA_RELEASE)
-    except OSError as err:
-        return [f"cannot read ({err})"]
+    texts = []
+    for path in (OS_RELEASE, FEDORA_RELEASE):
+        try:
+            texts.append(read(root / path))
+        except OSError as err:
+            return [f"{path}: cannot read ({err})"]
+    text, release = texts
     out = [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
            for number, line in enumerate(text.splitlines(), 1)
            if line.strip() and "=" not in line]
