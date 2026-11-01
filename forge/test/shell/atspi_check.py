@@ -149,10 +149,17 @@ def password_texts(accessible, Atspi):
 
 
 def focused_extents(accessible, Atspi):
-    """The focused node's extents in screen coordinates, the capture's, or None."""
+    """The focused node's box in the capture, or None. Read in the window's coordinates, as on
+    Wayland GTK reports every screen origin as (0, 0), so the surface must cover the output.
+    GTK also leaves the parent's border and padding out of a node's position: the node is taken
+    to fill its parent's content box, with that inset on every side, which holds for the
+    launcher's field in its card, the only scene that asks."""
     if accessible.get_state_set().contains(Atspi.StateType.FOCUSED) and accessible.get_component_iface() is not None:
-        rect = Atspi.Component.get_extents(accessible, Atspi.CoordType.SCREEN)
-        return (rect.x, rect.y, rect.width, rect.height)
+        x, y, width, height = extents_of(accessible, Atspi)
+        parent = accessible.get_parent()
+        outer = parent and extents_of(parent, Atspi)
+        inset = (outer[2] - width) // 2 if outer else 0
+        return (x + inset, y + inset, width, height)
     for index in range(accessible.get_child_count()):
         child = accessible.get_child_at_index(index)
         box = child and focused_extents(child, Atspi)
