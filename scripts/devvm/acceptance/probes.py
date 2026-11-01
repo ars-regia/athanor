@@ -201,7 +201,14 @@ def collect():
     ).strip()
     state = probe("trust", ["cat", "/run/athanor-update/state.json"])
     try:
-        facts["trust"] = json.loads(state or "{}").get("verified", {})
+        doc = json.loads(state or "{}")
+        # Schema 2 (UT7, UT13): the opt-out and the postpone lineage are published, null or not.
+        facts["trust"] = doc.get("verified", {}) | {
+            "schema": doc.get("schema"),
+            "automatic_security_updates": doc.get("automatic_security_updates"),
+            "postpone_published": "postpone" in doc
+            and (doc["postpone"] is None or isinstance(doc["postpone"], dict)),
+        }
     except json.JSONDecodeError:
         facts["trust"] = {}
         facts["rc"]["trust"]["err"] = "state.json is not JSON"
@@ -329,6 +336,12 @@ def evaluate(facts, expect, contacts, tunnel_port):
             "trust",
             f"verified.reason is {facts['trust'].get('reason')}, expected {reason}",
         )
+    for key in ("schema", "automatic_security_updates"):
+        want = expect.get("trust", {}).get(key)
+        if facts["trust"].get(key) != want:
+            fail("trust", f"{key} is {facts['trust'].get(key)!r}, expected {want!r}")
+    if not facts["trust"].get("postpone_published"):
+        fail("trust", "postpone is absent or neither null nor an object (schema 2)")
 
     if not facts["backup"]:
         fail("backup", "athanor-backup list shows no snapshot after the hourly unit ran")

@@ -199,6 +199,24 @@ mod tests {
     }
 
     #[test]
+    fn a_high_s_signature_verifies_because_go_does_not_normalise_it() {
+        use p256::ecdsa::signature::Signer as _;
+        use p256::ecdsa::SigningKey;
+
+        let key = SigningKey::from_slice(&[7; 32]).expect("a scalar in range");
+        let signature: Signature = key.sign(b"payload");
+        let (r, s) = signature.split_scalars();
+        let high = [(*r, *s), (*r, -*s)]
+            .into_iter()
+            .map(|(r, s)| Signature::from_scalars(r, s).expect("in range"))
+            .find(|candidate| candidate.normalize_s() != *candidate)
+            .expect("one of s and -s is high");
+        let der = high.to_der();
+        let read = Signature::from_der(der.as_bytes()).expect("DER");
+        assert!(key.verifying_key().verify(b"payload", &read).is_ok());
+    }
+
+    #[test]
     fn a_raw_signature_is_refused_because_only_der_is_read() {
         assert!(claims(&vectors("made/raw-signature"), &[key("made/a.pub")]).expect("readable").is_empty());
     }
