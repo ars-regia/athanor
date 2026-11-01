@@ -90,8 +90,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 
 %changelog
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-75
-- The comment of the import list says that the end of the session unsets only the names of
-  the display (doc_session.md, SN2, #825).
+- The comments of the import list and of athanor-desktop say that the end of the session
+  unsets only the names of the display (doc_session.md, SN2, #825).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-74
 - The supervisor of the screen locker and the idle daemon moves out of athanor-desktop into

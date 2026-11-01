@@ -56,7 +56,7 @@ stop_component_scopes
 systemctl --user reset-failed
 rm -f "$MARKER"
 
-# SN2's import list, the one file athanor-desktop and the readiness gate read, read with
+# SN2's import list, the one file athanor-desktop reads too, read with
 # step 1, after its cleanup and before the exit handler that needs it. The compositor sets
 # WAYLAND_DISPLAY and DISPLAY, so the script imports the rest (step 5), and its end removes
 # the names that describe the display, as the gate does (SN2, step 3). A list the reader

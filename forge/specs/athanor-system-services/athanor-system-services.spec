@@ -48,7 +48,8 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.1-32
 - The readiness gate's ExecStop= unsets only the names of the display, WAYLAND_DISPLAY,
   DISPLAY, XDG_SESSION_TYPE and XDG_SESSION_CLASS, so the user manager keeps its LANG after
-  a logout (doc_session.md, SN2, #825).
+  a logout (doc_session.md, SN2, #825). It no longer reads athanor-system-config's import
+  list, so the package no longer requires athanor-system-config.
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.1-31
 - athanor-desktop.service, the readiness gate, is PartOf=graphical-session.target and its

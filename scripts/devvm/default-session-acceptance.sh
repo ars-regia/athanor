@@ -17,8 +17,8 @@
 # The drop-ins of items 11 to 13 and of the debug logs are written as root under
 # /run/systemd/user/<unit>.d/, which outlives the account's sessions; the trap removes them,
 # with every other change a stage made in the guest. "Locked" is cosmic-greeter's marker
-# file, as in lock-acceptance.sh. The end-state checks read SN2's import list, as SN13 steps 1
-# and 2 left it, less XDG_CURRENT_DESKTOP: what athanor-compositor-session removes.
+# file, as in lock-acceptance.sh. The end-state checks read REMOVED below: what
+# athanor-compositor-session removes.
 #
 #   account    pia (1006, "Pia"), password pia, her idle timers off; the greeter restarted
 #   default    items 9 and 10: the menu shows both entries, "Athanor" checked and cosmic-comp's
