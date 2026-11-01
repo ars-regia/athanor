@@ -38,7 +38,7 @@ def spoken_by_the_dock(lines):
 
 def is_echo(line, reference):
     """Whether `line` is Orca's echo of a key: one word, in any case, that no announcement of
-    the reference holds. A state word of a button ("collapsed") is in the reference."""
+    the reference holds. A one-word announcement of the reference ("Running") is no echo."""
     return ECHO.fullmatch(line) is not None and line not in reference
 
 
@@ -50,7 +50,7 @@ def answered_a_command(lines, reference, size=3):
     is the set of utterances of the GTK walk.
 
     `size` is the three lines Orca says for the cc-window-1 button the walk ends on: its name
-    and "collapsed button", "Running." and "opens popup" (golden/orca/orca-dock.txt). A change
+    and "collapsed button", "Running" and "opens popup" (golden/orca/orca-dock.txt). A change
     of that row's announcement changes `size`. Any one-word utterance counts as an echo,
     whatever key it names."""
     return any(

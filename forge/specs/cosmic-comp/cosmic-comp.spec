@@ -52,7 +52,7 @@ export GIT_HASH=%{commit}
 cargo build --release --locked
 
 %install
-# What the `install` recipe of upstream's justfile installs; 1.10.0 has no Makefile.
+# What the `install` recipe of upstream's justfile installs.
 install -Dm0755 target/release/cosmic-comp %{buildroot}%{_bindir}/cosmic-comp
 install -Dm0644 data/keybindings.ron \
     %{buildroot}%{_datadir}/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
