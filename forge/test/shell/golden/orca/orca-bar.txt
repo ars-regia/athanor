@@ -1,20 +1,15 @@
 Screen reader on.
-Workspaces button.
-Applications button.
-Friday 18 September 2026, 10:00 collapsed button.
+Workspaces button
+Applications button
+Friday 18 September 2026, 10:00 collapsed button
 opens popup
-collapsed
-Accessibility collapsed button.
+Accessibility collapsed button
 opens popup
-collapsed
-Tiling collapsed button.
+Tiling collapsed button
 opens popup
-collapsed
-Power collapsed button.
+Power collapsed button
 opens popup
-collapsed
-System image verified collapsed button.
+System image verified collapsed button
 opens popup
-collapsed
-Workspaces button.
+Workspaces button
 Screen reader off.

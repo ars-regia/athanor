@@ -50,7 +50,7 @@ def answered_a_command(lines, reference, size=3):
     is the set of utterances of the GTK walk.
 
     `size` is the three lines Orca says for the cc-window-1 button the walk ends on: its name
-    and "collapsed button.", "Running." and "opens popup" (golden/orca/orca-dock.txt). A change
+    and "collapsed button", "Running." and "opens popup" (golden/orca/orca-dock.txt). A change
     of that row's announcement changes `size`. Any one-word utterance counts as an echo,
     whatever key it names."""
     return any(

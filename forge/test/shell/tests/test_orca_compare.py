@@ -150,9 +150,9 @@ class HiddenTest(unittest.TestCase):
             for lang in ("en", "it"):
                 reference = (GOLDEN / f"orca-{surface}{'-it' if lang == 'it' else ''}.txt").read_text().splitlines()
                 exempt = gr.exemptions(preset, dock, lang)
-                spoken = [u for u in reference if u not in {f"{name} button." for name in exempt}]
+                spoken = [u for u in reference if u not in {f"{name} {compare.BUTTON[lang]}" for name in exempt}]
                 self.assertEqual(len(compare.compare(reference, spoken)[1]), 2, (surface, lang))
-                lines, failures = compare.compare(reference, spoken, exempt)
+                lines, failures = compare.compare(reference, spoken, exempt, lang)
                 self.assertEqual(failures, [], (surface, lang))
                 self.assertEqual(sum(" hidden; decision 28 hides " in line for line in lines), 2)
 
@@ -161,20 +161,20 @@ class HiddenTest(unittest.TestCase):
             with self.subTest(lang=lang):
                 reference = (GOLDEN / golden).read_text().splitlines()
                 exempt = compare.own_exemptions("float", "-", lang)
-                absent = {f"{name} button." for name in exempt}
+                absent = {f"{name} {compare.BUTTON[lang]}" for name in exempt}
                 self.assertEqual(len(absent), 3)
                 spoken = [u for u in reference if u not in absent]
-                lines, failures = compare.compare(reference, spoken, exempt)
+                lines, failures = compare.compare(reference, spoken, exempt, lang)
                 self.assertEqual(failures, [])
                 self.assertIn(
-                    f"'{compare.TILING[lang]} button.': hidden; "
+                    f"'{compare.TILING[lang]} {compare.BUTTON[lang]}': hidden; "
                     "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)",
                     lines,
                 )
                 self.assertEqual(
-                    compare.compare(reference, reference, exempt)[1][2:],
+                    compare.compare(reference, reference, exempt, lang)[1][2:],
                     [
-                        f"'{compare.TILING[lang]} button.': spoken, but exempt: "
+                        f"'{compare.TILING[lang]} {compare.BUTTON[lang]}': spoken, but exempt: "
                         "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)"
                     ],
                 )
@@ -188,15 +188,15 @@ class HiddenTest(unittest.TestCase):
         self.assertEqual(
             compare.compare(reference, reference, exempt)[1],
             [
-                "'Workspaces button.': spoken, but exempt: decision 28 hides the dock's workspaces button (#835)",
-                "'Applications button.': spoken, but exempt: decision 28 hides the dock's application library button (#836)",
+                "'Workspaces button': spoken, but exempt: decision 28 hides the dock's workspaces button (#835)",
+                "'Applications button': spoken, but exempt: decision 28 hides the dock's application library button (#836)",
             ],
         )
         self.assertEqual(
             compare.compare(REFERENCE, REFERENCE, exempt)[1],
             [
-                "exemption 'Applications button.' names no utterance of the reference",
-                "exemption 'Workspaces button.' names no utterance of the reference",
+                "exemption 'Applications button' names no utterance of the reference",
+                "exemption 'Workspaces button' names no utterance of the reference",
             ],
         )
 

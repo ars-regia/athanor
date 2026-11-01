@@ -92,6 +92,8 @@ def heard_as(utterance):
 # The bar's tiling button under athanor-compositor: not a choice of decision 28 but a protocol to
 # come, so atspi_compare.py, which reads the whole tree, still reports it. Orca says it collapsed.
 TILING = {"en": "Tiling collapsed", "it": "Affiancamento contratto"}
+# Orca 51 says the role in the language of the session.
+BUTTON = {"en": "button", "it": "pulsante"}
 NO_TILING = ("the bar lacks the tiling button, which needs athanor_workspace_tiling_v1", 739)
 
 
@@ -103,10 +105,11 @@ def own_exemptions(preset, dock, lang):
     return exempt
 
 
-def compare(reference, transcript, exempt=None):
+def compare(reference, transcript, exempt=None, lang="en"):
     """Returns (lines, failures) for two lists of utterances. `exempt` maps the name of a button
-    decision 28 hides to its (cause, issue); Orca says such a button as "<name> button."."""
-    exempt = {f"{name} button.": why for name, why in (exempt or {}).items()}
+    decision 28 hides to its (cause, issue); Orca 51 says such a button as "<name> <role>", the
+    role in `lang`."""
+    exempt = {f"{name} {BUTTON[lang]}": why for name, why in (exempt or {}).items()}
     spoken = set(transcript)
     lines, failures = [], []
     if not reference:
@@ -153,11 +156,11 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     reference, transcript = (Path(path).read_text().splitlines() for path in argv[:2])
-    exempt = {}
+    exempt, lang = {}, "en"
     if own:
         preset, dock, lang = (None if v == "-" else v for v in own[1:])
         exempt = own_exemptions(preset, dock, lang)
-    lines, failures = compare(reference, transcript, exempt)
+    lines, failures = compare(reference, transcript, exempt, lang)
     print("\n".join(lines))
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)
