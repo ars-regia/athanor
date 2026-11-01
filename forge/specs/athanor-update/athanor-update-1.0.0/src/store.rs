@@ -255,14 +255,19 @@ impl Store {
         self.object_dir("attestations", digest)
     }
 
-    /// Removes the release attestation of every digest but `keep`, so that a registry that
-    /// names a new digest at each check cannot fill `/var`.
+    /// Removes the signature object and the release attestation of every digest but `keep`, so
+    /// that a registry that names a new digest at each check cannot fill `/var`.
     ///
     /// # Errors
-    /// The directory cannot be listed, or an entry cannot be removed.
-    pub fn retain_attestations(&self, keep: &[&str]) -> std::io::Result<()> {
-        let keep: Vec<PathBuf> = keep.iter().filter_map(|digest| self.attestation_dir(digest)).collect();
-        for entry in std::fs::read_dir(self.var.join("attestations"))? {
+    /// A directory cannot be listed, or an entry cannot be removed.
+    pub fn retain_objects(&self, keep: &[&str]) -> std::io::Result<()> {
+        self.retain("signatures", keep)?;
+        self.retain("attestations", keep)
+    }
+
+    fn retain(&self, kind: &str, keep: &[&str]) -> std::io::Result<()> {
+        let keep: Vec<PathBuf> = keep.iter().filter_map(|digest| self.object_dir(kind, digest)).collect();
+        for entry in std::fs::read_dir(self.var.join(kind))? {
             let entry = entry?;
             if keep.contains(&entry.path()) {
                 continue;
