@@ -4,7 +4,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,9 +52,13 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
-* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - A frame that a refused mode test forgot, whose VBlank still comes, no longer counts as
   a lock frame on screen (#813).
+
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- The session's end removes only the names of the display from the user manager, as the
+  readiness gate does (doc_session.md, SN2 and SN15, #825).
 
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - Apply sticky, slow and bounce keys in front of every key's reader, the bindings, the

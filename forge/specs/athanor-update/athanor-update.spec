@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,10 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
+- Each check removes the stored signature objects as it does the release attestations,
+  keeping those of the booted, staged, rollback and candidate digests (#666).
+
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
 - athanor-update-notify.service is WantedBy=athanor-session.target, where the user preset
   enables it (doc_session.md, SN3 and SN13 step 1).
