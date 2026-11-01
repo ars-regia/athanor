@@ -629,10 +629,11 @@ stage_security() { # items 16 and 17; doc_shell.md section 7, item 4
   jq -e '.ids | index("later") | not' <<< "$notice" > /dev/null || die "FAIL  17: the security notice offers Later: $notice"
   jq -e '.summary == "A security update is ready"' <<< "$notice" > /dev/null || die "FAIL  17: the security notice is titled otherwise: $notice"
   pass "17: the notice offers Postpone and no Later"
-  # Plan Task 10: the sheet offers Postpone beside Restart to update.
+  # UT6: Apply() refuses unless the state is `downloaded`, so the sheet offers Postpone and no
+  # Restart to update. The digest applies at the restart the user starts, as item 16 checks.
   shield_sheet
   sheet_shows "17: a security digest is waiting" Postpone
-  sheet_shows "17: a security digest is waiting" "Restart to update"
+  sheet_hides "17: a security digest is waiting" "Restart to update"
   boot=$(boot_id)
   sleep 600
   [[ $(boot_id) == "$boot" && $(marker) == v2 ]] || die "FAIL  16: the guest rebooted by itself within ten minutes"
