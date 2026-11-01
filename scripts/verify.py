@@ -1124,7 +1124,7 @@ def toolkit_boundary_problems(root=None):
     return out + gallery_problems(root)
 
 
-@check("toolkit-boundary", "The toolkit names no Athanor crate outside dev-dependencies, and its licence files match its license")
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, and its licence files match its license")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():
