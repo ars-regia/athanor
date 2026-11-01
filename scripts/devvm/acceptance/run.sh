@@ -834,8 +834,9 @@ stage_securitygreenboot() { # item 19
     [[ $(guest_ssh sudo bootc status --format json | jq -r .status.staged) == null ]] || die "FAIL  19: the held digest was staged"
   done
   # The stages after these expect v2, whose digest the older stage compares with its nvidia copy.
+  # The guest already follows :stable: a switch to it changes nothing, whatever the tag names.
   point_stable v2
-  guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
+  guest_ssh sudo bootc upgrade
   reboot_guest
   [[ $(marker) == v2 ]] || die "FAIL  the guest did not return to v2 after the security stages: it boots $(marker)"
 }
@@ -968,8 +969,9 @@ stage_featurehold() { # item 20
   deployment_locked || die "FAIL  20: the feature digest was unlocked"
   expect "20: and opens no lineage" .postpone null
   # As stage securitygreenboot ends: the stages after these expect v2.
+  # The guest already follows :stable: a switch to it changes nothing, whatever the tag names.
   point_stable v2
-  guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
+  guest_ssh sudo bootc upgrade
   reboot_guest
   [[ $(marker) == v2 ]] || die "FAIL  the guest did not return to v2 after stage featurehold: it boots $(marker)"
 }

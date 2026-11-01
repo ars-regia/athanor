@@ -128,7 +128,8 @@ power_cycle() {
 
 state() { guest_ssh cat /run/athanor-update/state.json | jq -r "$1"; }
 marker() { guest_ssh cat /usr/share/athanor-acceptance-marker; }
-check_now() { tunnel && guest_ssh sudo systemctl start athanor-update-check.service; }
+# reset-failed clears the unit's start limit: a stage runs checks faster than the timer ever does.
+check_now() { tunnel && guest_ssh 'sudo systemctl reset-failed athanor-update-check.service && sudo systemctl start athanor-update-check.service'; }
 point_stable() { skopeo copy --src-tls-verify=false --dest-tls-verify=false "docker://$REPO:$1" "docker://$REPO:stable" > /dev/null; }
 # The images outside the acceptance set do not know the throwaway registry, which serves
 # plain HTTP: a switch from one of them needs the drop-in every acceptance image ships
