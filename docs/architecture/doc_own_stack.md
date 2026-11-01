@@ -947,7 +947,7 @@ compositor and that the own compositor did not yet offer:
     project's authors where the source names no holder; and states that it was changed and
     when, as GPL-3.0 section 5(a) asks. The pull request names them (ADR-0121 decision 2). cosmic-comp,
     `GPL-3.0-only`, stays read and not copied (OS3). The outline cosmic-comp draws around the
-    focused window (#738) comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2),
+    focused window (#851) comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2),
     which needs the same drawing, so that the two marks are designed to be told apart (decision 31,
     amended on 2026-10-31). It is a drawn mark that hides, moves or changes no control or text, so
     what still differs stays recorded in `forge/test/shell/golden/athanor-differences.toml` with
