@@ -32,7 +32,7 @@ athanor-shelld = { path = "../../forge/specs/athanor-shelld/athanor-shelld-1.0.0
 athanor-trust-state = { path = "../athanor-trust-state", optional = true }
 # The same versions as athanor-update, whose modules `src/update.rs` includes.
 base64 = { version = "0.21", optional = true }
-p256 = { version = "0.13", features = ["ecdsa", "pem"], optional = true }
+p256 = { version = "0.14", features = ["ecdsa", "pem"], optional = true }
 chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
 glib = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
