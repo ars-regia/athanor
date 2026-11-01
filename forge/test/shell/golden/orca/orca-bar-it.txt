@@ -1,20 +1,15 @@
 Lettore schermo attivo.
-Spazi di lavoro button.
-Applicazioni button.
-venerdì 18 settembre 2026, 10:00 contratto button.
-opens popup
-contratto
-Accessibilità contratto button.
-opens popup
-contratto
-Affiancamento contratto button.
-opens popup
-contratto
-Alimentazione contratto button.
-opens popup
-contratto
-Immagine di sistema verificata contratto button.
-opens popup
-contratto
-Spazi di lavoro button.
+Spazi di lavoro pulsante
+Applicazioni pulsante
+venerdì 18 settembre 2026, 10:00 contratto pulsante
+apre un popup
+Accessibilità contratto pulsante
+apre un popup
+Affiancamento contratto pulsante
+apre un popup
+Alimentazione contratto pulsante
+apre un popup
+Immagine di sistema verificata contratto pulsante
+apre un popup
+Spazi di lavoro pulsante
 Lettore schermo disattivato.

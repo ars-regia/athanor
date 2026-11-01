@@ -140,16 +140,21 @@ def main():
         5,
     )
     step("the High contrast switch shows", bool(switch))
-    act(switch[0], "the High contrast switch")
-    step(
-        "high contrast on reaches the GNOME key and both built themes within 2 s",
-        wait_for(keys_are(True), 2),
-    )
-    act(switch[0], "the High contrast switch")
-    step(
-        "high contrast off reaches the GNOME key and both built themes within 2 s",
-        wait_for(keys_are(False), 2),
-    )
+    try:
+        act(switch[0], "the High contrast switch")
+        step(
+            "high contrast on reaches the GNOME key and both built themes within 2 s",
+            wait_for(keys_are(True), 2),
+        )
+        act(switch[0], "the High contrast switch")
+        step(
+            "high contrast off reaches the GNOME key and both built themes within 2 s",
+            wait_for(keys_are(False), 2),
+        )
+    finally:
+        # Only the switch rebuilds the themes: a failed step must not leave the key on with them.
+        if gnome_key() == "true":
+            act(switch[0], "the High contrast switch, restoring it")
     act(opener[0], "the Accessibility button")
 
 

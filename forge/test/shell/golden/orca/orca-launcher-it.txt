@@ -1,4 +1,5 @@
 Lettore schermo attivo.
-Cerca testo.
-cc window.
+Cerca testo
+cc window
+apre un popup
 Lettore schermo disattivato.

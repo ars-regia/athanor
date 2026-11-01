@@ -3,14 +3,16 @@
 //! context (doc_bar.md, BR2). Wayland and COSMIC types stay inside this crate; the shell
 //! sees only the types of [`model`].
 
+mod a11y;
+mod actions;
 #[cfg(feature = "gtk")]
 mod capture;
-pub mod clock;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
+mod keyboard_group;
 mod keymap;
 mod launch;
 pub mod model;
@@ -26,10 +28,11 @@ mod unit;
 #[cfg(test)]
 pub(crate) static MAIN_CONTEXT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+pub use actions::WindowActions;
 pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
 pub use shortcuts::SETTINGS_PAGE_PREFIX;
 pub use model::{
-    Accessibility, Event, ScreenFilter, Tiling, Window, WindowId, WindowState, Workspace,
-    WorkspaceId,
+    Accessibility, Event, KeyboardAid, KeyboardAids, Modifier, ScreenFilter, Tiling, Window,
+    WindowId, WindowState, Workspace, WorkspaceId, MAX_AID_DELAY,
 };

@@ -1,4 +1,5 @@
 Screen reader on.
-Search text.
-cc window.
+Search text
+cc window
+opens popup
 Screen reader off.

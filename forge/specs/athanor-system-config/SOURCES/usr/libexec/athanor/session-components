@@ -1,0 +1,185 @@
+# shellcheck shell=sh
+# session-components - the supervisor of the session's screen locker and idle daemon
+# (doc_session.md, SN15), sourced by athanor-desktop (cosmic-comp's session) and by
+# athanor-compositor-session (the own compositor's), so that both sessions run them the same
+# way. It defines functions and runs nothing.
+#
+# The locker and the idle daemon are not units: they run as children of this supervisor,
+# the way cosmic-session starts cosmic-greeter and cosmic-idle, because both need a parent
+# inside the logind session. cosmic-greeter, run as a user other than cosmic-greeter, is the
+# locker: it finds its session with GetSessionByPID on its parent PID, waits for the
+# session's Lock signal and holds the sleep inhibitor that locks the screen before suspend.
+# cosmic-idle turns the screens off after the configured idle time, locks the session with
+# `loginctl lock-session` half a second later and suspends after its own timeout. A child
+# of the user manager belongs to no session, so as a user unit the locker would never see a
+# Lock signal and the idle lock would lock nothing.
+#
+# Each runs through `systemd-run --scope`, which runs it in the supervisor's own process
+# tree, so its parent is still inside the session, and gives it a unit the own compositor's
+# allow-list can name: cosmic-greeter-locker.scope and cosmic-idle.scope. --collect unloads a
+# scope whose component failed, so that the next start can take the name again.
+# TimeoutStopSec=5s kills a component still running 5 s after its scope's stop, in place of
+# the default 90 s, which would hold the greeter back at the end of the session.
+
+# The components' scopes, the locker's first.
+COMPONENT_SCOPES="cosmic-greeter-locker.scope cosmic-idle.scope"
+
+# Stops each component scope that is active, waiting for each stop. A stop that fails counts
+# as done when the scope is then inactive: a scope is unloaded once its processes exit, and
+# the stop of a unit that is not loaded fails. Returns non-zero when a scope stays active, so
+# that a caller under `set -e` stops there.
+stop_component_scopes() {
+    stop_failed=0
+    for stop_scope in $COMPONENT_SCOPES; do
+        if systemctl --user is-active --quiet "$stop_scope" &&
+            ! systemctl --user stop "$stop_scope" &&
+            systemctl --user is-active --quiet "$stop_scope"; then
+            echo "session-components: $stop_scope did not stop" >&2
+            stop_failed=1
+        fi
+    done
+    return "$stop_failed"
+}
+
+# Logs <message> at err priority under athanor-desktop, the tag of the supervisor's entries in
+# both sessions; when systemd-cat cannot write it, the message goes to stderr, which the
+# session's own systemd-cat carries to the journal.
+component_error() {
+    if ! printf '%s\n' "$1" | systemd-cat -p err -t athanor-desktop; then
+        printf 'athanor-desktop: %s\n' "$1" >&2
+    fi
+}
+
+# Time is read from /proc/uptime, a monotonic clock read by a shell builtin; a failed read
+# counts the run as short.
+uptime_seconds() {
+    if read -r seconds _ < /proc/uptime; then
+        echo "${seconds%.*}"
+    else
+        echo 0
+    fi
+}
+
+# session_component <anchor> <name> <command>...: runs a session component again whenever
+# it exits, as cosmic-session does, for as long as the anchor process lives. <name> is the
+# component's, which the log names, apart from its command, which starts with systemd-run.
+#
+# A component that keeps failing is not restarted every second forever. An exit after a
+# run shorter than 60 seconds counts as a failure; the fifth failure in a row is logged at
+# err priority in the journal, naming the component -- a session with no locker is a
+# session that never locks -- and from then on the delay doubles at every failure, up to
+# 60 seconds. Only a run that lasted longer than 60 seconds resets the count and the delay:
+# a component crash-looping on a long delay never looks healthy again.
+#
+# The supervisor itself must not die: a dead supervisor is a locker that is never
+# restarted. It runs in a background subshell that inherits `set -e`, so errexit is turned
+# off inside it and every status that matters is tested explicitly.
+# ponytail: liveness by PID; a PID reused within one retry delay would keep the loop alive
+# until that process exits. A pidfd-based supervisor would close it if it matters.
+session_component() {
+    set +e
+    anchor=$1
+    name=$2
+    shift 2
+    delay=1
+    failures=0
+    while kill -0 "$anchor" 2> /dev/null; do
+        started=$(uptime_seconds)
+        if "$@"; then
+            status=0
+        else
+            status=$?
+        fi
+        now=$(uptime_seconds)
+        if [ $((now - started)) -gt 60 ]; then
+            failures=0
+            delay=1
+        else
+            failures=$((failures + 1))
+            if [ "$failures" -ge 5 ]; then
+                if [ "$failures" -eq 5 ]; then
+                    component_error "$name failed 5 times in a row, each run shorter than 60 seconds (last status $status); retrying with backoff"
+                fi
+                delay=$((delay * 2))
+                if [ "$delay" -gt 60 ]; then
+                    delay=60
+                fi
+            fi
+        fi
+        echo "athanor-desktop: $name exited with status $status, restarting in ${delay}s" >&2
+        sleep "$delay"
+    done
+}
+
+# True while either component scope is active.
+component_scopes_active() {
+    for active_scope in $COMPONENT_SCOPES; do
+        if systemctl --user is-active --quiet "$active_scope"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Stops both scopes without waiting on a job, then polls until both are inactive.
+stop_component_scopes_polling() {
+    # shellcheck disable=SC2086 # word splitting of the list is intended
+    if ! systemctl --user stop --no-block $COMPONENT_SCOPES; then
+        # A scope already unloaded fails the stop; the poll below tells whether one is left.
+        echo "session-components: the stop of a component scope failed; polling both" >&2
+    fi
+    while component_scopes_active; do
+        sleep 0.2
+    done
+}
+
+# session_components <anchor> [target]: the supervisor, run in the background by the
+# session's script, whose PID is <anchor>. It starts the locker and the idle daemon as two
+# jobs and, on TERM, kills both, stops their scopes and exits: a scope lies outside the
+# session's own scope, so `loginctl terminate-session` alone would leave both running. With
+# `target`, as under the own compositor, it first waits for athanor-session.target to be
+# active and takes WAYLAND_DISPLAY from the user manager, where the compositor set it.
+#
+# A job's kill -0 of the anchor runs only when its component exits, so a script killed with
+# SIGKILL would leave the locker and cosmic-idle running against an ended session, cosmic-idle
+# free to suspend the machine under the greeter. The supervisor therefore checks the anchor
+# every 200 ms; once it is gone, it kills both jobs and, since that leaves their components
+# alive, stops both scopes, checks once more a second later for a scope that a restart in
+# flight created, and exits. errexit is off, and each stop and is-active is tested.
+session_components() {
+    set +e
+    anchor=$1
+    if [ "${2:-}" = target ]; then
+        until systemctl --user is-active --quiet athanor-session.target; do
+            if ! kill -0 "$anchor" 2> /dev/null; then
+                return 0
+            fi
+            sleep 0.1
+        done
+        display=$(systemctl --user show-environment | sed -n 's/^WAYLAND_DISPLAY=//p')
+        if [ -z "$display" ]; then
+            component_error "the user manager has no WAYLAND_DISPLAY once athanor-session.target is active: the session runs without its locker and idle daemon"
+            return 1
+        fi
+        export WAYLAND_DISPLAY="$display"
+    fi
+    session_component "$anchor" cosmic-greeter \
+        systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &
+    locker=$!
+    session_component "$anchor" cosmic-idle \
+        systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &
+    idle=$!
+    trap 'kill "$locker" "$idle"; stop_component_scopes_polling; exit 143' TERM
+    while kill -0 "$anchor" 2> /dev/null; do
+        sleep 0.2
+    done
+    trap - TERM
+    if ! kill "$locker" "$idle"; then
+        echo "session-components: a component's job had already ended" >&2
+    fi
+    stop_component_scopes_polling
+    sleep 1
+    if component_scopes_active; then
+        stop_component_scopes_polling
+    fi
+}

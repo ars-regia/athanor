@@ -2,6 +2,8 @@
 //! panel, the others counted as "+N waiting". No clock and no GTK: the caller passes the
 //! time that elapsed, and pauses a countdown by not calling `tick`.
 
+use std::collections::HashMap;
+
 use crate::notices::WAITS;
 
 pub const VISIBLE: usize = 3;
@@ -120,6 +122,43 @@ pub fn target_output(activated: Option<&[String]>, outputs: &[String]) -> Option
     Some(focused.unwrap_or(0))
 }
 
+/// The popups each of `outputs` shows, in the order of `visible` (BR4, BR6 "Stacking").
+/// `placed` remembers the output each popup was put on, so a popup stays there when the
+/// focus moves and nothing is drawn twice. A new popup goes to `outputs[target]` unless that
+/// output is `covered`, the one with an open popover of the bar, where it waits. The covered
+/// output shows none, so the overlap never depends on the compositor's drawing order; its
+/// popups come back when the popover closes.
+pub fn place<M: Clone + PartialEq>(
+    placed: &mut HashMap<u32, M>,
+    visible: &[u32],
+    outputs: &[M],
+    target: Option<usize>,
+    covered: Option<&M>,
+) -> Vec<Vec<u32>> {
+    placed.retain(|id, output| visible.contains(id) && outputs.contains(output));
+    if let Some(target) = target
+        .and_then(|index| outputs.get(index))
+        .filter(|target| covered != Some(*target))
+    {
+        for id in visible {
+            placed.entry(*id).or_insert_with(|| target.clone());
+        }
+    }
+    outputs
+        .iter()
+        .map(|output| {
+            if covered == Some(output) {
+                return Vec::new();
+            }
+            visible
+                .iter()
+                .copied()
+                .filter(|id| placed.get(id) == Some(output))
+                .collect()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +190,31 @@ mod tests {
             "no window activated"
         );
         assert_eq!(target_output(Some(&on(&["DP-1"])), &[]), None);
+    }
+
+    #[test]
+    fn an_open_popover_hides_the_popups_of_its_output() {
+        let outputs = ["DP-1", "HDMI-A-1"];
+        let mut placed = HashMap::new();
+        assert_eq!(
+            place(&mut placed, &[1, 2], &outputs, Some(0), None),
+            [vec![1, 2], vec![]]
+        );
+        assert_eq!(
+            place(&mut placed, &[3, 1, 2], &outputs, Some(0), Some(&"DP-1")),
+            [Vec::<u32>::new(), Vec::new()],
+            "the popups already shown hide, and a new one waits"
+        );
+        assert_eq!(
+            place(&mut placed, &[3, 1, 2], &outputs, Some(1), Some(&"DP-1")),
+            [vec![], vec![3]],
+            "a new one goes to another output, and the hidden ones stay where they were"
+        );
+        assert_eq!(
+            place(&mut placed, &[3, 1, 2], &outputs, Some(0), None),
+            [vec![1, 2], vec![3]],
+            "the popover closed: they come back on their output"
+        );
     }
 
     #[test]

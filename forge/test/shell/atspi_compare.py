@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""atspi_compare.py <reference.json> <transcript.json>
+"""atspi_compare.py <reference.json> <transcript.json> [--own-compositor <preset|-> <dock|-> <lang>]
 
 doc_own_stack.md, OS8: a surface moves from GTK4 to athanor-toolkit only when what a screen
 reader is told about it holds every name, role, state and value of the GTK version. Both files
@@ -7,6 +7,11 @@ are atspi_check.py's ATSPI_TRANSCRIPT; the reference is the GTK chooser's, recor
 line per element of the reference with its verdict, and fails when the transcript lacks an
 element, a role, a state or a value of the reference. A state said in other words, as a toggle
 button's "pressed" for "checked", is a note, not a failure.
+
+--own-compositor names the scene's bar preset and dock setting, as rig.sh seeds them: the
+elements of the controls decision 28 of doc_own_stack.md hides there are exempt, each line
+naming the decision and the control's issue (golden_report.exemptions). An exempt element the
+transcript holds fails, and so does an exemption that names no element of the reference.
 """
 
 import json
@@ -14,6 +19,7 @@ import sys
 from pathlib import Path
 
 from atspi_check import INTERACTIVE
+from golden_report import exemptions
 
 # States that tell when the tree was read, not what the widget is: which widget holds the focus
 # and whether the window is the active one depend on the compositor's timing.
@@ -74,19 +80,33 @@ def same_role(a, b):
     return a == b or any(a in group and b in group for group in SAME_ROLE)
 
 
-def compare(reference, transcript):
-    """Returns (lines, failures): a verdict per element of the reference, and the failures."""
+def compare(reference, transcript, exempt=None):
+    """Returns (lines, failures): a verdict per element of the reference, and the failures.
+    `exempt` maps the name of an element decision 28 hides to its (cause, issue)."""
+    exempt = exempt or {}
     candidates = spoken(transcript)
     lines, failures = [], []
     if not spoken(reference):
         # A reference that holds nothing would let any transcript pass.
         return lines, ["the reference holds no element"]
+    failures += [
+        f"exemption {name!r} names no element of the reference"
+        for name in sorted(set(exempt) - {ref["name"] for ref in spoken(reference)})
+    ]
     for ref in spoken(reference):
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = next(
             (node for node in named if node["role"] == ref["role"]), None
         ) or next(iter(named), None)
         label = f"{ref['role']} {ref['name']!r}"
+        if ref["name"] in exempt:
+            cause, issue = exempt[ref["name"]]
+            if match is None:
+                lines.append(f"{label}: hidden; {cause} (#{issue})")
+            else:
+                failures.append(f"{label}: present, but exempt: {cause} (#{issue})")
+                lines.append(f"{label}: present, but exempt; FAIL")
+            continue
         if match is None:
             failures.append(f"{label}: missing")
             lines.append(
@@ -119,13 +139,18 @@ def compare(reference, transcript):
 
 
 def main(argv):
-    if len(argv) != 2:
+    own = argv[2:]
+    if len(argv) not in (2, 6) or (own and own[0] != "--own-compositor"):
         print(__doc__, file=sys.stderr)
         return 2
     reference, transcript = (
-        json.loads(Path(path).read_text(encoding="utf-8")) for path in argv
+        json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[:2]
     )
-    lines, failures = compare(reference, transcript)
+    exempt = {}
+    if own:
+        preset, dock, lang = (None if v == "-" else v for v in own[1:])
+        exempt = exemptions(preset, dock, lang)
+    lines, failures = compare(reference, transcript, exempt)
     for line in lines:
         print(line)
     for line in failures:

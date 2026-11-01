@@ -46,7 +46,7 @@ STAGE=
 CLEANED=0
 UPDATE_UNITS=(athanor-update-check.timer athanor-update-state.service)
 # The window that takes the focus from the sheet, in a transient unit of its own.
-SETTINGS_UNIT=shield-acceptance-settings
+SETTINGS_UNIT=app-athanor-com.system76.CosmicSettings@shield-acceptance
 # The shield's three headers, and the rows only an open sheet shows: the Secure Boot row of
 # a state that was read, or why none was (shield_probe.py matches any name of a list).
 SHIELD="System image verified|Not verified yet|Update refused"

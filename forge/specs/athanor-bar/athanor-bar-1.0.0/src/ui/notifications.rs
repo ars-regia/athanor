@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use athanor_bar::control_center;
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
 use athanor_bar::order::Module;
-use athanor_bar::popups::{target_output, Popups};
+use athanor_bar::popups::{place, target_output, Popups};
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
 use gtk4::{gdk, gio, glib, pango};
@@ -607,23 +607,21 @@ impl Service {
             .collect();
         let covered = bar.popover_output();
         let plan: Vec<(gdk::Monitor, Vec<Notice>)> = {
-            let mut placed = self.placed.borrow_mut();
-            placed.retain(|id, monitor| visible.contains(id) && monitors.contains(monitor));
-            if let Some(target) =
-                target_monitor(&bar, &monitors).filter(|target| covered.as_ref() != Some(target))
-            {
-                for id in &visible {
-                    placed.entry(*id).or_insert_with(|| target.clone());
-                }
-            }
+            let ids = place(
+                &mut self.placed.borrow_mut(),
+                &visible,
+                &monitors,
+                target_monitor(&bar, &monitors),
+                covered.as_ref(),
+            );
             let held = self.held.borrow();
             monitors
                 .into_iter()
-                .map(|monitor| {
-                    let shown = visible
-                        .iter()
-                        .filter(|id| placed.get(id) == Some(&monitor))
-                        .filter_map(|id| held.get(*id).cloned())
+                .zip(ids)
+                .map(|(monitor, ids)| {
+                    let shown = ids
+                        .into_iter()
+                        .filter_map(|id| held.get(id).cloned())
                         .collect();
                     (monitor, shown)
                 })
@@ -691,9 +689,9 @@ impl Service {
 }
 
 /// The `List` reply: do not disturb, and the last `CAPACITY` notifications, oldest first.
-/// The output new popups go to: the one the activated window is on. With no window
+/// The index in `monitors` of the output new popups go to: the one the activated window is on. With no window
 /// activated, or no compositor client, the first output is the fallback (BR4).
-fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> {
+fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<usize> {
     let activated = bar
         .client()
         .and_then(|client| {
@@ -707,7 +705,7 @@ fn target_monitor(bar: &Bar, monitors: &[gdk::Monitor]) -> Option<gdk::Monitor> 
         .iter()
         .map(|monitor| monitor.connector().map(String::from).unwrap_or_default())
         .collect();
-    target_output(activated.as_deref(), &connectors).and_then(|index| monitors.get(index).cloned())
+    target_output(activated.as_deref(), &connectors)
 }
 
 fn decode_list(reply: &glib::Variant) -> Option<(bool, Vec<Notice>)> {

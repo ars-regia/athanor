@@ -37,6 +37,16 @@ impl WindowState {
         }
         state
     }
+
+    /// Decodes the `state` bitfield of `athanor_toplevel_state_v1`. Bits this crate does not
+    /// know are ignored; version 1 carries neither `maximized` nor `fullscreen`.
+    pub(crate) fn from_athanor(flags: u32) -> Self {
+        Self {
+            activated: flags & 1 != 0,
+            minimized: flags & 2 != 0,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +56,8 @@ pub struct Window {
     pub title: String,
     pub state: WindowState,
     /// The connectors of the outputs the window is on, as GDK names them, in the order it
-    /// entered them. Empty on compositors without COSMIC's toplevel extension.
+    /// entered them, from COSMIC's toplevel extension or Athanor's toplevel state. Empty on
+    /// compositors with neither.
     pub outputs: Vec<String>,
 }
 
@@ -85,6 +96,57 @@ pub struct Accessibility {
     pub magnifier: bool,
     pub inverted: bool,
     pub filter: ScreenFilter,
+    /// What sticky keys hold for the next key, as a mask of `Modifier`.
+    pub latched: u32,
+    /// What sticky keys hold until the modifier is pressed again, as a mask of `Modifier`.
+    pub locked: u32,
+}
+
+/// A modifier sticky keys hold, its value the bit of `athanor_a11y_v1`'s mask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Modifier {
+    Shift = 1,
+    Control = 2,
+    Alt = 4,
+    Super = 8,
+    AltGr = 16,
+}
+
+impl Modifier {
+    pub const ALL: [Self; 5] = [
+        Self::Shift,
+        Self::Control,
+        Self::Alt,
+        Self::Super,
+        Self::AltGr,
+    ];
+
+    pub fn is_in(self, mask: u32) -> bool {
+        mask & self as u32 != 0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyboardAid {
+    Sticky,
+    Slow,
+    Bounce,
+}
+
+/// The longest delay of slow and bounce keys, in ms (doc_accessibility.md AX11).
+pub const MAX_AID_DELAY: u32 = 2000;
+
+/// The settings of the keyboard aids, which the compositor keeps for the session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyboardAids {
+    pub sticky: bool,
+    pub two_key_off: bool,
+    pub slow: bool,
+    pub slow_delay: u32,
+    pub bounce: bool,
+    pub bounce_delay: u32,
+    /// Whether the compositor tells the Shift gestures.
+    pub gestures: bool,
 }
 
 /// A change, delivered after the compositor finished describing it.
@@ -101,6 +163,12 @@ pub enum Event {
     /// The index of the active layout in [`Event::KeyboardLayouts`].
     KeyboardGroup(u32),
     Accessibility(Accessibility),
+    /// Slow or bounce keys rejected a key; which key is never told.
+    AidRejected(KeyboardAid),
+    /// A Shift gesture asked for the aid.
+    AidGesture(KeyboardAid),
+    /// The compositor turned the aid off itself.
+    AidOff(KeyboardAid),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -201,6 +269,30 @@ mod tests {
             }
         );
         assert_eq!(WindowState::from_cosmic(&[]), WindowState::default());
+    }
+
+    #[test]
+    fn window_state_from_athanor_flags() {
+        assert_eq!(WindowState::from_athanor(0), WindowState::default());
+        let activated = WindowState {
+            activated: true,
+            ..WindowState::default()
+        };
+        let minimized = WindowState {
+            minimized: true,
+            ..WindowState::default()
+        };
+        assert_eq!(WindowState::from_athanor(1), activated);
+        assert_eq!(WindowState::from_athanor(2), minimized);
+        assert_eq!(
+            WindowState::from_athanor(3),
+            WindowState {
+                activated: true,
+                minimized: true,
+                ..WindowState::default()
+            }
+        );
+        assert_eq!(WindowState::from_athanor(8), WindowState::default());
     }
 
     #[test]

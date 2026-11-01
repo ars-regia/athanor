@@ -44,6 +44,9 @@ class ClassifyTest(unittest.TestCase):
             "forge/builder/Containerfile",
             "flake.lock",
             "forge/scripts/select_check_specs.py",
+            "forge/scripts/check_idempotency.sh",
+            "forge/scripts/retry.sh",
+            "forge/scripts/registry_probe.sh",
             ".github/workflows/spec-build-check.yml",
         ):
             with self.subTest(path=path):

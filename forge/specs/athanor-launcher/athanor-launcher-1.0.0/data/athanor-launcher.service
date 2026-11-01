@@ -20,9 +20,10 @@ ExecStart=/usr/bin/athanor-launcher
 ExecStopPost=/usr/bin/athanor-launcher --record-exit
 TimeoutStartSec=20s
 Restart=on-failure
-RestartSec=1s
-RestartSteps=5
-RestartMaxDelaySec=60s
+# A surface (doc_session.md, SN6): every restart comes at once, with no RestartSteps, since
+# systemd counts restarts for the whole session; the launcher's own counter (SH8) and
+# StartLimitBurst above end a crash loop.
+RestartSec=100ms
 Slice=session.slice
 # SH4: always-on surfaces are drawn with Cairo, on every GPU.
 Environment=GSK_RENDERER=cairo

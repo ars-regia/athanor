@@ -26,6 +26,7 @@
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
+#   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
@@ -40,11 +41,15 @@
 #   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
+#                           RIG_COMPOSITOR=athanor runs it against athanor-compositor, the probe as its unit (run build-compositor first)
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|dock|launcher> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <bar|bar-modules|dock|launcher> --matrix   AX17: the walk in light, dark and both high-contrast
+#                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
+#                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
@@ -238,17 +243,41 @@ seed_scheme() { # seed_scheme <dir> <light|dark>: COSMIC's mode, for cosmic-comp
     else
         echo "org.gnome.desktop.interface color-scheme default"
     fi > "$1.gsettings"
+    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
+    # switch to 12 hours by locale.
+    echo "org.gnome.desktop.interface clock-format 24h" >> "$1.gsettings"
+}
+
+variant_env=()
+atspi_variant() { # atspi_variant <seed dir> [ring]: the appearance and text scale of RIG_ATSPI_VARIANT
+    # (<light|dark|hc-light|hc-dark>@<scale>), set on a seed after seed_bar, as the user's
+    # choice would be; the keys the shell reads (athanor-style appearance.rs) and GTK's scale
+    if [ -z "${RIG_ATSPI_VARIANT:-}" ]; then return 0; fi
+    local appearance=${RIG_ATSPI_VARIANT%@*} scale=${RIG_ATSPI_VARIANT#*@} mode=light contrast=false
+    case $appearance in
+    light) ;;
+    dark) mode=dark ;;
+    hc-light) contrast=true ;;
+    hc-dark) mode=dark contrast=true ;;
+    *) echo "RIG_ATSPI_VARIANT: unknown appearance '$appearance'" >&2; exit 2 ;;
+    esac
+    seed_scheme "$1" "$mode"
+    {
+        echo "org.gnome.desktop.a11y.interface high-contrast $contrast"
+        echo "org.gnome.desktop.interface text-scaling-factor $scale"
+    } >> "$1.gsettings"
+    # The ring is asked for only where the scene gives a control the focus (AX8)
+    variant_env=()
+    if [ "${2:-}" = ring ]; then variant_env=(ATSPI_RING=1); fi
+    if [ "$contrast" = true ]; then variant_env+=(ATSPI_HIGH_CONTRAST=1); fi
 }
 
 seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
     seed_layout "$1" "$2" "$3" "$4"
-    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1" "$1/cosmic/com.system76.CosmicAppletTime/v1"
+    mkdir -p "$1/cosmic/com.system76.CosmicComp/v1"
     printf '(rules: "", model: "pc105", layout: "us,it", variant: ",", options: None, repeat_delay: 600, repeat_rate: 25)' \
         > "$1/cosmic/com.system76.CosmicComp/v1/xkb_config"
     seed_scheme "$1" "$5"
-    # Pins the 24-hour clock the scenes' goldens show: en_US and ar_EG would otherwise
-    # switch to 12 hours by locale.
-    printf true > "$1/cosmic/com.system76.CosmicAppletTime/v1/military_time"
     printf 'schema = 1\nfavorites = ["com.system76.CosmicSettings.desktop"]\n' > "$1/athanor/favorites.toml"
 }
 
@@ -698,7 +727,12 @@ compositor-globals)
     missing=()
     standard=(wl_compositor wl_shm wl_seat wl_output xdg_wm_base wp_viewporter
         wp_fractional_scale_manager_v1 wp_presentation wp_cursor_shape_manager_v1 xdg_activation_v1
-        wl_data_device_manager zwlr_layer_shell_v1 wp_security_context_manager_v1 ext_idle_notifier_v1)
+        wl_data_device_manager zwp_primary_selection_device_manager_v1 zwlr_layer_shell_v1
+        wp_security_context_manager_v1 ext_idle_notifier_v1
+        zwp_tablet_manager_v2 zwp_pointer_gestures_v1 zxdg_decoration_manager_v1 zxdg_exporter_v2
+        zxdg_importer_v2)
+    # Decision 30's three.
+    standard+=(zwp_pointer_constraints_v1 zwp_relative_pointer_manager_v1 zwp_keyboard_shortcuts_inhibit_manager_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
@@ -718,14 +752,17 @@ compositor-globals)
     for interface in ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1 \
         ext_foreign_toplevel_image_capture_source_manager_v1 ext_output_image_capture_source_manager_v1 \
         ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
-        zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1; do
+        zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
+        zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
+        athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1 \
+        zwlr_data_control_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 9 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 17 privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
@@ -744,6 +781,11 @@ cargo)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
+    ;;
+toolkit-gpu)
+    bash "$0" cargo test --locked -p athanor-toolkit --features gpu --lib -- --ignored | tee "$out/toolkit-gpu.log"
+    # Cargo exits 0 when no test ran: a renamed test must not leave a green run of nothing.
+    grep -q 'test result: ok\. [1-9]' "$out/toolkit-gpu.log"
     ;;
 seal-bin)
     shift
@@ -885,7 +927,7 @@ dock-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/dock_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 dock-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") --window --pinnable ${session_unit[*]}"
     ;;
 notifications-e2e)
     stage_greeter_icons
@@ -925,6 +967,9 @@ tray-e2e)
                  && exec python3 /repo/forge/test/shell/bar_session.py --tray --respawn"
     ;;
 compositor-e2e)
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-compositor build-compositor
+    fi
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
     seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
     mkdir -p "$seed"
@@ -1026,6 +1071,21 @@ EOF
     echo "look at $out/bar-preview-*.png"
     ;;
 atspi)
+    if [ "${3:-}" = --matrix ]; then
+        case ${2:-} in
+        bar | bar-modules | dock | launcher) ;;
+        *) echo "rig.sh atspi: --matrix runs on bar, bar-modules, dock or launcher, not '${2:-}'" >&2; exit 2 ;;
+        esac
+        for appearance in light dark hc-light hc-dark; do
+            for scale in 1.0 1.25 1.5; do
+                if ! RIG_ATSPI_VARIANT=$appearance@$scale "${BASH_SOURCE[0]}" atspi "$2"; then
+                    echo "rig.sh atspi $2 --matrix: FAIL in the variant $appearance@$scale" >&2
+                    exit 1
+                fi
+            done
+        done
+        exit 0
+    fi
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
     # its reference is recorded under cosmic-comp only.
     if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
@@ -1049,7 +1109,7 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
-            [dock]="athanor-dock Applicazioni" [launcher]="athanor-launcher Cerca")
+            [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$2]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
@@ -1119,17 +1179,18 @@ atspi)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 6: input source and tiling need zcosmic_keyboard_layout_manager_v1 and
-        # zcosmic_workspace_manager_v2, whose private replacements docs/spikes/c1-protocols.md
-        # (section 3) proposes and revision 2 specifies.
-        unit='' widgets=8
+        # 5: tiling needs zcosmic_workspace_manager_v2, whose private replacement
+        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies, and
+        # decision 28 of doc_own_stack.md hides workspaces (#835) and applications (#836).
+        unit='' widgets=8 own=()
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
-            unit=--unit widgets=6
+            unit=--unit widgets=5 own=(--own-compositor float - "${3:-en}")
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
+        atspi_variant "$out/seed-atspi-bar"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
             ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
@@ -1137,19 +1198,21 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-compositor it names each line the bar lacks (Input source and Tiling, C1).
+        # athanor-compositor it names each line the bar lacks (Tiling, C1), and the buttons
+        # decision 28 hides are exempt under its float preset (`own`).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json"
+            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
-        # Under athanor-compositor 10: as in `bar`, the input source and tiling buttons are missing.
+        # Under athanor-compositor 9: as in `bar`, tiling, workspaces and applications are missing.
         widgets=12
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=9; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
+        atspi_variant "$out/seed-atspi-bar-modules"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=12 RIG_CONFIG_SEED=/out/seed-atspi-bar-modules \
             RIG_DATA_OVERLAY="$bar_overlay" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
@@ -1160,17 +1223,20 @@ atspi)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
         # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-toolkit's
         # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
+        # Under athanor-compositor 2: decision 28 hides workspaces (#835) and applications (#836).
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
-        transcript=atspi-dock${3:+-$3}.json
+        transcript=atspi-dock${3:+-$3}.json widgets=4 own=()
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=2 own=(--own-compositor - visible "${3:-en}"); fi
         seed_bar "$out/seed-atspi-dock" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
+        atspi_variant "$out/seed-atspi-dock"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-dock \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app 4" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py $dock_app $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$dock_bin") ${session_unit[*]}"
         surface_not_closed atspi dock atspi-dock
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
+            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript" "${own[@]}"
         ;;
     launcher)
         # 1 interactive widget by atspi_check.py's list of roles: the entry, named "Search".
@@ -1178,7 +1244,14 @@ atspi)
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
         # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
+        # The entry takes the focus on show under athanor-compositor; cosmic-comp leaves it
+        # unfocused (the recorded reference holds no "focused" on it), so no ring is asked for.
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            atspi_variant "$out/seed-atspi-launcher" ring
+        else
+            atspi_variant "$out/seed-atspi-launcher"
+        fi
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/atspi-launcher${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-launcher 1" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-launcher -- \
@@ -1245,7 +1318,7 @@ orca)
         exit 1
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
-    transcript=orca-$2${3:+-$3}.txt
+    transcript=orca-$2${3:+-$3}.txt own=()
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1278,9 +1351,19 @@ orca)
         # Applications); three more reach the test window, whose menu Shift+F10 opens, the
         # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
         # keyboard to the window (#614); orca_dock.py drops that line.
+        # Under athanor-compositor a layer surface takes the keyboard on a click or on
+        # Ctrl+Alt+Tab (AX7), not when it maps, so the walk starts with that key. The dock shows
+        # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
+        # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
+        # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
         seed_bar "$out/seed-orca-dock" float top visible light
+        walk=(Tab*9 shift+F10 Down*4 Escape)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor - visible "${3:-en}")
+            walk=(ctrl+alt+Tab Tab*6 KP_Enter shift+F10 Down*4 Escape)
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-dock \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript Tab*9 shift+F10 Down*4 Escape" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_dock.py $dock_app /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-dock -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$dock_bin") --window --pinnable --respawn"
         surface_not_closed orca dock orca-dock
@@ -1288,13 +1371,21 @@ orca)
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Input source and Tiling, C1). Tab skips Input source (#751), so the
-        # seventh Tab comes back round to the first; the eighth once Tab reaches it.
+        # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
+        # through `own`). Under cosmic-comp Tab skips Input source (#751), so the
+        # seventh Tab comes back round to the first; the eighth once Tab reaches it. Under
+        # athanor-compositor Ctrl+Alt+Tab reaches the Clock and the seven Tabs go round the five
+        # buttons left, Input source among them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
+        walk=(Tab*7)
+        if [ -n "$unit" ]; then
+            own=(--own-compositor float - "${3:-en}")
+            walk=(ctrl+alt+Tab "${walk[@]}")
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-bar \
             RIG_DATA_OVERLAY="$bar_overlay" \
-            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript Tab*7" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-bar -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
@@ -1331,7 +1422,7 @@ orca)
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
-        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript"
+        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
     # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-toolkit's, with vello_cpu and with

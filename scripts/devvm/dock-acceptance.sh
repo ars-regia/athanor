@@ -34,12 +34,8 @@ CLEANED=0
 # The launch stage's entry, and the file its wayland-info writes the globals it sees to.
 LAUNCH_ID=os.athanor.DockAcceptanceWaylandInfo
 GLOBALS=/tmp/athanor-dock-acceptance-globals
-# Globals only the main socket offers: an application behind the context sees none of them
-# (the list compositor-acceptance.sh checks).
-PRIVILEGED=(zcosmic_toplevel_info_v1 zcosmic_toplevel_manager_v1 ext_workspace_manager_v1
-    zcosmic_workspace_manager_v2 zwlr_layer_shell_v1 ext_data_control_manager_v1
-    zwlr_data_control_manager_v1 wp_security_context_manager_v1
-    zcosmic_keyboard_layout_manager_v1 cosmic_a11y_manager_v1)
+# Globals only the main socket offers: an application behind the context sees none of them.
+mapfile -t PRIVILEGED < "$ROOT/forge/test/shell/forbidden-globals.txt"
 
 # Runs a command as the session user, with the session's bus and compositor.
 in_session() {
