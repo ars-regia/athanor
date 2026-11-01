@@ -1044,11 +1044,17 @@ seeds_kept() { # seeds_kept DESCRIPTION
 }
 
 ci_stage_seed() { # UD18 2
-  local from nonce
+  local from nonce reason
   disk_floor
   from=$(booted_digest)
   [[ $from =~ ^sha256:[0-9a-f]{64}$ ]] || die "FAIL  UD18 2: the booted digest reads '$from'"
   [[ $from != "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 2: the candidate is :stable already: there is nothing to upgrade from"
+  # doc_update_trust.md section 6 item 7, before any update (#787): the installer's digest reads
+  # no-signature until a check reaches the registry, media once it has, signature after the restart.
+  reason=$(state .verified.reason)
+  [[ $reason == no-signature || $reason == media || $reason == signature ]] ||
+    die "FAIL  UD18 2: the machine installed from the ISO reads '$reason' before any update"
+  pass "UD18 2: the machine installed from the ISO reads $reason before any update"
   echo "$from" > "$ACC_STATE/from-digest"
   guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1 > "$ACC_STATE/shipped-sum"
   nonce=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')

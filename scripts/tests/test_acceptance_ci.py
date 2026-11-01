@@ -90,6 +90,7 @@ class CiMode(unittest.TestCase):
     def run_sh(self, *args, env=None, timeout=60):
         return subprocess.run(
             ["bash", str(RUN), *args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             env={**self.env, **(env or {})},
@@ -152,7 +153,7 @@ class CiMode(unittest.TestCase):
         self.assertIn("== seed", result.stdout, result.stderr)
         self.assertNotEqual(result.returncode, 0)
 
-    def guest(self, update, journal, serial_session=True, reader=0):
+    def guest(self, update, journal, serial_session=True, reader=0, reason="signature"):
         """A guest whose check settled on UPDATE with the candidate downloaded and logged
         JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply(). READER is
         the exit status of the grep for the attestation reader: 1 for a client that predates
@@ -163,7 +164,7 @@ class CiMode(unittest.TestCase):
             "update": update,
             "downloaded": {"digest": DIGEST},
             "last_error": "none",
-            "verified": {"reason": "signature"},
+            "verified": {"reason": reason},
         }
         (g / "state.json").write_text(json.dumps(state))
         (g / "journal").write_text(journal + "\n")
@@ -174,6 +175,23 @@ class CiMode(unittest.TestCase):
         (g / "sessions").write_text(json.dumps(sessions))
         (g / "reader").write_text(f"{reader}\n")
         self.stub("ssh", GUEST.replace("@GUEST@", str(g)))
+
+    def test_seed_reads_the_verdict_of_a_machine_installed_from_the_iso(self):
+        for reason in ("no-signature", "media", "signature"):
+            with self.subTest(reason=reason):
+                # The stages go on to upgrade, which the login on ttyS0 stops.
+                self.guest("downloaded", FEATURE_LINE, reason=reason)
+                result = self.run_sh("--ci", "seed", env=self.ci)
+                self.assertIn(f"reads {reason} before any update", result.stdout, result.stderr)
+
+    def test_seed_refuses_any_other_verdict(self):
+        for reason in ("policy-not-in-force", "reference-out-of-scope", "key-not-in-policy", ""):
+            with self.subTest(reason=reason):
+                self.guest("none", "", reason=reason)
+                result = self.run_sh("--ci", "seed", env=self.ci)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("before any update", result.stderr)
+                self.assertNotIn("seeded in /home", result.stdout)
 
     def test_upgrade_reads_the_class_the_runner_verified(self):
         self.guest("downloaded", FEATURE_LINE)
