@@ -161,8 +161,8 @@ on windows: the control center is granted the first, the bar, the dock and the l
 `athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
 keyboard's layout group: the bar alone is granted it, for its input-source switch. The layouts, options and repeat come from
 cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
-before the first client and again after each change of it (an inotify watch of its directory,
-or of the nearest existing ancestor while the directory is missing), so one file drives the
+before the first client and again after each change of it (an inotify watch of its directory
+and of every ancestor of it, along each link on the way), so one file drives the
 keymap under both compositors. The seat keeps its group, clamped to the new layouts, and its
 Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
 most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
