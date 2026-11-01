@@ -26,8 +26,8 @@ else
 	echo "athanor-desktop: cannot read the session class from logind; file search stays off" >&2
 fi
 # The import list is one file, shared with the own compositor's session (doc_session.md,
-# SN2). A name this script's environment does not hold is skipped, so the manager keeps its own value. XDG_CURRENT_DESKTOP already
-# reaches the manager, before any unit starts, from /usr/lib/environment.d/50-athanor-desktop.conf;
+# SN2). A name this script's environment does not hold is skipped, so the manager keeps its
+# own value. XDG_CURRENT_DESKTOP already reaches the manager, before any unit starts, from /usr/lib/environment.d/50-athanor-desktop.conf;
 # importing it again republishes the value athanor-session exported, which is the same one.
 # The reader refuses a list it cannot read or that names no valid variable, since systemctl
 # given no name would import this script's whole environment.

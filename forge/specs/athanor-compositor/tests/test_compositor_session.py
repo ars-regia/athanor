@@ -42,10 +42,13 @@ OWN = [
     "XKB_DEFAULT_VARIANT",
     "XKB_DEFAULT_OPTIONS",
 ]
-# What the session's end removes: the names of the display (SN2), then OWN.
+# What the session's end runs: the gate's own ExecStop= (SN2, SN15 step 3 (d)), then OWN.
+GATE = (
+    SPECS
+    / "athanor-system-services/SOURCES/usr/lib/systemd/user/athanor-desktop.service"
+).read_text()
 UNSET = " ".join(
-    "systemctl --user unset-environment WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE "
-    "XDG_SESSION_CLASS".split() + OWN
+    [GATE.split("ExecStop=/usr/bin/", 1)[1].splitlines()[0], *OWN]
 )
 
 # systemctl: `start --wait` creates the marker as the unit's ExecStartPost= does when $START

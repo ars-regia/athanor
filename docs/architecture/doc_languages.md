@@ -199,7 +199,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - Values are checked against `[A-Za-z0-9_.@-]`, as `athanor-greeter-session` already checks them. A value that fails is logged and ignored.
 - The greeter passes no language in `StartSession`, and `auth.rs` does not change. The session reads its own user's setting itself, so nothing the greeter process holds decides the session's environment.
 - `athanor-desktop` adds `LANG`, `LANGUAGE` and the `LC_*` variables of LN7 to its `import-environment` call, so the user units (the bar, the dock, `athanor-shelld`, the launcher) run in the user's locale.
-- A change of language takes effect at the next login. The Settings page says so, and offers to log out.
+- A change of language takes effect at the next login, and a user manager that outlives the session can hold an older value back (`doc_session.md` SN2, amended 2026-11-01, #825). The Settings page says so, and offers to log out.
 
 **LN7. Region formats.**
 
@@ -210,7 +210,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - otherwise it exports none of them.
 - It reads the key with `gsettings get`.
 - The region list offers every locale in the archive (887 on 2026-10-05), shown with its formatted example date and number.
-- A change of region takes effect at the next login, as for the language.
+- A change of region takes effect at the next login, as for the language, and a user manager that outlives the session can hold an older value back (`doc_session.md` SN2, amended 2026-11-01, #825).
 - The time zone is not a region setting: it belongs to `org.freedesktop.timedate1` and to the Settings and first-run specifications.
 
 **LN8. The shell's clock and calendar follow the region.**
