@@ -26,6 +26,7 @@
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
+#   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
@@ -780,6 +781,11 @@ cargo)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
+    ;;
+toolkit-gpu)
+    bash "$0" cargo test --locked -p athanor-toolkit --features gpu --lib -- --ignored | tee "$out/toolkit-gpu.log"
+    # Cargo exits 0 when no test ran: a renamed test must not leave a green run of nothing.
+    grep -q 'test result: ok\. [1-9]' "$out/toolkit-gpu.log"
     ;;
 seal-bin)
     shift
