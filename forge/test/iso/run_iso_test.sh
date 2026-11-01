@@ -194,6 +194,8 @@ rm -f "$serial" "$monitor"
 # It is given the monitor too: the password is typed at the greeter through it.
 # In the upgrade case it holds the console past Settings (ATHANOR_CONSOLE_HOLD), so the
 # reboots of the stages are on the serial log and their markers in phases.txt.
+# The pace is for the tests' fake guest: a real run must never inherit it from the caller.
+unset ATHANOR_CONSOLE_PACE
 hold=0
 if [[ -n ${UPDATE_TO:-} ]]; then hold=1; fi
 ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
@@ -211,7 +213,18 @@ console_pid=$!
         sleep "${SHOT_EVERY:-30}"
         i=$((i + 1))
         printf -v name '%s/screen-%03d.ppm' "$output" "$i"
-        python3 "${here}/monitor.py" "$monitor" "screendump ${name}" > /dev/null 2>&1 || break
+        # The reply goes to the log: it is where an error the monitor answers with shows.
+        # A failure while QEMU is up is a monitor that crashed or could not connect, and is
+        # reported with its own text; one after the socket is gone is the run ending.
+        if ! shot=$(python3 "${here}/monitor.py" "$monitor" "screendump ${name}" 2>&1); then
+            [[ -S $monitor ]] && echo "screenshot ${name} failed, no more will be taken: ${shot}" >&2
+            break
+        fi
+        echo "$shot" >> "${output}/screenshots.log"
+        # QEMU answers a screendump it could not write with `Error: ...` and a zero status.
+        if [[ $shot == *$'\n'Error* ]]; then
+            echo "screenshot ${name}: the monitor answered: ${shot#*$'\n'}" >&2
+        fi
     done
 ) &
 shots_pid=$!

@@ -150,23 +150,23 @@ pub async fn open(client: &Client, opener: Opener) {
 
 pub fn activate(client: &Client, window: &Open<WindowId>) {
     let restored = if window.minimized {
-        client.unminimize(window.id)
+        client.window_actions().unminimize(window.id)
     } else {
         Ok(())
     };
-    if let Err(err) = restored.and_then(|()| client.activate(window.id)) {
+    if let Err(err) = restored.and_then(|()| client.window_actions().activate(window.id)) {
         tracing::error!(error = %err, "cannot activate the window");
     }
 }
 
 pub fn minimize(client: &Client, window: WindowId) {
-    if let Err(err) = client.minimize(window) {
+    if let Err(err) = client.window_actions().minimize(window) {
         tracing::error!(error = %err, "cannot minimise the window");
     }
 }
 
 pub fn close(client: &Client, window: WindowId) {
-    if let Err(err) = client.close(window) {
+    if let Err(err) = client.window_actions().close(window) {
         tracing::error!(error = %err, "cannot close the window");
     }
 }

@@ -143,7 +143,7 @@ impl PointerGrab<State> for MoveGrab {
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
-        let Some(area) = data.window_area() else {
+        let Some(area) = data.window_area_at(event.location) else {
             return;
         };
         let delta = (event.location - self.start.location).to_i32_round();
@@ -159,6 +159,7 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
+            data.settle(&self.window);
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }

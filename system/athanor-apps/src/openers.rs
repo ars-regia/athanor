@@ -12,9 +12,12 @@ use gtk4::prelude::*;
 use crate::entries;
 use crate::Host;
 
-/// `None` without the compositor client (SH1).
+/// `None` without the compositor client (SH1), and for an opener hidden under the own
+/// compositor (doc_own_stack.md, decision 28).
 pub fn button<H: Host>(host: &Rc<H>, opener: Opener) -> Option<gtk4::Button> {
-    host.client()?;
+    if !opener.shown(host.client()?.own_compositor()) {
+        return None;
+    }
     let (icon, name) = entries::opener(opener);
     let button = gtk4::Button::from_icon_name(icon);
     button.add_css_class("bar-button");

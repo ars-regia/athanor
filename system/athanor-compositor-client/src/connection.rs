@@ -49,11 +49,8 @@ use wayland_protocols::wp::security_context::v1::client::{
 
 use crate::keymap::{self, MAX_KEYMAP};
 use crate::model::{
-    Accessibility, Change, Event, ScreenFilter, Table, Tiling, Window, WindowId, WindowState,
-    Workspace, WorkspaceId,
-};
-use crate::protocols::a11y::client::cosmic_a11y_manager_v1::{
-    self, ActiveState, CosmicA11yManagerV1, Filter,
+    Accessibility, Change, Event, KeyboardAids, ScreenFilter, Table, Tiling, Window, WindowId,
+    WindowState, Workspace, WorkspaceId,
 };
 use crate::protocols::keyboard_layout::client::{
     zcosmic_keyboard_layout_manager_v1::ZcosmicKeyboardLayoutManagerV1,
@@ -64,6 +61,10 @@ use crate::protocols::toplevel_info::client::{
     zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
 };
 use crate::protocols::toplevel_management::client::zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1;
+use crate::protocols::toplevel_state::client::{
+    athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
+    athanor_toplevel_state_v1::{self, AthanorToplevelStateV1},
+};
 use crate::protocols::workspace_v2::client::{
     zcosmic_workspace_handle_v2::{self, TilingState, ZcosmicWorkspaceHandleV2},
     zcosmic_workspace_manager_v2::ZcosmicWorkspaceManagerV2,
@@ -101,6 +102,8 @@ pub(crate) fn fresh() -> u64 {
 
 /// The shell's view of the compositor. Every call happens on the thread that runs GLib's
 /// default main context: GTK's main thread, or the thread of a calloop loop that runs it.
+/// One per Wayland connection: athanor-compositor allows a connection one state object of
+/// each window, and ends a connection that makes a second (`already_made`).
 pub struct Client {
     pub(crate) inner: Rc<Inner>,
 }
@@ -121,8 +124,7 @@ pub(crate) struct Inner {
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
     /// The compositor's globals, for those bound only when a call needs them: the capture
-    /// globals, which a client that never captures never binds.
-    #[cfg(feature = "gtk")]
+    /// globals and the window actions, which a client that never captures or acts never binds.
     pub(crate) registry: GlobalList,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
@@ -212,7 +214,6 @@ impl Client {
             gdk: RefCell::new(None),
             connection,
             qh,
-            #[cfg(feature = "gtk")]
             registry: globals,
             queue: RefCell::new(queue),
             state: RefCell::new(state),
@@ -278,35 +279,16 @@ impl Client {
         self.inner.state.borrow().keyboard_group
     }
 
+    /// Whether the compositor is athanor-compositor: `athanor_toplevel_manager_v1`, which only
+    /// it offers and only to the shell, is bound (doc_own_stack.md, decision 28).
+    pub fn own_compositor(&self) -> bool {
+        self.inner.state.borrow().globals.athanor_toplevel.is_some()
+    }
+
     /// `None` when the compositor offers no accessibility protocol.
     pub fn accessibility(&self) -> Option<Accessibility> {
         let state = self.inner.state.borrow();
         state.globals.a11y.as_ref().map(|_| state.accessibility)
-    }
-
-    pub fn activate(&self, window: WindowId) -> Result<(), Error> {
-        let state = self.inner.live_state()?;
-        let manager = state.toplevel_manager()?;
-        let seat = state
-            .globals
-            .seat
-            .as_ref()
-            .ok_or(Error::Unavailable("wl_seat"))?;
-        manager.activate(state.cosmic_toplevel(window)?, seat);
-        drop(state);
-        self.flush()
-    }
-
-    pub fn minimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::set_minimized)
-    }
-
-    pub fn unminimize(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::unset_minimized)
-    }
-
-    pub fn close(&self, window: WindowId) -> Result<(), Error> {
-        self.toplevel_request(window, ZcosmicToplevelManagerV1::close)
     }
 
     pub fn set_tiling(&self, workspace: WorkspaceId, tiling: Tiling) -> Result<(), Error> {
@@ -333,42 +315,41 @@ impl Client {
         self.flush()
     }
 
+    /// Through cosmic-comp's manager, else athanor-compositor's after `watch_keyboard_group`.
     /// The compositor ignores a group beyond the configured layouts.
     pub fn set_keyboard_group(&self, group: u32) -> Result<(), Error> {
         let state = self.inner.live_state()?;
-        state
-            .keyboard_layout
-            .as_ref()
-            .ok_or(Error::Unavailable("zcosmic_keyboard_layout_manager_v1"))?
-            .set_group(group);
+        match &state.keyboard_layout {
+            Some(layout) => layout.set_group(group),
+            None => crate::keyboard_group::set_group(&state, group)?,
+        }
         drop(state);
         self.flush()
     }
 
     pub fn set_magnifier(&self, enabled: bool) -> Result<(), Error> {
         let state = self.inner.live_state()?;
-        state.a11y()?.set_magnifier(active_state(enabled));
+        state.a11y()?.set_magnifier(enabled);
         drop(state);
         self.flush()
     }
 
     pub fn set_screen_filter(&self, inverted: bool, filter: ScreenFilter) -> Result<(), Error> {
-        let filter = match filter {
-            ScreenFilter::None => Filter::Disabled,
-            ScreenFilter::Greyscale => Filter::Greyscale,
-            ScreenFilter::Protanopia => Filter::DaltonizeProtanopia,
-            ScreenFilter::Deuteranopia => Filter::DaltonizeDeuteranopia,
-            ScreenFilter::Tritanopia => Filter::DaltonizeTritanopia,
-            ScreenFilter::Unknown => {
-                return Err(Error::InvalidArgument(
-                    "an unknown screen filter cannot be set",
-                ))
-            }
-        };
+        if filter == ScreenFilter::Unknown {
+            return Err(Error::InvalidArgument(
+                "an unknown screen filter cannot be set",
+            ));
+        }
         let state = self.inner.live_state()?;
-        state
-            .a11y()?
-            .set_screen_filter(active_state(inverted), filter);
+        state.a11y()?.set_screen_filter(inverted, filter);
+        drop(state);
+        self.flush()
+    }
+
+    /// The keyboard aids (doc_accessibility.md AX11), which only athanor-compositor has.
+    pub fn set_keyboard_aids(&self, aids: KeyboardAids) -> Result<(), Error> {
+        let state = self.inner.live_state()?;
+        state.a11y()?.set_keyboard_aids(aids)?;
         drop(state);
         self.flush()
     }
@@ -454,17 +435,6 @@ impl Client {
             .map(str::to_owned)
             .or_else(|| self.inner.display_name())
             .ok_or_else(|| Error::Connection("the connection has no socket path".into()))
-    }
-
-    fn toplevel_request(
-        &self,
-        window: WindowId,
-        request: impl FnOnce(&ZcosmicToplevelManagerV1, &ZcosmicToplevelHandleV1),
-    ) -> Result<(), Error> {
-        let state = self.inner.live_state()?;
-        request(state.toplevel_manager()?, state.cosmic_toplevel(window)?);
-        drop(state);
-        self.flush()
     }
 
     pub(crate) fn flush(&self) -> Result<(), Error> {
@@ -771,23 +741,21 @@ mod queue_source {
     }
 }
 
-fn active_state(enabled: bool) -> ActiveState {
-    if enabled {
-        ActiveState::Enabled
-    } else {
-        ActiveState::Disabled
-    }
-}
 
 #[derive(Default)]
 pub(crate) struct Globals {
     toplevel_info: Option<ZcosmicToplevelInfoV1>,
-    toplevel_manager: Option<ZcosmicToplevelManagerV1>,
+    pub(crate) toplevel_manager: Option<ZcosmicToplevelManagerV1>,
+    athanor_toplevel: Option<AthanorToplevelManagerV1>,
+    /// athanor-compositor's window actions, bound at the first action (plan D2).
+    pub(crate) actions: crate::actions::Globals,
+    /// athanor-compositor's keyboard group, bound at the first watch.
+    pub(crate) keyboard_group: crate::keyboard_group::Globals,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
-    keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
-    a11y: Option<CosmicA11yManagerV1>,
+    pub(crate) keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
+    pub(crate) a11y: Option<crate::a11y::Manager>,
     security_context: Option<WpSecurityContextManagerV1>,
     /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
     /// globals at the first capture.
@@ -800,6 +768,7 @@ pub(crate) struct Globals {
 pub(crate) struct Toplevel {
     pub(crate) ext: ExtForeignToplevelHandleV1,
     cosmic: Option<ZcosmicToplevelHandleV1>,
+    athanor: Option<AthanorToplevelStateV1>,
 }
 
 struct WorkspaceHandles {
@@ -821,12 +790,12 @@ pub(crate) struct State {
     outputs: HashMap<u32, wl_output::WlOutput>,
     output_names: HashMap<ObjectId, String>,
     output_modes: HashMap<ObjectId, OutputMode>,
-    keyboard: Option<wl_keyboard::WlKeyboard>,
+    pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
-    keyboard_layouts: Vec<String>,
-    keyboard_group: u32,
-    accessibility: Accessibility,
-    events: Vec<Event>,
+    pub(crate) keyboard_layouts: Vec<String>,
+    pub(crate) keyboard_group: u32,
+    pub(crate) accessibility: Accessibility,
+    pub(crate) events: Vec<Event>,
     /// The window pictures in flight, by call.
     #[cfg(feature = "gtk")]
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
@@ -863,10 +832,12 @@ impl State {
         state.globals = Globals {
             toplevel_info: bind(globals, qh, 2..=3),
             toplevel_manager: bind(globals, qh, 1..=4),
+            athanor_toplevel: bind(globals, qh, 1..=1),
+            actions: crate::actions::Globals::default(),
+            keyboard_group: crate::keyboard_group::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
-            // Version 3 deprecates the screen filter events of version 2.
-            a11y: bind(globals, qh, 2..=2),
+            a11y: crate::a11y::bind_cosmic(globals, qh),
             security_context: bind(globals, qh, 1..=1),
             #[cfg(feature = "gtk")]
             shm: bind(globals, qh, 1..=1),
@@ -913,14 +884,17 @@ impl State {
             .collect()
     }
 
-    fn toplevel_manager(&self) -> Result<&ZcosmicToplevelManagerV1, Error> {
+    pub(crate) fn seat(&self) -> Result<&wl_seat::WlSeat, Error> {
         self.globals
-            .toplevel_manager
+            .seat
             .as_ref()
-            .ok_or(Error::Unavailable("zcosmic_toplevel_manager_v1"))
+            .ok_or(Error::Unavailable("wl_seat"))
     }
 
-    fn cosmic_toplevel(&self, window: WindowId) -> Result<&ZcosmicToplevelHandleV1, Error> {
+    pub(crate) fn cosmic_toplevel(
+        &self,
+        window: WindowId,
+    ) -> Result<&ZcosmicToplevelHandleV1, Error> {
         self.toplevels
             .get(&window)
             .ok_or(Error::NoWindow)?
@@ -929,11 +903,29 @@ impl State {
             .ok_or(Error::Unavailable("zcosmic_toplevel_info_v1"))
     }
 
-    fn a11y(&self) -> Result<&CosmicA11yManagerV1, Error> {
+    fn a11y(&self) -> Result<&crate::a11y::Manager, Error> {
         self.globals
             .a11y
             .as_ref()
-            .ok_or(Error::Unavailable("cosmic_a11y_manager_v1"))
+            .ok_or(Error::Unavailable("an accessibility manager"))
+    }
+
+    // The compositor names an output in reply to its bind, before it can report a toplevel
+    // on it.
+    fn output_enter(&mut self, id: &WindowId, output: &wl_output::WlOutput) {
+        let name = self.output_names.get(&output.id());
+        if let (Some(window), Some(name)) = (self.windows.pending(id), name) {
+            if !window.outputs.contains(name) {
+                window.outputs.push(name.clone());
+            }
+        }
+    }
+
+    fn output_leave(&mut self, id: &WindowId, output: &wl_output::WlOutput) {
+        let name = self.output_names.get(&output.id());
+        if let (Some(window), Some(name)) = (self.windows.pending(id), name) {
+            window.outputs.retain(|entered| entered != name);
+        }
     }
 
     fn push_window(&mut self, change: Change<Window>) {
@@ -966,7 +958,7 @@ impl State {
         }
     }
 
-    fn set_accessibility(&mut self, next: Accessibility) {
+    pub(crate) fn set_accessibility(&mut self, next: Accessibility) {
         if next != self.accessibility {
             self.accessibility = next;
             self.events.push(Event::Accessibility(next));
@@ -1079,6 +1071,7 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
             if let Some(manager) = &state.globals.keyboard_layouts {
                 state.keyboard_layout = Some(manager.get_keyboard_layout(&keyboard, qh, ()));
             }
+            crate::keyboard_group::watch(state, &keyboard, qh);
             state.keyboard = Some(keyboard);
         }
     }
@@ -1113,13 +1106,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             return;
         }
         match read_keymap(fd, size) {
-            Ok(text) => {
-                let layouts = keymap::layout_names(&text);
-                if layouts != state.keyboard_layouts {
-                    state.keyboard_layouts = layouts.clone();
-                    state.events.push(Event::KeyboardLayouts(layouts));
-                }
-            }
+            Ok(text) => state.keymap_layouts(keymap::layout_names(&text)),
             Err(err) => tracing::warn!("the keymap could not be read: {err}"),
         }
     }
@@ -1135,41 +1122,7 @@ impl Dispatch<ZcosmicKeyboardLayoutV1, ()> for State {
         _: &QueueHandle<Self>,
     ) {
         let zcosmic_keyboard_layout_v1::Event::Group { group } = event;
-        if group != state.keyboard_group {
-            state.keyboard_group = group;
-            state.events.push(Event::KeyboardGroup(group));
-        }
-    }
-}
-
-impl Dispatch<CosmicA11yManagerV1, ()> for State {
-    fn event(
-        state: &mut Self,
-        _: &CosmicA11yManagerV1,
-        event: cosmic_a11y_manager_v1::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        let enabled = |value: WEnum<ActiveState>| value == WEnum::Value(ActiveState::Enabled);
-        let mut next = state.accessibility;
-        match event {
-            cosmic_a11y_manager_v1::Event::Magnifier { active } => next.magnifier = enabled(active),
-            cosmic_a11y_manager_v1::Event::ScreenFilter { inverted, filter } => {
-                next.inverted = enabled(inverted);
-                next.filter = match filter {
-                    WEnum::Value(Filter::Disabled) => ScreenFilter::None,
-                    WEnum::Value(Filter::Greyscale) => ScreenFilter::Greyscale,
-                    WEnum::Value(Filter::DaltonizeProtanopia) => ScreenFilter::Protanopia,
-                    WEnum::Value(Filter::DaltonizeDeuteranopia) => ScreenFilter::Deuteranopia,
-                    WEnum::Value(Filter::DaltonizeTritanopia) => ScreenFilter::Tritanopia,
-                    WEnum::Value(Filter::Unknown) | WEnum::Unknown(_) => ScreenFilter::Unknown,
-                };
-            }
-            // Version 3 only; this client binds version 2.
-            cosmic_a11y_manager_v1::Event::ScreenFilter2 { .. } => {}
-        }
-        state.set_accessibility(next);
+        state.set_group(group);
     }
 }
 
@@ -1193,6 +1146,12 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
             .toplevel_info
             .as_ref()
             .map(|info| info.get_cosmic_toplevel(&toplevel, qh, id));
+        // COSMIC's extension first (plan D3). One state object per window: the compositor
+        // ends the connection on a second.
+        let athanor = match (&cosmic, &state.globals.athanor_toplevel) {
+            (None, Some(manager)) => Some(manager.get_toplevel_state(&toplevel, qh, id)),
+            _ => None,
+        };
         state.windows.insert(
             id,
             Window {
@@ -1208,6 +1167,7 @@ impl Dispatch<ExtForeignToplevelListV1, ()> for State {
             Toplevel {
                 ext: toplevel,
                 cosmic,
+                athanor,
             },
         );
     }
@@ -1255,6 +1215,9 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
                 if let Some(toplevel) = state.toplevels.remove(id) {
                     if let Some(cosmic) = toplevel.cosmic {
                         cosmic.destroy();
+                    }
+                    if let Some(athanor) = toplevel.athanor {
+                        athanor.destroy();
                     }
                     toplevel.ext.destroy();
                 }
@@ -1304,23 +1267,47 @@ impl Dispatch<ZcosmicToplevelHandleV1, WindowId> for State {
                     window.state = WindowState::from_cosmic(&array);
                 }
             }
-            // The compositor names an output in reply to its bind, before it can report a
-            // toplevel on it.
             zcosmic_toplevel_handle_v1::Event::OutputEnter { output } => {
-                let name = state.output_names.get(&output.id());
-                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
-                    if !window.outputs.contains(name) {
-                        window.outputs.push(name.clone());
-                    }
-                }
+                state.output_enter(id, &output);
             }
             zcosmic_toplevel_handle_v1::Event::OutputLeave { output } => {
-                let name = state.output_names.get(&output.id());
-                if let (Some(window), Some(name)) = (state.windows.pending(id), name) {
-                    window.outputs.retain(|entered| entered != name);
-                }
+                state.output_leave(id, &output);
             }
             _ => {}
+        }
+    }
+}
+
+impl Dispatch<AthanorToplevelStateV1, WindowId> for State {
+    fn event(
+        state: &mut Self,
+        _: &AthanorToplevelStateV1,
+        event: athanor_toplevel_state_v1::Event,
+        id: &WindowId,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            athanor_toplevel_state_v1::Event::State { state: flags } => {
+                let flags = match flags {
+                    WEnum::Value(flags) => flags.bits(),
+                    WEnum::Unknown(flags) => flags,
+                };
+                if let Some(window) = state.windows.pending(id) {
+                    window.state = WindowState::from_athanor(flags);
+                }
+            }
+            athanor_toplevel_state_v1::Event::OutputEnter { output } => {
+                state.output_enter(id, &output);
+            }
+            athanor_toplevel_state_v1::Event::OutputLeave { output } => {
+                state.output_leave(id, &output);
+            }
+            athanor_toplevel_state_v1::Event::Done => {
+                if let Some(change) = state.windows.commit(id) {
+                    state.push_window(change);
+                }
+            }
         }
     }
 }
@@ -1495,6 +1482,7 @@ macro_rules! ignore_events {
 
 ignore_events!(
     ZcosmicToplevelManagerV1,
+    AthanorToplevelManagerV1,
     ZcosmicWorkspaceManagerV2,
     ZcosmicKeyboardLayoutManagerV1,
     WpSecurityContextManagerV1,

@@ -47,6 +47,7 @@ import sys
 import threading
 import time
 
+import pace
 from memory_case import MEMORY_PROBE, MEMORY_PROBE_WAIT
 
 # Marker -> phase name. Order matters only for reporting; each is written once. Colour
@@ -407,7 +408,9 @@ SESSION_DIAGNOSTICS = (
 # seconds -- the interval after which run 34581940472 still had no window -- and answers
 # ALIVE only if the unit is still active and its journal holds no Rust panic and no
 # abort or core dump. The screenshot taken on the answer is what shows the window.
-SETTINGS_UNIT = b"athanor-settings-probe"
+# The launcher's name for an application's unit: cosmic-settings blocks on cosmic-randr, which
+# athanor-compositor serves only in the units of Settings (data/privileged-clients).
+SETTINGS_UNIT = b"app-athanor-com.system76.CosmicSettings@probe"
 SETTINGS_APP = b"com.system76.CosmicSettings"
 SETTINGS_WATCH = b"20"
 SETTINGS_CRASH = b"panicked at|code=dumped|status=6/ABRT"
@@ -488,7 +491,7 @@ MOK_PROBE = (
 MOK_PROBE_WAIT = 5.0
 # The tests drive a fake guest that answers at once and scale every wait in the login
 # path down through this; the run itself leaves it at one.
-PACE = float(os.environ.get("ATHANOR_CONSOLE_PACE", "1"))
+PACE = pace.from_environment()
 # The upgrade case (run_iso_test.sh with UPDATE_TO): a steady Settings does not end the
 # run. The serial login is ended, since a tty session makes Apply() ask for an
 # administrator (UT6), `ready` is written beside the log once the getty offers its login
@@ -560,12 +563,12 @@ def main() -> int:
         print(f"  console: {name} at {time.strftime('%H:%M:%S')}", flush=True)
 
     def boot_with_our_kickstart() -> None:
-        time.sleep(GRUB_SETTLE)
+        time.sleep(GRUB_SETTLE * PACE)
         s.sendall(b"c")  # leave the menu for GRUB's command line
-        time.sleep(BETWEEN_COMMANDS)
+        time.sleep(BETWEEN_COMMANDS * PACE)
         for command in BOOT_COMMANDS:
             s.sendall(command + b"\n")
-            time.sleep(BETWEEN_COMMANDS)
+            time.sleep(BETWEEN_COMMANDS * PACE)
         note("grub-booted")
 
     def ask(command: bytes, wait: float) -> None:

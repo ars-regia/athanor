@@ -4,13 +4,16 @@
 //! scale 1, an output as it draws itself, and either is copied into the client's wl_shm buffer at
 //! the next frame of the outputs. Nothing is captured while the session is locked (spike Q7).
 
+use crate::a11y::Look;
+use crate::look::{FilterElement, Filters};
+use crate::marks::Marks;
 use crate::state::{draw_view, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
-use smithay::backend::renderer::element::AsRenderElements;
+use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::GlesTexture;
-use smithay::backend::renderer::{Bind, ExportMem, ImportAll, Offscreen, Renderer, Texture};
+use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Texture};
 use smithay::desktop::{Space, Window};
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm};
@@ -164,13 +167,16 @@ fn constraints(width: i32, height: i32) -> BufferConstraints {
 }
 
 impl State {
-    /// The window or the output `source` names, if it is still mapped and of a size that can be
-    /// captured, with that size.
+    /// The window or the output `source` names, if it is still mapped, minimised or on an
+    /// inactive workspace, and of a size that can be captured, with that size.
     fn captured(&self, source: &ImageCaptureSource) -> Option<(Target, (i32, i32))> {
         let target = match source.user_data().get::<Captured>()? {
+            // A window out of the space keeps its thumbnail, drawn from its last buffer.
             Captured::Window(id) => self
                 .space
                 .elements()
+                .chain(self.minimised.iter().map(|(window, _)| window))
+                .chain(self.parked.iter().map(|(window, _)| window))
                 .find(|window| {
                     window
                         .user_data()
@@ -205,12 +211,16 @@ impl State {
                 self.capture_sessions.retain(|kept| *kept != session);
                 continue;
             };
+            let marks = self.marks();
             let read = match &mut self.backend {
-                Backend::Headless(headless) => headless.read_back(&target, &self.space),
-                Backend::Drm(drm) => drm.read_back(&target, &self.space),
-                Backend::Nested(nested) => {
-                    read_back::<_, GlesTexture>(nested.backend.renderer(), &target, &self.space)
-                }
+                Backend::Headless(headless) => headless.read_back(&target, &self.space, &marks),
+                Backend::Drm(drm) => drm.read_back(&target, &self.space, &marks),
+                Backend::Nested(nested) => read_back::<_, GlesTexture>(
+                    nested.backend.renderer(),
+                    &target,
+                    &self.space,
+                    &marks,
+                ),
             };
             match read.and_then(|pixels| copy_into(&frame.buffer(), width, height, &pixels)) {
                 Ok(true) => {
@@ -230,16 +240,19 @@ impl State {
 }
 
 /// Draws `what` off screen and reads its pixels back, `READ_FORMAT`, row by row from the top: a
-/// window at scale 1, an output as it draws `space`, whole.
+/// window at scale 1, an output as it draws `space`, whole, without the magnifier and the
+/// colour filters, which are the user's view and not the screen's contents (AX10).
 pub fn read_back<R, T>(
     renderer: &mut R,
     what: &Target,
     space: &Space<Window>,
+    marks: &Marks,
 ) -> Result<Vec<u8>, Error>
 where
-    R: Renderer + ImportAll + ExportMem + Offscreen<T> + Bind<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R: Filters + ExportMem + Offscreen<T> + Bind<T>,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
     let (width, height) = what.size().ok_or("nothing of a size to capture")?;
     let size = Size::<i32, Buffer>::from((width, height));
@@ -262,8 +275,9 @@ where
             // a client asks for it (the portal, task 7).
             let mut tracker = OutputDamageTracker::from_output(output);
             // ponytail: without the input method's popups; pass them in when a capture needs them.
-            let view = View::Space(space, &[]);
-            let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker)
+            let view = View::Space(space, &[], marks);
+            let look = Look::default();
+            let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker, look)
                 .map_err(|error| format!("{error:?}"))?;
             result.sync.wait()?;
         }

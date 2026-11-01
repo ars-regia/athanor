@@ -10,11 +10,14 @@ jobs:
   lint:
     name: 🔎 Lint workflows (actionlint + scripts/verify.py)
     runs-on: ubuntu-24.04
-    # The ISO acceptance suite drives a fake guest over a socket in real time and takes
-    # about a minute on its own, which left no room under the previous five.
-    timeout-minutes: 10
+    # On 2026-10-24 the job grew from 7 to 10 minutes, and a promotion lost it at 10 minutes 1
+    # second. The timeout only stops a hung job; the last step fails a run that is slow but
+    # finished, at a budget well below it, so the next slowdown is seen before it costs a run.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Start the duration budget clock
+        run: python3 scripts/ci/job_budget.py start "$RUNNER_TEMP/lint-started"
       - name: Install actionlint 1.7.9 (checksum-verified, kept off PATH)
         run: |
           set -euo pipefail
@@ -54,7 +57,7 @@ jobs:
           set -euo pipefail
           python3 -B -m unittest discover -s system/nvidia/tests -v
       - name: Build ordering scripts (unit tests against an offline registry)
-        run: python3 -B -m unittest discover -s system/tests -v
+        run: python3 -B scripts/ci/unittest_parallel.py system/tests 4
       - name: Update and trust package (unit tests)
         run: python3 -B -m unittest discover -s forge/specs/athanor-update/tests -v
       - name: Recovery console (unit tests)
@@ -73,9 +76,6 @@ jobs:
           python3 -B forge/test/iso/test_verdict.py
           python3 -B forge/test/iso/test_report.py
 
-      - name: Forge scripts (unit tests)
-        run: python3 -B -m unittest discover -s forge/scripts/tests -v
-
       - name: Repository scripts (unit tests)
         run: |
           set -euo pipefail
@@ -93,3 +93,8 @@ jobs:
           set -euo pipefail
           python3 -B -m unittest discover -s forge/scripts/tests -v
           python3 -B -m unittest discover -s forge/test/shell/tests -v
+
+      - name: Duration budget (ten minutes, the timeout is twenty)
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/job_budget.py check "$RUNNER_TEMP/lint-started" 10 | tee -a "$GITHUB_STEP_SUMMARY"

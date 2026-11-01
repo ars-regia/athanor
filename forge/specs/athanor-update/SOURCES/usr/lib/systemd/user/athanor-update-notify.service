@@ -16,4 +16,5 @@ RestrictNamespaces=yes
 SystemCallFilter=@system-service
 
 [Install]
-WantedBy=graphical-session.target
+# Started with the session under its target, enabled by the user preset (doc_session.md, SN3).
+WantedBy=athanor-session.target

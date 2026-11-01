@@ -12,6 +12,17 @@ set -eu
 # a compositor that died, units failed -- would have this one start half-way. Clear it.
 systemctl --user stop athanor-session.target
 systemctl --user reset-failed
+# A session on the own compositor killed before its exit handler ran leaves its compositor,
+# the scopes of the locker and the idle daemon, and its variables (doc_session.md, SN15).
+# The compositor's unit is stopped only where its package is installed: stopping a unit that
+# is not loaded fails, and would end this session.
+if [ -e /usr/lib/systemd/user/athanor-compositor.service ]; then
+    systemctl --user stop athanor-compositor.service
+fi
+# shellcheck source=SCRIPTDIR/../libexec/athanor/session-components
+. /usr/libexec/athanor/session-components
+stop_component_scopes
+systemctl --user unset-environment ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
 
 # A colon-separated list, most specific first, as the specification reads it: COSMIC's
 # own components and the portals recognise the desktop by its second name. The user
@@ -20,6 +31,18 @@ systemctl --user reset-failed
 export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
 
+# Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
+# /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
+# manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
+# children of this script, not of the user manager, so they need it from here.
+export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+# The user's language, region and cursor (doc_session.md SN2), which athanor-desktop imports
+# into the user manager.
+# shellcheck source=SCRIPTDIR/../libexec/athanor/session-environment
+. /usr/libexec/athanor/session-environment
+export_user_environment
+
 # GTK 4.20's wayland input-method module, which GTK 4 picks whenever the compositor
 # offers text-input-v3, composes nothing by itself: with no input method running,
 # dead keys and Compose sequences are dropped (US-International loses every accent).
@@ -27,12 +50,6 @@ export XDG_SESSION_TYPE=wayland
 # engine is enabled, unset when athanor-ime.service runs, since IBus composes then.
 # The user manager reads the same value from 50-athanor-desktop.conf; keep the two equal.
 export GTK_IM_MODULE=simple
-
-# Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
-# /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
-# manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
-# children of this script, not of the user manager, so they need it from here.
-export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
 # The USB policy is relaxed for an unlocked session; the hook does nothing where
 # usbguard is not running.

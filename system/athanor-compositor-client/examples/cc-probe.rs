@@ -26,6 +26,7 @@ fn window(window: &Window) -> Value {
         "minimized": window.state.minimized,
         "maximized": window.state.maximized,
         "fullscreen": window.state.fullscreen,
+        "outputs": window.outputs,
     })
 }
 
@@ -49,6 +50,9 @@ fn event(event: &Event) -> Value {
         Event::KeyboardLayouts(names) => json!({"keyboard_layouts": names}),
         Event::KeyboardGroup(group) => json!({"keyboard_group": group}),
         Event::Accessibility(a11y) => json!({"accessibility": format!("{a11y:?}")}),
+        Event::AidRejected(aid) => json!({"aid_rejected": format!("{aid:?}")}),
+        Event::AidGesture(aid) => json!({"aid_gesture": format!("{aid:?}")}),
+        Event::AidOff(aid) => json!({"aid_off": format!("{aid:?}")}),
     }
 }
 
@@ -59,6 +63,7 @@ fn snapshot(client: &Client, display: &gdk::Display) -> Value {
         "keyboard_layouts": client.keyboard_layouts(),
         "keyboard_group": client.keyboard_group(),
         "accessibility": client.accessibility().map(|a11y| format!("{a11y:?}")),
+        "own_compositor": client.own_compositor(),
         "outputs": outputs::current(display).iter()
             .map(|o| json!({"connector": o.connector, "width": o.width, "height": o.height}))
             .collect::<Vec<_>>(),
@@ -99,16 +104,17 @@ async fn step(
             .ok_or(format!("no window with app id {app_id}"))
     };
     let error = |err: &dyn std::fmt::Display| err.to_string();
+    let actions = client.window_actions();
     match verb {
         "snapshot" => println!("{}", snapshot(client, display)),
         "watch" => {
             let seconds: u64 = arg()?.parse().map_err(|err| error(&err))?;
             glib::timeout_future(Duration::from_secs(seconds)).await;
         }
-        "activate" => client.activate(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "minimize" => client.minimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "unminimize" => client.unminimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
-        "close" => client.close(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "activate" => actions.activate(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "minimize" => actions.minimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "unminimize" => actions.unminimize(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
+        "close" => actions.close(by_app_id(&arg()?)?).map_err(|e| error(&e))?,
         "react" => {
             // A handler that reads and acts from inside the callback (re-entrancy).
             let app_id = arg()?;
@@ -117,7 +123,7 @@ async fn step(
                 if let Event::WindowChanged(w) = e {
                     if w.app_id == app_id && w.state.minimized {
                         let listed = client.windows().iter().any(|other| other.id == w.id);
-                        let unminimized = client.unminimize(w.id).is_ok();
+                        let unminimized = client.window_actions().unminimize(w.id).is_ok();
                         println!("{}", json!({"reacted": listed && unminimized}));
                     }
                 }
@@ -186,6 +192,10 @@ fn main() -> ExitCode {
         }
     };
     client.connect_events(|_, e| println!("{}", json!({"event": event(e)})));
+    if let Err(err) = client.watch_keyboard_group() {
+        println!("{}", json!({"error": err.to_string()}));
+        return ExitCode::FAILURE;
+    }
     let main_loop = glib::MainLoop::new(None, false);
     let result = std::rc::Rc::new(std::cell::Cell::new(ExitCode::SUCCESS));
     glib::spawn_future_local({

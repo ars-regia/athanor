@@ -1,10 +1,12 @@
 # athanor-compositor
 
 Athanor's own Wayland compositor on [Smithay](https://github.com/Smithay/smithay)
-(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). No package ships it yet. Once
-milestone C1's DRM backend has passed the console sessions, the image ships it as an optional
-session at the greeter, under the conditions of decision 10, and cosmic-comp stays the default
-session until this one passes the acceptance of the specification's revision 2 (OS19).
+(`docs/architecture/doc_own_stack.md`, milestone C1; ADR-0121). The package
+`athanor-compositor` ships it as the greeter's default session (`docs/architecture/doc_session.md`,
+SN14 and SN15, revision 4; `doc_own_stack.md` decision 28): `data/athanor-compositor-session`
+starts `data/athanor-compositor.service`, which starts the desktop once the display is ready.
+cosmic-comp's session stays at the greeter as the second entry until this one passes OS19 of
+`doc_own_stack.md` in full and the overview and the window switcher on Alt+Tab have come.
 
 ## Smithay
 
@@ -29,12 +31,37 @@ It opens one output the size of its window, at the given scale (1 by default), l
 next free `wayland-N` socket and logs that name. In the shell rig, `RIG_COMPOSITOR=athanor`
 runs it in place of cosmic-comp (`forge/test/shell/session.sh`).
 
+SIGTERM, which `systemctl --user stop` sends, and SIGINT, which Ctrl+C sends, end the event loop
+as a closed nested window does (`src/shutdown.rs`). The compositor then stops xwayland-satellite
+and removes the X11 display's lock and socket while they are still its own. It drops the Wayland
+socket, releases the DRM device and the seat through the drops of the state and of the event
+loop's sources, and exits 0. The
+satellite runs in a scope of its own under the user manager, outside the service's cgroup, so
+stopping the service does not end it: the compositor sends SIGTERM to the process it spawned,
+which `systemd-run --scope` executes in place, and SIGKILL after two seconds. Xwayland exits by
+itself when the satellite's connection closes. `tests/sigterm.rs` covers the Wayland socket and
+its lock, and `xwayland.rs` the satellite's termination and the ownership of the X11 files; no
+test covers the release of the DRM device and the seat.
+
+The signals are blocked at the start of `run`, before the display, the backend and any thread,
+so that every thread inherits the block, and are read once the loop runs. A signal sent while the compositor starts is honoured
+when the loop begins, and a start that blocks inside a call (the seat, the DRM device) ends only
+by SIGKILL. The same holds for a loop blocked in a call. Once the loop has returned, the source
+is removed, and a second SIGTERM or Ctrl+C takes the default action and ends a stalled cleanup.
+`doc_session.md` specifies `TimeoutStopSec=5s` for `athanor-compositor.service`, which the
+session's change (#704) ships, not this crate: systemd then sends SIGKILL after 5 s, and the
+satellite's two seconds between SIGTERM and SIGKILL stay below it.
+
 Task 2 adds the headless backend of OS6: virtual outputs of any number, size and scale, drawn
 off screen.
 
 ```
 athanor-compositor --headless --render-node /dev/dri/renderD128 --output 1920x1080 --output 1280x800@1.5
 ```
+
+A manual `--headless` run, like the shell rig's, also asks the session bus for the name
+`org.freedesktop.a11y.Manager`, which Orca's keyboard commands need; if the session already has an
+owner, the compositor logs it and runs without Orca's commands.
 
 On a render node it draws through GBM and GLES and offers `linux-dmabuf` (version 4, with
 feedback naming the node) and, when the node can wait on a syncobj, `linux-drm-syncobj-v1`.
@@ -66,9 +93,31 @@ windows with their title and app id, and `ext-image-copy-capture-v1` copies one 
 through the toplevel capture source (an output since OS9 task 2), into a client's `wl_shm` buffer (`src/capture.rs`).
 `ext-session-lock-v1` shows only the lock surfaces and gives them the keyboard and the pointer,
 refuses every capture, and confirms the lock once every output has drawn it (`src/lock.rs`).
-`ext-idle-notify-v1` follows the input, and `ext-workspace-v1` offers one active workspace per
-output (`src/workspace.rs`). `wp-security-context-v1` tags the clients a sandbox connects: they
-see none of these globals but the idle notifier, nor the security context manager.
+`ext-idle-notify-v1` follows the input. Each output has its own dynamic workspaces
+(`doc_own_stack.md` OS2, `src/workspace.rs`), as cosmic-comp keeps them: an empty one always
+last, which a window placed on it turns into a new empty one after it, and a workspace emptied
+that is neither the last nor the active one is removed. A window maps on the first output's
+active workspace; the windows of an inactive one leave the space, keeping their place, and come
+back there when it is activated, at once, with no animation. A window on an inactive workspace
+can still be captured, and activating it from the dock, or restoring it, activates its workspace
+first; an xdg-activation token, which a focused client can make at any time, switches no
+workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+window on an inactive workspace, minimised or drawing nothing grabs nothing. A window
+a move drops with its centre on another output joins that output's active workspace, and a
+window its output no longer shows after the outputs change is centred on that output, on the
+first when its output went, whose active workspace it then joins; a window is maximised to its
+workspace's output, fitted to it again when the outputs change, and restored onto it when its
+place there moved off the output. `ext-workspace-v1` sends each output as a group and its workspaces in order, named from 1,
+their place as coordinates, the active one's state, and the `activate` capability, applied at the
+manager's `commit` and refused while the session is locked. Since SN13 step 6 of `doc_session.md`, `idle-inhibit-unstable-v1`
+holds the idle notifications off while an inhibitor's surface is shown, as cosmic-comp does: a
+minimised window, a dead client or the lock lets them run (`src/idle_inhibit.rs`).
+`zwp_primary_selection_device_manager_v1` is every client's and follows the keyboard focus as the
+clipboard does; `ext_data_control_manager_v1` and `zwlr_data_control_manager_v1`, which read and set
+both selections without the focus, are privileged and granted to no client yet (`src/clipboard.rs`).
+`wp-security-context-v1` tags the clients a sandbox connects: they
+see the standard globals, primary selection among them, and no privileged one, data control
+included, nor the security context manager.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
@@ -79,7 +128,7 @@ unit is the first component of the cgroup v2 path that is not a slice, below the
 for a user unit; the first, so that a unit with `Delegate=yes` cannot name a sub-cgroup after
 another unit. The allow-list, `/usr/share/athanor/compositor/privileged-clients`
 (`data/privileged-clients`), has one grant per line, `<executable> <unit> <interface>...`; the
-executable is a path under `/usr`, the unit a service or a scope, each interface one of the
+executable is a path under `/usr`, the unit a service, a scope or a family of template units, `<prefix>*@.service`, each interface one of the
 privileged globals the compositor offers. A grant needs the executable's path, the unit, and
 the file: `stat` of `/proc/<pid>/exe` and `stat` of the allow-list's path in the compositor's
 mount namespace must name the same device and inode, since a sandbox whose own `/usr` holds a
@@ -95,15 +144,46 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
-| `zwlr_layer_shell_v1`, bottom and background layers | every client |
+| `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
 
 `data/globals` gives the class of every global the compositor can offer, and the fixture fails
 on an offered global without a row (`os9_every_global_is_classified`). `ext_workspace_manager_v1`
 and `zwlr_output_manager_v1` became privileged with OS9 (open questions 7 and 10 of the OS9
-plan): the bar's line carries the workspaces, and the output manager is the control center's.
+plan): the bar's line carries the workspaces, and the output manager is the control center's,
+and cosmic-randr's in the units of Settings until it leaves the image.
+`zwlr_output_power_manager_v1` turns a screen off and is the idle daemon's: a client it reached
+could blank the session.
+`athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
+on windows: the control center is granted the first, the bar, the dock and the launcher both.
+`athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
+keyboard's layout group: the bar alone is granted it, for its input-source switch. The layouts, options and repeat come from
+cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
+before the first client and again after each change of it (an inotify watch of its directory
+and of every ancestor of it, along each link on the way), so one file drives the
+keymap under both compositors. The seat keeps its group, clamped to the new layouts, and its
+Caps Lock. A file that is malformed, lists more than four layouts, is not a regular file of at
+most 64 KiB or does not compile leaves the last keymap, with a warning; without a file the
+keymap is the environment's and the repeat 25 per second after 200 ms.
+`athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-compositor-client) switches the
+magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
+granted it. The inversion and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron`
+under the state root, read at start and written atomically, in cosmic-comp's format, at each
+change; a file that cannot be read changes nothing and is written over only at the next change,
+and a filter this compositor does not name is kept, sent as `unknown` and not drawn. The
+magnifier's increment, how the view follows the pointer and the mouse zoom shortcuts are
+cosmic-comp's `accessibility_zoom` under the configuration root, read at start and after each
+change as `xkb_config` is. A step multiplies or divides the level by one plus the increment,
+between 1 and 256; Super+= and Super+- step it, under a shortcut inhibitor too and never while
+the session is locked, and so does Super with the scroll wheel when the mouse shortcuts are on.
+The view follows the pointer, and the middle of the window or layer surface the keyboard goes
+to until the pointer next moves. The output under the point followed is drawn scaled about the
+view, the inversion and the filter as one
+pass over each output's final frame; captures and screencopy get neither. While a pass is on,
+nothing is scanned out directly. `src/screen_filter.rs` is the only reader and writer of these
+two files.
 The virtual keyboard and pointer of OS9 task 6 are granted to no shipped client. Their input
 takes the hardware's path, so the compositor's keys and the layer focus apply to it. The
 keymap follows the keyboard that sent the last key, as wlroots has it: a virtual keyboard's own
@@ -125,21 +205,28 @@ stays so after unlock: only a grab asked for while unlocked is sent the keymap, 
 and the current modifiers, then the keys. While locked the text inputs follow no surface, so
 the input method is neither activated for the lock surface nor told its text, and what it
 commits or pre-edits reaches no client. Releasing its grab ends that grab only, never one that
-replaced it; an exclusive layer surface taking the keyboard ends any grab, the input method's
-included.
+replaced it. A popup's grab replaces the input method's while it lasts, and an exclusive layer
+surface taking the keyboard takes it off; neither ends it: it is back for the next key pressed
+with no key held, without a new request, so that it serves the launcher's field and the window
+after it. Only the lock and the input method's own release end it.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
 heads with their modes, position, transform and scale, and a configuration succeeds when it
-changes nothing but scales from 1 to 4; one that disables a head or asks for another mode,
-position, transform or adaptive sync fails.
+changes nothing but scales from 1 to 4 and transforms; one that disables a head or asks for
+another mode, position or adaptive sync fails, and so does another transform of the nested
+output, whose transform rights the backend's frame.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
 and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped
 binary binds it, so `data/privileged-clients` grants it to no one; the rig's capture is its
 client.
 
-The image ships no allow-list yet, as it ships no compositor; `data/privileged-clients` grants
-the bar what the plan names, and the fixture grants its clients every privileged global but the
-output manager as the bar, and the output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
+`data/privileged-clients` grants the bar, the dock, the control center and the launcher the
+interfaces each uses (`doc_session.md`, SN12); the test
+`every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line` fails when
+a crate under `forge/specs` draws on the top or overlay layer, or connects to the compositor's
+globals, without a line. The greeter is outside the list while it runs on cosmic-comp. The
+fixture grants its clients every privileged global but the output manager as the bar, and the
+output manager to its control center (`FIXTURE_ALLOW_LIST`). No client is granted `ext_session_lock_manager_v1` there: no locker
 can lock the session until one is added.
 
 What the check does not cover, and what revision 2 of `doc_own_stack.md` decided:
@@ -155,8 +242,6 @@ What the check does not cover, and what revision 2 of `doc_own_stack.md` decided
   FUSE server, and a test with a stalled FUSE server (decision 18).
 - **Unconfined code is out of scope** (OS4, first paragraph): a process running as the user can
   start a unit of any name with `systemd-run --user` and run the bar's executable in it.
-- The bottom and background layers of `wlr-layer-shell` stay offered inside a security context;
-  revision 2 keeps them open to every client (OS4).
 - Input-method, data control and the private interface are not offered yet; each joins the
   allow-list's interfaces when it is.
 - A granted client's exclusive overlay surface kept the keyboard while it lived, with no escape
@@ -189,35 +274,66 @@ exporting the tree of a surface the compositor closed: in one run of task 7 with
 observation, not a fixture), the walk passed while the compositor's log said it closed the bar's
 surface and the capture was empty. The check therefore also fails when that log is missing or
 says it closed the bar's surface. The bar
-shows 6 interactive widgets, not cosmic-comp's 8: the input source and the tiling toggle need
-`zcosmic_keyboard_layout_manager_v1` and `zcosmic_workspace_manager_v2`, whose private
-replacements `docs/spikes/c1-protocols.md` proposes and revision 2 specifies (decision 19).
+shows 7 interactive widgets, not cosmic-comp's 8: the tiling toggle needs
+`zcosmic_workspace_manager_v2`, whose private replacement `docs/spikes/c1-protocols.md` proposes
+and revision 2 specifies (decision 19); the input source follows
+`athanor_keyboard_group_manager_v1`.
 
 Orca and `org.freedesktop.a11y.KeyboardMonitor` (`doc_accessibility.md` AX4), which revision 2
-requires (OS4):
+requires (OS4), are served by `src/keyboard_monitor.rs` (#863):
 
-- The rig's Orca walks (`rig.sh orca`) do not need it. In the rig under cosmic-comp, which owns
-  `org.freedesktop.a11y.Manager` with the monitor on the scene's bus, Orca's debug log records no
-  key event during a walk, and `KP_Enter`, Orca's "where am I", pressed through `wtype` after two
-  Tabs, is not spoken: Orca speaks from AT-SPI focus events alone. The keys reach the
-  application through the virtual keyboard and, by these signs, not the monitor; cosmic-comp's
-  source was not traced to confirm it.
-- Orca's own commands need it. Under this compositor nothing owns `org.freedesktop.a11y.Manager`,
-  so Orca's commands do not reach Orca. A client the allow-list grants them gets the virtual
-  keyboard and pointer (OS9 task 6); what `wtype` lacks to walk a surface in the rig is its line
-  in the allow-list (OS9 task 7).
-- The size of the work: the monitor on the session bus (`GrabKeyboard`, `UngrabKeyboard`,
-  `WatchKeyboard`, `UnwatchKeyboard`, `SetKeyGrabs`, the `KeyEvent` signal) through zbus, already
-  a dependency of the workspace, on a thread of its own that talks to calloop through a channel;
-  the filter in the keyboard path that sends every key to a watcher and keeps the grabbed ones
-  from the focused client; and AX4's admission at every call, the owner of
-  `org.gnome.Orca.KeyboardMonitor` in the cgroup of `orca.service` with Orca's executable under
-  `/usr`, read through `GetConnectionCredentials`' `ProcessFD` with `identity.rs`'s unit and file
-  checks. Whether the image's session bus returns `ProcessFD` is unverified
-  (`doc_accessibility.md` AX4, open doubt 9); without it the pid with AX5's reuse check stands in. About 500 lines with their tests (an estimate). The virtual keyboard's
-  keys take the hardware's path (OS9 task 6), so they will pass through that filter as well,
-  which cosmic-comp's do not. With `wtype`'s allow-list line (OS9 task 7), `rig.sh orca` can
-  then run under `RIG_COMPOSITOR=athanor` and test an Orca command, not only focus.
+- The interface (`GrabKeyboard`, `UngrabKeyboard`, `WatchKeyboard`, `UnwatchKeyboard`,
+  `SetKeyGrabs`, the `KeyEvent` signal) lives at `/org/freedesktop/a11y/Manager` under
+  `org.freedesktop.a11y.Manager` on the session bus, served through zbus on threads of its own
+  that talk to calloop through channels. Its calls are handled one at a time, in the order the
+  bus sent them, so that a grab and its release are never applied the wrong way round; each is
+  answered once it is admitted. The admission asks the bus, and reads the changes of names, on
+  a second connection: zbus stops reading a connection while one of its queues is full, so the
+  calls waiting on the first never block the answers the admission waits for. The signal goes to
+  its client alone. If the bus closes or the name's watch ends, every client is forgotten and
+  the monitor stops, logged: no stale grab outlives it.
+- Every call is admitted before it changes anything: its sender owns
+  `org.gnome.Orca.KeyboardMonitor`, runs in the cgroup of `orca.service`, and runs an
+  executable under `/usr` that is the very file at its path, read through the pidfd of
+  `GetConnectionCredentials`' `ProcessFD`, or, from a bus without it, the pid asked for twice
+  and opened as a pidfd, with AX5's reuse check after the reads. `/usr/bin/orca` is a Python
+  script, so the executable is the interpreter: the unit is what tells Orca apart. A refused
+  call is answered `org.freedesktop.DBus.Error.AccessDenied` and changes nothing; a refused
+  client is forgotten; the journal names a refusal at most once a minute. When Orca's name
+  changes owner, or a connection comes or goes, every admitted client is admitted again, and
+  one that fails is forgotten, logged: the interface has no signal to tell it. AX4 open doubt
+  9: Athanor 43's session bus (dbus-broker 37) returns `ProcessFD` for an ordinary peer, and the
+  reference laptop's bus returned it on 2026-10-30 (#863, with Orca running); the rig's bus is
+  not observed. Changes of names queue one wake-up at most,
+  so that a connection that comes and goes in a loop leaves room for Orca's call.
+- In the keyboard path every key, the virtual keyboard's included, is sent to a watcher before
+  the bindings, and the input method's forwarded keys are not sent twice. A protected key, one
+  whose action no inhibitor takes from the compositor (`Action::never_inhibited`: lock, VT
+  switch, terminate, reveal, the focus cycle, the screen reader's own key), is sent to no
+  client, Orca included, press and release, as OS4 says of the reveal key: the maintainer's
+  decision of 2026-10-30 (#863). After the bindings a key Orca grabs, its virtual modifiers
+  (Insert, Caps Lock) or the whole keyboard is kept from the focused client; no grab takes a
+  protected key. A grab matches the key as the keyboard reads it, and a capital letter matches
+  the small one Orca grabs, since Caps Lock capitalizes it; the modifiers match exactly, all but
+  the Lock that Caps Lock, held, sets. A virtual modifier is held by its key, not by the keysym the
+  keyboard reads for it when it is let go. The monitor is not a binding: under a shortcuts inhibitor
+  a watcher is still sent every key and a grab still takes its key (`doc_own_stack.md` decision
+  30). A key is protected locked or not, though the lock leaves some protected keys to the lock
+  surface. While the session is locked a watcher is still sent every key but the protected ones, the
+  lock surface's included, as cosmic-comp does, so that Orca speaks during the unlock, and no
+  grab or virtual modifier takes a key: the maintainer's decision of 2026-10-30 (#863), not an
+  oversight. Caps Lock as Orca's modifier gives back the lock it found, on or off, and the
+  focused client is told; a key a grab keeps from the client that changes the modifiers, as
+  Caps Lock under a grab of the keyboard does, is told to the client as modifiers. `KeyEvent`
+  is declared in the interface, so its introspection lists it.
+- The fixture tests (`src/fixture/keyboard_monitor.rs`) cover the watcher, the grabs, the
+  protected keys under a grab, under an inhibitor and while locked, Caps Lock's capital letters
+  and its lock, a virtual modifier let go under Shift, the refused callers, the virtual keyboard, the shortcuts
+  inhibitor and the lock. One test serves the interface on a private `dbus-daemon`: Orca is
+  admitted before its answer, another client is answered `AccessDenied`, a key is addressed to
+  its client alone, Orca is forgotten when it lets its name go, and every client when the bus
+  goes. Not yet covered: the order of calls under load, `rig.sh orca` testing an Orca command
+  under `RIG_COMPOSITOR=athanor`, and a check on the laptop with Orca itself.
 
 Task 8 adds the DRM backend (`src/udev.rs`, after Smithay's `anvil`): on a console, in a logind
 session of the seat, it opens the seat's primary GPU through libseat, draws each connected
@@ -238,16 +354,62 @@ refresh, paced by its vblank, with presentation feedback from the hardware clock
 not draw at all, and a surface no output shows still gets its frame callback once a second. The
 lock is confirmed only once every output has presented a frame drawn locked: a frame that could
 not be drawn, queued or presented is drawn whole again, and a draw with nothing new does not
-count. The frame-time report of task 2 runs here too. A monitor that goes moves the windows only it showed
-onto the first output, centred; the pointer moves across every output and stays on them.
+count. The frame-time report of task 2 runs here too. A monitor that goes moves its windows to the first
+output's active workspace, centred on the first output when it does not show them; the pointer moves across every output and stays on them.
 Started with a monitor plugged in that cannot be set up, and no other, the compositor ends with
 an error rather than show nothing; a monitor that cannot be set up later is logged as an error
 and tried again at the next scan of the connectors.
 
-The compositor keeps two kinds of key, which no client sees: Ctrl+Alt+F1 to F12 switch the
-virtual terminal, and **Super+Escape takes the keyboard back and locks the session**
-(`doc_lock_and_prompts.md` LP5), with Super alone: Super+Alt+Escape and Super+Shift+Escape are
-the client's. At the press, whatever follows, the keyboard leaves the exclusive top or overlay
+The compositor draws two marks around windows (`src/marks.rs`, `doc_own_stack.md` decision 31):
+the outline of the window with the keyboard focus, from the theme, which `src/focus_theme.rs`
+reads and follows, and a border of three fixed lines on every window and popup of a client in a
+security context, and of xwayland-satellite. `marks::stack` builds the stack of a frame for
+`draw_view` and for the DRM path alike.
+
+The compositor keeps the keys of its bindings (`src/bindings.rs`, `doc_own_stack.md` OS13),
+which neither the focused client nor the input method's grab sees, press or release:
+Ctrl+Alt+F1 to F12 switch the virtual terminal; Super+Alt+Escape ends the compositor, and the
+session with it (`doc_lock_and_prompts.md` LP10); Super+Alt+T, the reveal key of OS4, is kept
+with no effect until a change of its own (decision 31); Super+Q and Alt+F4 send `close` to the window with the
+keyboard focus, and to nothing when a layer surface holds it; Super+Space steps the seat's
+layout group, the first after the last; Super+1 to Super+9 activate the n-th workspace of the
+focused window's output (the first output's when no window has the keyboard), its last when n is
+past it, and Super+0 the last; Super+Shift with a digit moves the focused window there and the
+workspace follows; Super+Ctrl with Left, Up, h or k, or Right, Down, j or l, steps one workspace
+back or on, with no wrap, and Super+Shift+Ctrl with the same keys carries the focused window that
+step (OV13); Ctrl+Alt+Tab gives the keyboard to the next surface of
+the top layer that takes it on demand, those anchored to the top edge first and then the
+others, in the order their layer surfaces were created within each group, and after the last to the window, never
+from an exclusive surface or while locked, skipping an identity Super+Escape took the keyboard
+from (a bar along the top comes before a dock along the bottom, but a side dock that hides
+itself is anchored to the top too, and a bottom bar falls in the second group; from a window
+the cycle reads the first output, and a popup of a layer surface restarts it); and **Super+Escape takes the keyboard back and locks
+the session** (LP5), with Super alone. While the session is locked only the terminal switches,
+Super+Alt+Escape, Super+Space and the volume, mute and brightness keys act (section 1), Super+Alt+T is kept and acts on
+nothing, and every other key goes to the lock surface. Decision 28's three
+keys, Super+N, Super+Alt+A and COSMIC's other defaults reach the client.
+
+Super pressed and released alone, and Super+A until `athanor-library` exists, show the launcher
+(`os.athanor.Launcher1.Show`), and Super+C
+toggles the control center (`os.athanor.ControlCenter1.Toggle`); a key, a button, an axis or a
+gesture while Super is held, or a lock, cancels the launcher. Both press and release of Super
+reach the client. The calls go to the session bus from one thread, `session-calls`
+(`src/session_calls.rs`), through a queue of eight: a full queue drops the call with a warning,
+the loop never waits on the bus, and the bus starts either program at its first call. A call
+asked before the session locked is dropped, and a press of Super or Super+C repeated while its
+first call waits is sent once.
+
+The mute, microphone-mute and media keys run `wpctl` and `playerctl` as cosmic-comp's session
+does, and Super+Shift+Escape and the power key cosmic-osd's log-out and power dialogs. A key
+forks nothing: the same thread asks the user manager to run each fixed argument
+vector as a transient unit, `app-athanor\x2dcompositor-<name>-<pid>x<n>.service` in
+`app.slice` with `NoNewPrivileges` (`StartTransientUnit`, no shell). The touchpad key, alone or with Super+Ctrl, turns
+the touchpads' events off and on for the session. The volume and brightness keys and Super+Alt+S
+call cosmic-settings-daemon's `VolumeUp`, `VolumeDown`, `IncreaseDisplayBrightness`,
+`DecreaseDisplayBrightness` and `ScreenReader`, as cosmic-comp's session does, from one file,
+`src/bindings/cosmic.rs` (`doc_own_stack.md` decision 29), until athanor-osd and athanor-a11y
+take those keys; a volume or brightness step is never coalesced.
+At Super+Escape's press, whatever follows, the keyboard leaves the exclusive top or overlay
 surface that holds it, and that surface's popup grab ends, for the next exclusive surface or the
 top window: no lock client need run, and logind may fail. Then the compositor asks logind to lock
 its session (`org.freedesktop.login1.Session.Lock` on `session/auto`, what `loginctl
@@ -294,6 +456,25 @@ What the backend does not do yet, each marked `ponytail:` in `src/udev.rs`:
 - The primary GPU only; a second GPU, and its monitors, are not used.
 - A change redraws every output, not only those it shows on: a second monitor draws empty frames
   while the first animates.
+
+## X11
+
+When `/usr/bin/xwayland-satellite` is installed, the compositor holds an X11 display
+(`src/xwayland.rs`): the first free `:N`, its lock `/tmp/.X<N>-lock`, the socket
+`/tmp/.X11-unix/X<N>`, and the abstract name of the same path bound but not listening: libxcb,
+which tries it first, is refused and uses the file, so no other server answers under it and no
+process outside the file's mount namespace, a sandboxed application's, reaches the display. The
+first X11 client starts the satellite with the socket (`-listenfd`) and, as `WAYLAND_DISPLAY`, a
+Wayland socket of its own, `$XDG_RUNTIME_DIR/athanor-x11-<N>`, whose every client is confined:
+the standard globals only, no privilege and no identity, as inside a security context, whatever
+its executable (OS4). Not `WAYLAND_SOCKET`: the satellite starts Xwayland before it connects, and
+Xwayland, which inherits the variable and the descriptor, takes the connection. Under the user
+manager (`NOTIFY_SOCKET` set) it runs in a scope of its own, `systemd-run --user --scope`. When it
+exits, the X11 clients that came meanwhile are dropped and the next one starts it again, a second
+after the last start at the soonest: a client that comes sooner waits for it. Without the
+satellite there is no X11 display and the log says so. The display's number is logged with the
+Wayland socket; announcing it to the session as `DISPLAY` is the session's readiness (#704,
+doc_session.md SN13 step 6).
 
 ## Console sessions (C1 task 9, run by the maintainer)
 
@@ -343,9 +524,9 @@ sudo install -D -m 0644 /dev/stdin /usr/share/athanor/compositor/privileged-clie
 LIST
 ```
 
-The shipped `data/privileged-clients` has no line for the dock, so the dock's top layer and its
-window list are refused in any image: a gap to close in task 9a (#683). The dock line above is only for
-this run.
+The shipped `data/privileged-clients` grants the bar and the dock under their own units,
+`athanor-bar.service` and `athanor-dock.service` (task 9a, #683). The `c1-*` lines above are only
+for this run.
 
 ### 2. Start
 

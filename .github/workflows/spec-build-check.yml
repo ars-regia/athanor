@@ -8,8 +8,9 @@ name: Spec Build Check
 # its content hash (forge/scripts/check_idempotency.sh, the tag the DAG pulls): the published
 # athanor-builder:<hash> when the registry has it, else a builder image made from the pull request
 # (forge/scripts/builder_image.sh, handed to the build jobs as a one-day workflow artifact, never
-# pushed). Never athanor-builder:latest: that is the default branch's builder, and a pull request
-# into another branch (rebase/fedora-45) would build against the default branch's libraries.
+# pushed). Never athanor-builder:latest: that is the default branch's builder, which lags a
+# change to the builder's inputs until the Orchestrator promotes the new one, and which a pull
+# request into another branch (rebase/fedora-45) would build against.
 # Each spec builds in its own job with forge/scripts/run_spec_build.sh, the script of
 # call-dag-compile.yml (fetch with network, build without). On a green build of the spec bot's
 # pull request, bot-merge.yml runs forge/scripts/bot_merge.py, which merges it when every bump keeps its leading non-zero version component (semver-compatible).

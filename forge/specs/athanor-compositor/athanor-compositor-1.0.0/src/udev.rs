@@ -7,7 +7,10 @@
 //! at all while idle.
 
 use crate::capture::Target;
+use crate::a11y::Look;
 use crate::cursor::{pointer_elements, Cursor, PointerElement};
+use crate::look::FilterElement;
+use crate::marks::{Marks, Stacked};
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -29,6 +32,7 @@ use smithay::backend::renderer::damage::Error as DamageError;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
+use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Kind, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
@@ -39,7 +43,6 @@ use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{primary_gpu, UdevBackend, UdevEvent};
 use smithay::backend::SwapBuffersError;
 use smithay::desktop::layer_map_for_output;
-use smithay::desktop::space::{space_render_elements, SpaceRenderElements};
 use smithay::desktop::utils::OutputPresentationFeedback;
 use smithay::desktop::Window;
 use smithay::output::{Mode, Output};
@@ -47,10 +50,16 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
 use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
 use smithay::reexports::drm::Device as _;
-use smithay::reexports::input::event::{
-    DeviceEvent, EventTrait, KeyboardEvent, PointerEvent, SwitchEvent,
+use smithay::reexports::input::event::gesture::{
+    GestureHoldEvent, GesturePinchEvent, GestureSwipeEvent,
 };
-use smithay::reexports::input::{Event as LibinputEvent, Libinput};
+use smithay::reexports::input::event::{
+    DeviceEvent, EventTrait, GestureEvent, KeyboardEvent, PointerEvent, SwitchEvent,
+    TabletToolEvent,
+};
+use smithay::reexports::input::{
+    Device as InputDevice, Event as LibinputEvent, Libinput, SendEventsMode,
+};
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_server::Display;
@@ -74,9 +83,17 @@ type HeadOutput = DrmOutput<Allocator, Exporter, OutputPresentationFeedback, Drm
 
 smithay::backend::renderer::element::render_elements! {
     Element<=GlesRenderer>;
-    Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
+    Space=Stacked<GlesRenderer>,
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Pointer=PointerElement<GlesRenderer>,
+}
+
+// The frame as the magnifier and the colour filters show it: the elements scaled, or the whole
+// frame drawn offscreen and shown through the colour pass (`look.rs`).
+smithay::backend::renderer::element::render_elements! {
+    Frame<=GlesRenderer>;
+    Zoomed=RescaleRenderElement<Element>,
+    Filtered=FilterElement<GlesTexture>,
 }
 
 /// The session, the GPU and its monitors, and the input devices.
@@ -97,6 +114,10 @@ pub struct Drm {
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
     cursor: Cursor,
+    /// The devices that can tap, which the touchpad key turns off and on (D16).
+    touchpads: Vec<InputDevice>,
+    /// Whether the touchpad key has turned them off.
+    touchpads_off: bool,
 }
 
 /// What a scheduled draw of an output is for.
@@ -115,6 +136,9 @@ struct Head {
     drm_output: HeadOutput,
     /// A frame is queued and waits for its VBlank.
     queued: bool,
+    /// The VBlanks still owed for frames queued before the output was turned off: each comes
+    /// and presents nothing (`power_output`). A session switch drops them (`resume`).
+    stale_vblanks: u8,
     /// Whether its frames showed the lock.
     lock: LockFrames,
     /// The next draw, when one is scheduled, and what it is for.
@@ -126,11 +150,30 @@ struct Head {
     /// The earliest next draw: six tenths of a period after a VBlank, a period after a draw
     /// that had nothing new to show.
     not_before: Option<Instant>,
+    /// Whether it is on: an output the power client turned off draws nothing (`power_output`).
+    powered: bool,
+}
+
+/// Turns `device`'s events on or off; a device that cannot is logged.
+fn send_events(device: &InputDevice, on: bool) {
+    let mode = if on {
+        SendEventsMode::ENABLED
+    } else {
+        SendEventsMode::DISABLED
+    };
+    if let Err(error) = device.config_send_events_set_mode(mode) {
+        tracing::warn!(
+            ?error,
+            device = device.sysname(),
+            on,
+            "a touchpad's events could not be switched"
+        );
+    }
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
-/// devices, the switches and the kinds that handler acts on; `None` for the rest, which it takes
-/// only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
+/// devices, the switches, the gestures, the tablet tools and the kinds that handler acts on;
+/// `None` for the rest, which it takes only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
 fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend>> {
     Some(match event {
         LibinputEvent::Device(DeviceEvent::Added(added)) => InputEvent::DeviceAdded {
@@ -154,6 +197,40 @@ fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend
         },
         LibinputEvent::Pointer(PointerEvent::ScrollContinuous(event)) => InputEvent::PointerAxis {
             event: PointerScrollAxis::Continuous(event),
+        },
+        LibinputEvent::Gesture(gesture) => match gesture {
+            GestureEvent::Swipe(GestureSwipeEvent::Begin(event)) => {
+                InputEvent::GestureSwipeBegin { event }
+            }
+            GestureEvent::Swipe(GestureSwipeEvent::Update(event)) => {
+                InputEvent::GestureSwipeUpdate { event }
+            }
+            GestureEvent::Swipe(GestureSwipeEvent::End(event)) => {
+                InputEvent::GestureSwipeEnd { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::Begin(event)) => {
+                InputEvent::GesturePinchBegin { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::Update(event)) => {
+                InputEvent::GesturePinchUpdate { event }
+            }
+            GestureEvent::Pinch(GesturePinchEvent::End(event)) => {
+                InputEvent::GesturePinchEnd { event }
+            }
+            GestureEvent::Hold(GestureHoldEvent::Begin(event)) => {
+                InputEvent::GestureHoldBegin { event }
+            }
+            GestureEvent::Hold(GestureHoldEvent::End(event)) => {
+                InputEvent::GestureHoldEnd { event }
+            }
+            _ => return None,
+        },
+        LibinputEvent::Tablet(tablet) => match tablet {
+            TabletToolEvent::Axis(event) => InputEvent::TabletToolAxis { event },
+            TabletToolEvent::Proximity(event) => InputEvent::TabletToolProximity { event },
+            TabletToolEvent::Tip(event) => InputEvent::TabletToolTip { event },
+            TabletToolEvent::Button(event) => InputEvent::TabletToolButton { event },
+            _ => return None,
         },
         _ => return None,
     })
@@ -190,6 +267,7 @@ pub fn start(
     let renderer = gles(&mut gpus, &render_node)?;
     let render_formats = renderer.egl_context().dmabuf_render_formats().clone();
     let dmabuf_formats = renderer.dmabuf_formats();
+    let pass = crate::look::prepare(renderer);
     let heads = DrmOutputManager::new(
         device,
         GbmAllocator::new(
@@ -221,9 +299,16 @@ pub fn start(
         failed: HashMap::new(),
         nvidia,
         cursor: Cursor::from_env(),
+        touchpads: Vec::new(),
+        touchpads_off: false,
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
+    if !pass {
+        state.no_filter_pass();
+    }
+    state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
+    state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
 
     let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats).build()?;
@@ -247,6 +332,7 @@ pub fn start(
         .map_err(|e| e.error)?;
     handle
         .insert_source(LibinputInputBackend::new(libinput), |event, _, state| {
+            state.track_touchpads(&event);
             state.process_input_event(event)
         })
         .map_err(|e| e.error)?;
@@ -295,11 +381,13 @@ impl Drm {
         &mut self,
         what: &Target,
         space: &smithay::desktop::Space<Window>,
+        marks: &Marks,
     ) -> Result<Vec<u8>, Error> {
         crate::capture::read_back::<_, GlesTexture>(
             gles(&mut self.gpus, &self.render_node)?,
             what,
             space,
+            marks,
         )
     }
 }
@@ -316,6 +404,44 @@ impl State {
             if let Err(error) = drm.session.change_vt(vt) {
                 tracing::warn!(%error, vt, "the virtual terminal could not be switched");
             }
+        }
+    }
+
+    /// Keeps the touchpads, the devices that can tap, for the touchpad key (D16); one added
+    /// while the key has turned them off starts off.
+    fn track_touchpads(&mut self, event: &InputEvent<LibinputInputBackend>) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        match event {
+            InputEvent::DeviceAdded { device } if device.config_tap_finger_count() > 0 => {
+                if drm.touchpads_off {
+                    send_events(device, false);
+                }
+                drm.touchpads.push(device.clone());
+            }
+            InputEvent::DeviceRemoved { device } => {
+                drm.touchpads.retain(|touchpad| touchpad != device);
+            }
+            _ => {}
+        }
+    }
+
+    /// The touchpad key (D16): every touchpad stops sending events, or starts again, for the
+    /// session; cosmic-comp's setting of it is not read. Nested or headless, there is none.
+    pub(crate) fn toggle_touchpads(&mut self) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            tracing::debug!("no touchpads outside a session of the seat");
+            return;
+        };
+        drm.touchpads_off = !drm.touchpads_off;
+        tracing::info!(
+            off = drm.touchpads_off,
+            touchpads = drm.touchpads.len(),
+            "the touchpad key"
+        );
+        for touchpad in &drm.touchpads {
+            send_events(touchpad, !drm.touchpads_off);
         }
     }
 
@@ -338,16 +464,23 @@ impl State {
             return;
         }
         let now = Instant::now();
-        let due: Vec<(crtc::Handle, Duration)> = drm
+        let due: Vec<(crtc::Handle, Duration, Wake)> = drm
             .outputs
             .iter_mut()
             .filter_map(|(crtc, head)| {
                 head.wanted = true;
-                next_draw(head, now).map(|delay| (*crtc, delay))
+                if !head.powered {
+                    // Off, it only sends its surfaces' frame callbacks (`draw`).
+                    return head
+                        .timer
+                        .is_none()
+                        .then_some((*crtc, FRAME_THROTTLE, Wake::Throttle));
+                }
+                next_draw(head, now).map(|delay| (*crtc, delay, Wake::Draw))
             })
             .collect();
-        for (crtc, delay) in due {
-            self.schedule(crtc, delay);
+        for (crtc, delay, wake) in due {
+            self.wake(crtc, delay, wake);
         }
     }
 
@@ -368,6 +501,8 @@ impl State {
         // A key kept before the switch is released on the other terminal, if at all: the record
         // would swallow the next release of that key (`key_input`).
         self.kept_keys.clear();
+        self.super_tap = None;
+        self.aids_paused();
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning
@@ -394,7 +529,10 @@ impl State {
                 _ => {}
             }
             match backend_event(event) {
-                Some(event) => self.process_input_event(event),
+                Some(event) => {
+                    self.track_touchpads(&event);
+                    self.process_input_event(event)
+                }
                 // As `process_input_event` does for every event: a touch, a gesture or a
                 // tablet event keeps the session awake although the handler does not act on it.
                 None => self.activity(),
@@ -429,11 +567,20 @@ impl State {
         }
         for head in drm.outputs.values_mut() {
             head.queued = false;
+            head.stale_vblanks = 0;
+            // The switch was activity: the idle daemon decides again from it (output power
+            // plan, D8).
+            if !head.powered {
+                head.powered = true;
+                head.drm_output.reset_buffers();
+            }
         }
         self.kept_keys.clear();
+        self.super_tap = None;
         // A failure may have been the switch's: the monitors that failed are tried again.
         drm.failed.clear();
         let device_id = drm.node.dev_id();
+        self.power_restored();
         self.scan(device_id);
         let crtcs: Vec<crtc::Handle> = match &self.backend {
             Backend::Drm(drm) => drm.outputs.keys().copied().collect(),
@@ -565,6 +712,13 @@ impl State {
         if let Err(error) = used {
             tracing::warn!(%error, output = head.output.name(), "the new mode was refused: the output keeps its own");
             return;
+        }
+        // A refused test makes Smithay commit a frame with the new mode, which lights the CRTC
+        // of an output the power client turned off.
+        if !head.powered {
+            if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
+                tracing::warn!(%error, output = head.output.name(), "the output could not be kept off");
+            }
         }
         let output = head.output.clone();
         tracing::info!(
@@ -699,11 +853,13 @@ impl State {
                 output: output.clone(),
                 drm_output,
                 queued: false,
+                stale_vblanks: 0,
                 lock: LockFrames::default(),
                 failing: FailureLog::default(),
                 timer: None,
                 wanted: true,
                 not_before: None,
+                powered: true,
             },
         );
         self.map_output(&output);
@@ -792,6 +948,12 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
+        if head.stale_vblanks > 0 {
+            head.stale_vblanks -= 1;
+            // The frame `clear` dropped: the frame queued since the output came back on, if any,
+            // is not on screen yet, and a lock must not count it as shown.
+            return;
+        }
         head.queued = false;
         let Some(mode) = head.output.current_mode() else {
             return;
@@ -864,10 +1026,52 @@ impl State {
         }
     }
 
+    /// Turns `output` on or off at the power client's request, and says whether it is on
+    /// afterwards (output power plan, D5 and D6). Off, its CRTC is disabled and nothing is
+    /// drawn; on, its next frame is drawn whole, and queuing it enables the CRTC again.
+    /// Nested or headless, the mode is only recorded.
+    pub fn power_output(&mut self, output: &Output, on: bool) -> bool {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return on;
+        };
+        let Some((&crtc, head)) = drm
+            .outputs
+            .iter_mut()
+            .find(|(_, head)| &head.output == output)
+        else {
+            return on;
+        };
+        if on {
+            head.powered = true;
+            head.drm_output.reset_buffers();
+            head.wanted = true;
+            self.schedule(crtc, Duration::ZERO);
+            return true;
+        }
+        if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
+            tracing::warn!(%error, output = output.name(), "the output could not be turned off");
+            return true;
+        }
+        head.powered = false;
+        if std::mem::take(&mut head.queued) {
+            head.stale_vblanks = head.stale_vblanks.saturating_add(1);
+        }
+        if let Some((timer, _)) = head.timer.take() {
+            self.loop_handle.remove(timer);
+        }
+        tracing::info!(output = output.name(), "the output is off");
+        // The lock may have waited only for this output.
+        self.confirm_lock();
+        if self.frame_callbacks_waiting() {
+            self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
+        }
+        false
+    }
+
     /// A lock is confirmed only once every output presented a frame drawn locked.
     fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
-            if lock_shown(drm.outputs.values().map(|head| &head.lock)) {
+            if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.lock))) {
                 self.locked_drawn();
             }
         }
@@ -879,6 +1083,7 @@ impl State {
     /// after that throttle.
     fn draw(&mut self, crtc: crtc::Handle) {
         let status = self.shown_cursor();
+        let marks = self.marks();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -890,6 +1095,23 @@ impl State {
         }
         head.wanted = false;
         let output = head.output.clone();
+        if !head.powered {
+            // No element is on it, so its surfaces lose it as their primary output and get
+            // their frame callbacks at the throttle, as a surface shown on no output does.
+            let now = self.clock.now();
+            self.frame_done(
+                &output,
+                &RenderElementStates::default(),
+                false,
+                now,
+                FRAME_THROTTLE,
+            );
+            if self.frame_callbacks_waiting() {
+                self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
+            }
+            self.flush();
+            return;
+        }
         let Some(mode) = output.current_mode() else {
             return;
         };
@@ -901,6 +1123,10 @@ impl State {
             .get_pointer()
             .map(|pointer| (pointer.current_location(), status));
         let popups = self.composing.popups_on(&self.space, &output);
+        let area = self.space.output_geometry(&output);
+        let look = self
+            .a11y
+            .look(&output, area, pointer.as_ref().map(|(at, _)| *at));
         let drawn = match gles(&mut drm.gpus, &drm.render_node) {
             Ok(renderer) => render(
                 renderer,
@@ -908,8 +1134,10 @@ impl State {
                 &self.space,
                 self.lock.as_ref(),
                 &popups,
+                &marks,
                 pointer.as_ref(),
                 &mut drm.cursor,
+                look,
             ),
             Err(error) => {
                 tracing::error!(%error, "no renderer: the output draws again in a second");
@@ -970,6 +1198,7 @@ impl State {
         }
         self.serve_captures();
         self.space.refresh();
+        self.send_toplevel_states();
         self.popups.cleanup();
         self.flush();
     }
@@ -1091,9 +1320,12 @@ impl LockFrames {
     }
 }
 
-/// Whether every head of `heads` shows the lock.
-fn lock_shown<'a>(heads: impl IntoIterator<Item = &'a LockFrames>) -> bool {
-    heads.into_iter().all(|frames| frames.shown)
+/// Whether every head of `heads`, each with whether it is on, shows the lock: a head that is
+/// off shows nothing, so it hides the space as well as the lock does (output power plan, D7).
+fn lock_shown<'a>(heads: impl IntoIterator<Item = (bool, &'a LockFrames)>) -> bool {
+    heads
+        .into_iter()
+        .all(|(powered, frames)| !powered || frames.shown)
 }
 
 /// The delay of the next draw of `head`, when it must be scheduled at `now`: when something
@@ -1128,19 +1360,23 @@ fn pacing(
 }
 
 /// Draws the frame of `head`: the space, or the lock surface while `lock` holds the session,
-/// with the pointer on top, the cursor its status names, when it is over the output. Whether there was anything new to
-/// show, and the elements' states.
+/// with the pointer on top, the cursor its status names, when it is over the output, as `look`
+/// says of the magnifier and the colour filters. Whether there was anything new to show, and
+/// the elements' states.
+#[allow(clippy::too_many_arguments)]
 fn render(
     renderer: &mut GlesRenderer,
     head: &mut Head,
     space: &smithay::desktop::Space<Window>,
     lock: Option<&crate::lock::Lock>,
     popups: &[crate::input_method::PlacedPopup],
+    marks: &Marks,
     pointer: Option<&(
         smithay::utils::Point<f64, smithay::utils::Logical>,
         smithay::input::pointer::CursorImageStatus,
     )>,
     cursor: &mut Cursor,
+    look: Look,
 ) -> Result<(bool, RenderElementStates), SwapBuffersError> {
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
@@ -1187,14 +1423,27 @@ fn render(
                     .map(Element::Surface),
                 );
             }
-            let space_elements = space_render_elements(renderer, [space], output, 1.0)
-                .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
-            elements.extend(space_elements.into_iter().map(Element::Space));
+            let stacked = crate::marks::stack(renderer, space, output, marks);
+            elements.extend(stacked.into_iter().map(Element::Space));
         }
     }
+    let zoomed = crate::look::zoomed(elements, look.zoom);
+    let (frame, filtered) = match look.filter {
+        Some(affine) => {
+            let (element, states) = crate::look::filtered(renderer, output, &zoomed, affine)
+                .map_err(|error| match error {
+                    DamageError::Rendering(error) => SwapBuffersError::from(error),
+                    DamageError::OutputNoMode(error) => {
+                        SwapBuffersError::TemporaryFailure(Box::new(error))
+                    }
+                })?;
+            (vec![Frame::Filtered(element)], Some(states))
+        }
+        None => (zoomed.into_iter().map(Frame::Zoomed).collect(), None),
+    };
     let result = head
         .drm_output
-        .render_frame(renderer, &elements, BACKGROUND, FrameFlags::DEFAULT)
+        .render_frame(renderer, &frame, BACKGROUND, FrameFlags::DEFAULT)
         .map_err(|error| match error {
             RenderFrameError::PrepareFrame(error) => SwapBuffersError::from(error),
             RenderFrameError::RenderFrame(DamageError::Rendering(error)) => {
@@ -1215,7 +1464,8 @@ fn render(
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
         }
     }
-    Ok((!result.is_empty, result.states))
+    // Under the colour pass the frame is one element: the states are those of what it shows.
+    Ok((!result.is_empty, filtered.unwrap_or(result.states)))
 }
 
 /// Withdraws the global of `output`, which clients bound to it see go.
@@ -1278,31 +1528,49 @@ mod tests {
     #[test]
     fn the_lock_is_confirmed_only_by_locked_frames_on_every_screen() {
         let (mut first, mut second) = (LockFrames::default(), LockFrames::default());
-        assert!(!lock_shown([&first, &second]), "unlocked frames on screen");
+        assert!(!lock_shown([(true, &first), (true, &second)]), "unlocked frames on screen");
         first.queued(true);
         second.queued(true);
         second.presented();
         // The first output's frame failed to present, then a draw had nothing new: neither
         // reaches it.
         assert!(
-            !lock_shown([&first, &second]),
+            !lock_shown([(true, &first), (true, &second)]),
             "the first screen is not locked yet"
         );
         first.queued(true);
         first.presented();
-        assert!(lock_shown([&first, &second]), "both screens show the lock");
+        assert!(lock_shown([(true, &first), (true, &second)]), "both screens show the lock");
         second.queued(false);
         assert!(
-            !lock_shown([&first, &second]),
+            !lock_shown([(true, &first), (true, &second)]),
             "an unlocked frame on its way: a lock asked for now is not shown by the old frame"
         );
         second.queued(true);
-        assert!(!lock_shown([&first, &second]), "a locked frame only queued");
+        assert!(!lock_shown([(true, &first), (true, &second)]), "a locked frame only queued");
         second.presented();
-        assert!(lock_shown([&first, &second]), "locked again on both");
+        assert!(lock_shown([(true, &first), (true, &second)]), "locked again on both");
         // A lock taken forgets what an earlier one showed.
         first = LockFrames::default();
-        assert!(!lock_shown([&first, &second]));
+        assert!(!lock_shown([(true, &first), (true, &second)]));
+    }
+
+    /// An output that is off shows the lock: cosmic-idle locks after it blanks the outputs, and
+    /// waits for `locked`.
+    #[test]
+    fn an_output_that_is_off_shows_the_lock() {
+        let (off, mut on) = (LockFrames::default(), LockFrames::default());
+        assert!(lock_shown([(false, &off), (false, &on)]), "both off");
+        assert!(
+            !lock_shown([(false, &off), (true, &on)]),
+            "the other shows the space"
+        );
+        on.queued(true);
+        on.presented();
+        assert!(
+            lock_shown([(false, &off), (true, &on)]),
+            "the other shows the lock"
+        );
     }
 
     /// With no output there is nothing to wait for: a lock is confirmed at once.

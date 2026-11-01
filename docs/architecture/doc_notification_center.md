@@ -15,7 +15,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was
   - `athanor-shelld` advertises `actions`, `body`, `icon-static` and `persistence` (`src/notifications.rs:28`), keeps at most 100 notifications in memory (`src/store.rs:9`), and admits calls on `os.athanor.Notifications1` only from `athanor-bar.service` (`src/sender.rs`, checked in `src/notifications.rs`).
   - Nothing is written to disk but the do-not-disturb switch (`src/dnd.rs`); the crash file of ST5 is specified and not built.
   - The unit sets `MemoryHigh=48M` and `MemoryMax=192M` around a budget of 16 MB PSS at rest (`data/athanor-shelld.service`, after `doc_bar.md`, section 5, item 17).
-  - The bar's clock opens a `gtk4::Calendar` in a popover (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/clock.rs:128`).
+  - The bar's clock opens a `gtk4::Calendar` in a popover (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/clock.rs:146`).
   - `athanor-compositor-client` binds `zcosmic_toplevel_info_v1` (`system/athanor-compositor-client/src/connection.rs:746`), which reports each window's fullscreen and activated states. Spike P4 found that cosmic-comp 1.8 withholds privileged globals only from clients inside a Wayland security context; a session service on the main socket receives them all.
 
 ## 2. Decisions

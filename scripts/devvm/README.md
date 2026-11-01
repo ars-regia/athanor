@@ -170,6 +170,23 @@ scripts/devvm/reset.sh             # back to the freshly installed system
   The list is read from the AT-SPI tree, so it needs the greeter on greetd's accessibility
   bus; the screenshots in `.scratch/greeter-acceptance/` are the only check of what is drawn.
   `cleanup` removes the accounts and the settings the stages made, and is not part of a run.
+- `default-session-acceptance.sh [stage...]` checks items 9 to 15 and 17 to 19 of
+  `doc_session.md` section 5 (revision 4: the own compositor's session as the greeter's
+  default, SN13 step 6) and answers section 4, questions 11 and 13. It signs a test account, `pia`,
+  in at the greeter through `keyboard_type.py` and `greeter_probe.py`, leaving the session
+  menu alone for the default or checking cosmic-comp's entry with the keyboard;
+  `session_window.py` is the GTK4 field item 14 types into, the window holding item 10's
+  idle inhibitor and the windows question 11 activates. `default` and `cosmic` start each
+  session and check its units, the two component scopes and the end state; `kill`, `exit`,
+  `gate`, `ready`, `magnifier`, `filter` and `localed` break the start with SIGKILL, a
+  drop-in under `/run/systemd/user`, a GNOME key, a dconf mode, a screen filter record, a
+  bind mount or a masked `systemd-localed`, and time the greeter's return or the hand-off to
+  cosmic-comp's session; `keyboard` sets the system keyboard and puts it back; `linger`
+  kills the session's script and checks the supervisor's cleanup; `absent` removes the
+  compositor's files under `bootc usr-overlay`, and `absent` and `boot` reboot. The trap puts
+  back every change a stage made, and names any it could not. Item 17's case of the greeter's
+  magnifier is not run while the greeter sends no `ATHANOR_A11Y`. `cleanup` removes the
+  account and is not part of a run.
 - Settings are in `devvm.env` and are overridden from the environment: `CPUS=4`,
   `MEMORY=8G`, `DISK_GIB=40`, `GPU_OUTPUTS=2` (the second head starts disconnected, so
   every other stage sees one output; `bar-acceptance.sh hotplug` is the one that needs
