@@ -3,7 +3,7 @@
 //! library opener). Under auto-hide it reserves no space and shows a strip on its edge
 //! until the pointer rests there (`athanor_dock::autohide`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_apps::openers;
@@ -136,6 +136,21 @@ pub struct Surface {
     row: Option<Row>,
     /// `None`: the window is not on screen.
     placement: Option<Placement>,
+}
+
+/// Keeps a dock that starts hidden from the keyboard until its first frame is on screen:
+/// cosmic-comp gives the keyboard to an on-demand surface that maps, and the dock would then
+/// show itself with nothing asked of it.
+fn wait_for_the_keyboard(window: &gtk4::ApplicationWindow) {
+    window.set_keyboard_mode(KeyboardMode::None);
+    let painted = Cell::new(false);
+    window.add_tick_callback(move |window, _| {
+        if !painted.replace(true) {
+            return glib::ControlFlow::Continue;
+        }
+        window.set_keyboard_mode(KeyboardMode::OnDemand);
+        glib::ControlFlow::Break
+    });
 }
 
 impl Surface {
@@ -340,6 +355,9 @@ impl Surface {
             });
             hider.show(false);
             self.hider.replace(Some(hider));
+            if !self.window.is_mapped() {
+                wait_for_the_keyboard(&self.window);
+            }
             if self.window.is_active() {
                 feed(&self.hider, Event::KeyboardIn);
             }
