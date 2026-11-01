@@ -947,11 +947,11 @@ compositor and that the own compositor did not yet offer:
     project's authors where the source names no holder; and states that it was changed and
     when, as GPL-3.0 section 5(a) asks. The pull request names them (ADR-0121 decision 2). cosmic-comp,
     `GPL-3.0-only`, stays read and not copied (OS3). The outline cosmic-comp draws around the
-    focused window (#738) comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2),
+    focused window (#851) comes with the trusted path's border (OS4; `doc_session.md` SN16, gap 2),
     which needs the same drawing, so that the two marks are designed to be told apart (decision 31,
     amended on 2026-10-31). It is a drawn mark that hides, moves or changes no control or text, so
     what still differs stays recorded in `forge/test/shell/golden/athanor-differences.toml` with
-    its cause and its issue, #851, as a difference of colour is (decision 28). Not taken: for shortcuts
+    its cause and its issue, #918, as a difference of colour is (decision 28). Not taken: for shortcuts
     inhibit, a consent dialog per application, as GNOME asks, which does not exist yet, or no
     inhibitor; for the way out, a key of its own, or the console switch and Super+Alt+Escape
     alone; for the pointer, unconfined, which keeps the protocols from every application the
@@ -1048,10 +1048,10 @@ compositor and that the own compositor did not yet offer:
     fractional scale; that a tree at the far end of the coordinates ends nothing; that its popup
     is bordered and its layer surface refused; that an unconfined window is not bordered; that a
     maximised window has no outline; that the lock covers the marks; that a window above covers a mark of the window below; and that a mark
-    follows a theme change without a new client. The entries of #851 stay in
+    follows a theme change without a new client. The entries of #918 stay in
     `forge/test/shell/golden/athanor-differences.toml` for what still differs, the divider
     cosmic-comp draws inside the outline, the outline's corners and, at scale 1.5, its width, and
-    a case that shows a confined window takes an entry of #851 for the
+    a case that shows a confined window takes an entry of #918 for the
     border, which cosmic-comp does not draw. Not taken: one grey line of 1 px in `#808080`, which
     a grey backdrop hides and which, with the focus, tells the two apart by one pixel inside the
     outline; two lines, black outside and white inside, which a dark wallpaper and a white edge
