@@ -278,7 +278,7 @@ impl State {
 
     /// Places a window, at its first commit with a size, in what the layer surfaces' exclusive
     /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
-    /// windows after it are not cascaded as cosmic-comp's are yet (#738). It takes the keyboard
+    /// windows after it are not cascaded as cosmic-comp's are yet (#918). It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
     /// user's input, so a client cannot take the focus from another by opening one; a window
     /// with a parent follows it (`follow_parent`).
