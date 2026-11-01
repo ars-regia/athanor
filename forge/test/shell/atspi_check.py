@@ -152,10 +152,12 @@ def focused_extents(accessible, Atspi):
     """The focused node's box in the capture, or None. Read in the window's coordinates, as on
     Wayland GTK reports every screen origin as (0, 0), so the surface must cover the output.
     GTK also leaves the parent's border and padding out of a node's position: the node is taken
-    to fill its parent, with that inset on every side."""
+    to sit centred in its parent, with that inset on every side."""
     if accessible.get_state_set().contains(Atspi.StateType.FOCUSED) and accessible.get_component_iface() is not None:
         x, y, width, height = extents_of(accessible, Atspi)
-        inset = (extents_of(accessible.get_parent(), Atspi)[2] - width) // 2
+        parent = accessible.get_parent()
+        outer = parent and extents_of(parent, Atspi)
+        inset = (outer[2] - width) // 2 if outer else 0
         return (x + inset, y + inset, width, height)
     for index in range(accessible.get_child_count()):
         child = accessible.get_child_at_index(index)
