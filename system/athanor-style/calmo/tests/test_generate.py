@@ -53,6 +53,17 @@ class CssTest(unittest.TestCase):
         for selector in selectors:
             self.assertIn(":focus:focus-visible", selector)
 
+    def test_the_ring_is_three_pixels_wide_in_high_contrast(self):
+        ring = "    outline: {}px solid @ath_acc_fg;\n    outline-offset: 2px;"
+        for variant in ("light", "dark"):
+            self.assertEqual(generate.css(self.tokens, variant).count(ring.format(2)), 2)
+            self.assertEqual(generate.css(self.tokens, f"{variant}-hc").count(ring.format(3)), 2)
+
+    def test_the_launcher_ring_goes_round_the_field(self):
+        text = generate.css(self.tokens, "light")
+        self.assertIn("entry.launcher-query:focus-within {\n    outline: 2px solid", text)
+        self.assertIn("entry.launcher-query > text:focus:focus-visible {\n    outline: none;", text)
+
     def test_the_dock_rules_read_the_dock_tokens(self):
         text = generate.css(self.tokens, "light")
         self.assertIn(".dock-island {\n    padding: 4px;", text)

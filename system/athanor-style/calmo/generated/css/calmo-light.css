@@ -404,6 +404,16 @@ window.athanor-surface spinbutton:focus-within {
     outline-color: @ath_acc_fg;
 }
 
+/* The launcher's focus is on the field's text, inside it: the ring of AX8 goes round the field. */
+window.athanor-surface entry.launcher-query:focus-within {
+    outline: 2px solid @ath_acc_fg;
+    outline-offset: 2px;
+}
+
+window.athanor-surface entry.launcher-query > text:focus:focus-visible {
+    outline: none;
+}
+
 window.athanor-surface entry > text > selection:focus-within,
 window.athanor-surface spinbutton > text > selection:focus-within {
     background-color: @ath_acc;
