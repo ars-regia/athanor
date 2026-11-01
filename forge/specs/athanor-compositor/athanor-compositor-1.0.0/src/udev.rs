@@ -134,13 +134,8 @@ enum Wake {
 struct Head {
     output: Output,
     drm_output: HeadOutput,
-    /// A frame is queued and waits for its VBlank.
-    queued: bool,
-    /// The VBlanks still owed for frames queued before the output was turned off: each comes
-    /// and presents nothing (`power_output`). A session switch drops them (`resume`).
-    stale_vblanks: u8,
-    /// Whether its frames showed the lock.
-    lock: LockFrames,
+    /// What its frames and VBlanks amount to.
+    frames: Frames,
     /// The next draw, when one is scheduled, and what it is for.
     timer: Option<(RegistrationToken, Wake)>,
     /// Whether its draws keep failing, so that the log says so once (`FailureLog`).
@@ -566,8 +561,7 @@ impl State {
             return;
         }
         for head in drm.outputs.values_mut() {
-            head.queued = false;
-            head.stale_vblanks = 0;
+            head.frames.session_resumed();
             // The switch was activity: the idle daemon decides again from it (output power
             // plan, D8).
             if !head.powered {
@@ -852,9 +846,7 @@ impl State {
             Head {
                 output: output.clone(),
                 drm_output,
-                queued: false,
-                stale_vblanks: 0,
-                lock: LockFrames::default(),
+                frames: Frames::default(),
                 failing: FailureLog::default(),
                 timer: None,
                 wanted: true,
@@ -948,13 +940,9 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
-        if head.stale_vblanks > 0 {
-            head.stale_vblanks -= 1;
-            // The frame `clear` dropped: the frame queued since the output came back on, if any,
-            // is not on screen yet, and a lock must not count it as shown.
+        if !head.frames.vblank() {
             return;
         }
-        head.queued = false;
         let Some(mode) = head.output.current_mode() else {
             return;
         };
@@ -975,6 +963,7 @@ impl State {
         };
         match head.drm_output.frame_submitted() {
             Ok(feedback) => {
+                head.frames.presented(feedback.is_some());
                 if let Some(mut feedback) = feedback {
                     feedback.presented(
                         presented,
@@ -983,7 +972,6 @@ impl State {
                         flags,
                     );
                 }
-                head.lock.presented();
             }
             Err(error) => {
                 // The whole frame is drawn and queued again, so that a lock frame reaches the
@@ -1020,7 +1008,7 @@ impl State {
     pub fn lock_taken(&mut self) {
         if let Backend::Drm(drm) = &mut self.backend {
             for head in drm.outputs.values_mut() {
-                head.lock = LockFrames::default();
+                head.frames.lock = LockFrames::default();
             }
             self.confirm_lock();
         }
@@ -1053,9 +1041,7 @@ impl State {
             return true;
         }
         head.powered = false;
-        if std::mem::take(&mut head.queued) {
-            head.stale_vblanks = head.stale_vblanks.saturating_add(1);
-        }
+        head.frames.powered_off();
         if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
@@ -1071,7 +1057,7 @@ impl State {
     /// A lock is confirmed only once every output presented a frame drawn locked.
     fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
-            if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.lock))) {
+            if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.frames.lock))) {
                 self.locked_drawn();
             }
         }
@@ -1090,7 +1076,7 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return;
         };
-        if head.queued {
+        if head.frames.queued {
             return;
         }
         head.wanted = false;
@@ -1163,8 +1149,7 @@ impl State {
                 if let Some(head) = drm.outputs.get_mut(&crtc) {
                     match head.drm_output.queue_frame(feedback) {
                         Ok(()) => {
-                            head.queued = true;
-                            head.lock.queued(locked);
+                            head.frames.queued(locked);
                             head.failing.recovered(&head.output);
                         }
                         Err(error) => {
@@ -1184,7 +1169,7 @@ impl State {
                     head.failing.recovered(&head.output);
                     // Nothing new does not confirm a lock: only a frame drawn locked that
                     // reached the screen does, so the whole frame is drawn again.
-                    if locked && !head.lock.shown {
+                    if locked && !head.frames.lock.shown {
                         head.drm_output.reset_buffers();
                         redraw = true;
                     }
@@ -1293,6 +1278,62 @@ fn preferred_mode(connector: &connector::Info) -> Option<smithay::reexports::drm
         .copied()
 }
 
+/// What the frames and VBlanks of a head amount to, apart from the DRM calls: each VBlank is
+/// matched here to the frame it presents, or to none.
+#[derive(Clone, Copy, Debug, Default)]
+struct Frames {
+    /// A frame is queued and waits for its VBlank.
+    queued: bool,
+    /// The VBlanks still owed for frames queued before the output was turned off: each comes
+    /// and presents nothing (`power_output`). A session switch drops them (`resume`).
+    stale_vblanks: u8,
+    /// Whether its frames showed the lock.
+    lock: LockFrames,
+}
+
+impl Frames {
+    /// A frame was queued, drawn `locked` or not.
+    fn queued(&mut self, locked: bool) {
+        self.queued = true;
+        self.lock.queued(locked);
+    }
+
+    /// A VBlank came: whether it is the queued frame's. One owed to a frame `clear` dropped is
+    /// not: the frame queued since the output came back on, if any, is not on screen yet, and a
+    /// lock must not count it as shown.
+    fn vblank(&mut self) -> bool {
+        if self.stale_vblanks > 0 {
+            self.stale_vblanks -= 1;
+            return false;
+        }
+        self.queued = false;
+        true
+    }
+
+    /// The queued frame's VBlank was handled; `submitted` is whether Smithay still held that
+    /// frame. On a refused test `DrmOutput::use_mode` commits a frame of its own, which asks for
+    /// no event, and forgets the frame in flight, whose VBlank still comes: the screen then
+    /// shows Smithay's frame, so the lock does not count this one.
+    fn presented(&mut self, submitted: bool) {
+        if submitted {
+            self.lock.presented();
+        }
+    }
+
+    /// The output was turned off and `clear` dropped the queued frame, if any.
+    fn powered_off(&mut self) {
+        if std::mem::take(&mut self.queued) {
+            self.stale_vblanks = self.stale_vblanks.saturating_add(1);
+        }
+    }
+
+    /// The session came back: no VBlank of before it left comes now.
+    fn session_resumed(&mut self) {
+        self.queued = false;
+        self.stale_vblanks = 0;
+    }
+}
+
 /// What the frames of a head showed of the lock. Only a frame on screen counts: a frame queued
 /// and then not presented, or a draw with nothing new to show, changes nothing.
 #[derive(Clone, Copy, Debug, Default)]
@@ -1335,7 +1376,7 @@ fn lock_shown<'a>(heads: impl IntoIterator<Item = (bool, &'a LockFrames)>) -> bo
 fn next_draw(head: &Head, now: Instant) -> Option<Duration> {
     pacing(
         head.wanted,
-        head.queued,
+        head.frames.queued,
         head.timer.map(|(_, wake)| wake),
         head.not_before,
         now,
@@ -1478,7 +1519,7 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 
 #[cfg(test)]
 mod tests {
-    use super::{lock_shown, pacing, FailureLog, LockFrames, Wake};
+    use super::{lock_shown, pacing, FailureLog, Frames, LockFrames, Wake};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -1571,6 +1612,82 @@ mod tests {
             lock_shown([(false, &off), (true, &on)]),
             "the other shows the lock"
         );
+    }
+
+    /// A frame in flight when the output turns off: its VBlank presents nothing, and the frame
+    /// queued once the output is back on waits for its own.
+    #[test]
+    fn a_power_off_with_a_frame_in_flight_owes_a_vblank_that_presents_nothing() {
+        let mut frames = Frames::default();
+        frames.queued(true);
+        frames.powered_off();
+        assert!(!frames.queued, "nothing waits while the output is off");
+        frames.queued(true);
+        assert!(!frames.vblank(), "the dropped frame's VBlank");
+        assert!(frames.queued, "the new frame is still queued");
+        assert!(!frames.lock.shown);
+        assert!(frames.vblank(), "the new frame's VBlank");
+        assert!(!frames.queued);
+        frames.presented(true);
+        assert!(frames.lock.shown);
+    }
+
+    /// Off with nothing in flight: no VBlank is owed, so the next one is the next frame's.
+    #[test]
+    fn a_power_off_with_nothing_in_flight_owes_nothing() {
+        let mut frames = Frames::default();
+        frames.powered_off();
+        frames.queued(false);
+        assert!(frames.vblank());
+    }
+
+    /// Two power-offs before an event is read: two VBlanks are owed, each to a dropped frame.
+    #[test]
+    fn two_power_offs_before_an_event_owe_two_vblanks() {
+        let mut frames = Frames::default();
+        frames.queued(false);
+        frames.powered_off();
+        frames.queued(false);
+        frames.powered_off();
+        frames.queued(true);
+        assert!(!frames.vblank());
+        assert!(!frames.vblank());
+        assert!(frames.queued);
+        assert!(frames.vblank());
+    }
+
+    /// A session switch drops what was in flight, so a new frame's VBlank is its own, and what
+    /// the screen showed of the lock stands.
+    #[test]
+    fn a_session_switch_drops_the_owed_vblanks() {
+        let mut frames = Frames::default();
+        frames.queued(true);
+        assert!(frames.vblank());
+        frames.presented(true);
+        frames.queued(true);
+        frames.powered_off();
+        frames.session_resumed();
+        assert!(!frames.queued);
+        assert!(frames.lock.shown);
+        frames.queued(true);
+        assert!(frames.vblank());
+    }
+
+    /// A mode change's fallback forgets the frame in flight and commits its own, which asks for
+    /// no event. The VBlank of the frame in flight still comes and ends it, so the next draw
+    /// goes on, but with nothing submitted the lock does not count it.
+    #[test]
+    fn a_frame_a_mode_change_forgot_is_not_counted_for_the_lock() {
+        let mut frames = Frames::default();
+        frames.queued(true);
+        assert!(frames.vblank());
+        assert!(!frames.queued, "the next draw is not held back");
+        frames.presented(false);
+        assert!(!frames.lock.shown);
+        frames.queued(true);
+        assert!(frames.vblank());
+        frames.presented(true);
+        assert!(frames.lock.shown);
     }
 
     /// With no output there is nothing to wait for: a lock is confirmed at once.
