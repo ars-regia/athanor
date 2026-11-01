@@ -705,6 +705,9 @@ impl State {
         };
         if let Err(error) = used {
             tracing::warn!(%error, output = head.output.name(), "the new mode was refused: the output keeps its own");
+            // Smithay may have committed a frame of its own on every output before giving up,
+            // and forgotten the frames in flight: a lock needs new ones to be confirmed.
+            self.request_redraw();
             return;
         }
         // A refused test makes Smithay commit a frame with the new mode, which lights the CRTC
@@ -1311,9 +1314,9 @@ impl Frames {
     }
 
     /// The queued frame's VBlank was handled; `submitted` is whether Smithay still held that
-    /// frame. On a refused test `DrmOutput::use_mode` commits a frame of its own, which asks for
-    /// no event, and forgets the frame in flight, whose VBlank still comes: the screen then
-    /// shows Smithay's frame, so the lock does not count this one.
+    /// frame. On a refused test `DrmOutput::use_mode` commits a frame of its own on every output,
+    /// which asks for no event, and forgets the frame in flight, whose VBlank still comes: the
+    /// screen then shows Smithay's frame, so the lock does not count this one.
     fn presented(&mut self, submitted: bool) {
         if submitted {
             self.lock.presented();
