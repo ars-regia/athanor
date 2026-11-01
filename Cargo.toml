@@ -89,6 +89,8 @@ anyhow = "1.0.99"
 # Logging & Telemetry
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+# Cursor themes, for athanor-compositor's pointer.
+xcursor = "0.3.11"
 
 # Hashing & Utilities
 sha2 = "0.10.9"

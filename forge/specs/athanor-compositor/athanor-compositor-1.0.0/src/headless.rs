@@ -3,7 +3,12 @@
 //! GLES, and offers linux-dmabuf with its feedback and linux-drm-syncobj-v1 when the node can
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
+use crate::capture::Target;
 use crate::lock::Lock;
+use crate::input_method::PlacedPopup;
+use crate::a11y::Look;
+use crate::look::{FilterElement, Filters};
+use crate::marks::Marks;
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -11,14 +16,12 @@ use smithay::backend::allocator::gbm::GbmDevice;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::drm::{DrmDeviceFd, DrmNode};
 use smithay::backend::renderer::damage::OutputDamageTracker;
-use smithay::backend::renderer::element::RenderElementStates;
+use smithay::backend::renderer::element::{RenderElement, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{ApiDevice, GpuManager};
 use smithay::backend::renderer::pixman::PixmanRenderer;
-use smithay::backend::renderer::{
-    Bind, ExportMem, ImportAll, ImportDma, Offscreen, Renderer, Texture,
-};
+use smithay::backend::renderer::{Bind, ExportMem, ImportDma, Offscreen, Texture};
 use smithay::desktop::{Space, Window};
 use smithay::output::Output;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -126,8 +129,13 @@ pub fn start(
             let Gpu::Gbm { manager, node, .. } = &mut headless.gpu else {
                 return Err("the headless backend lost its render node".into());
             };
-            let formats = gles(manager, node)?.dmabuf_formats();
+            let renderer = gles(manager, node)?;
+            let formats = renderer.dmabuf_formats();
+            let pass = crate::look::prepare(renderer);
             let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
+            if !pass {
+                state.no_filter_pass();
+            }
             state
                 .dmabuf_state
                 .create_global_with_default_feedback::<State>(&dh, &feedback);
@@ -242,6 +250,7 @@ impl State {
 
     /// Draws every output, then sends presentation feedback and frame callbacks.
     fn tick(&mut self, period: Duration) {
+        let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return;
         };
@@ -249,7 +258,14 @@ impl State {
         let mut frames = Vec::with_capacity(headless.outputs.len());
         for index in 0..headless.outputs.len() {
             let started = Instant::now();
-            match headless.draw(index, &self.space, self.lock.as_ref(), false) {
+            let output = headless.outputs[index].output.clone();
+            let popups = self.composing.popups_on(&self.space, &output);
+            let pointer = self.seat.get_pointer().map(|p| p.current_location());
+            let look = self
+                .a11y
+                .look(&output, self.space.output_geometry(&output), pointer);
+            let view = (&self.space, self.lock.as_ref(), &popups[..], &marks, look);
+            match headless.draw(index, view, false) {
                 Ok(drawn) => {
                     frames.push((headless.outputs[index].output.clone(), drawn));
                     if let Some(stats) = &mut self.frame_stats {
@@ -271,6 +287,7 @@ impl State {
             self.locked_drawn();
         }
         self.space.refresh();
+        self.send_toplevel_states();
         self.popups.cleanup();
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");
@@ -291,26 +308,26 @@ impl Headless {
         Ok(())
     }
 
-    /// Draws `window` off screen at scale 1 and reads it back (`capture::read_window`).
-    pub fn read_window(&mut self, window: &Window) -> Result<Vec<u8>, Error> {
+    /// Draws what a capture source names off screen and reads it back (`capture::read_back`).
+    pub fn read_back(
+        &mut self,
+        what: &Target,
+        space: &Space<Window>,
+        marks: &Marks,
+    ) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
             Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_window::<_, GlesTexture>(gles(manager, node)?, window)
+                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space, marks)
             }
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_window::<_, Image>(renderer, window)
+                crate::capture::read_back::<_, Image>(renderer, what, space, marks)
             }
         }
     }
 
-    /// Draws output `index`, and reads its pixels back when `read`.
-    fn draw(
-        &mut self,
-        index: usize,
-        space: &Space<Window>,
-        lock: Option<&Lock>,
-        read: bool,
-    ) -> Result<Drawn, Error> {
+    /// Draws output `index` as `view` holds it: the space, the lock, the input method's popups
+    /// and the magnifier and filters; and reads its pixels back when `read`.
+    fn draw(&mut self, index: usize, view: Shown<'_>, read: bool) -> Result<Drawn, Error> {
         let virt = self
             .outputs
             .get_mut(index)
@@ -323,11 +340,11 @@ impl Headless {
                 buffers,
             } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(gles(manager, node)?, buffer, virt, space, lock, read)
+                draw(gles(manager, node)?, buffer, virt, view, read)
             }
             Gpu::Pixman { renderer, buffers } => {
                 let buffer = buffers.get_mut(index).ok_or_else(missing)?;
-                draw(renderer, buffer, virt, space, lock, read)
+                draw(renderer, buffer, virt, view, read)
             }
         };
         // The tracker counts a failed frame as drawn: a new one draws the next frame whole, so
@@ -340,24 +357,34 @@ impl Headless {
     }
 }
 
-/// Draws the space on `virt` into `buffer`, or only its lock surface while `lock` holds the
+/// What an output is drawn from: the space, the lock, the input method's popups, the windows'
+/// marks, and what the magnifier and the filters do to it.
+type Shown<'a> = (
+    &'a Space<Window>,
+    Option<&'a Lock>,
+    &'a [PlacedPopup],
+    &'a Marks,
+    Look,
+);
+
+/// Draws the space on `virt` into `buffer`, or only its lock surface while the lock holds the
 /// session, and reads the frame back when `read`.
 fn draw<R, T>(
     renderer: &mut R,
     buffer: &mut T,
     virt: &mut Virtual,
-    space: &Space<Window>,
-    lock: Option<&Lock>,
+    (space, lock, popups, marks, look): Shown<'_>,
     read: bool,
 ) -> Result<Drawn, Error>
 where
-    R: Renderer + ImportAll + ExportMem + Bind<T>,
-    R::TextureId: Clone + Texture + 'static,
+    R: Filters + ExportMem + Bind<T>,
+    R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
     let age = usize::from(virt.drawn);
     let mut target = renderer.bind(buffer)?;
-    let view = View::of(space, lock, &virt.output);
+    let view = View::of(space, lock, popups, marks, &virt.output);
     let result = draw_view(
         renderer,
         &mut target,
@@ -365,6 +392,7 @@ where
         age,
         view,
         &mut virt.damage_tracker,
+        look,
     )
     .map_err(|error| format!("{error:?}"))?;
     // Smithay releases a client's buffer when the renderer drops its texture, not when the GPU
@@ -495,11 +523,24 @@ impl State {
     /// The pixels of output `index` as the space now stands, `FRAME_FORMAT`, row by row from
     /// the top.
     pub fn capture(&mut self, index: usize) -> Result<Vec<u8>, Error> {
+        let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return Err("only the headless backend reads frames back".into());
         };
+        let (popups, look) = match headless.outputs.get(index) {
+            Some(virt) => {
+                let pointer = self.seat.get_pointer().map(|p| p.current_location());
+                let area = self.space.output_geometry(&virt.output);
+                (
+                    self.composing.popups_on(&self.space, &virt.output),
+                    self.a11y.look(&virt.output, area, pointer),
+                )
+            }
+            None => (Vec::new(), Look::default()),
+        };
+        let view = (&self.space, self.lock.as_ref(), &popups[..], &marks, look);
         headless
-            .draw(index, &self.space, self.lock.as_ref(), true)?
+            .draw(index, view, true)?
             .pixels
             .ok_or_else(|| "the frame was not read back".into())
     }

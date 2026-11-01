@@ -271,9 +271,16 @@ stage_cleanup() {
         failed=1
     }
     for unit in "${ACTIVE_BEFORE[@]}"; do
+        # The crash-loop stages of earlier acceptances can leave the start limit spent.
+        in_session systemctl --user reset-failed "$unit" || {
+            echo "cleanup: systemctl --user reset-failed $unit failed" >&2
+            failed=1
+        }
         in_session systemctl --user start "$unit" || {
             echo "cleanup: systemctl --user start $unit failed; it was running before the run" >&2
             failed=1
+            # status exits 3 for the failed unit it is printing; that is the expected answer.
+            in_session systemctl --user status --no-pager "$unit" >&2 || [[ $? == 3 ]]
         }
     done
     return "$failed"

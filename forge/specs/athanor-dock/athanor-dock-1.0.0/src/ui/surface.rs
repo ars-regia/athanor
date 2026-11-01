@@ -3,7 +3,7 @@
 //! library opener). Under auto-hide it reserves no space and shows a strip on its edge
 //! until the pointer rests there (`athanor_dock::autohide`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use athanor_apps::openers;
@@ -17,7 +17,7 @@ use gtk4::{gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use super::Dock;
-use crate::i18n::tr;
+use athanor_dock::i18n::tr;
 use crate::layer_guard;
 
 /// The auto-hide state of one surface and its one timer.
@@ -138,6 +138,21 @@ pub struct Surface {
     placement: Option<Placement>,
 }
 
+/// Keeps a dock that starts hidden from the keyboard until its first frame is on screen:
+/// cosmic-comp gives the keyboard to an on-demand surface that maps, and the dock would then
+/// show itself with nothing asked of it.
+fn wait_for_the_keyboard(window: &gtk4::ApplicationWindow) {
+    window.set_keyboard_mode(KeyboardMode::None);
+    let painted = Cell::new(false);
+    window.add_tick_callback(move |window, _| {
+        if !painted.replace(true) {
+            return glib::ControlFlow::Continue;
+        }
+        window.set_keyboard_mode(KeyboardMode::OnDemand);
+        glib::ControlFlow::Break
+    });
+}
+
 impl Surface {
     /// A layer surface on `monitor`, not on screen until `place` gives it an edge.
     pub fn new(dock: &Rc<Dock>, monitor: &gdk::Monitor) -> Surface {
@@ -166,6 +181,17 @@ impl Surface {
         let over = hider.clone();
         motion.connect_leave(move |_| feed(&over, Event::PointerOut));
         window.add_controller(motion);
+        // Active is the window holding the keyboard: a focus controller reports nothing while
+        // no widget of it has the focus yet.
+        let over = hider.clone();
+        window.connect_is_active_notify(move |window| {
+            let event = if window.is_active() {
+                Event::KeyboardIn
+            } else {
+                Event::KeyboardOut
+            };
+            feed(&over, event);
+        });
         let weak = Rc::downgrade(dock);
         window.connect_map(move |_| {
             if let Some(dock) = weak.upgrade() {
@@ -329,6 +355,12 @@ impl Surface {
             });
             hider.show(false);
             self.hider.replace(Some(hider));
+            if !self.window.is_mapped() {
+                wait_for_the_keyboard(&self.window);
+            }
+            if self.window.is_active() {
+                feed(&self.hider, Event::KeyboardIn);
+            }
         }
         self.window.set_child(Some(&stack));
         self.row = row;

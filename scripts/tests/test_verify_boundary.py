@@ -90,8 +90,14 @@ class BoundaryTest(unittest.TestCase):
         both = 'const X: [&str; 2] = ["com.system76.CosmicFiles.desktop", "com.system76.CosmicPanel"];\n'
         self.assertEqual(len(problems({"system/athanor-layout/src/favorites.rs": both})), 1)
 
+    def test_a_family_of_units_of_a_cosmic_application_is_not_a_configuration(self):
+        code = 'const LINE: &str = "app-athanor-com.system76.CosmicSettings*@.service";\n'
+        self.assertEqual(problems({"system/athanor-layout/src/main.rs": code}), [])
+
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
             "forge/tools/calmo-cosmic-theme/src/main.rs",
             "system/athanor-compositor-client/src/theme.rs",
         ]
@@ -99,6 +105,9 @@ class BoundaryTest(unittest.TestCase):
             with self.subTest(path):
                 self.assertEqual(problems({path: COSMIC_CONFIG}), [])
         refused = [
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/state.rs",
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings.rs",
+            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/other.rs",
             "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0/src/main.rs",
             "system/athanor-layout/src/cosmic.rs",
             "system/athanor-layout/src/apply.rs",

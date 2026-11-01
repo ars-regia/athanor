@@ -33,11 +33,11 @@ NAMED = {
     "mute": 113, "voldown": 114, "volup": 115,
 }
 # Linux input event codes of the US layout: unshifted characters, then shifted ones.
-PLAIN = dict(zip("1234567890-=qwertyuiopasdfghjklzxcvbnm./ ", [
+PLAIN = dict(zip("1234567890-=qwertyuiopasdfghjklzxcvbnm./ '", [
     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     30, 31, 32, 33, 34, 35, 36, 37, 38,
-    44, 45, 46, 47, 48, 49, 50, 52, 53, 57,
+    44, 45, 46, 47, 48, 49, 50, 52, 53, 57, 40,
 ]))
 SHIFTED = {"+": 13, "*": 9, "_": 12, "#": 4, "%": 6, "&": 8, "?": 53} | {c.upper(): k for c, k in PLAIN.items() if c.isalpha()}
 # How long the compositor takes to add a new input device.

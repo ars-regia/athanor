@@ -8,6 +8,10 @@ range (65535 per pixel in Q16), older releases print the plain count. Spike P3 m
 machine; llvmpipe chooses its code path from the host CPU, so 64 pixels, 0.003 % of a
 1920x1080 frame, is allowed between runner generations. The smallest thing that can move
 on a surface, a 12 px badge, is 113 pixels.
+
+The toolkit dock's captures, the dock goldens rig.sh tags toolkit-, allow 16: its
+running indicator is 2 px across a 32 px button at scale 1.0, 64 pixels. The GTK dock's
+goldens keep 64, as every other surface does.
 """
 import re
 import subprocess
@@ -15,6 +19,13 @@ import sys
 from pathlib import Path
 
 TOLERANCE = 64
+TOOLKIT_DOCK_TOLERANCE = 16
+
+
+def tolerance(golden_dir, tag):
+    if golden_dir.name == "dock" and tag.startswith("toolkit-"):
+        return TOOLKIT_DOCK_TOLERANCE
+    return TOLERANCE
 
 
 def parse_count(text):
@@ -24,8 +35,8 @@ def parse_count(text):
     return int(float(match.group(1)))
 
 
-def verdict(differing):
-    return differing <= TOLERANCE
+def verdict(differing, allowed=TOLERANCE):
+    return differing <= allowed
 
 
 def differing_pixels(golden, actual, diff):
@@ -54,9 +65,10 @@ def main(argv):
             failed += 1
             continue
         differing = differing_pixels(golden, actual, actual_dir / f"{tag}-diff.png")
-        ok = verdict(differing)
+        allowed = tolerance(golden_dir, tag)
+        ok = verdict(differing, allowed)
         failed += not ok
-        print(f"{'ok  ' if ok else 'FAIL'} {tag}: {differing} pixel(s) differ (tolerance {TOLERANCE})")
+        print(f"{'ok  ' if ok else 'FAIL'} {tag}: {differing} pixel(s) differ (tolerance {allowed})")
     return 1 if failed else 0
 
 

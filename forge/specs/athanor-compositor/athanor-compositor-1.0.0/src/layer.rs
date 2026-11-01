@@ -17,10 +17,11 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::shell::wlr_layer::{
-    KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
+    Anchor, KeyboardInteractivity, Layer, LayerSurface as WlrLayerSurface, WlrLayerShellHandler,
     WlrLayerShellState,
 };
 use smithay::wayland::shell::xdg::PopupSurface;
+use std::cell::Cell;
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
@@ -67,14 +68,15 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
         }
+        self.fit_maximised();
         self.refocus(wl_surface);
     }
 }
 
 impl State {
     /// A commit of a layer surface: its output's layers are arranged again, a configure goes
-    /// out when its size changed or it has had none, and the keyboard follows its
-    /// interactivity.
+    /// out when its size changed or it has had none, unless the commit unmapped it, and the
+    /// keyboard follows its interactivity.
     pub fn layer_commit(&mut self, surface: &WlSurface) {
         if self.refuse_top_layers(surface) {
             return;
@@ -89,7 +91,17 @@ impl State {
         }) else {
             return;
         };
-        layer.layer_surface().send_pending_configure();
+        // A commit with no buffer, of a surface that showed one, unmaps it: wlr-layer-shell
+        // returns it to its state before its first commit, and the client maps it again with
+        // another commit without a buffer, answered by a configure. One sent now, of the state
+        // it was reset to, would be the first the client reads after that commit, and the
+        // surface would be mapped again at that stale size.
+        let shown = layer.user_data().get_or_insert(Shown::default);
+        let unmapped = shown.0.replace(mapped(surface)) && !mapped(surface);
+        if !unmapped {
+            layer.layer_surface().send_pending_configure();
+        }
+        self.fit_maximised();
 
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
@@ -204,6 +216,94 @@ impl State {
         self.focus_top();
     }
 
+    /// Ctrl+Alt+Tab: the keyboard goes to the next of the mapped on-demand surfaces of the top
+    /// layer of the output that has it: the layer surface's output, or the focused window's,
+    /// else the output under the pointer, else the first. A popup counts as its root surface,
+    /// so the cycle continues after a layer surface's popup, which closes. Those anchored to
+    /// the top come first, then the others, each group in the order its surfaces were created;
+    /// after the last it goes back to the window
+    /// (`focus_top`). The keyboard is not taken from an exclusive surface (D10), and the
+    /// surfaces of an identity Super+Escape took the keyboard from are skipped. Not while
+    /// locked: `fire` refuses it.
+    pub fn focus_cycle(&mut self) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if self.exclusive_layer().is_some() {
+            return;
+        }
+        let held = keyboard.current_focus();
+        let popup_root = held
+            .as_ref()
+            .and_then(|focus| self.popups.find_popup(focus))
+            .and_then(|popup| find_popup_root_surface(&popup).ok());
+        let focus = popup_root.clone().or(held);
+        let on_layer = focus.as_ref().and_then(|focus| {
+            self.space.outputs().find(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(focus, WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
+        });
+        let pointer_output = || {
+            let at = self.seat.get_pointer()?.current_location();
+            self.space.output_under(at).next().cloned()
+        };
+        // A window across two outputs: the one under the pointer, if the window is on it.
+        let window_output = || {
+            let window = self.window_for(focus.as_ref()?)?;
+            let outputs = self.space.outputs_for_element(&window);
+            pointer_output()
+                .filter(|output| outputs.contains(output))
+                .or_else(|| outputs.into_iter().next())
+        };
+        let output = on_layer
+            .cloned()
+            .or_else(window_output)
+            .or_else(pointer_output)
+            .or_else(|| self.space.outputs().next().cloned());
+        let Some(output) = output else {
+            return;
+        };
+        let mut ring: Vec<(bool, WlSurface)> = layer_map_for_output(&output)
+            .layers_on(Layer::Top)
+            .filter(|layer| {
+                layer.cached_state().keyboard_interactivity == KeyboardInteractivity::OnDemand
+                    && mapped(layer.wl_surface())
+                    && !self.escaped(layer.wl_surface())
+            })
+            .map(|layer| {
+                (
+                    !layer.cached_state().anchor.contains(Anchor::TOP),
+                    layer.wl_surface().clone(),
+                )
+            })
+            .collect();
+        ring.sort_by_key(|(below, _)| *below);
+        let next = match ring
+            .iter()
+            .position(|(_, surface)| Some(surface) == focus.as_ref())
+        {
+            Some(at) => ring.get(at + 1),
+            None => ring.first(),
+        };
+        // Nothing to cycle to from a window: leave its input method's grab alone.
+        if next.is_none() && on_layer.is_none() {
+            return;
+        }
+        // The popup the keyboard leaves closes, with its grabs.
+        if let Some(root) = &popup_root {
+            self.dismiss_popups_of(root);
+        }
+        if keyboard.is_grabbed() {
+            keyboard.unset_grab(self);
+        }
+        match next {
+            Some((_, surface)) => self.set_keyboard_focus(Some(surface.clone())),
+            None => self.focus_top(),
+        }
+    }
+
     /// An output that goes: its layer surfaces are closed, as the protocol asks, and the
     /// keyboard leaves them.
     // ponytail: closed, not moved to another output; a shell maps them again where it wants.
@@ -265,7 +365,11 @@ fn holds_exclusively(layer: &LayerSurface) -> bool {
         && mapped(layer.wl_surface())
 }
 
+/// Whether a layer surface showed a buffer at its last commit, kept in its user data.
+#[derive(Default)]
+struct Shown(Cell<bool>);
+
 /// Whether `surface` shows a buffer.
-fn mapped(surface: &WlSurface) -> bool {
+pub(crate) fn mapped(surface: &WlSurface) -> bool {
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
 }

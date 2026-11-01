@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import release_class
 import schema
@@ -38,6 +39,11 @@ ARTIFACTS = ["release-request", "image-digests", "kernel-digests"]
 FILES = ["image-digests.txt", "kernel-digests.txt", "kernel-unsigned.txt"]
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 TIMEOUT = 300  # seconds for one external command
+# How long the API's record of the build may lag the jobs that requested this release. Seen: 6.3 min.
+SETTLE = 600  # seconds
+SETTLE_PAUSE = 15  # seconds between two reads
+# What no later read will change, unlike a 5xx or a 403 of the rate limit.
+PERMANENT = re.compile(r"\(HTTP 40[14]\)")
 CREATED = "org.opencontainers.image.created"
 REVISION = "org.opencontainers.image.revision"
 
@@ -68,6 +74,49 @@ def tool(*args):
 
 def api(path, *flags):
     return json.loads(tool("gh", "api", *flags, path))
+
+
+def build_record(repo, run_id):
+    """The API's record of the build run and of the jobs of its attempt."""
+    run = api(f"/repos/{repo}/actions/runs/{run_id}")
+    pages = api(
+        f"/repos/{repo}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100",
+        "--paginate",
+        "--slurp",
+    )
+    return run, [j for page in pages for j in page["jobs"]]
+
+
+def behind(run, jobs):
+    """Whether the record has not yet caught up with the jobs that requested the release."""
+    return (
+        run["status"] == "queued"
+        or IMAGE_JOB not in [j["name"] for j in jobs]
+        or any(j["name"] != REQUEST_JOB and j["conclusion"] is None for j in jobs)
+    )
+
+
+def settled(repo, run_id, attempt):
+    """The build run and its jobs, once the API's record has caught up with request-release, or
+    as they stand after SETTLE seconds. The record can show a finished job as unfinished and the
+    run as queued for minutes, and one read of it would end the release of this build. The
+    checks that follow stay as strict: a run that stays behind is refused by them, and one at
+    another attempt than the request's will never catch up, so it is not waited for."""
+    deadline = time.monotonic() + SETTLE
+    while True:
+        try:
+            run, jobs = build_record(repo, run_id)
+        except Refused as error:
+            if PERMANENT.search(str(error)) or time.monotonic() >= deadline:
+                raise
+        else:
+            if (
+                run["run_attempt"] != attempt
+                or not behind(run, jobs)
+                or time.monotonic() >= deadline
+            ):
+                return run, jobs
+        time.sleep(SETTLE_PAUSE)
 
 
 def compare(repo, base, head):
@@ -241,7 +290,7 @@ def check(out):
             schema.validate(request, schema.load("release-request"))
         except ValueError as error:
             raise Refused(f"release-request.json: {error}") from None
-        run = api(f"/repos/{repo}/actions/runs/{run_id}")
+        run, jobs = settled(repo, run_id, request["build_run_attempt"])
         why = []
         if request["build_run_id"] != int(run_id):
             why.append(f"request names run id {request['build_run_id']}, not {run_id}")
@@ -260,12 +309,6 @@ def check(out):
         for name in FILES:
             if sha256(tmp / name) != request["sha256"][name]:
                 why.append(f"{name} differs from the hash of the request")
-        pages = api(
-            f"/repos/{repo}/actions/runs/{run_id}/attempts/{run['run_attempt']}/jobs?per_page=100",
-            "--paginate",
-            "--slurp",
-        )
-        jobs = [j for page in pages for j in page["jobs"]]
         why += [
             f"job {j['name']} {j['conclusion']}"
             for j in jobs

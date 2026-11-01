@@ -11,6 +11,7 @@ from test_kernel_artifacts import Tool
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "system" / "evidence-bundle.sh"
 IDENTITY = "https://github.com/ars-regia/athanor/.github/workflows/promote-stable.yml@refs/heads/iso-v0"
+RELEASE = {"tag": "promoted-412", "title": "43.20261024.5123", "latest": False, "notes_sha256": "d" * 64}
 
 
 class EvidenceBundle(Tool):
@@ -21,6 +22,7 @@ class EvidenceBundle(Tool):
         (a / "evidence").mkdir(parents=True)
         (a / "packages").mkdir()
         (a / "promotion.json").write_text(json.dumps({"run_id": 412}))
+        (a / "release.json").write_text(json.dumps(RELEASE))
         (a / "image-digests.txt").write_text(
             "r/athanor-system 412 sha256:" + "a" * 64 + "\n"
         )
@@ -59,6 +61,7 @@ class EvidenceBundle(Tool):
                     "image-digests.txt",
                     "packages/athanor-system.txt",
                     "promotion.json",
+                    "release.json",
                 ]
             ),
         )
@@ -70,6 +73,13 @@ class EvidenceBundle(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn("promotion-plan.sh", r.stderr)
         self.assertFalse(self.bundle.exists())
+
+    def test_create_refuses_a_plan_without_release_json(self):
+        (self.artifacts / "release.json").unlink()
+        r = self.run_script("create", str(self.artifacts), str(self.bundle))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("github-release.sh plan", r.stderr)
+        self.assertFalse((self.bundle / "bundle.sha256").exists())
 
     def test_create_refuses_a_symlink(self):
         (self.artifacts / "evidence" / "link.json").symlink_to(
@@ -142,26 +152,96 @@ class EvidenceBundle(Tool):
 
     def test_the_summary_names_what_the_approval_covers(self):
         (self.artifacts / "promotion.json").write_text(json.dumps({
-            "run_id": 412, "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
+            "run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+            "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
             "skipped": [{"name": "athanor-system-nvidia-legacy", "reason": "not promoted before 0.9"}],
             "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64,
-            "overrides": ["athanor-system-nvidia"], "builder_content_hash": "b" * 64}))
+            "overrides": ["athanor-system-nvidia"], "builder_content_hash": "b" * 64, "dwell_hours": 0}))
         (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps({
             "gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-09T10:00:00Z"}))
         r = self.run_script("summary", str(self.artifacts))
         self.assertEqual(r.returncode, 0, r.stderr)
-        for text in ("build run 412", "sha256:" + "a" * 64, "Hardware override: athanor-system-nvidia",
+        for text in ("build run 412", "sha256:" + "a" * 64, "Hardware override: athanor-system-nvidia", "Dwell: 0 h (UD5)",
                      "Signatures verified in: athanor-builder:" + "b" * 64,
                      "| iso-acceptance | athanor-system | pass |", "athanor-system-nvidia-legacy",
                      "Installer ISO (athanor-iso:stable after the system images): `sha256:" + "c" * 64 + "`"):
             self.assertIn(text, r.stdout)
 
+    def plan(self, **fields):
+        plan = {"run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+                "images": [{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": None}],
+                "skipped": [], "overrides": [], "builder_content_hash": "b" * 64, "dwell_hours": 24,
+                "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64}
+        plan.update(fields)
+        (self.artifacts / "promotion.json").write_text(json.dumps({k: v for k, v in plan.items() if v is not None}))
+        (self.artifacts / "evidence" / "iso-acceptance.athanor-system.json").write_text(json.dumps({
+            "gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-09T10:00:00Z"}))
+
+    def test_summary_names_the_version_and_commit(self):
+        self.plan()
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Version: 43.20261024.5123 (commit " + "f" * 40 + ")", r.stdout)
+
+    def test_summary_refuses_a_plan_without_a_version(self):
+        for field in ("version", "revision"):
+            with self.subTest(field=field):
+                self.plan(**{field: None})
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+
+    def test_summary_names_the_release_tag_title_and_notes_hash(self):
+        self.plan()
+        release = {"tag": "v0.9.0", "title": 'Athanor 0.9 "surface" (43.20261024.5123)', "latest": True,
+                   "notes_sha256": "e" * 64,
+                   "fallback": {"tag": "promoted-412", "title": "43.20261024.5123", "latest": False,
+                                "notes_sha256": "d" * 64}}
+        (self.artifacts / "release.json").write_text(json.dumps(release))
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for text in ("`v0.9.0`", 'Athanor 0.9 "surface" (43.20261024.5123)', "latest true", "`" + "e" * 64 + "`",
+                     "`promoted-412`", "latest false", "`" + "d" * 64 + "`"):
+            self.assertIn(text, r.stdout)
+        for field in ("tag", "title", "latest", "notes_sha256"):
+            with self.subTest(field=field):
+                (self.artifacts / "release.json").write_text(json.dumps({k: v for k, v in release.items() if k != field}))
+                r = self.run_script("summary", str(self.artifacts))
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn(field, r.stderr)
+        (self.artifacts / "release.json").unlink()
+        r = self.run_script("summary", str(self.artifacts))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("release.json", r.stderr)
+
+    def test_summary_promotion_mode_is_a_function_of_the_build_and_the_tag(self):
+        self.plan(trigger="https://github.com/ars-regia/athanor/actions/runs/9001")
+        (self.artifacts / "release.json").unlink()
+        first = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        for text in ("### Build run 412", "Version: 43.20261024.5123 (commit " + "f" * 40 + ")",
+                     "gh release download promoted-412 -R ars-regia/athanor -p 'evidence-412-*.tar'",
+                     "--certificate-identity " + IDENTITY, "sha256sum --strict -c bundle.sha256"):
+            self.assertIn(text, first.stdout)
+        for text in ("9001", "GitHub Release", "Previous stable", "Hardware override", "athanor-builder", "iso-acceptance"):
+            self.assertNotIn(text, first.stdout)
+        # Another promotion of the same build: its own run, previous stable, override, builder and evidence.
+        self.plan(trigger="https://github.com/ars-regia/athanor/actions/runs/9002", overrides=["athanor-system-nvidia"],
+                  images=[{"name": "athanor-system", "digest": "sha256:" + "a" * 64, "previous_stable": "sha256:" + "e" * 64}],
+                  builder_content_hash="9" * 64)
+        (self.artifacts / "evidence" / "hardware.athanor-system.json").write_text(json.dumps({
+            "gate": "hardware", "image": "athanor-system", "verdict": "pass", "finished_at": "2026-10-24T10:00:00Z"}))
+        second = self.run_script("summary", "--promotion", str(self.artifacts), "promoted-412")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first.stdout, second.stdout)
     def test_the_summary_refuses_a_missing_field(self):
         # A plan without overrides would read "Hardware override: none" in the approval.
-        plan = {"run_id": 412, "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64,
+        plan = {"run_id": 412, "version": "43.20261024.5123", "revision": "f" * 40,
+                "images": [], "skipped": [], "overrides": [], "builder_content_hash": "b" * 64, "dwell_hours": 24,
                 "iso": "sha256:" + "c" * 64, "iso_system": "sha256:" + "a" * 64}
         evidence = {"gate": "iso-acceptance", "image": "athanor-system", "verdict": "pass", "finished_at": "t"}
         for name, document, field in (("promotion.json", plan, "overrides"),
+                                      ("promotion.json", plan, "dwell_hours"),
                                       ("promotion.json", plan, "builder_content_hash"),
                                       ("promotion.json", plan, "iso"),
                                       ("promotion.json", plan, "iso_system"),

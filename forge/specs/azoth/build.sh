@@ -51,6 +51,15 @@ if [[ $VARIANT ]]; then
 fi
 
 # Names and URLs derived from the pins.
+NVR=$(bash "$HERE/nvr.sh")     # also rejects a FEDORA_KERNEL_NVR of the wrong shape
+# %dist of the build is the Fedora release of the pinned SRPM (the .fcNN of
+# FEDORA_KERNEL_NVR), not the builder's: kernel.spec's release is 300%{?buildid}%{?dist},
+# and with the builder's %dist a fedora:43 builder turns an fc45 source into ...fc43
+# while nvr.sh and the publish jobs expect ...fc45. %fedora is not redefined: the spec's
+# `%if 0%{?fedora}` conditionals follow the builder that actually compiles, which stays
+# fedora:43 until task 12 of docs/superpowers/plans/2026-10-18-fedora-45-rebase.md.
+[[ ${FEDORA_KERNEL_NVR#*-} =~ \.fc[0-9]+ ]] || die "FEDORA_KERNEL_NVR without a Fedora dist tag: $FEDORA_KERNEL_NVR"
+DIST=${BASH_REMATCH[0]}
 SRPM=kernel-$FEDORA_KERNEL_NVR.src.rpm
 KOJI=https://kojipkgs.fedoraproject.org/packages/kernel/${FEDORA_KERNEL_NVR%%-*}/${FEDORA_KERNEL_NVR#*-}
 # koji prunes the signed copies of the builds that are no longer the latest but keeps the
@@ -139,7 +148,7 @@ rpmkeys --checksig --verbose "$SIGNED_SRPM" | grep "signature, key fingerprint: 
 # --- tree ---------------------------------------------------------------------------
 
 step "kernel.spec and Fedora sources in $TOP"
-printf '%%_topdir %s\n%%buildid .azoth%s\n' "$TOP" "${VARIANT:+.$VARIANT}" > "$HOME/.rpmmacros"
+printf '%%_topdir %s\n%%buildid .azoth%s\n%%dist %s\n' "$TOP" "${VARIANT:+.$VARIANT}" "$DIST" > "$HOME/.rpmmacros"
 rpm -i "$SIGNED_SRPM"
 
 step "CachyOS base: three-way merge of vanilla, CachyOS and the Red Hat patch, then patches.list and patches/"
@@ -409,7 +418,6 @@ echo "MicroVM config: $(grep -c '=y$' "$MICROVM_OBJ/.config") built-in options, 
 
 # A variant is only the main kernel to be measured: no guest kernel.
 if [[ ( $STAGE == microvm || $STAGE == build ) && -z $VARIANT ]]; then
-  NVR=$(bash "$HERE/nvr.sh")
   step "MicroVM kernel: rpmbuild -bb microvm/azoth-microvm.spec (O=$MICROVM_OBJ)"
   # The same SOURCE_DATE_EPOCH as the main kernel, which rpm takes from the kernel.spec
   # changelog: the guest spec has none, and without an epoch the package timestamps would
@@ -435,7 +443,11 @@ if [[ $STAGE == build ]]; then
       *) cp "$rpm" "$OUT/kernel/" ;;
     esac
   done
-  rpm -qp --qf '%{VERSION}-%{RELEASE}' "$TOP"/RPMS/x86_64/kernel-core-*.rpm > "$OUT/nvr"
+  # The publish jobs compare out/nvr with nvr.sh: a mismatch stops here, not at publication.
+  BUILT=$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$TOP"/RPMS/x86_64/kernel-core-*.rpm)
+  EXPECTED=${NVR/.azoth./.azoth${VARIANT:+.$VARIANT}.}
+  [[ $BUILT == "$EXPECTED" ]] || die "rpmbuild built kernel $BUILT, the pins (nvr.sh) give $EXPECTED"
+  printf '%s' "$BUILT" > "$OUT/nvr"
 fi
 
 step "done: $(find "$OUT" -type f -printf "%P ")"

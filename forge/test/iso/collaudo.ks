@@ -31,6 +31,15 @@ xconfig --startxonboot
 firewall --use-system-defaults
 services --disabled=sshd
 
+# The upgrade case (run_iso_test.sh with UPDATE_TO) drives the installed system over SSH
+# (doc_update_delivery.md UD19). run_iso_test.sh deletes every block between these markers
+# for the other cases, so the ISO acceptance keeps sshd disabled. A fixed address, as in
+# scripts/devvm/devvm.ks: slirp's DHCP moved the lease from .15 to .16 across a reboot,
+# and the port forward reaches .15 only.
+# upgrade-acceptance begin
+network --bootproto=static --device=link --ip=10.0.2.15 --netmask=255.255.255.0 --gateway=10.0.2.2 --nameserver=10.0.2.3 --activate --onboot=yes
+# upgrade-acceptance end
+
 # The whole disk, no questions. The test VM has one virtio disk and nothing to preserve.
 clearpart --all --initlabel
 autopart --type=btrfs
@@ -331,3 +340,24 @@ repository=${image%@*}
 case ${repository##*/} in *:*) repository=${repository%:*} ;; esac
 bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registry "$repository:stable"
 %end
+
+# The upgrade case's access, for the test VM only (UD19): the per-run public key that
+# run_iso_test.sh substitutes, a passwordless sudo rule for the test user, the runner bound
+# to the home zone, which keeps ssh (the public zone has none, ADR-0089 and ADR-0116), and
+# sshd started at boot. Deleted with its markers in every other case.
+# upgrade-acceptance begin
+%post --erroronfail
+set -eu
+home=$(getent passwd collaudo | cut -d: -f6)
+install -d -m 0700 -o collaudo -g collaudo "$home/.ssh"
+printf '%s\n' '@COLLAUDO_SSH_KEY@' > "$home/.ssh/authorized_keys"
+chown collaudo:collaudo "$home/.ssh/authorized_keys"
+chmod 0600 "$home/.ssh/authorized_keys"
+restorecon -R "$home/.ssh"
+echo 'collaudo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/50-collaudo
+chmod 0440 /etc/sudoers.d/50-collaudo
+visudo -cf /etc/sudoers.d/50-collaudo
+firewall-offline-cmd --zone=home --add-source=10.0.2.2
+systemctl enable sshd.service
+%end
+# upgrade-acceptance end

@@ -16,6 +16,8 @@ import schema  # noqa: E402
 from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
+# The check, without its wait for a record that a test leaves behind for good.
+NO_WAIT = "import sys, release_candidate as r; r.SETTLE = 0; sys.exit(r.main(sys.argv[1:]))"
 R = "ars-regia/athanor"
 REG = "ghcr.io/owner"
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
@@ -175,7 +177,8 @@ class Candidate(Tool):
             [
                 sys.executable,
                 "-B",
-                str(SCRIPT),
+                "-c",
+                NO_WAIT,
                 "check",
                 "--out",
                 str(self.dir / "out"),
@@ -183,7 +186,13 @@ class Candidate(Tool):
             capture_output=True,
             text=True,
             cwd=ROOT,
-            env={**self.env, "BUILD_RUN_ID": run_id, "GITHUB_REF": ref, **extra},
+            env={
+                **self.env,
+                "BUILD_RUN_ID": run_id,
+                "GITHUB_REF": ref,
+                "PYTHONPATH": str(SCRIPT.parent),
+                **extra,
+            },
         )
 
     def order(self):
@@ -317,6 +326,69 @@ class Candidate(Tool):
     def test_a_pull_request_event_refuses(self):
         self.github(run=run_object(event="pull_request"))
         self.refused("event pull_request")
+
+    def settle(self, *reads, attempt=1, wait=60):
+        """settled() over the given API answers, an exception being raised: (run, jobs, reads
+        left)."""
+        import release_candidate as module
+
+        answers = iter(reads)
+
+        def api(*_):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        saved = module.api, module.SETTLE, module.SETTLE_PAUSE
+        module.api, module.SETTLE, module.SETTLE_PAUSE = api, wait, 0
+        try:
+            run, found = module.settled(R, "412", attempt)
+        finally:
+            module.api, module.SETTLE, module.SETTLE_PAUSE = saved
+        return run, found, len(list(answers))
+
+    def test_the_check_waits_while_the_run_reads_as_queued(self):
+        run, _, left = self.settle(run_object(status="queued"), jobs(), run_object(), jobs())
+        self.assertEqual((run["status"], left), ("in_progress", 0))
+
+    def test_the_check_waits_while_a_job_has_no_conclusion(self):
+        late = jobs({"name": "late", "conclusion": None})
+        _, found, left = self.settle(run_object(), late, run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_the_check_waits_while_the_image_job_is_not_listed(self):
+        _, found, left = self.settle(run_object(), [{"jobs": []}], run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_a_failed_read_during_the_wait_is_read_again(self):
+        import release_candidate as module
+
+        _, found, left = self.settle(module.Refused("502"), run_object(), jobs())
+        self.assertEqual((found, left), (jobs()[0]["jobs"], 0))
+
+    def test_a_read_that_keeps_failing_refuses_at_the_end_of_the_wait(self):
+        import release_candidate as module
+
+        with self.assertRaisesRegex(module.Refused, "502"):
+            self.settle(module.Refused("gh: Bad Gateway (HTTP 502)"), wait=0)
+
+    def test_a_permanent_error_is_not_waited_for(self):
+        import release_candidate as module
+
+        with self.assertRaisesRegex(module.Refused, "404"):
+            self.settle(module.Refused("gh: Not Found (HTTP 404)"), run_object(), jobs())
+
+    def test_a_run_at_another_attempt_is_not_waited_for(self):
+        spare = (run_object(), jobs())
+        run, _, left = self.settle(
+            run_object(status="queued", run_attempt=2), jobs(), *spare
+        )
+        self.assertEqual((run["run_attempt"], left), (2, 2))
+
+    def test_a_record_that_stays_behind_is_refused(self):
+        self.github(pages=jobs({"name": "late", "conclusion": None}))
+        self.refused("job late None")
 
     def test_a_queued_build_refuses(self):
         self.github(run=run_object(status="queued"))

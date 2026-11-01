@@ -130,10 +130,12 @@ goes through (the builder's inputs `flake.nix`, `flake.lock` and `forge/builder/
 `forge/config/rpmmacros`, `build_spec.sh`, `run_spec_build.sh`, `fetch_sources.sh`)
 rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). Only the DAG's specs
 are built: any other changed directory (the kernel, Nix-built packages, unlisted or deleted
-specs) is named in the log and skipped. A change to the
-builder's inputs runs in a builder image built from the pull request
-(`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
-artifact and never pushed; any other change runs in the published `athanor-builder:latest`.
+specs) is named in the log and skipped. The specs build in the builder of the checkout,
+named by its content hash (`check_idempotency.sh --package builder`): the published
+`athanor-builder:<hash>` when the registry has it, else a builder image built from the pull
+request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
+artifact and never pushed. Never `athanor-builder:latest`, the default branch's builder: a
+pull request into another branch would build against the default branch's libraries.
 
 ## 6. Tier repositories and the system image
 

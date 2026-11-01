@@ -48,11 +48,12 @@ The repository variables set are `SETTINGS_APP_CLIENT_ID`, `EVIDENCE_REGISTRY` a
 | VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:63`) | orchestrator (:153, :206, :268), `kernel-build.yml:55`, `kernel-bump.yml:61,259`, `nvidia-kmod.yml:45`, `call-nvidia-kmod-prepare.yml:37`, `system-image-check.yml:53` |
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `rust-security-audit.yml:28` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `accept.yml`, `promote-stable.yml` |
-| VAR5 | `PROMOTE_DWELL_HOURS` | `24` | PR #180 only: `promote-stable.yml` |
+| VAR5 | `PROMOTE_DWELL_HOURS` | `24` | not a repository variable: `promote-stable.yml` sets it from its `dwell_hours` input (0 to 24, UD5), and `scripts/ci/promotion-record.sh` records it in `promotion.json` and the approval summary |
 | VAR6 | `SETTINGS_APP_CLIENT_ID` | none; set by the maintainer | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
 | VAR7 | removed 2026-10-09 (ADR-0103 D4) | | |
 | VAR9 | `EVIDENCE_REGISTRY` | none: unset, promotion fails closed (ADR-0106 item 4); set by the maintainer on 2026-10-11 to `quay.io/ars-regia` | `promote-stable.yml` `plan` and `promote`, through `system/promote-login.sh` and `system/evidence-bundle.sh`: the OCI registry off GitHub that keeps the evidence bundle of every promotion |
 | VAR10 | `EVIDENCE_REGISTRY_USER` | none; set by the maintainer on 2026-10-11 | as VAR9: the user of SEC16 |
+| VAR11 | `MAINTAINER_TAG_EMAIL` | none; set by the maintainer | `promote-stable.yml` `plan` and `github-release`, through `system/github-release.sh`: the tagger email a `v0.x` tag must carry (ADR-0131 decision 3) |
 | VAR8 | `BOT_APP_CLIENT_ID` | none | environment `bots`: client id of the bots GitHub App `athanor-bots` (SEC15), read as `vars.BOT_APP_CLIENT_ID` by the jobs of SEC15 |
 
 | Id | Environment | Secrets | Protection (`.github/settings/environments.json`; `signing` stays beside the split until the image key rotation of section 4.1 ends) | Referenced by |

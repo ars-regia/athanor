@@ -51,12 +51,8 @@ LAUNCH_ID=os.athanor.LauncherAcceptanceWaylandInfo
 GLOBALS=/tmp/athanor-launcher-acceptance-globals
 HTTPS_ID=os.athanor.LauncherAcceptanceHttps
 HTTPS_OUT=/tmp/athanor-launcher-acceptance-https
-# Globals only the main socket offers: an application behind the context sees none of them
-# (the list compositor-acceptance.sh checks).
-PRIVILEGED=(zcosmic_toplevel_info_v1 zcosmic_toplevel_manager_v1 ext_workspace_manager_v1
-    zcosmic_workspace_manager_v2 zwlr_layer_shell_v1 ext_data_control_manager_v1
-    zwlr_data_control_manager_v1 wp_security_context_manager_v1
-    zcosmic_keyboard_layout_manager_v1 cosmic_a11y_manager_v1)
+# Globals only the main socket offers: an application behind the context sees none of them.
+mapfile -t PRIVILEGED < "$ROOT/forge/test/shell/forbidden-globals.txt"
 DCONF_GAP='dconf will not work properly'
 
 # Runs a command as the session user, with the session's bus and compositor.
@@ -433,8 +429,8 @@ stage_windows() {
     sleep 3
     start_term acceptance-other $b
     sleep 3
-    search acceptance-window "acceptance-window — Terminal, Window"
-    [[ $(first_row) == "acceptance-window — Terminal, Window" ]] || fail "first row is '$(first_row)'"
+    search acceptance-window "acceptance-window, Window"
+    [[ $(first_row) == "acceptance-window, Window" ]] || fail "first row is '$(first_row)'"
     # The window opened last holds the focus; Enter must give it to the other one (item 5).
     type_keys @enter
     wait_until 8 hidden || fail "the launcher is still shown after Enter on a window"
@@ -918,7 +914,7 @@ memory_round() {
     type_keys @up
     sleep 4
     close_launcher || fail "the launcher does not close"
-    search acceptance-memory "acceptance-memory — Terminal, Window"
+    search acceptance-memory "acceptance-memory, Window"
     close_launcher || fail "the launcher does not close"
     preview_decoded okpng-1 okpng-1.png
     preview_decoded okpdf-1 okpdf-1.pdf

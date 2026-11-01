@@ -249,7 +249,7 @@ impl Painter {
     fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
         let wanted: Vec<&Arc<Pixmap>> = (0..ui.len())
             .filter_map(|id| match &ui.widget(id).kind {
-                Kind::Image { image, .. } => Some(image.pixmap()),
+                Kind::Image { image, .. } | Kind::IconButton { image, .. } => Some(image.pixmap()),
                 _ => None,
             })
             .collect();

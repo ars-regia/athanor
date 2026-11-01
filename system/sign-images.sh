@@ -25,7 +25,9 @@
 # With --attestations DIR, the release statements candidate wrote (PB4b, ADR-0127), it then
 # attests each image with `cosign attest` and the same key, as <repo>:sha256-<hex>.att. cosign
 # writes there the classic DSSE attachment with --new-bundle-format=false, and takes the
-# statement's predicate; the subject is the reference it attests. Before anything is signed,
+# statement's predicate; the subject is the reference it attests. --tlog-upload=false keeps it
+# off the transparency log; cosign 3 reads a signing config by default and then refuses that
+# flag, so --use-signing-config=false lets it apply (#705). Before anything is signed,
 # scripts/ci/release_attestation.py requires one statement per image of the digests file,
 # naming that image, and none for anything else. cosign reads the passphrase from stdin when
 # COSIGN_PASSWORD is not set, so it gets the same private file as skopeo and no environment.
@@ -107,7 +109,7 @@ if [[ -n $attestations ]]; then
         # retries transient registry errors itself. A failed attest fails the job; a re-run
         # attests again, and an identical second attestation verifies as the first. One that
         # differs never would: candidate refuses it first (release_attestation.py prior).
-        cosign attest --key "$work/key" --type "$predicate_type" --tlog-upload=false --new-bundle-format=false \
+        cosign attest --key "$work/key" --type "$predicate_type" --tlog-upload=false --use-signing-config=false --new-bundle-format=false \
             --predicate "$work/predicates/${digest#sha256:}.json" "$repository@$digest" < "$work/passphrase"
         echo "attested: $repository@$digest"
     done < "$digests"

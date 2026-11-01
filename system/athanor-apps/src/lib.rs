@@ -3,9 +3,10 @@
 //! pinning and unpinning, launching behind a security context (BR2), and the opener
 //! buttons. Generic over `Host`, which each program implements for its own state.
 //!
-//! Without the default `gtk` feature only the model, the favourites and the translations
-//! build, for a surface drawn without GTK.
+//! Without the default `gtk` feature the model, the entries and their acts (`entries`), the
+//! favourites and the translations build, for a surface drawn without GTK.
 
+pub mod entries;
 pub mod favorites;
 pub mod i18n;
 #[cfg(feature = "gtk")]

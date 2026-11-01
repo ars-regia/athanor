@@ -1,12 +1,18 @@
 #!/usr/bin/python3
 """input_method_check.py - doc_own_stack.md, milestone T1 task 6 (OS9 item 3): athanor-toolkit's
 text field takes composed input from an input method. Run as RIG_HOLD beside
-athanor-toolkit-field under cosmic-comp. Starts the test input method, which binds
-zwp_input_method_v2 unconfined, as every client of the scene; captures the field with the
-preedit, then with the commit; and reads the field's text on the accessibility bus at each step:
-empty under the preedit, which is not text yet, and the committed text after.
+athanor-toolkit-field. Starts the test input method; captures the field with the preedit, then
+with the commit; and reads the field's text on the accessibility bus at each step: empty under
+the preedit, which is not text yet, and the committed text after.
+
+Under cosmic-comp every client of the scene binds zwp_input_method_v2, and the input method and
+grim run directly. Under RIG_COMPOSITOR=athanor the protocol and the capture are privileged
+(doc_own_stack.md OS4): the input method runs as rig-input-method.service and grim as
+rig-grim.service, through in-unit.sh, as rig-privileged-clients grants them. The capture reads
+RIG_CAPTURE_OUTPUT, which scene.sh sets to athanor-compositor's first headless output.
 """
 
+import os
 import queue
 import subprocess
 import sys
@@ -18,6 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import find_application, value_of
 
 PREEDIT, COMMIT = "ni", "你"
+METHOD = "/out/bin/athanor-toolkit-input-method"
+IN_UNIT = "/repo/forge/test/shell/in-unit.sh"
 TIMEOUT = 10
 # Between two captures of a frame that may still be on its way.
 CAPTURE_INTERVAL_S = 0.1
@@ -43,8 +51,22 @@ def wait_for_text(Atspi, node, expected):
     return False
 
 
+def under_athanor():
+    return os.environ.get("RIG_COMPOSITOR") == "athanor"
+
+
+def capture_command(name):
+    grim = [IN_UNIT, "rig-grim.service", "/usr/bin/grim"] if under_athanor() else ["grim"]
+    return grim + ["-o", os.environ.get("RIG_CAPTURE_OUTPUT", "WINIT-0"), f"/out/{name}.png"]
+
+
+def method_command():
+    unit = [IN_UNIT, "rig-input-method.service"] if under_athanor() else []
+    return unit + [METHOD, PREEDIT, COMMIT]
+
+
 def capture(name):
-    subprocess.run(["grim", "-o", "WINIT-0", f"/out/{name}.png"], check=True)
+    subprocess.run(capture_command(name), check=True)
     return Path(f"/out/{name}.png").read_bytes()
 
 
@@ -110,7 +132,7 @@ def main():
         return 1
     before = capture("input-method-before")
     method = subprocess.Popen(
-        ["/out/bin/athanor-toolkit-input-method", PREEDIT, COMMIT],
+        method_command(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,

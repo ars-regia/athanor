@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:71.fc43}
+Release:        %{?autorelease}%{!?autorelease:74.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -14,7 +14,7 @@ Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
-# athanor-desktop runs the session's screen locker and idle daemon.
+# session-components runs the session's screen locker and idle daemon.
 Requires: cosmic-greeter cosmic-idle
 # Core UI andDaemons
 Requires: athanor-greeter-ui
@@ -60,6 +60,10 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-update
 %attr(0755,root,root) /usr/libexec/athanor-flatpak-triggers
 %attr(0755,root,root) /usr/libexec/athanor-usbguard-internal
+%dir /usr/libexec/athanor
+/usr/libexec/athanor/session-components
+/usr/libexec/athanor/session-import-names
+/usr/libexec/athanor/session-environment
 /usr/lib/systemd/system/athanor-usbguard-internal.service
 %dir /usr/share/athanor-system-config/flatpak-no-triggers
 /usr/lib/systemd/system/athanor-flatpak-triggers.service
@@ -77,6 +81,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 /usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
 /usr/share/glib-2.0/schemas/90_athanor-network.gschema.override
 /usr/share/athanor-system-config/greetd.toml
+/usr/share/athanor-system-config/session-import
 /usr/share/athanor-system-config/usbguard-daemon.conf
 /usr/share/athanor-system-config/greenboot.conf
 %attr(0755,root,root) /etc/greenboot/check/required.d/10-greetd-running.sh
@@ -84,6 +89,38 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-74
+- The supervisor of the screen locker and the idle daemon moves out of athanor-desktop into
+  /usr/libexec/athanor/session-components, which athanor-desktop and the own compositor's
+  session source (doc_session.md, SN15). It runs cosmic-greeter in
+  cosmic-greeter-locker.scope and cosmic-idle in cosmic-idle.scope, checks its anchor every
+  200 ms and stops both scopes once the anchor is gone.
+- athanor-session stops athanor-compositor.service, where its package is installed, and
+  both scopes, and removes ATHANOR_OWN_COMPOSITOR and XKB_DEFAULT_* from the user manager:
+  what a session on the own compositor killed before its exit handler leaves (SN15).
+- athanor-desktop reads the import list through the function of
+  /usr/libexec/athanor/session-import-names, which the own compositor's session sources too,
+  so that both sessions parse and refuse the list the same way (doc_session.md, SN2 and SN15).
+- athanor-session's exports of the user's language, region and cursor move into the function
+  of /usr/libexec/athanor/session-environment, which the own compositor's session sources
+  too, so that both sessions export the same values (doc_session.md, SN2 and SN15 step 4).
+
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-73
+- athanor-session exports LANG and LANGUAGE from the user's AccountsService languages,
+  the LC_* formats of the GSettings region when it differs from LANG, and XCURSOR_SIZE and
+  XCURSOR_THEME from the GNOME interface keys; the import list carries them into the user
+  manager (doc_session.md SN2 and SN13 step 2; doc_languages.md LN6 and LN7;
+  doc_accessibility.md AX9). Each AccountsService call is bounded to 2 s. LN7's
+  athanor-first-run apply-handoff comes with that command (doc_first_run.md, step 4).
+
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-72
+- The variables athanor-desktop imports into the user manager are listed in one file,
+  /usr/share/athanor-system-config/session-import, which the readiness gate of
+  athanor-system-services reads to unset them at the end of the session
+  (doc_session.md, SN2 and SN13 step 1). The list is unchanged. athanor-desktop skips blank,
+  whitespace-only and indented comment lines, drops a CRLF ending, validates each name and
+  refuses an empty list, so systemctl never imports the whole environment.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-71
 - athanor-greeter-client masks nvidia-modprobe with /usr/bin/true instead of /dev/null:
   bwrap's read-only remount of devtmpfs is refused to xdm_t, and the greeter never started

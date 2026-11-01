@@ -225,8 +225,8 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
 | File | Desired | Live until the maintainer applies it |
 | --- | --- | --- |
-| `rulesets.json` | rulesets `product-branches` and `product-review`, both on `refs/heads/iso-v0` and `refs/heads/main`. `product-branches` holds the integrity rules: no deletion, no force push, linear history and the required check `gate` of GitHub Actions (integration 15368, not strict); it has no bypass actor (no merge queue yet: see below). `product-review` holds the pull request rule: code-owner review and no other approval (squash only, stale approvals dismissed; the paths with no owner merge without a review, ADR-0107); its bypass actors are the repository admin role and the bots GitHub App (`Integration`), both in pull-request mode, so the maintainer and the bots merge their own pull requests without a second reviewer but nobody pushes past the integrity rules. `bot-branches` covers `refs/heads/chore/update-specs-zero-trust` and `refs/heads/bump/system-*`, the branches `bot_merge.py` merges: creation, update and force push are refused to everyone but the bots App (`Integration`, bypass mode `always`), and deletion stays allowed because a merged branch is deleted (PL1, PL2, PL4, PQ5). `rebase-branches` and `rebase-review` cover `refs/heads/rebase/*` (ADR-0125) as the product pair covers the product branches: `rebase-branches` holds no force push and the required check `gate`, not enforced on the push that creates the branch, with no bypass actor; `rebase-review` holds the pull request rule of `product-review`, with only the admin role as bypass actor in pull-request mode; neither has a deletion rule | no ruleset |
-| `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below) | both names set (`gh secret list`, `gh variable list`, 2026-10-11) |
+| `rulesets.json` | rulesets `product-branches` and `product-review`, both on `refs/heads/iso-v0` and `refs/heads/main`. `product-branches` holds the integrity rules: no deletion, no force push, linear history and the required check `gate` of GitHub Actions (integration 15368, not strict); it has no bypass actor (no merge queue yet: see below). `product-review` holds the pull request rule: code-owner review and no other approval (squash only, stale approvals dismissed; the paths with no owner merge without a review, ADR-0107); its bypass actors are the repository admin role and the bots GitHub App (`Integration`), both in pull-request mode, so the maintainer and the bots merge their own pull requests without a second reviewer but nobody pushes past the integrity rules. `bot-branches` covers `refs/heads/chore/update-specs-zero-trust` and `refs/heads/bump/system-*`, the branches `bot_merge.py` merges: creation, update and force push are refused to everyone but the bots App (`Integration`, bypass mode `always`), and deletion stays allowed because a merged branch is deleted (PL1, PL2, PL4, PQ5). `rebase-branches` and `rebase-review` cover `refs/heads/rebase/*` (ADR-0125) as the product pair covers the product branches: `rebase-branches` holds no force push and the required check `gate`, not enforced on the push that creates the branch, with no bypass actor; `rebase-review` holds the pull request rule of `product-review` with one difference, a merge commit allowed beside the squash, so a sync of the product branch into a rebase branch keeps the product branch in its ancestry (`.claude/rules/workflow.md`, 2026-10-22), and has only the admin role as bypass actor in pull-request mode; neither has a deletion rule. Three tag rulesets protect the tags a GitHub Release names (ADR-0131 decision 8): `version-tags-create` on `refs/tags/v*` holds the rule `creation`, with the repository admin role (`RepositoryRole` 5) as its only bypass actor in mode `always`, so only the maintainer creates a `v*` tag; `version-tags-immutable` on `refs/tags/v*` holds `update` and `deletion`, with no bypass actor; `promotion-tags` on `refs/tags/promoted-*` holds `update` and `deletion`, with no bypass actor. A bypass actor bypasses every rule of its ruleset, so the one rule the admin may pass sits alone in its own ruleset, and the App is a bypass actor of none of them | no ruleset |
+| `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below); variable `MAINTAINER_TAG_EMAIL`, the tagger email a `v0.x` tag must carry (secrets.md VAR11, ADR-0131 decision 3) | both names set (`gh secret list`, `gh variable list`, 2026-10-11); `MAINTAINER_TAG_EMAIL` set by the maintainer on 2026-10-24 |
 
 `gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
 the findings of `scripts/ci/known-red.txt` until their expiry, so the ruleset adds no
@@ -286,3 +286,50 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    to `true` in `actions.json`; the maintainer then applies it.
 
 `prevent_self_review` is not among these steps: it waits for a second reviewer (section 7).
+
+**Recovery from a mistaken `v*` tag.** `version-tags-immutable` has no bypass actor, so a
+wrong `v0.x.y` (lightweight, unsigned, or on the wrong commit) blocks every promotion plan of
+that commit (`system/github-release.sh plan`, ADR-0131 decision 7) and cannot be removed as it
+stands. The maintainer, from their own machine:
+
+1. Sets `"enforcement": "disabled"` on `version-tags-immutable` in a local, uncommitted
+   `rulesets.json`, runs `python3 scripts/github-settings/ghsettings.py apply` and reads the
+   plan (one `PUT …/rulesets/<id>`, no `DESTRUCTIVE` line), then `apply --yes`.
+2. If a Release exists at the tag (a valid tag on the wrong commit gets one published),
+   deletes it first with `gh release delete v0.x.y -R ars-regia/athanor`. This is the one
+   exception to the rule that a Release holding another run's `evidence-*` asset is never
+   deleted.
+3. Deletes the tag with `git push origin --delete v0.x.y`.
+4. Restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes`
+   again, then `diff`, which must print no drift for `rulesets`.
+5. Pushes the corrected signed tag, which `version-tags-create` lets the admin create.
+
+**Recovery from a wrong `promoted-*` tag.** `promotion-tags` blocks the update and deletion of
+`refs/tags/promoted-*` but leaves their creation open, because the job token of the
+`github-release` job creates them and a bypass for `GITHUB_TOKEN` is not verified. A
+`promoted-<run>` tag created by anyone else on the wrong commit fails the promotion closed:
+`system/github-release.sh` refuses a promotion tag that names another commit than the
+revision. The maintainer, from their own machine:
+
+1. Sets `"enforcement": "disabled"` on `promotion-tags` in a local, uncommitted
+   `rulesets.json`, runs `python3 scripts/github-settings/ghsettings.py apply`, reads the plan,
+   then `apply --yes`.
+2. If a Release exists at the tag, deletes it first with
+   `gh release delete promoted-<run> -R ars-regia/athanor`.
+3. Deletes the tag with `git push origin --delete promoted-<run>`.
+4. Restores the file with `git restore .github/settings/rulesets.json`, runs `apply --yes`
+   again, then `diff`, which must print no drift for `rulesets`.
+5. Re-runs the `github-release` job of the promotion run.
+
+**Recovery from a promotion dispatched before its `v0.x` tag.** ADR-0131 decision 5 has the
+maintainer push the signed tag first; a promotion dispatched without it publishes the build
+as `promoted-<run>`. The maintainer pushes the signed `v0.x` tag on the build's revision, then
+dispatches the same promotion again, with the same inputs. Every image is already stable at the build's digests,
+so it moves no tag (`scripts/ci/promotion-record.sh`); it passes the same checks and the
+release approval, and publishes the `v0.x` Release with its own bundle (decision 6). The
+`promoted-<run>` Release stays, with the first bundle.
+
+A tag on the right commit with a forged Release at it is no recovery case: `github-release.sh`
+publishes only on a Release that is this promotion's approved one exactly (title, notes hash,
+target, no prerelease, `latest`) and whose every other asset is a signed evidence bundle that
+verifies for that tag and commit, and refuses any other, naming the recovery.

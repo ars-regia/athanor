@@ -102,6 +102,20 @@ def fill_page(page, container, text):
             rows.append(Gtk.Label(label=f"{text['row']} {n}", xalign=0))
         scroll.set_child(rows)
         container.append(scroll)
+    elif page == "text":
+        view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False)
+        view.get_buffer().set_text(text["notes.text"].replace("\\n", "\n"))
+        view.update_property([Gtk.AccessibleProperty.LABEL], [text["notes"]])
+        # Four lines tall, as the toolkit's text area.
+        _, line = view.create_pango_layout("X").get_pixel_size()
+        scroll = Gtk.ScrolledWindow(
+            min_content_height=4 * line,
+            max_content_height=4 * line,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            has_frame=True,
+        )
+        scroll.set_child(view)
+        container.append(scroll)
     else:
         raise ValueError(f"no page {page!r}")
 

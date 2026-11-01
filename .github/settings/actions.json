@@ -22,6 +22,7 @@
   "variables": [
     "EVIDENCE_REGISTRY",
     "EVIDENCE_REGISTRY_USER",
+    "MAINTAINER_TAG_EMAIL",
     "SETTINGS_APP_CLIENT_ID"
   ],
   "workflow_permissions": {

@@ -99,6 +99,36 @@ class Evidence(unittest.TestCase):
         self.write("--verdict-json", str(good), str(bad))
         self.assertIn("verdict is fail", self.check().stderr)
 
+    UPGRADE_CHECKS = ("secure-boot", "upgrade-stages", "upgraded-secure-boot", "rolled-back-secure-boot")
+
+    def upgrade_verdict(self, checks):
+        path = self.dir / "upgrade.json"
+        path.write_text(json.dumps({"pass": True, "checks": checks}))
+        self.write("--verdict-json", str(path), gate="upgrade-acceptance")
+        return json.loads((self.dir / "upgrade-acceptance.athanor-system.json").read_text())["verdict"]
+
+    def test_upgrade_gate_passes_with_every_required_check(self):
+        self.assertEqual(self.upgrade_verdict(dict.fromkeys(self.UPGRADE_CHECKS, True)), "pass")
+        self.assertEqual(self.check(gate="upgrade-acceptance").returncode, 0)
+
+    def test_upgrade_gate_fails_without_rolled_back_secure_boot(self):
+        # UD18: Secure Boot must hold on the deployment GoBack() returns to, not only on the
+        # candidate; a verdict.json that passes without the check does not pass the gate.
+        checks = {name: True for name in self.UPGRADE_CHECKS if name != "rolled-back-secure-boot"}
+        self.assertEqual(self.upgrade_verdict(checks), "fail")
+        for name in self.UPGRADE_CHECKS:
+            with self.subTest(false=name):
+                checks = dict.fromkeys(self.UPGRADE_CHECKS, True)
+                checks[name] = False
+                self.assertEqual(self.upgrade_verdict(checks), "fail")
+
+    def test_iso_gate_unchanged(self):
+        path = self.dir / "sb.json"
+        path.write_text(json.dumps({"pass": True, "checks": {"secure-boot": True}}))
+        self.write("--verdict-json", str(path))
+        data = json.loads((self.dir / "iso-acceptance.athanor-system.json").read_text())
+        self.assertEqual(data["verdict"], "pass")
+
     def test_the_iso_acceptance_needs_the_secure_boot_case(self):
         plain, sb = self.dir / "plain.json", self.dir / "sb.json"
         plain.write_text(json.dumps({"pass": True, "checks": {"greeter": True}}))

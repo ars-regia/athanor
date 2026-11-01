@@ -105,6 +105,17 @@ class BumpGroups(unittest.TestCase):
         self.assertEqual(result["locks"], {"legacy": "580.190.01"})
         self.assertEqual(self.generated, [("legacy", "580.190.01")])
 
+    def test_a_pair_from_another_fedora_release_says_the_key_must_move(self):
+        self.assertFalse([n for n in bump.compute("kernel")["notes"] if "FEDORA_KEY_FPR" in n])
+        pair = ("7.2.8", "7.2.8-100.fc44", "cachyos-7.2.8-1", "2026-09-30T00:00:00Z")
+        with mock.patch.object(bump, "kernel_pair", lambda pins, notes: pair):
+            notes = bump.compute("kernel")["notes"]
+        self.assertIn(
+            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key; "
+            "set it to the Fedora 44 key before merging, or build.sh's SRPM signature check fails",
+            notes,
+        )
+
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")
         self.assertEqual(touched, {self.system_cf})

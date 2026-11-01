@@ -11,6 +11,7 @@ mod bus;
 mod clock;
 mod control_center;
 mod input;
+mod keyboard_aids;
 mod logind;
 mod menu;
 mod network;
@@ -26,7 +27,7 @@ mod tray;
 
 use std::cell::{Cell, RefCell};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
@@ -157,7 +158,7 @@ pub struct Bar {
     outputs: RefCell<Vec<Output>>,
     favorites: Store,
     surfaces: RefCell<Vec<Surface>>,
-    watches: RefCell<Vec<gio::FileMonitor>>,
+    _watches: Vec<gio::FileMonitor>,
     debounce: RefCell<Option<glib::SourceId>>,
     open_popover: RefCell<Option<gtk4::Popover>>,
     ready: Cell<bool>,
@@ -168,6 +169,8 @@ pub struct Bar {
     tray: Rc<tray::Host>,
     /// One trust state per bar: every surface's shield reads it.
     trust: Rc<shield::Trust>,
+    /// One keyboard aids' service per bar: a notice is announced once, whatever the surfaces.
+    aids: keyboard_aids::Service,
     /// The bar itself, for the `&self` methods that defer work to an idle.
     me: Weak<Bar>,
 }
@@ -181,8 +184,6 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
         gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
     }
     appearance::load(&display, &Appearance::read());
-    let layout = source.layout();
-    tracing::info!(layout = ?layout, "layout applied");
     let client = match Client::connect(&display) {
         Ok(client) => Some(client),
         Err(err) => {
@@ -190,27 +191,34 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
             None
         }
     };
-    let bar = Rc::new_cyclic(|weak: &Weak<Bar>| Bar {
-        app: app.clone(),
-        _hold: app.hold(),
-        outputs: RefCell::new(outputs::current(&display)),
-        display,
-        client,
-        layout: Cell::new(layout),
-        source,
-        favorites: Store::load(favorites_file),
-        surfaces: RefCell::new(Vec::new()),
-        watches: RefCell::new(Vec::new()),
-        debounce: RefCell::new(None),
-        open_popover: RefCell::new(None),
-        ready: Cell::new(false),
-        open_on_start: env::var("ATHANOR_BAR_OPEN")
-            .ok()
-            .and_then(|id| Module::from_id(&id)),
-        me: weak.clone(),
-        notifications: notifications::Service::start(weak),
-        tray: tray::Host::start(weak),
-        trust: shield::Trust::start(weak),
+    let bar = Rc::new_cyclic(|weak: &Weak<Bar>| {
+        // Armed before the layout and the favourites are read, so that a write while the
+        // bar starts is read or reported, never lost.
+        let (layout, watches) = source.watch(|dir| monitor(dir, weak.clone()));
+        tracing::info!(layout = ?layout, "layout applied");
+        Bar {
+            app: app.clone(),
+            _hold: app.hold(),
+            outputs: RefCell::new(outputs::current(&display)),
+            display,
+            client,
+            layout: Cell::new(layout),
+            source,
+            favorites: Store::load(favorites_file),
+            surfaces: RefCell::new(Vec::new()),
+            _watches: watches,
+            debounce: RefCell::new(None),
+            open_popover: RefCell::new(None),
+            ready: Cell::new(false),
+            open_on_start: env::var("ATHANOR_BAR_OPEN")
+                .ok()
+                .and_then(|id| Module::from_id(&id)),
+            me: weak.clone(),
+            notifications: notifications::Service::start(weak),
+            tray: tray::Host::start(weak),
+            trust: shield::Trust::start(weak),
+            aids: keyboard_aids::Service::default(),
+        }
     });
     bar.rebuild();
     if bar.surfaces.borrow().is_empty() {
@@ -230,7 +238,10 @@ fn changed_by(event: &Event) -> Changed {
             Changed::Workspaces
         }
         Event::KeyboardLayouts(_) | Event::KeyboardGroup(_) => Changed::Keyboard,
-        Event::Accessibility(_) => Changed::Accessibility,
+        Event::Accessibility(_)
+        | Event::AidRejected(_)
+        | Event::AidGesture(_)
+        | Event::AidOff(_) => Changed::Accessibility,
     }
 }
 
@@ -255,6 +266,28 @@ fn build(module: Module, bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<d
         Module::Audio => audio::new(bar),
         Module::Battery => battery::new(bar),
         Module::ControlCenter => control_center::new(bar),
+    }
+}
+
+/// A watch on `dir`, one of the directories the layout's layers and the favourites file
+/// share, that schedules a reload. A directory that does not exist yet is watched all the
+/// same.
+fn monitor(dir: &Path, bar: Weak<Bar>) -> Option<gio::FileMonitor> {
+    match gio::File::for_path(dir)
+        .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+    {
+        Ok(monitor) => {
+            monitor.connect_changed(move |_, _, _, _| {
+                if let Some(bar) = bar.upgrade() {
+                    bar.schedule();
+                }
+            });
+            Some(monitor)
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, dir = %dir.display(), "cannot watch; changes there apply at the next start");
+            None
+        }
     }
 }
 
@@ -576,11 +609,25 @@ impl Bar {
         }
     }
 
+    /// Says `text` over AT-SPI (doc_accessibility.md AX11), from the first surface: a notice is
+    /// the bar's, not a surface's.
+    fn announce(&self, text: &str) {
+        if let Some(surface) = self.surfaces.borrow().first() {
+            surface
+                .window
+                .announce(text, gtk4::AccessibleAnnouncementPriority::Medium);
+        }
+    }
+
     fn watch(self: &Rc<Self>) {
+        self.aids.start(self);
         if let Some(client) = &self.client {
             let weak = Rc::downgrade(self);
             client.connect_events(move |_, event| {
                 if let Some(bar) = weak.upgrade() {
+                    if let Some(text) = bar.aids.heard(event) {
+                        bar.announce(&text);
+                    }
                     bar.refresh(changed_by(event));
                 }
             });
@@ -591,25 +638,6 @@ impl Bar {
                 bar.schedule();
             }
         });
-        for dir in self.source.watched() {
-            // A directory that does not exist yet is watched all the same.
-            match gio::File::for_path(&dir)
-                .monitor_directory(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
-            {
-                Ok(monitor) => {
-                    let weak = Rc::downgrade(self);
-                    monitor.connect_changed(move |_, _, _, _| {
-                        if let Some(bar) = weak.upgrade() {
-                            bar.schedule();
-                        }
-                    });
-                    self.watches.borrow_mut().push(monitor);
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, dir = %dir.display(), "cannot watch; changes there apply at the next start");
-                }
-            }
-        }
         let display = self.display.clone();
         appearance::watch(move |current| appearance::load(&display, &current));
 

@@ -2,7 +2,7 @@
 id: W1-ACCESSIBILITY
 title: "doc_accessibility decisions (wave 1)"
 date: 2026-10-05
-status: accepted
+status: amended by ADR-0133
 issues: []
 areas: [accessibility, shell]
 ---

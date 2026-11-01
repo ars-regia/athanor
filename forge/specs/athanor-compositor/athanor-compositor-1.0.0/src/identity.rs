@@ -20,20 +20,72 @@ pub enum Privilege {
     TopLayers,
     ToplevelList,
     ToplevelCaptureSource,
+    /// `ext_output_image_capture_source_manager_v1`: a source of an output's pixels, by its
+    /// `wl_output`.
+    OutputCaptureSource,
     ImageCopyCapture,
     SessionLock,
+    /// `ext_workspace_manager_v1`: the workspaces, which a client may switch.
+    Workspaces,
+    /// `zwlr_output_manager_v1`: the outputs' configuration, the control center's.
+    OutputManagement,
+    /// `zwlr_output_power_manager_v1`: the outputs turned off and on, the idle daemon's.
+    OutputPower,
+    /// `zwp_virtual_keyboard_manager_v1`: keys typed as if on the hardware keyboard.
+    VirtualKeyboard,
+    /// `zwlr_virtual_pointer_manager_v1`: a pointer moved and clicked as if by the hardware one.
+    VirtualPointer,
+    /// `zwp_input_method_manager_v2`: the seat's input method, which is told the focused text
+    /// field's text, commits text into it and may take the keyboard.
+    InputMethod,
+    /// `athanor_toplevel_manager_v1`: every window's state, read only.
+    ToplevelState,
+    /// `athanor_toplevel_actions_v1`: every window activated, minimised, restored or closed.
+    ToplevelActions,
+    /// `athanor_keyboard_group_manager_v1`: the keyboard's layout group, followed and switched.
+    KeyboardGroup,
+    /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
+    /// keyboard aids configured (doc_accessibility.md AX10, AX11).
+    A11y,
+    /// `ext_data_control_manager_v1`: the clipboard and the primary selection, read and set
+    /// without the keyboard focus, a clipboard manager's.
+    ExtDataControl,
+    /// `zwlr_data_control_manager_v1`: the same through the wlroots protocol, which
+    /// wl-clipboard 2.2 speaks.
+    WlrDataControl,
+    /// `trusted-prompt`, a mark and no global: the client's surfaces are trusted prompts, while
+    /// one of which has the keyboard focus the keyboard aids tell nothing of the keys typed
+    /// (doc_own_stack.md OS4 and OS5, doc_accessibility.md AX11).
+    TrustedPrompt,
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 5] = [
+    const ALL: [(Self, &'static str); 19] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
             Self::ToplevelCaptureSource,
             "ext_foreign_toplevel_image_capture_source_manager_v1",
         ),
+        (
+            Self::OutputCaptureSource,
+            "ext_output_image_capture_source_manager_v1",
+        ),
         (Self::ImageCopyCapture, "ext_image_copy_capture_manager_v1"),
         (Self::SessionLock, "ext_session_lock_manager_v1"),
+        (Self::Workspaces, "ext_workspace_manager_v1"),
+        (Self::OutputManagement, "zwlr_output_manager_v1"),
+        (Self::OutputPower, "zwlr_output_power_manager_v1"),
+        (Self::VirtualKeyboard, "zwp_virtual_keyboard_manager_v1"),
+        (Self::VirtualPointer, "zwlr_virtual_pointer_manager_v1"),
+        (Self::InputMethod, "zwp_input_method_manager_v2"),
+        (Self::ToplevelState, "athanor_toplevel_manager_v1"),
+        (Self::ToplevelActions, "athanor_toplevel_actions_v1"),
+        (Self::KeyboardGroup, "athanor_keyboard_group_manager_v1"),
+        (Self::A11y, "athanor_a11y_manager_v1"),
+        (Self::ExtDataControl, "ext_data_control_manager_v1"),
+        (Self::WlrDataControl, "zwlr_data_control_manager_v1"),
+        (Self::TrustedPrompt, MARK),
     ];
 
     fn named(interface: &str) -> Option<Self> {
@@ -42,6 +94,18 @@ impl Privilege {
             .find(|(_, name)| *name == interface)
             .map(|(privilege, _)| *privilege)
     }
+}
+
+/// The allow-list's mark of a trusted prompt, the one name of a line that is no interface.
+pub const MARK: &str = "trusted-prompt";
+
+/// The interface of every privileged global, as the allow-list names it.
+#[cfg(test)]
+pub(crate) fn names() -> impl Iterator<Item = &'static str> {
+    Privilege::ALL
+        .iter()
+        .map(|(_, name)| *name)
+        .filter(|name| *name != MARK)
 }
 
 /// A process, as the compositor reads it at connect.
@@ -157,9 +221,24 @@ fn so_peerpidfd(socket: BorrowedFd<'_>) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
+/// A pidfd of the process `pid` (`pidfd_open`, Linux 5.3), for a peer known by its pid alone. The
+/// pid may name another process by then: AX5's reuse check is the caller's.
+#[allow(unsafe_code)]
+pub(crate) fn pidfd_open(pid: u32) -> io::Result<OwnedFd> {
+    let pid = libc::pid_t::try_from(pid).map_err(io::Error::other)?;
+    // SAFETY: pidfd_open takes a pid and flags by value and touches no memory of this process.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let fd = libc::c_int::try_from(fd).map_err(io::Error::other)?;
+    // SAFETY: on success the kernel installed a new pidfd at `fd` that nothing else owns.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
 /// The pid `pidfd` names in the compositor's pid namespace, from its fdinfo: -1 once the process
 /// is reaped (its pid free for reuse), 0 if it is outside the namespace; both are refused.
-fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, Error> {
+pub(crate) fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, Error> {
     let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd()))?;
     let pid: i32 = info
         .lines()
@@ -188,10 +267,27 @@ pub fn unit(cgroup: &str) -> Option<&str> {
     (unit.ends_with(".service") || unit.ends_with(".scope")).then_some(unit)
 }
 
+/// How a grant's unit ends when it names the instances of every template with its prefix.
+const TEMPLATES: &str = "*@.service";
+
+/// Whether `grant`, a unit of the allow-list, names `unit`: the same name, or an instance of a
+/// template with its prefix.
+fn names_unit(grant: &str, unit: &str) -> bool {
+    match grant.strip_suffix(TEMPLATES) {
+        Some(prefix) => unit
+            .strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(".service"))
+            .and_then(|rest| rest.split_once('@'))
+            .is_some_and(|(_, instance)| !instance.is_empty()),
+        None => grant == unit,
+    }
+}
+
 /// The allow-list: which executable in which unit is granted which privileged globals. One
 /// grant per line, `<executable> <unit> <interface>...`, separated by spaces; `#` starts a
 /// comment line. The executable is an absolute path under `/usr`, the unit a `.service` or
-/// `.scope`, each interface one of `Privilege`'s.
+/// `.scope`, or `<prefix>*@.service`, every instance of a template whose name starts with the
+/// prefix; each interface one of `Privilege`'s.
 #[derive(Debug, Default, PartialEq)]
 pub struct AllowList(Vec<(PathBuf, String, Vec<Privilege>)>);
 
@@ -230,6 +326,13 @@ impl AllowList {
             if !(unit.ends_with(".service") || unit.ends_with(".scope")) || unit.contains('/') {
                 return Err(bad("the unit is not a service or a scope").into());
             }
+            let named = match unit.strip_suffix(TEMPLATES) {
+                Some(prefix) => !prefix.is_empty() && !prefix.contains(['*', '@']),
+                None => !unit.contains('*'),
+            };
+            if !named {
+                return Err(bad("a star ends a prefix, before @.service").into());
+            }
             let privileges = fields
                 .map(|name| {
                     Privilege::named(name).ok_or_else(|| bad(&format!("{name} is not privileged")))
@@ -254,7 +357,7 @@ impl AllowList {
         let named: Vec<_> = self
             .0
             .iter()
-            .filter(|(executable, u, _)| *executable == identity.executable && u == unit)
+            .filter(|(executable, u, _)| *executable == identity.executable && names_unit(u, unit))
             .collect();
         if named.is_empty() {
             return Vec::new();
@@ -321,6 +424,41 @@ mod tests {
     }
 
     #[test]
+    fn a_family_of_units_names_the_instances_of_its_templates() {
+        const FAMILY: &str = "app-athanor-com.example.Settings*@.service";
+        for unit in [
+            "app-athanor-com.example.Settings@0123.service",
+            "app-athanor-com.example.Settings.Displays@0123.service",
+        ] {
+            assert!(names_unit(FAMILY, unit), "{unit}");
+        }
+        for unit in [
+            "app-athanor-com.example.Settings.service",
+            "app-athanor-com.example.Settings@.service",
+            "app-athanor-com.example.Settings@0123.scope",
+            "app-athanor-org.gnome.Nautilus@0123.service",
+        ] {
+            assert!(!names_unit(FAMILY, unit), "{unit}");
+        }
+        // Only a family is one: a name with a star is otherwise an ordinary, unmatched name.
+        assert!(!names_unit("a*.service", "ab.service"));
+    }
+
+    #[test]
+    fn a_star_stands_only_for_the_end_of_a_prefix() {
+        for unit in [
+            "*@.service",
+            "a*b@.service",
+            "a@*@.service",
+            "a*.service",
+            "a*.scope",
+        ] {
+            let line = format!("/usr/bin/x {unit} zwlr_output_manager_v1\n");
+            assert!(AllowList::parse(&line).is_err(), "{unit}");
+        }
+    }
+
+    #[test]
     fn the_unit_is_the_first_below_the_slices_and_the_user_manager() {
         let user =
             "0::/user.slice/user-1000.slice/user@1000.service/app.slice/athanor-bar.service\n";
@@ -364,6 +502,21 @@ mod tests {
             ..bar()
         };
         assert!(list.grants(&no_unit, BAR_PID, &Files).is_empty());
+    }
+
+    /// The mark of a trusted prompt is granted as an interface is, on its line alone.
+    #[test]
+    fn the_trusted_prompt_mark_is_read_on_its_line() {
+        let line = "/usr/bin/athanor-bar athanor-bar.service trusted-prompt\n";
+        let list = AllowList::parse(line).expect("allow-list");
+        assert_eq!(
+            list.grants(&bar(), BAR_PID, &Files),
+            [Privilege::TrustedPrompt]
+        );
+        let other = AllowList::parse(BAR).expect("allow-list");
+        assert!(!other
+            .grants(&bar(), BAR_PID, &Files)
+            .contains(&Privilege::TrustedPrompt));
     }
 
     /// A file at the bar's path that is not the bar's file, as in a sandbox with its own `/usr`,
@@ -414,6 +567,95 @@ mod tests {
         let shipped =
             AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
         assert!(!shipped.grants(&bar(), BAR_PID, &Files).is_empty());
+    }
+
+    /// The shipped allow-list lets the bar, the dock, the launcher and the control center read
+    /// every window's state, and all but the control center act on windows.
+    #[test]
+    fn only_the_bar_the_dock_and_the_launcher_act_on_windows() {
+        /// Every path is the file of every process.
+        struct Any;
+        impl Process for Any {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn executable_file(&self, _: i32) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+            fn file(&self, _: &Path) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+        }
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (name, acts) in [
+            ("athanor-bar", true),
+            ("athanor-control-center", false),
+            ("athanor-dock", true),
+            ("athanor-launcher", true),
+        ] {
+            let client = Identity {
+                executable: format!("/usr/bin/{name}").into(),
+                unit: Some(format!("{name}.service")),
+            };
+            let granted = shipped.grants(&client, BAR_PID, &Any);
+            assert!(granted.contains(&Privilege::ToplevelState), "{name} reads");
+            assert_eq!(
+                granted.contains(&Privilege::ToplevelActions),
+                acts,
+                "{name} acts"
+            );
+        }
+    }
+
+    /// The shipped allow-list lets the bar alone follow and switch the keyboard group and the
+    /// accessibility features: the dock, the launcher and the control center never call
+    /// `watch_keyboard_group`, `set_magnifier` or `set_screen_filter`.
+    #[test]
+    fn only_the_bar_follows_the_keyboard_group_and_the_a11y_manager() {
+        /// Every path is the file of every process.
+        struct Any;
+        impl Process for Any {
+            fn executable(&self, _: i32) -> io::Result<PathBuf> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn cgroup(&self, _: i32) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+            fn executable_file(&self, _: i32) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+            fn file(&self, _: &Path) -> io::Result<FileId> {
+                Ok(BAR_FILE)
+            }
+        }
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        for (name, follows) in [
+            ("athanor-bar", true),
+            ("athanor-control-center", false),
+            ("athanor-dock", false),
+            ("athanor-launcher", false),
+        ] {
+            let client = Identity {
+                executable: format!("/usr/bin/{name}").into(),
+                unit: Some(format!("{name}.service")),
+            };
+            let granted = shipped.grants(&client, BAR_PID, &Any);
+            assert_eq!(
+                granted.contains(&Privilege::KeyboardGroup),
+                follows,
+                "{name} follows the keyboard group"
+            );
+            assert_eq!(
+                granted.contains(&Privilege::A11y),
+                follows,
+                "{name} binds the accessibility manager"
+            );
+        }
     }
 
     /// A process whose pid cannot be read has no identity.
@@ -555,5 +797,164 @@ mod tests {
         );
         let cgroup = std::fs::read_to_string("/proc/self/cgroup").expect("cgroup");
         assert_eq!(identity.unit.as_deref(), unit(&cgroup));
+    }
+
+    /// The shell clients the shipped allow-list grants, by crate under `forge/specs`, with the
+    /// interfaces each uses (doc_session.md, SN12; #683, widened). `Client::connect` binds every
+    /// privileged global the compositor offers it; a client is granted only the ones it uses:
+    /// the dock lists windows, the launcher lists and captures them, the control center only
+    /// draws on the overlay layer. Then the upstream clients of doc_session.md revision 4,
+    /// SN12 and SN15, which no crate of the tree builds: the locker, the idle daemon and
+    /// cosmic-osd.
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 8] = [
+        (
+            "athanor-bar",
+            "athanor-bar.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
+                "athanor_keyboard_group_manager_v1",
+                "athanor_a11y_manager_v1",
+            ],
+        ),
+        (
+            "athanor-launcher",
+            "athanor-launcher.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_foreign_toplevel_image_capture_source_manager_v1",
+                "ext_image_copy_capture_manager_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
+            ],
+        ),
+        (
+            "athanor-dock",
+            "athanor-dock.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_foreign_toplevel_list_v1",
+                "ext_workspace_manager_v1",
+                "athanor_toplevel_manager_v1",
+                "athanor_toplevel_actions_v1",
+            ],
+        ),
+        (
+            "athanor-control-center",
+            "athanor-control-center.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "zwlr_output_manager_v1",
+                "ext_workspace_manager_v1",
+                "ext_foreign_toplevel_list_v1",
+                "athanor_toplevel_manager_v1",
+            ],
+        ),
+        (
+            "cosmic-greeter",
+            "cosmic-greeter-locker.scope",
+            &["ext_session_lock_manager_v1"],
+        ),
+        (
+            "cosmic-idle",
+            "cosmic-idle.scope",
+            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
+        ),
+        ("cosmic-osd", "cosmic-osd.service", &["zwlr_layer_shell_v1"]),
+        (
+            "cosmic-randr",
+            "app-athanor-com.system76.CosmicSettings*@.service",
+            &["zwlr_output_manager_v1"],
+        ),
+    ];
+
+    /// Crates that draw on the top or overlay layer without a line: the compositor itself, and
+    /// the greeter, which runs on cosmic-comp in greetd's session until it moves
+    /// (doc_own_stack.md, section 6, step 5).
+    const OUTSIDE_THE_LIST: [&str; 2] = ["athanor-compositor", "athanor-greeter-ui"];
+
+    /// Every `.rs` file under `dir`.
+    fn sources(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("entry").path();
+            if path.is_dir() {
+                sources(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                found.push(path);
+            }
+        }
+    }
+
+    /// The crates under `forge/specs` whose sources contain one of `needles`.
+    fn crates_with(needles: &[&str]) -> Vec<String> {
+        let specs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut crates = Vec::new();
+        for package in std::fs::read_dir(&specs).expect("forge/specs") {
+            let package = package.expect("entry").path();
+            let name = package
+                .file_name()
+                .expect("name")
+                .to_string_lossy()
+                .into_owned();
+            let src = package.join(format!("{name}-1.0.0/src"));
+            if !src.is_dir() {
+                continue;
+            }
+            let mut files = Vec::new();
+            sources(&src, &mut files);
+            let uses = files.iter().any(|file| {
+                let text = std::fs::read_to_string(file).expect("source");
+                needles.iter().any(|needle| text.contains(needle))
+            });
+            if uses {
+                crates.push(name);
+            }
+        }
+        crates.sort();
+        crates
+    }
+
+    #[test]
+    fn every_shipped_shell_client_on_the_upper_layers_or_privileged_globals_has_its_line() {
+        let found = crates_with(&["Layer::Top", "Layer::Overlay", "Client::connect"]);
+        // The scan must see the clients it is about, or it proves nothing.
+        assert!(found.iter().any(|name| name == "athanor-bar"), "{found:?}");
+        for name in found {
+            assert!(
+                OUTSIDE_THE_LIST.contains(&name.as_str())
+                    || SHELL_CLIENTS.iter().any(|(client, _, _)| *client == name),
+                "{name} draws on the top or overlay layer or connects to the compositor's \
+                 privileged globals, and has no line in data/privileged-clients"
+            );
+        }
+
+        let shipped =
+            AllowList::parse(include_str!("../data/privileged-clients")).expect("allow-list");
+        let expected: Vec<_> = SHELL_CLIENTS
+            .iter()
+            .map(|(name, unit, interfaces)| {
+                let privileges = interfaces
+                    .iter()
+                    .map(|interface| Privilege::named(interface).expect("privileged"))
+                    .collect::<Vec<_>>();
+                (
+                    PathBuf::from(format!("/usr/bin/{name}")),
+                    unit.to_string(),
+                    privileges,
+                )
+            })
+            .collect();
+        assert_eq!(shipped.0, expected);
+        // Only the locker locks the session (SN15).
+        assert!(shipped.0.iter().all(|(path, unit, privileges)| {
+            !privileges.contains(&Privilege::SessionLock)
+                || (path == Path::new("/usr/bin/cosmic-greeter")
+                    && unit == "cosmic-greeter-locker.scope")
+        }));
     }
 }

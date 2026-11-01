@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        19%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,41 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-19
+- The bar sends the keys of org.gnome.desktop.a11y.keyboard to athanor-compositor at its start and
+  at each change, a delay out of bounds clamped and logged, and writes stickykeys-enable false
+  when two-key-off turns sticky keys off. The accessibility button shows the latched and locked
+  modifiers and a rejected key, and announces each over AT-SPI at polite priority; a Shift
+  gesture's offer is announced too, shown for 30 seconds, and accepted from the accessibility
+  menu. No sound is played. (doc_accessibility.md AX11, #865)
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
+- The input-source button takes the seat's layouts from athanor-keyboard-group-v1 version 2, so
+  a virtual keyboard's keymap no longer hides it under the keyboard focus, and a layout with
+  no name reads "Layout 2" in place of a blank entry (#876).
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- Settings and its pages, from the image's desktop entries, start on the main socket until
+  cosmic-settings leaves the image, since the output manager cosmic-randr waits on reaches no
+  security context (doc_bar.md BR2, #880).
+
+* Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- The accessibility menu's magnifier, inversion and filter rows are shown under
+  athanor-compositor too, through its athanor_a11y_manager_v1, and under cosmic-comp through
+  cosmic_a11y_manager_v1 up to version 3. The magnifier's GNOME key,
+  screen-magnifier-enabled, turns the magnifier on at the bar's start when true and is sent to
+  the compositor at each change, and the magnifier row writes it and tells the compositor
+  (doc_accessibility.md AX10, #864).
+
+* Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- The notification popups already shown on an output hide while a popover of the bar is
+  open there, as new ones already waited, so none is drawn over the notification list under
+  any compositor (#742).
+
+* Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
+- The layout's directory watches are armed before the first read, so a layout written
+  while the bar starts is applied, never lost.
+
 * Sat Oct 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
 - The accent's focus rings, borders, indicators and slider highlights reach 3:1 on every
   surface, and a red accent's fill carries white text at 4.5:1 (#571).

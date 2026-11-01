@@ -241,6 +241,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 - **The retirement step** (step 6 of SE26) happens once Settings passes the gate, in one change:
   - `cosmic-settings` and `cosmic-randr` leave `forge/config/packages.json:132-133` (nothing else requires either: `rpm -q --whatrequires`, 2026-10-05). `cosmic-settings.rules` leaves with its package. `cosmic-settings-daemon` and its rule stay until stage 8.
   - Settings' desktop entry loses `NoDisplay`.
+  - cosmic-randr's line in the compositor's allow-list, its entry in `UPSTREAM` of `verify.py` and `keeps_main_socket` in `athanor-compositor-client` leave, with the sentences of `doc_bar.md` BR2 and `doc_own_stack.md` OS4 that name them (amended on 2026-10-30, #880).
   - The bar's favourites replace `com.system76.CosmicSettings.desktop` with `os.athanor.Settings.desktop` (`forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`).
   - The control center's footer and tiles call `Show` (CC4); the notification center's links do the same (NC11).
   - The scripts that use cosmic-settings as a test window move to Settings: `scripts/devvm/shield-acceptance.sh:140-144` and the preview scenes of `forge/test/shell/rig.sh:334-336`.

@@ -1,28 +1,33 @@
 //! The compositor's state: the protocol globals, the space of windows and its outputs, the seat
 //! and the backend that draws them.
 
-use crate::handlers::HeldCommit;
+use crate::handlers::{shown, HeldCommit};
 use crate::headless::{FrameStats, Headless};
 use crate::identity::{AllowList, Identity, Privilege, Proc, Process};
+use crate::input_method::PlacedPopup;
+use crate::a11y::Look;
+use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
+use crate::look::{FilterElement, Filters};
+use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
+use crate::output_management::OutputManagement;
+use crate::output_power::OutputPower;
+use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
-use crate::workspace::Group;
+use crate::workspace::{Bound, Strip};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
+use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::{
-    default_primary_scanout_output_compare, Kind, RenderElementStates,
+    default_primary_scanout_output_compare, Kind, RenderElement, RenderElementStates,
 };
 use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
-use smithay::backend::renderer::{ImportAll, ImportDma, Renderer, Texture};
-use smithay::desktop::space::render_output;
+use smithay::backend::renderer::{ImportDma, Texture};
 use smithay::desktop::utils::{
     send_frames_surface_tree, surface_presentation_feedback_flags_from_states,
     surface_primary_scanout_output, update_surface_primary_scanout_output,
@@ -32,12 +37,14 @@ use smithay::desktop::{
     layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
+use smithay::input::pointer::CursorImageStatus;
 use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -47,15 +54,18 @@ use smithay::utils::{
     Clock, Logical, Monotonic, Physical, Point, Rectangle, Serial, Size, Time, Transform,
 };
 use smithay::wayland::compositor::{
-    CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
+    send_surface_state, CompositorClientState, CompositorState, SurfaceAttributes, SurfaceData,
 };
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::drm_syncobj::DrmSyncobjState;
-use smithay::wayland::foreign_toplevel_list::ForeignToplevelListState;
-use smithay::wayland::fractional_scale::FractionalScaleManagerState;
+use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState};
+use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleManagerState};
+use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
-use smithay::wayland::image_capture_source::ToplevelCaptureSourceState;
+use smithay::wayland::image_capture_source::{
+    OutputCaptureSourceState, ToplevelCaptureSourceState,
+};
 use smithay::wayland::image_copy_capture::{Frame, ImageCopyCaptureState, Session, SessionRef};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::presentation::{PresentationState, Refresh};
@@ -63,11 +73,16 @@ use smithay::wayland::security_context::{SecurityContext, SecurityContextState};
 use smithay::wayland::selection::data_device::DataDeviceState;
 use smithay::wayland::session_lock::SessionLockManagerState;
 use smithay::wayland::shell::wlr_layer::{Layer, WlrLayerShellState};
-use smithay::wayland::shell::xdg::XdgShellState;
+use smithay::wayland::shell::xdg::{ToplevelSurface, XdgShellState};
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
+use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -82,6 +97,11 @@ use std::time::Duration;
 pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
 
 pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
+
+/// The keyboard's repeat: the delay before a held key repeats, in milliseconds, and the
+/// repeats per second.
+pub const REPEAT_DELAY: i32 = 200;
+pub const REPEAT_RATE: i32 = 25;
 
 /// What draws the outputs.
 pub enum Backend {
@@ -106,6 +126,48 @@ pub struct State {
     pub last_input_serial: Option<Serial>,
     /// The keys whose press the compositor kept for itself: their release is kept as well.
     pub kept_keys: Vec<Keycode>,
+    /// The actions of the bound keys pressed, in order (`State::fire`); the fixture reads them.
+    #[cfg(test)]
+    pub fired: Vec<crate::bindings::Action>,
+    /// The press of Super, alone, whose release shows the launcher unless another key, a
+    /// button, an axis or a gesture comes first (plan D4).
+    pub super_tap: Option<Keycode>,
+    /// The toplevels exported by xdg-foreign (`foreign.rs`).
+    pub foreign: crate::foreign::Foreign,
+    /// The touchpad gesture in progress (`gestures.rs`).
+    pub gesture: Option<crate::gestures::Kind>,
+    /// The windows owed an answer to a decoration request (`decoration.rs`).
+    pub decoration_owed: Vec<WlSurface>,
+    /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
+    pub tool_pressed: std::collections::HashMap<
+        smithay::backend::input::TabletToolDescriptor,
+        Vec<u32>,
+    >,
+    /// Counts the locks taken: a request for the session bus carries the epoch it was asked
+    /// in, and the worker drops one asked before a lock (`session_calls`).
+    pub lock_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// The session-bus worker of the key bindings; none headless.
+    pub session_calls: Option<crate::session_calls::SessionCalls>,
+    /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
+    pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
+    pub aids: crate::aids::Aids,
+    /// The modifiers each virtual keyboard last set, applied to its own keys only
+    /// (`with_keymap_of`).
+    pub virtual_modifiers: HashMap<VirtualKeyboardDevice, [u32; 4]>,
+    /// The keys each virtual keyboard holds that went past the input method's grab, whose
+    /// release goes past it too. Only evdev's key codes are kept, each once, so an entry holds
+    /// at most 768.
+    pub past_grab_keys: HashMap<VirtualKeyboardDevice, HashSet<Keycode>>,
+    /// The virtual keyboard whose keymap the seat has, the keyboard that sent the last key;
+    /// none while the seat has its own (`with_keymap_of`).
+    pub virtual_keymap: Option<crate::input::VirtualKeymap>,
+    /// The text inputs and the input method (`input_method.rs`).
+    pub composing: crate::input_method::Composing,
+    /// The buttons each virtual pointer holds, whose release goes on while the session is
+    /// locked; a pointer's entry goes with it. Only evdev's button codes are counted, so an entry
+    /// holds at most 512.
+    pub virtual_buttons: HashMap<VirtualPointerDevice, Vec<u32>>,
     /// The identities (executable and unit, as the grants go) whose exclusive layer surface
     /// held the keyboard when the user pressed Super+Escape: their exclusive layer surfaces,
     /// on any connection, hold it again only after a click on one of their surfaces
@@ -116,6 +178,9 @@ pub struct State {
     /// Why the compositor must end with an error: set by `fail`, read by `main` once the loop
     /// has stopped.
     pub fatal: Option<String>,
+    /// The cursor a client set last and that client, or the default and no client: shown only
+    /// while that client holds the pointer's focus (`shown_cursor`).
+    pub cursor_status: (CursorImageStatus, Option<ClientId>),
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -127,6 +192,8 @@ pub struct State {
     pub dmabuf_state: DmabufState,
     pub xdg_activation_state: XdgActivationState,
     pub data_device_state: DataDeviceState,
+    /// Primary selection and data control (`clipboard`).
+    pub clipboard: crate::clipboard::Clipboard,
     /// linux-drm-syncobj-v1, offered only on a render node that can wait on a syncobj.
     pub syncobj_state: Option<DrmSyncobjState>,
     /// The clients' frame times and the outputs' draw times.
@@ -140,6 +207,7 @@ pub struct State {
 
     pub foreign_toplevel_state: ForeignToplevelListState,
     pub toplevel_capture_state: ToplevelCaptureSourceState,
+    pub output_capture_state: OutputCaptureSourceState,
     pub image_copy_capture_state: ImageCopyCaptureState,
     /// The capture sessions in progress; dropping one stops it.
     pub capture_sessions: Vec<Session>,
@@ -149,13 +217,43 @@ pub struct State {
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
     pub idle_notifier_state: IdleNotifierState<Self>,
-    /// The workspace groups sent to the clients of ext-workspace-v1.
-    pub workspace_groups: Vec<Group>,
+    /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
+    pub inhibitors: HashMap<WlSurface, usize>,
+    /// The keyboard-shortcuts inhibitors and the clients Ctrl+Alt+Tab suspended (`constraints`).
+    pub input_hold: crate::constraints::Held,
+    /// What the clients of ext-workspace-v1 were sent.
+    pub workspace_clients: Vec<Bound>,
+    /// The workspaces of each output (`workspace`).
+    pub workspaces: Vec<Strip>,
+    /// The number the last workspace made was given.
+    pub next_workspace: u64,
+    /// The windows of the inactive workspaces, out of the space, each with its location.
+    pub parked: Vec<(Window, Point<i32, Logical>)>,
+    /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
+    pub toplevel_states: Vec<AthanorToplevelStateV1>,
+    /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
+    pub keyboard_groups: Vec<AthanorKeyboardGroupV1>,
+    /// The group the live objects were last sent (`State::send_keyboard_group`).
+    pub sent_group: u32,
+    /// The magnifier and the colour filters, and the managers of athanor-a11y-v1.
+    pub a11y: crate::a11y::A11y,
+    pub focus_theme: crate::focus_theme::FocusTheme,
+    /// The keyboard's repeat, rate then delay as `repeat_info` takes them: `REPEAT_RATE` and
+    /// `REPEAT_DELAY` until `xkb_config` sets it.
+    pub repeat: (i32, i32),
+    /// The minimised windows, out of the space, each with the location it is restored at.
+    pub minimised: Vec<(Window, Point<i32, Logical>)>,
+    /// The heads sent to the clients of wlr-output-management, and their configurations.
+    pub output_management: OutputManagement,
+    /// The outputs turned off, and the clients of wlr-output-power-management.
+    pub output_power: OutputPower,
 
     /// Which client is granted which privileged global (OS4), read when the compositor starts.
     pub allow_list: AllowList,
     /// Where a connecting client's executable and cgroup are read.
     pub process: Box<dyn Process>,
+    /// The X11 display xwayland-satellite serves, when the compositor holds one.
+    pub x11: Option<crate::xwayland::X11>,
 }
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
@@ -199,20 +297,27 @@ impl State {
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
-        // Every client may bind it; only a client granted `TopLayers` keeps a surface on the top
-        // or overlay layer (`layer_commit`). The escape key takes the keyboard back from the
-        // exclusive surface of a granted client (`escape_exclusive`).
-        let layer_shell_state = WlrLayerShellState::new::<Self>(&dh);
+        // A confined client does not see it, since a surface of its own would stand unmarked
+        // (`doc_own_stack.md` decision 31). Of the others, only a client granted `TopLayers`
+        // keeps a surface on the top or overlay layer (`layer_commit`). The escape key takes the
+        // keyboard back from the exclusive surface of a granted client (`escape_exclusive`).
+        let layer_shell_state = WlrLayerShellState::new_with_filter::<Self, _>(&dh, unconfined);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         // The globals below keep no state the compositor reads back.
         OutputManagerState::new_with_xdg_output::<Self>(&dh);
         ViewporterState::new::<Self>(&dh);
+        // cosmic-idle's fade to black (doc_own_stack.md OS17); Smithay draws such a buffer as
+        // a solid colour on every renderer.
+        SinglePixelBufferState::new::<Self>(&dh);
+        IdleInhibitManagerState::new::<Self>(&dh);
+        let input_hold = crate::constraints::Held::new(&dh);
         FractionalScaleManagerState::new::<Self>(&dh);
         PresentationState::new::<Self>(&dh, clock.id() as u32);
         CursorShapeManagerState::new::<Self>(&dh);
         let xdg_activation_state = XdgActivationState::new::<Self>(&dh);
         // GDK will not open a display without wl_data_device_manager.
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let clipboard = crate::clipboard::Clipboard::new(&dh);
         // The privileged globals of OS4, each to the clients the allow-list grants it.
         let foreign_toplevel_state = ForeignToplevelListState::new_with_filter::<Self>(&dh, |c| {
             granted(c, Privilege::ToplevelList)
@@ -221,21 +326,39 @@ impl State {
             ToplevelCaptureSourceState::new_with_filter::<Self, _>(&dh, |c| {
                 granted(c, Privilege::ToplevelCaptureSource)
             });
+        let output_capture_state = OutputCaptureSourceState::new_with_filter::<Self, _>(&dh, |c| {
+            granted(c, Privilege::OutputCaptureSource)
+        });
         let image_copy_capture_state =
             ImageCopyCaptureState::new_with_filter::<Self, _>(&dh, |c| {
                 granted(c, Privilege::ImageCopyCapture)
             });
         let lock_state =
             SessionLockManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::SessionLock));
-        // ext-workspace-v1 is not among OS4's privileged protocols: every unconfined client's.
         crate::workspace::global(&dh);
+        crate::toplevel_state::global(&dh);
+        crate::keyboard_group::global(&dh);
+        crate::a11y::global(&dh);
+        crate::output_management::global(&dh);
+        crate::output_power::global(&dh);
+        // Synthetic input, which takes the hardware's path (`input.rs`).
+        VirtualKeyboardManagerState::new::<Self, _>(&dh, |c| {
+            granted(c, Privilege::VirtualKeyboard)
+        });
+        VirtualPointerManagerState::new::<Self, _>(&dh, |c| granted(c, Privilege::VirtualPointer));
+        // Composed text (OS9 item 3): the input method by grant, text input outside a sandbox.
+        crate::input_method::globals(&dh);
+        crate::gestures::global(&dh);
+        crate::tablet::global(&dh);
+        crate::decoration::global(&dh);
+        crate::foreign::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
-        seat.add_keyboard(Default::default(), 200, 25)?;
+        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)?;
         seat.add_pointer();
 
         dispatch_clients(event_loop, display)?;
@@ -252,9 +375,26 @@ impl State {
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
+            #[cfg(test)]
+            fired: Vec::new(),
+            super_tap: None,
+            foreign: Default::default(),
+            gesture: None,
+            decoration_owed: Vec::new(),
+            tool_pressed: Default::default(),
+            lock_epoch: std::sync::Arc::default(),
+            session_calls: None,
+            keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            aids: Default::default(),
+            virtual_modifiers: HashMap::new(),
+            past_grab_keys: HashMap::new(),
+            virtual_keymap: None,
+            composing: Default::default(),
+            virtual_buttons: HashMap::new(),
             escaped: Vec::new(),
             lock_requests: 0,
             fatal: None,
+            cursor_status: (CursorImageStatus::default_named(), None),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -265,6 +405,7 @@ impl State {
             dmabuf_state: DmabufState::new(),
             xdg_activation_state,
             data_device_state,
+            clipboard,
             syncobj_state: None,
             frame_stats: None,
             held: Vec::new(),
@@ -272,15 +413,31 @@ impl State {
             client_gone,
             foreign_toplevel_state,
             toplevel_capture_state,
+            output_capture_state,
             image_copy_capture_state,
             capture_sessions: Vec::new(),
             captures: Vec::new(),
             lock_state,
             lock: None,
             idle_notifier_state,
-            workspace_groups: Vec::new(),
+            inhibitors: HashMap::new(),
+            input_hold,
+            workspace_clients: Vec::new(),
+            workspaces: Vec::new(),
+            next_workspace: 0,
+            parked: Vec::new(),
+            toplevel_states: Vec::new(),
+            keyboard_groups: Vec::new(),
+            sent_group: 0,
+            a11y: crate::a11y::A11y::default(),
+            focus_theme: crate::focus_theme::FocusTheme::default(),
+            repeat: (REPEAT_RATE, REPEAT_DELAY),
+            minimised: Vec::new(),
+            output_management: OutputManagement::default(),
+            output_power: OutputPower::default(),
             allow_list: AllowList::load(Path::new(crate::identity::ALLOW_LIST)),
             process: Box::new(Proc),
+            x11: None,
         })
     }
 
@@ -319,9 +476,21 @@ impl State {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
-            security_context: context,
+            confined: context.is_some(),
             grants,
             identity,
+        })
+    }
+
+    /// What the compositor keeps for a client of xwayland-satellite's socket: confined as a
+    /// security context's client is, so granted nothing whatever its identity (OS4).
+    pub fn satellite_state(&self) -> Arc<ClientState> {
+        Arc::new(ClientState {
+            compositor_state: CompositorClientState::default(),
+            gone: self.client_gone.clone(),
+            confined: true,
+            grants: Vec::new(),
+            identity: None,
         })
     }
 
@@ -335,50 +504,159 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        if let Some(shown) = self.space.output_geometry(output) {
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            known.0.set(shown);
+        }
+        self.output_heads_changed();
+        self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and the windows no output left shows
-    /// are centred on the first one, where the user can reach them.
+    /// An output that goes: its layer surfaces are closed, and its windows join the first
+    /// output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
+        self.forget_output_power(output);
         self.close_layers(output);
         self.space.unmap_output(output);
         self.fit_to_outputs();
+        self.workspaces_changed();
     }
 
-    /// After the outputs changed (one went, or took another size): the windows no output shows
-    /// are centred on the first one, the pointer is brought back onto the outputs and the lock
-    /// surfaces take the size of their output.
+    /// After the outputs changed (one went, or took another size): the windows their home output
+    /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
+    /// home output follows that output and stays whole (`stays_whole`), the maximised ones are
+    /// fitted to it again, the pointer is brought back onto the outputs and the lock surfaces take
+    /// the size of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
-        let stranded: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|window| {
-                self.space
-                    .element_geometry(window)
-                    .is_some_and(|area| !outputs.iter().any(|output| output.overlaps(area)))
-            })
-            .cloned()
-            .collect();
-        if let Some(area) = self.window_area() {
-            for window in stranded {
-                let at = centred(area, window.geometry());
-                self.space.relocate_element(&window, at);
-            }
+        let changed = self.changed_outputs();
+        let mut moved = !changed.is_empty();
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for window in windows {
+            let (Some(area), Some(shown)) = (
+                self.home_area(&window),
+                self.space.element_geometry(&window),
+            ) else {
+                continue;
+            };
+            let place = Rectangle::new(self.stays_whole(&window, shown, &changed), shown.size);
+            let at = if self.shown_at_home(&window, place) {
+                place.loc
+            } else {
+                centred(area, shown.size)
+            };
+            moved |= at != shown.loc;
+            self.space.relocate_element(&window, at);
         }
+        self.fit_kept_places(&changed);
+        self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
-            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+            let carried = changed.iter().find_map(|(output, was)| {
+                let shown = self.space.output_geometry(output)?;
+                let wanted = at + (shown.loc - was.loc).to_f64();
+                let on = was.to_f64().contains(at);
+                on.then(|| crate::input::confine(&[shown], at, wanted)).flatten()
+            });
+            let to = carried.or_else(|| crate::input::confine(&outputs, at, at));
+            if let Some(to) = to.filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
+            } else if moved {
+                self.refresh_pointer();
             }
         }
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
+        }
+        self.output_heads_changed();
+    }
+
+    /// The outputs that took another size or place since this was last asked, each with where
+    /// it was before.
+    fn changed_outputs(&self) -> Vec<(Output, Rectangle<i32, Logical>)> {
+        let changed = self.space.outputs().filter_map(|output| {
+            let shown = self.space.output_geometry(output)?;
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            let was = known.0.replace(shown);
+            (was != shown).then(|| (output.clone(), was))
+        });
+        changed.collect()
+    }
+
+    /// Where the place `kept` of `window` goes after `changed`: if it lay on its home output it
+    /// follows that output. If it lay whole there it stays whole: along a side the output's new
+    /// edges cut, it goes inside what the output leaves, and along the other it stays where the
+    /// user left it. Otherwise it stays over the edge, where a user may leave a window
+    /// (`grabs::kept_reachable`).
+    fn stays_whole(
+        &self,
+        window: &Window,
+        kept: Rectangle<i32, Logical>,
+        changed: &[(Output, Rectangle<i32, Logical>)],
+    ) -> Point<i32, Logical> {
+        let moved = self.home_output(window).and_then(|home| {
+            let (_, was) = changed.iter().find(|(output, _)| *output == home)?;
+            let shown = self.space.output_geometry(&home)?;
+            let moved = Rectangle::new(kept.loc + (shown.loc - was.loc), kept.size);
+            was.overlaps(kept).then_some((shown, moved, was.contains_rect(kept)))
+        });
+        match (moved, self.home_area(window)) {
+            (Some((shown, moved, true)), Some(area)) if !shown.contains_rect(moved) => {
+                let fits = |at: i32, size: i32, from: i32, room: i32| {
+                    at >= from && at + size <= from + room
+                };
+                let kept = inside(area, moved);
+                let x = fits(moved.loc.x, moved.size.w, shown.loc.x, shown.size.w);
+                let y = fits(moved.loc.y, moved.size.h, shown.loc.y, shown.size.h);
+                let x = if x { moved.loc.x } else { kept.x };
+                let y = if y { moved.loc.y } else { kept.y };
+                (x, y).into()
+            }
+            (Some((_, moved, _)), _) => moved.loc,
+            _ => kept.loc,
+        }
+    }
+
+    /// `stays_whole` for the places a window comes back to, or is on its way to.
+    fn fit_kept_places(&mut self, changed: &[(Output, Rectangle<i32, Logical>)]) {
+        let away = self.parked.iter().chain(&self.minimised).map(|(window, _)| window);
+        let windows: Vec<Window> = self.space.elements().chain(away).cloned().collect();
+        for window in windows {
+            let data = window.user_data();
+            let maximised = data.get::<Maximised>().map(|maximised| &maximised.0);
+            let full = data.get::<FullScreen>().map(|full| &full.0);
+            for slot in [maximised, full].into_iter().flatten() {
+                if let Some(mut kept) = slot.get() {
+                    kept.before.loc = self.stays_whole(&window, kept.before, changed);
+                    slot.set(Some(kept));
+                }
+            }
+            if let Some(relocate) = data.get::<Relocate>() {
+                if let Some(mut moving @ Destination { to: Some(to), .. }) = relocate.0.get() {
+                    let asked = window
+                        .toplevel()
+                        .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+                    let size = asked.unwrap_or_else(|| window.geometry().size);
+                    let place = Rectangle::new(to, size);
+                    moving.to = Some(self.stays_whole(&window, place, changed));
+                    relocate.0.set(Some(moving));
+                }
+            }
+        }
+        for index in 0..self.parked.len() {
+            let (window, at) = self.parked[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.parked[index].1 = self.stays_whole(&window, kept, changed);
+        }
+        for index in 0..self.minimised.len() {
+            let (window, at) = self.minimised[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.minimised[index].1 = self.stays_whole(&window, kept, changed);
         }
     }
 
@@ -412,33 +690,379 @@ impl State {
         waiting
     }
 
-    /// The area of the first output: where the pointer moves.
-    pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
-        self.space
-            .outputs()
-            .next()
-            .and_then(|output| self.space.output_geometry(output))
+    /// What the layer surfaces' exclusive zones leave of the first output (`window_area_on`):
+    /// where the fixture's windows are kept, maximised and restored.
+    #[cfg(test)]
+    pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
+        self.window_area_on(self.space.outputs().next()?)
     }
 
-    /// What the layer surfaces' exclusive zones leave of the first output: where windows are
-    /// placed.
-    pub fn window_area(&self) -> Option<Rectangle<i32, Logical>> {
+    /// The first output's `window_area` at the size the layer map lays the output out, its
+    /// logical size rounded rather than the space's ceiling (853 and not 854 for 1280 px at
+    /// 1.5): the non-exclusive zone cosmic-comp places a new window in (`placed`).
+    pub fn placement_area(&self) -> Option<Rectangle<i32, Logical>> {
         let output = self.space.outputs().next()?;
+        let area = self.space.output_geometry(output)?;
+        let laid_out = laid_out(output)?;
+        let zone = layer_map_for_output(output).non_exclusive_zone();
+        Some(inset(Rectangle::new(area.loc, laid_out), laid_out, zone))
+    }
+
+    /// What the zones leave of the output nearest to `point` (`output_nearest`): where a window
+    /// being moved is kept.
+    pub fn window_area_at(&self, point: Point<f64, Logical>) -> Option<Rectangle<i32, Logical>> {
+        self.window_area_on(self.output_nearest(point)?)
+    }
+
+    /// The output under `point`, or the output nearest to it when `point` is on none, in a gap
+    /// between outputs of different sizes.
+    pub fn output_nearest(&self, point: Point<f64, Logical>) -> Option<&Output> {
+        let distance = |output: &Output| {
+            let shown = self.space.output_geometry(output)?.to_f64();
+            let x = point.x.clamp(shown.loc.x, shown.loc.x + shown.size.w);
+            let y = point.y.clamp(shown.loc.y, shown.loc.y + shown.size.h);
+            Some((x - point.x).powi(2) + (y - point.y).powi(2))
+        };
+        self.space.output_under(point).next().or_else(|| {
+            self.space
+                .outputs()
+                .filter_map(|output| Some((distance(output)?, output)))
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, output)| output)
+        })
+    }
+
+    /// What the layer surfaces' exclusive zones leave of `output`.
+    pub fn window_area_on(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
         let area = self.space.output_geometry(output)?;
         // The layer map lays the output out at its logical size rounded, the space at its
         // ceiling (853 and 854 for 1280 px at 1.5): the zones are taken as insets, so that a
         // fractional scale with no zone places windows as the whole output does.
-        let laid_out = output.current_mode().map(|mode| {
-            let size = mode
-                .size
-                .to_f64()
-                .to_logical(output.current_scale().fractional_scale());
-            output
-                .current_transform()
-                .transform_size(size.to_i32_round())
-        })?;
+        let laid_out = laid_out(output)?;
         let zone = layer_map_for_output(output).non_exclusive_zone();
         Some(inset(area, laid_out, zone))
+    }
+
+    /// Maximises `window` to `home_area`, or fits a maximised one to it again: a configure
+    /// with the `maximized` state and the area's size, and the window moves into the area at
+    /// the commit that answers it. The geometry it had before is kept for `restore`.
+    pub fn maximise(&mut self, window: &Window) {
+        let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_area(window)) else {
+            return;
+        };
+        let maximised = window.user_data().get_or_insert(Maximised::default);
+        let before = match maximised.0.get() {
+            Some(kept) => kept.before,
+            None => self.settled_geometry(window),
+        };
+        maximised.0.set(Some(Kept { before, area }));
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Maximized);
+            state.size = Some(area.size);
+        });
+        // Before its first commit the initial configure carries the state.
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        relocate(window, area.loc, serial);
+    }
+
+    /// Restores a maximised `window`: a configure without the `maximized` state and with the
+    /// size it had, and the window moves back at the commit that answers it, centred in its
+    /// `home_area` when its home output no longer shows that place. The geometry it had, or
+    /// `None` when it is not maximised. A window maximised before it had a size picks its own
+    /// and is placed as a new window is.
+    pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        let toplevel = window.toplevel()?;
+        let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
+        toplevel.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Maximized);
+        });
+        self.back_to(window, kept);
+        Some(kept)
+    }
+
+    /// A full-screen window no longer maximised leaves full-screen for the place it had before
+    /// it was.
+    pub fn forget_maximised(&self, window: &Window) {
+        let data = window.user_data();
+        let kept = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        if let (Some(Kept { before, .. }), Some(full)) = (kept, data.get::<FullScreen>()) {
+            full.0.set(full.0.get().map(|kept| Kept { before, ..kept }));
+        }
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+            });
+        }
+    }
+
+    /// A configure with the size `kept` had, and the window moves back at the commit that
+    /// answers it, centred in its `home_area` when its home output no longer shows that place.
+    /// A window drawn with no earlier place is placed at that commit, as a new window is.
+    fn back_to(&mut self, window: &Window, kept: Rectangle<i32, Logical>) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
+            state.size = (!kept.is_empty()).then_some(kept.size);
+        });
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        if !kept.is_empty() {
+            relocate(window, self.kept_place(window, kept), serial);
+        } else if crate::handlers::shown(window) {
+            place_again(window, serial);
+        } else if let Some(moving) = window.user_data().get::<Relocate>() {
+            // Asked before the window was placed: nothing to go back to, and `place` places it.
+            moving.0.set(None);
+        }
+    }
+
+    /// Where a window goes back to `kept`: there, or the middle of its `home_area` when its home
+    /// output no longer shows that place.
+    fn kept_place(&self, window: &Window, kept: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+        match self
+            .home_area(window)
+            .filter(|_| !self.shown_at_home(window, kept))
+        {
+            Some(area) => centred(area, kept.size),
+            None => kept.loc,
+        }
+    }
+
+    /// A window that unmapped has asked for nothing (`xdg_toplevel`): it is neither full-screen
+    /// nor maximised any more, and it draws again at the place it had.
+    pub fn forget_requests(&self, window: &Window) {
+        let data = window.user_data();
+        let maximised = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        let full = data.get::<FullScreen>().and_then(|kept| kept.0.take());
+        match maximised.or(full) {
+            Some(Kept { before, .. }) if before.is_empty() => place_again(window, None),
+            Some(Kept { before, .. }) => relocate(window, self.kept_place(window, before), None),
+            None => {}
+        }
+    }
+
+    /// Gives `window` the `output` the client named, or its home output, whole: a configure
+    /// with the `fullscreen` state and the output's size, and the window moves there at the
+    /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
+    /// maximised window stays so, and returns to that. A window on an inactive workspace or
+    /// minimised stays there, whichever output it names: only the user brings it to the one they
+    /// see.
+    pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
+        let visible = self.on_active_workspace(window) && !self.is_minimised(window);
+        let named = output.filter(|_| visible);
+        if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
+            // Before its first commit a window has no workspace yet.
+            self.place_on_workspace(window);
+            self.move_window_to(window, id);
+        }
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(area) = self.home_output_area(window) else {
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_configure();
+            }
+            return;
+        };
+        let before = self.settled_geometry(window);
+        let full = window.user_data().get_or_insert(FullScreen::default);
+        let before = full.0.get().map_or(before, |kept| kept.before);
+        full.0.set(Some(Kept { before, area }));
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Fullscreen);
+            state.size = Some(area.size);
+        });
+        // Before its first commit the initial configure carries the state.
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        relocate(window, area.loc, serial);
+    }
+
+    /// Where `window` stands, or will once a move on its way lands, at the size that move
+    /// asked; out of the space, where it comes back; empty on its way to where `placed` puts it.
+    fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
+        let size = window.geometry().size;
+        let moving = window
+            .user_data()
+            .get::<Relocate>()
+            .and_then(|relocate| relocate.0.get());
+        if let Some(Destination { to: None, .. }) = moving {
+            return Rectangle::default();
+        }
+        if let Some(Destination { to: Some(to), .. }) = moving {
+            let asked = window
+                .toplevel()
+                .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+            return Rectangle::new(to, asked.unwrap_or(size));
+        }
+        self.space.element_geometry(window).unwrap_or_else(|| {
+            self.minimised
+                .iter()
+                .chain(self.parked.iter())
+                .find(|(kept, _)| kept == window)
+                .map(|(_, at)| Rectangle::new(*at, size))
+                .unwrap_or_default()
+        })
+    }
+
+    /// Ends `full_screen`: the window returns to where it was, or to its maximised size.
+    pub fn leave_full_screen(&mut self, window: &Window) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(kept) = window
+            .user_data()
+            .get::<FullScreen>()
+            .and_then(|full| full.0.take())
+        else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Fullscreen);
+        });
+        let maximised = window
+            .user_data()
+            .get::<Maximised>()
+            .is_some_and(|maximised| maximised.0.get().is_some());
+        if maximised {
+            self.maximise(window);
+        } else {
+            self.back_to(window, kept.before);
+        }
+    }
+
+    /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,
+    /// and the keyboard and the pointer go to what is under it; it keeps committing until
+    /// `unminimise`. A window the user cannot see, one that has not drawn yet included, is
+    /// refused: false.
+    pub fn minimise(&mut self, window: &Window) -> bool {
+        let Some(at) = self
+            .space
+            .element_location(window)
+            .filter(|_| shown(window))
+        else {
+            return false;
+        };
+        self.end_window_grab(window);
+        self.dismiss_popups(window);
+        window.set_activated(false);
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.send_pending_configure();
+        }
+        self.space.unmap_elem(window);
+        self.minimised.push((window.clone(), at));
+        if let Some(toplevel) = window.toplevel() {
+            self.refocus(toplevel.wl_surface());
+        }
+        // A button goes to the pointer's focus: a click without a motion must miss the window.
+        self.refresh_pointer();
+        self.request_redraw();
+        true
+    }
+
+    /// Restores a minimised `window` where it was, or centred in its `home_area` when its output
+    /// no longer shows that place, on top and with the keyboard, its workspace activated first.
+    /// False when it is not minimised, or draws nothing (it committed a null buffer, as an app
+    /// hiding into the tray does): it stays minimised.
+    pub fn unminimise(&mut self, window: &Window) -> bool {
+        if !self.is_minimised(window) || !shown(window) {
+            return false;
+        }
+        if let Some(id) = self.workspace_of(window) {
+            self.activate_workspace(id);
+        }
+        let Some(index) = self.minimised.iter().position(|(kept, _)| kept == window) else {
+            return false;
+        };
+        let (window, at) = self.minimised.remove(index);
+        let at = self.reachable(&window, at);
+        self.space.map_element(window.clone(), at, true);
+        // A move answered while it was minimised applies now, and a maximised window takes the
+        // area of now.
+        self.relocated(&window);
+        self.fit_maximised();
+        self.focus(&window);
+        self.refresh_pointer();
+        self.request_redraw();
+        true
+    }
+
+    /// Fits the maximised windows to their `home_area` again, and the full-screen ones to their
+    /// output, after the layer surfaces' exclusive zones or the outputs changed it.
+    pub fn fit_maximised(&mut self) {
+        let stale: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|window| {
+                let full = window.user_data().get::<FullScreen>();
+                if let Some(kept) = full.and_then(|full| full.0.get()) {
+                    return self.home_output_area(window) != Some(kept.area);
+                }
+                window
+                    .user_data()
+                    .get::<Maximised>()
+                    .and_then(|maximised| maximised.0.get())
+                    .zip(self.home_area(window))
+                    .is_some_and(|(kept, area)| kept.area != area)
+            })
+            .cloned()
+            .collect();
+        for window in &stale {
+            if is_full_screen(window) {
+                self.full_screen(window, None);
+            } else {
+                self.maximise(window);
+            }
+        }
+    }
+
+    /// Moves `window`'s geometry to `to`: now, or, while the window waits for a configure that
+    /// changes its size, at the commit that answers it.
+    pub fn move_window(&mut self, window: &Window, to: Point<i32, Logical>) {
+        let serial = window
+            .user_data()
+            .get::<Relocate>()
+            .and_then(|relocate| relocate.0.get())
+            .and_then(|destination| destination.serial);
+        relocate(window, to, serial);
+        self.relocated(window);
+    }
+
+    /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
+    /// waits for, so that the window moves with its new size, not before, and says whether it
+    /// did. A full-screen window then keeps to the middle of its output, at every call.
+    pub fn relocated(&mut self, window: &Window) -> bool {
+        let mut landed = false;
+        let relocate = window.user_data().get::<Relocate>();
+        if let Some(Destination { to, serial }) = relocate.and_then(|relocate| relocate.0.get()) {
+            if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
+                if !answered(toplevel, serial) {
+                    return false;
+                }
+            }
+            let to = to.or_else(|| {
+                let area = self.home_area(window)?;
+                crate::handlers::shown(window).then(|| placed(area, window.geometry()))
+            });
+            if let (Some(relocate), Some(to)) = (relocate, to) {
+                relocate.0.set(None);
+                self.space.relocate_element(window, to);
+                landed = true;
+            }
+        }
+        // A client smaller than its output stands in the middle of it, as
+        // `xdg_toplevel.set_fullscreen` says.
+        if let Some(area) = full_screen_area(window) {
+            let to = centred(area, window.geometry().size);
+            landed |= self.space.element_location(window) != Some(to);
+            self.space.relocate_element(window, to);
+        }
+        landed
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -453,8 +1077,10 @@ impl State {
         Ok(())
     }
 
-    /// After a frame of `output`: the output each surface is shown on, presentation feedback
-    /// when the frame changed, and the frame callbacks.
+    /// After a frame of `output`: the output each surface is shown on, and the scale of that
+    /// output as the surface's preferred one, presentation feedback when the frame changed, and
+    /// the frame callbacks. The scale is sent here, whatever changed it: a surface hears of a new
+    /// scale at the first frame of its output that shows it.
     pub fn frame_done(
         &mut self,
         output: &Output,
@@ -465,8 +1091,10 @@ impl State {
     ) {
         // Collected: the output's layer map is not held while the surfaces are visited.
         let layers: Vec<LayerSurface> = layer_map_for_output(output).layers().cloned().collect();
+        let scale = output.current_scale();
+        let transform = output.current_transform();
         let scanout = |surface: &WlSurface, surface_states: &SurfaceData| {
-            update_surface_primary_scanout_output(
+            let primary = update_surface_primary_scanout_output(
                 surface,
                 output,
                 surface_states,
@@ -474,6 +1102,13 @@ impl State {
                 states,
                 default_primary_scanout_output_compare,
             );
+            // Both send only what changed since they last sent it.
+            if primary.as_ref() == Some(output) {
+                with_fractional_scale(surface_states, |fractional| {
+                    fractional.set_preferred_scale(scale.fractional_scale())
+                });
+                send_surface_state(surface, surface_states, scale.integer_scale(), transform);
+            }
         };
         for window in self.space.elements() {
             window.with_surfaces(scanout);
@@ -487,6 +1122,10 @@ impl State {
             .and_then(|lock| lock.surface_on(output))
             .cloned();
         if let Some(surface) = &locked {
+            with_surfaces_surface_tree(surface, scanout);
+        }
+        let popups = self.composing.popups_on(&self.space, output);
+        for (surface, _) in &popups {
             with_surfaces_surface_tree(surface, scanout);
         }
         if damaged {
@@ -514,7 +1153,12 @@ impl State {
                 surface_primary_scanout_output,
             );
         }
-        if let Some(surface) = &locked {
+        // ponytail: no presentation feedback for the input method's popups, which ask for none
+        // yet; take theirs in `presentation_feedback` when one does.
+        for surface in locked
+            .iter()
+            .chain(popups.iter().map(|(surface, _)| surface))
+        {
             send_frames_surface_tree(
                 surface,
                 output,
@@ -522,6 +1166,20 @@ impl State {
                 throttle,
                 surface_primary_scanout_output,
             );
+        }
+        // The cursor surface is not among the space's elements: its frames go to the output
+        // the pointer is over.
+        if let CursorImageStatus::Surface(surface) = self.shown_cursor() {
+            let over = self.seat.get_pointer().is_some_and(|pointer| {
+                self.space
+                    .output_under(pointer.current_location())
+                    .any(|under| under == output)
+            });
+            if over {
+                send_frames_surface_tree(&surface, output, frame_target, throttle, |_, _| {
+                    Some(output.clone())
+                });
+            }
         }
     }
 
@@ -556,8 +1214,16 @@ impl State {
             return None;
         }
         let output = self.space.output_under(pos).next()?;
-        let origin = self.space.output_geometry(output)?.loc;
+        let shown = self.space.output_geometry(output)?;
+        let origin = shown.loc;
         let map = layer_map_for_output(output);
+        let focused = self.focused_window();
+        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
+        let above_top = lifted.and_then(|window| {
+            let location = self.space.element_location(window)? - window.geometry().loc;
+            window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+            Some((Under::Window(window.clone()), location))
+        });
         // The top surface of `layer` with input at `pos`: one whose input region leaves `pos`
         // out lets the click through to what is below.
         let on = |layer| {
@@ -567,16 +1233,29 @@ impl State {
                 Some((Under::Layer(surface.clone()), location))
             })
         };
-        let found = on(Layer::Overlay)
-            .or_else(|| on(Layer::Top))
-            .or_else(|| {
-                self.space
-                    .element_under(pos)
-                    .map(|(window, location)| (Under::Window(window.clone()), location))
-            })
+        let front = on(Layer::Overlay).or(above_top);
+        // The black around a smaller client hides what is below as well.
+        if lifted.is_some() {
+            return front;
+        }
+        let above = front.or_else(|| on(Layer::Top));
+        if above.is_some() {
+            return above;
+        }
+        let window = self.space.element_under(pos);
+        let black = self
+            .space
+            .elements()
+            .rev()
+            .take_while(|above| window.as_ref().is_none_or(|(window, _)| above != window))
+            .any(|above| crate::marks::whole_on(above, shown));
+        if black {
+            return None;
+        }
+        window
+            .map(|(window, location)| (Under::Window(window.clone()), location))
             .or_else(|| on(Layer::Bottom))
-            .or_else(|| on(Layer::Background));
-        found
+            .or_else(|| on(Layer::Background))
     }
 
     /// The surface under `pos`, with its origin in the space.
@@ -608,25 +1287,63 @@ impl State {
             .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
             .cloned()
     }
+
+    /// The window whose toplevel is `surface`, mapped or minimised.
+    pub fn window_or_minimised(&self, surface: &WlSurface) -> Option<Window> {
+        self.windows()
+            .find(|w| w.toplevel().is_some_and(|t| t.wl_surface() == surface))
+            .cloned()
+    }
+
+    /// The window the foreign toplevel list names by `handle`, mapped or minimised.
+    pub fn window_by_handle(&self, handle: &ForeignToplevelHandle) -> Option<Window> {
+        self.windows()
+            .find(|w| {
+                w.user_data()
+                    .get::<ForeignToplevelHandle>()
+                    .is_some_and(|own| own.matches(handle))
+            })
+            .cloned()
+    }
+
+    /// Whether `window` is minimised.
+    pub fn is_minimised(&self, window: &Window) -> bool {
+        self.minimised.iter().any(|(kept, _)| kept == window)
+    }
+
+    /// The mapped windows, then the minimised ones, then those of the inactive workspaces.
+    pub(crate) fn windows(&self) -> impl Iterator<Item = &Window> {
+        self.space
+            .elements()
+            .chain(self.minimised.iter().map(|(window, _)| window))
+            .chain(self.parked.iter().map(|(window, _)| window))
+    }
 }
 
-/// What an output shows: the space, or while the session is locked only the lock surface the
-/// locker gave it, if any, on the background.
+/// What an output shows: the space with the input method's popups on top, or while the session
+/// is locked only the lock surface the locker gave it, if any, on the background.
 pub enum View<'a> {
-    Space(&'a Space<Window>),
+    Space(&'a Space<Window>, &'a [PlacedPopup], &'a Marks),
     Locked(Option<&'a WlSurface>),
 }
 
 impl<'a> View<'a> {
-    pub fn of(space: &'a Space<Window>, lock: Option<&'a Lock>, output: &Output) -> Self {
+    pub fn of(
+        space: &'a Space<Window>,
+        lock: Option<&'a Lock>,
+        popups: &'a [PlacedPopup],
+        marks: &'a Marks,
+        output: &Output,
+    ) -> Self {
         match lock {
             Some(lock) => View::Locked(lock.surface_on(output)),
-            None => View::Space(space),
+            None => View::Space(space, popups, marks),
         }
     }
 }
 
-/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents.
+/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents, as
+/// `look` says of the magnifier and the colour filters.
 pub fn draw_view<'d, R>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
@@ -634,40 +1351,46 @@ pub fn draw_view<'d, R>(
     age: usize,
     view: View<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
+    look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
-    R: Renderer + ImportAll,
-    R::TextureId: Clone + Texture + 'static,
+    R: Filters,
+    R::TextureId: Send + Clone + Texture + 'static,
+    FilterElement<R::TextureId>: RenderElement<R>,
 {
-    match view {
-        View::Space(space) => render_output::<_, WaylandSurfaceRenderElement<R>, _, _>(
-            output,
+    let scale = output.current_scale().fractional_scale();
+    let surface = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
+        render_elements_from_surface_tree::<_, Stacked<R>>(
             renderer,
-            framebuffer,
+            surface,
+            at,
+            scale,
             1.0,
-            age,
-            [space],
-            &[],
-            damage_tracker,
-            BACKGROUND,
-        ),
-        View::Locked(surface) => {
-            let scale = output.current_scale().fractional_scale();
-            let elements: Vec<WaylandSurfaceRenderElement<R>> = surface
-                .map(|surface| {
-                    render_elements_from_surface_tree(
-                        renderer,
-                        surface,
-                        (0, 0),
-                        scale,
-                        1.0,
-                        Kind::Unspecified,
-                    )
-                })
-                .unwrap_or_default();
-            damage_tracker.render_output(renderer, framebuffer, age, &elements, BACKGROUND)
+            Kind::Unspecified,
+        )
+    };
+    // The popups and the lock surface are surfaces as the space's are, above them.
+    let mut elements: Vec<Stacked<R>> = Vec::new();
+    match view {
+        View::Space(space, popups, marks) => {
+            for (popup, at) in popups {
+                let at = at.to_physical_precise_round(scale);
+                elements.extend(surface(renderer, popup, at));
+            }
+            elements.extend(crate::marks::stack(renderer, space, output, marks));
         }
+        View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
+        View::Locked(None) => {}
     }
+    crate::look::draw(
+        renderer,
+        framebuffer,
+        output,
+        age,
+        elements,
+        damage_tracker,
+        look,
+    )
 }
 
 /// What the pointer can find under it.
@@ -794,8 +1517,9 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     gone: channel::Sender<ClientId>,
-    /// The security context the client connected through, if any (a sandboxed application).
-    pub security_context: Option<SecurityContext>,
+    /// Whether it is confined: it connected through a security context, as a sandboxed
+    /// application does, or through xwayland-satellite's socket.
+    confined: bool,
     /// The privileged globals granted when it connected.
     grants: Vec<Privilege>,
     /// What the grants were decided on, when the process could be read.
@@ -816,12 +1540,22 @@ pub fn granted(client: &Client, privilege: Privilege) -> bool {
         .is_some_and(|data| data.grants.contains(&privilege))
 }
 
-/// Whether `client` connected outside a security context: only such a client sees
-/// ext-workspace-v1 and the security context manager.
+/// Whether `client` connected outside a security context: only such a client sees the security
+/// context manager.
 pub fn unconfined(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
-        .is_some_and(|data| data.security_context.is_none())
+        .is_some_and(|data| !data.confined)
+}
+
+impl State {
+    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31).
+    pub fn marks(&self) -> Marks {
+        Marks {
+            focused: self.focused_window(),
+            outline: self.focus_theme.outline(),
+        }
+    }
 }
 
 impl ClientData for ClientState {
@@ -837,21 +1571,136 @@ impl ClientData for ClientState {
     }
 }
 
-/// Where a window of `geometry` is mapped to be centred in `area`, its top left kept inside.
-pub fn centred(
+/// Where a window's geometry goes (its top left, the space's location of the element: the
+/// space draws the buffer at it less the geometry's offset, so that offset is never added or
+/// taken off here), at the commit that answers the configure of the serial, or
+/// at its next commit without one (`State::relocated`).
+#[derive(Default)]
+pub struct Relocate(Cell<Option<Destination>>);
+
+#[derive(Clone, Copy)]
+struct Destination {
+    /// `None` is where `placed` puts the window at the size it then has.
+    to: Option<Point<i32, Logical>>,
+    serial: Option<Serial>,
+}
+
+/// Whether the state `toplevel` committed answers the configure of `serial`, or a later one.
+pub fn answered(toplevel: &ToplevelSurface, serial: Serial) -> bool {
+    toplevel
+        .with_cached_state(|state| state.last_acked.as_ref().map(|configure| configure.serial))
+        .is_some_and(|acked| acked >= serial)
+}
+
+/// Asks for `window` to move its geometry to `to` at the commit that answers `serial`.
+pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>) {
+    window
+        .user_data()
+        .get_or_insert(Relocate::default)
+        .0
+        .set(Some(Destination {
+            to: Some(to),
+            serial,
+        }));
+}
+
+/// `relocate` to where `placed` puts the window at the size it then has.
+fn place_again(window: &Window, serial: Option<Serial>) {
+    window
+        .user_data()
+        .get_or_insert(Relocate::default)
+        .0
+        .set(Some(Destination { to: None, serial }));
+}
+
+/// A maximised window's geometry before it was maximised, and the area it was maximised to.
+#[derive(Default)]
+struct Maximised(Cell<Option<Kept>>);
+
+/// As `Maximised`, for a full-screen window and its output.
+#[derive(Default)]
+struct FullScreen(Cell<Option<Kept>>);
+
+/// The output `window` has whole, from the request to the request that ends it
+/// (`State::full_screen`).
+pub fn full_screen_area(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    let full = window.user_data().get::<FullScreen>()?;
+    Some(full.0.get()?.area)
+}
+
+pub fn is_full_screen(window: &Window) -> bool {
+    full_screen_area(window).is_some()
+}
+
+/// Where an output was when `map_output` or `changed_outputs` last saw it.
+#[derive(Default)]
+struct KnownArea(Cell<Rectangle<i32, Logical>>);
+
+#[derive(Clone, Copy)]
+struct Kept {
+    before: Rectangle<i32, Logical>,
+    area: Rectangle<i32, Logical>,
+}
+
+/// Where `window` lies inside `area`, moved no further than that takes; its top left stays in
+/// `area` when it does not fit.
+fn inside(area: Rectangle<i32, Logical>, window: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+    let right = area.loc.x + area.size.w - window.size.w;
+    let bottom = area.loc.y + area.size.h - window.size.h;
+    let x = window.loc.x.min(right).max(area.loc.x);
+    let y = window.loc.y.min(bottom).max(area.loc.y);
+    (x, y).into()
+}
+
+/// Where the geometry's top left goes for a window of `size` to be centred in `area`: a space
+/// location, to which the geometry's offset in the buffer does not belong.
+pub fn centred(area: Rectangle<i32, Logical>, size: Size<i32, Logical>) -> Point<i32, Logical> {
+    let x = area.loc.x + ((area.size.w - size.w) / 2).max(0);
+    let y = area.loc.y + ((area.size.h - size.h) / 2).max(0);
+    (x, y).into()
+}
+
+/// `output`'s logical size rounded, at which the layer map lays it out.
+pub(crate) fn laid_out(output: &Output) -> Option<Size<i32, Logical>> {
+    output.current_mode().map(|mode| {
+        let size = mode
+            .size
+            .to_f64()
+            .to_logical(output.current_scale().fractional_scale());
+        output
+            .current_transform()
+            .transform_size(size.to_i32_round())
+    })
+}
+
+/// Where a new window of `geometry` is mapped in `area`, `State::placement_area`, as cosmic-comp
+/// places the first floating window it maps with no place of its own
+/// (`src/shell/layout/floating/mod.rs`, `map_internal`): each half floored on its own, the
+/// window's middle at the area's across, and its top half the area's height less half the
+/// window's below the area's top, but no lower than an eighth of that height. Its top left is
+/// kept inside, where cosmic-comp would shrink a window larger than the area, and every step
+/// saturates, so a client's geometry, however large, cannot overflow. The point is the
+/// geometry's top left: the space draws the buffer at it less the geometry's offset in the
+/// buffer (smithay's `render_location`), so that offset, a client's shadow, is not taken off.
+pub fn placed(
     area: Rectangle<i32, Logical>,
     geometry: Rectangle<i32, Logical>,
 ) -> Point<i32, Logical> {
-    let x = area.loc.x + ((area.size.w - geometry.size.w) / 2).max(0) - geometry.loc.x;
-    let y = area.loc.y + ((area.size.h - geometry.size.h) / 2).max(0) - geometry.loc.y;
-    (x, y).into()
+    let half = |of: i32, window: i32| (of / 2).saturating_sub(window / 2).max(0);
+    let across = half(area.size.w, geometry.size.w);
+    let down = half(area.size.h, geometry.size.h).min(area.size.h / 8);
+    (
+        area.loc.x.saturating_add(across),
+        area.loc.y.saturating_add(down),
+    )
+        .into()
 }
 
 /// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of
 /// the output laid out at `laid_out`. Each inset is kept inside the output, so that a client's
 /// exclusive zone, however large, cannot place windows outside it or overflow; zones that leave
 /// no room at all are ignored, and windows take the whole output.
-fn inset(
+pub(crate) fn inset(
     area: Rectangle<i32, Logical>,
     laid_out: Size<i32, Logical>,
     zone: Rectangle<i32, Logical>,
@@ -872,7 +1721,7 @@ fn inset(
 
 #[cfg(test)]
 mod tests {
-    use super::{inset, GrabSerials};
+    use super::{inset, placed, GrabSerials};
     use smithay::reexports::wayland_server::backend::{ClientData, ClientId};
     use smithay::reexports::wayland_server::Display;
     use smithay::utils::{Logical, Rectangle, Serial};
@@ -913,6 +1762,42 @@ mod tests {
                 rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX)
             ),
             output
+        );
+    }
+
+    /// A new window is placed as cosmic-comp places it: centred across, and no lower than an
+    /// eighth of the area's height below its top (#738).
+    #[test]
+    fn a_new_window_is_placed_as_cosmic_comp_places_it() {
+        let output = rect(0, 0, 1280, 800);
+        // Short: an eighth down, 100, where centring would put it at 350.
+        assert_eq!(placed(output, rect(0, 0, 200, 100)), (540, 100).into());
+        // Tall: centred, 50, above an eighth.
+        assert_eq!(placed(output, rect(0, 0, 200, 700)), (540, 50).into());
+        // Below a bar of 32; the geometry's offset in its buffer is not taken off.
+        assert_eq!(
+            placed(rect(0, 32, 1280, 768), rect(10, 20, 200, 100)),
+            (540, 128).into()
+        );
+        // Larger than the area: its top left kept inside.
+        assert_eq!(placed(output, rect(0, 0, 1400, 900)), (0, 0).into());
+        // Each half floored on its own: 640 - 100 and 400 - 350, where halving the difference
+        // gives 539 and 49.
+        assert_eq!(placed(output, rect(0, 0, 201, 701)), (540, 50).into());
+        // The layer map's 853 by 533 of 1280 by 800 px at 1.5: the chooser's 420 at 216, as on
+        // cosmic-comp's golden chooser-light-1.5-en (324 px), where the space's 854 gives 217.
+        assert_eq!(
+            placed(rect(0, 0, 853, 533), rect(0, 0, 420, 100)),
+            (216, 66).into()
+        );
+        // An area or a geometry at the ends of i32 does not overflow.
+        assert_eq!(
+            placed(rect(i32::MAX, i32::MAX, 1280, 800), rect(0, 0, 200, 100)),
+            (i32::MAX, i32::MAX).into()
+        );
+        assert_eq!(
+            placed(output, rect(i32::MIN, i32::MIN, i32::MAX, i32::MAX)),
+            (0, 0).into()
         );
     }
 

@@ -347,12 +347,73 @@ msgstr "Control center"
 
 #: src/ui/input.rs:41
 #, rust-format
+msgid "Layout {number}"
+msgstr "Layout {number}"
+
+#: src/ui/input.rs:44
+#, rust-format
 msgid "Input source: {name}"
 msgstr "Input source: {name}"
 
-#: src/ui/input.rs:86
+#: src/ui/input.rs:92
 msgid "Input source"
 msgstr "Input source"
+
+#: src/ui/keyboard_aids.rs
+msgid "sticky keys"
+msgstr "sticky keys"
+
+#: src/ui/keyboard_aids.rs
+msgid "slow keys"
+msgstr "slow keys"
+
+#: src/ui/keyboard_aids.rs
+msgid "bounce keys"
+msgstr "bounce keys"
+
+#: src/ui/keyboard_aids.rs
+msgid "Shift"
+msgstr "Shift"
+
+#: src/ui/keyboard_aids.rs
+msgid "Control"
+msgstr "Control"
+
+#: src/ui/keyboard_aids.rs
+msgid "Alt"
+msgstr "Alt"
+
+#: src/ui/keyboard_aids.rs
+msgid "Super"
+msgstr "Super"
+
+#: src/ui/keyboard_aids.rs
+msgid "AltGr"
+msgstr "AltGr"
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} locked"
+msgstr "{modifier} locked"
+
+#: src/ui/keyboard_aids.rs
+msgid "{modifier} latched"
+msgstr "{modifier} latched"
+
+#: src/ui/keyboard_aids.rs
+msgid "Key rejected: {aid}"
+msgstr "Key rejected: {aid}"
+
+#: src/ui/keyboard_aids.rs
+msgid "Turn on {aid}?"
+msgstr "Turn on {aid}?"
+
+#: src/ui/keyboard_aids.rs
+msgid "No modifier held"
+msgstr "No modifier held"
+
+#: src/ui/accessibility.rs
+msgid "Turn on"
+msgstr "Turn on"
 
 #: src/ui/mod.rs:678
 msgid "Unpin from Bar"

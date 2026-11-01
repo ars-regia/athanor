@@ -1,18 +1,19 @@
 //! Smithay's handler traits: what the compositor does when a client commits, maps a window,
 //! opens a popup, imports a dmabuf or asks for activation.
 
-use crate::state::{ClientState, State};
+use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
+use crate::state::{is_full_screen, ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
     find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
-use smithay::input::pointer::Focus;
-use smithay::input::tablet::TabletSeatHandler;
+use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::{
@@ -33,22 +34,23 @@ use smithay::wayland::foreign_toplevel_list::ForeignToplevelHandle;
 use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler};
 use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::security_context::{
     SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
 };
 use smithay::wayland::selection::data_device::{
     set_data_device_focus, DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler,
 };
+use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -76,6 +78,13 @@ pub struct HeldCommit {
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
+
+/// Whether the user can see `window` in the space: placed, and still drawing something, since a
+/// client can unmap a placed window by committing a null buffer.
+pub(crate) fn shown(window: &Window) -> bool {
+    let size = window.geometry().size;
+    window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
+}
 
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
@@ -108,15 +117,41 @@ impl CompositorHandler for State {
             while let Some(parent) = get_parent(&root) {
                 root = parent;
             }
-            if let Some(window) = self.window_for(&root) {
+            if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
-                self.place(&window);
+                // Only a null buffer takes a placed window back to before its initial configure,
+                // and the end of this function sends a new one.
+                let unmapped = window.user_data().get::<Placed>().is_some()
+                    && window
+                        .toplevel()
+                        .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
+                if unmapped {
+                    self.forget_requests(&window);
+                }
+                // A minimised window, or one on an inactive workspace, is placed and moved when
+                // it comes back (`unminimise`, `activate_workspace`).
+                if !self.is_minimised(&window) && !self.is_parked(&window) {
+                    self.place(&window);
+                    let landed = self.relocated(&window);
+                    self.anchor_resized(&window);
+                    // Also what a full-screen window's answer lifts (`marks::lifted`), which an
+                    // answer to an earlier configure does as well.
+                    if landed {
+                        self.repoint_moved(&window);
+                    } else if unmapped || is_full_screen(&window) {
+                        self.repoint();
+                    }
+                }
             }
         }
         self.layer_commit(surface);
 
         // The first commit of a toplevel or a popup gets its initial configure.
-        if let Some(toplevel) = self.window_for(surface).as_ref().and_then(Window::toplevel) {
+        if let Some(toplevel) = self
+            .window_or_minimised(surface)
+            .as_ref()
+            .and_then(Window::toplevel)
+        {
             if !toplevel.is_initial_configure_sent() {
                 toplevel.send_configure();
             }
@@ -241,16 +276,18 @@ impl State {
         });
     }
 
-    /// Centres a window, at its first commit with a size, in what the layer surfaces' exclusive
-    /// zones leave of the output. It takes the keyboard
+    /// Places a window, at its first commit with a size, in what the layer surfaces' exclusive
+    /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
+    /// windows after it are not cascaded as cosmic-comp's are yet (#918). It takes the keyboard
     /// only when no live surface holds it or its own client does: mapping a window is not the
-    /// user's input, so a client cannot take the focus from another by opening one.
+    /// user's input, so a client cannot take the focus from another by opening one; a window
+    /// with a parent follows it (`follow_parent`).
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
             return;
         }
-        let Some(area) = self.window_area() else {
+        let Some(area) = self.placement_area() else {
             return;
         };
         if !window.user_data().insert_if_missing(|| Placed) {
@@ -263,7 +300,7 @@ impl State {
                 .new_toplevel::<Self>(title, app_id);
             window.user_data().insert_if_missing(|| handle);
         }
-        let (x, y) = crate::state::centred(area, geometry).into();
+        let (x, y) = crate::state::placed(area, geometry).into();
         let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
         let holder = self
             .seat
@@ -278,12 +315,179 @@ impl State {
             // Placed where it stays: at the bottom, under the window being typed into.
             self.space.relocate_element(window, (x, y));
         }
+        self.place_on_workspace(window);
+        self.follow_parent(window, true);
+    }
+
+    /// A window with a parent is stacked above it and above the parent's other dialogs, on the
+    /// parent's workspace. With `grant`, which only `place` passes, it also takes the keyboard
+    /// when the parent's own surface holds it, as a dialog does: the user is typing into the
+    /// parent, so the dialog opened for it is where the typing goes on. The surface is compared,
+    /// not the client, so a handle for one window does not take the keyboard from a prompt of
+    /// the same client; a client's own dialogs are covered by the rule of `place`. A re-parent
+    /// of a placed window moves and stacks it and never takes the keyboard.
+    ///
+    /// What this accepts: an exported handle is the exporter's grant, so its holder may keep a
+    /// dialog above the exporter's window for as long as the handle lives, and a new window
+    /// parented through it takes the keyboard from the parent's surface at its first placement,
+    /// which is what a portal's file chooser needs. A holder that opens new windows repeatedly
+    /// can therefore take the keyboard from the exporter's window each time one is placed; that
+    /// is not closed here. A parent on an inactive workspace is hidden: the window follows it
+    /// there, is hidden with it, and takes no keyboard; one that is minimised leaves the window
+    /// where it is, beneath, with none.
+    fn follow_parent(&mut self, window: &Window, grant: bool) {
+        let Some(parent) = self.parent_window(window) else {
+            return;
+        };
+        if let Some(id) = self.workspace_of(&parent) {
+            self.move_window_to(window, id);
+        }
+        if self.space.element_location(&parent).is_none()
+            || self.space.element_location(window).is_none()
+        {
+            return;
+        }
+        let held = self
+            .seat
+            .get_keyboard()
+            .and_then(|keyboard| keyboard.current_focus());
+        if held.as_ref() == window.toplevel().map(|t| t.wl_surface()) {
+            return;
+        }
+        if grant && held.as_ref() == parent.toplevel().map(|t| t.wl_surface()) {
+            self.focus(window);
+            return;
+        }
+        // Just above the parent and its dialogs, under what is above them now; the window's
+        // own dialogs go with it.
+        let order: Vec<Window> = self.space.elements().cloned().collect();
+        let children = self.children();
+        let surface = |kept: &Window| kept.toplevel().map(|t| t.wl_surface().clone());
+        let (Some(window_surface), Some(parent_surface)) = (surface(window), surface(&parent))
+        else {
+            return;
+        };
+        let own = Self::descendants(&children, &window_surface);
+        let family = Self::descendants(&children, &parent_surface);
+        let is_own = |kept: &Window| surface(kept).is_some_and(|s| own.contains(&s));
+        let anchor = order.iter().rposition(|kept| {
+            kept != window
+                && !is_own(kept)
+                && (*kept == parent || surface(kept).is_some_and(|s| family.contains(&s)))
+        });
+        let (Some(anchor), Some(at_window)) =
+            (anchor, order.iter().position(|kept| kept == window))
+        else {
+            return;
+        };
+        if at_window < anchor {
+            self.space.raise_element(window, false);
+            for kept in order.iter().filter(|kept| is_own(kept)) {
+                self.space.raise_element(kept, false);
+            }
+            for above in order
+                .iter()
+                .skip(anchor + 1)
+                .filter(|kept| *kept != window && !is_own(kept))
+            {
+                self.space.raise_element(above, false);
+            }
+        }
+    }
+
+    /// The window of `window`'s parent, mapped, minimised or on an inactive workspace.
+    fn parent_window(&self, window: &Window) -> Option<Window> {
+        let parent = window.toplevel()?.parent()?;
+        self.window_or_minimised(&parent)
+    }
+
+    /// The children of each toplevel surface, in one pass over the windows; empty when no
+    /// window has a parent, the common case.
+    fn children(&self) -> HashMap<WlSurface, Vec<WlSurface>> {
+        let mut children: HashMap<WlSurface, Vec<WlSurface>> = HashMap::new();
+        for toplevel in self.windows().filter_map(|window| window.toplevel()) {
+            if let Some(parent) = toplevel.parent() {
+                children
+                    .entry(parent)
+                    .or_default()
+                    .push(toplevel.wl_surface().clone());
+            }
+        }
+        children
+    }
+
+    /// The surfaces that descend from `root` through `children`, each visited once, so that a
+    /// chain of any length costs one pass and a loop ends.
+    fn descendants(
+        children: &HashMap<WlSurface, Vec<WlSurface>>,
+        root: &WlSurface,
+    ) -> HashSet<WlSurface> {
+        let mut found = HashSet::new();
+        let mut pending = vec![root];
+        while let Some(at) = pending.pop() {
+            for child in children.get(at).into_iter().flatten() {
+                if found.insert(child.clone()) {
+                    pending.push(child);
+                }
+            }
+        }
+        found
+    }
+
+    /// The mapped windows that descend from `root`, bottom to top.
+    fn subtree(&self, root: &Window) -> Vec<Window> {
+        let children = self.children();
+        let Some(root) = root.toplevel().map(|t| t.wl_surface()) else {
+            return Vec::new();
+        };
+        if children.is_empty() {
+            return Vec::new();
+        }
+        let found = Self::descendants(&children, root);
+        self.space
+            .elements()
+            .filter(|kept| {
+                kept.toplevel()
+                    .is_some_and(|t| found.contains(t.wl_surface()))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The pointer, the start of its grab and the window, when the client of `surface` may
+    /// start a window grab with `serial`: the session is not locked, and `serial` is the last
+    /// button press, sent to that client and still held. A client cannot take the pointer when
+    /// it likes, as the popup grab checks.
+    fn window_grab(
+        &self,
+        surface: &ToplevelSurface,
+        seat: &wl_seat::WlSeat,
+        serial: Serial,
+    ) -> Option<(PointerHandle<Self>, GrabStartData<Self>, Window)> {
+        if self.lock.is_some() {
+            return None;
+        }
+        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        let client = surface.wl_surface().client()?.id();
+        if !self.grab_serials.clicked(serial, &client) || !pointer.has_grab(serial) {
+            return None;
+        }
+        let start = pointer.grab_start_data()?;
+        // A full-screen window has no place to be dragged from.
+        let window = self
+            .window_for(surface.wl_surface())
+            .filter(|window| !is_full_screen(window))?;
+        Some((pointer, start, window))
     }
 
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
     /// the keyboard exclusively; the others are deactivated.
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
+        // The window's own dialogs stay above it.
+        for dialog in self.subtree(window) {
+            self.space.raise_element(&dialog, false);
+        }
         for other in self.space.elements() {
             other.set_activated(other == window);
             if let Some(toplevel) = other.toplevel() {
@@ -327,10 +531,7 @@ impl State {
             .space
             .elements()
             .rev()
-            .find(|window| {
-                let size = window.geometry().size;
-                window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
-            })
+            .find(|window| shown(window))
             .cloned();
         match top {
             Some(window) => self.focus(&window),
@@ -356,16 +557,17 @@ impl State {
     }
 
     /// The origin in the space of a popup's root, a window or a layer surface, and the area of
-    /// the output it is shown on.
+    /// the output it is shown on: a window's is the output nearest to its centre
+    /// (`output_nearest`), the one it is shown on whether it is settled or being moved.
     fn popup_root_place(
         &self,
         root: &WlSurface,
     ) -> Option<(Point<i32, Logical>, Rectangle<i32, Logical>)> {
         if let Some(window) = self.window_for(root) {
-            return Some((
-                self.space.element_geometry(&window)?.loc,
-                self.output_area()?,
-            ));
+            let geometry = self.space.element_geometry(&window)?;
+            let centre = (geometry.loc + geometry.size.downscale(2)).to_f64();
+            let output = self.output_nearest(centre)?;
+            return Some((geometry.loc, self.space.output_geometry(output)?));
         }
         self.space.outputs().find_map(|output| {
             let area = self.space.output_geometry(output)?;
@@ -391,6 +593,20 @@ impl XdgShellHandler for State {
         &mut self.xdg_shell_state
     }
 
+    fn ack_configure(&mut self, surface: WlSurface, _configure: Configure) {
+        self.decoration_acked(&surface);
+    }
+
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.foreign_parent_set_natively(&surface);
+        // Before its first placement `place` stacks the window; a re-parent never gives it the keyboard.
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            if window.user_data().get::<Placed>().is_some() {
+                self.follow_parent(&window, false);
+            }
+        }
+    }
+
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         // Mapped now at the bottom of the stack, placed at its first sized commit.
         let window = Window::new_wayland_window(surface);
@@ -399,14 +615,125 @@ impl XdgShellHandler for State {
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        if let Some(window) = self.window_for(surface.wl_surface()) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
                 self.foreign_toplevel_state.remove_toplevel(handle);
             }
             self.space.unmap_elem(&window);
+            self.minimised.retain(|(kept, _)| *kept != window);
+            self.parked.retain(|(kept, _)| *kept != window);
+            self.workspaces_changed();
         }
-        // The keyboard does not leave a destroyed window by itself.
+        self.foreign_toplevel_destroyed(surface.wl_surface());
+        // The keyboard does not leave a destroyed window by itself, nor does the pointer.
         self.refocus(surface.wl_surface());
+        self.repoint();
+    }
+
+    /// The window follows the pointer until every button is up. A maximised window is
+    /// restored first, its top edge where it was and its centre under the pointer.
+    fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(mut from) = self.space.element_geometry(&window).map(|g| g.loc) else {
+            return;
+        };
+        if let Some(kept) = self.restore(&window) {
+            from.x = start
+                .location
+                .to_i32_round::<i32>()
+                .x
+                .saturating_sub(kept.size.w / 2);
+            if let Some(area) = self.window_area_at(start.location) {
+                self.move_window(&window, kept_reachable(area, from, kept.size));
+            }
+        }
+        let grab = MoveGrab {
+            start,
+            window,
+            from,
+        };
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    /// The window's `edges` follow the pointer until every button is up. A maximised window
+    /// keeps its size.
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        let maximised = surface
+            .with_pending_state(|state| state.states.contains(xdg_toplevel::State::Maximized));
+        if edges == xdg_toplevel::ResizeEdge::None || maximised {
+            return;
+        }
+        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+            return;
+        };
+        let Some(from) = self.space.element_geometry(&window) else {
+            return;
+        };
+        let grab = ResizeGrab::new(start, window, edges, from);
+        pointer.set_grab(self, grab, serial, Focus::Clear);
+    }
+
+    /// A full-screen window keeps its output, and is told what it has.
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
+            self.end_window_grab(&window);
+            self.maximise(&window);
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                self.forget_maximised(&window);
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
+            self.restore(&window);
+        }
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            self.end_window_grab(&window);
+            self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+            self.repoint();
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            if !is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
+            self.leave_full_screen(&window);
+            self.repoint();
+        }
+    }
+
+    /// Refused for a window the user cannot see, one that has not drawn yet included.
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_for(surface.wl_surface()) {
+            self.minimise(&window);
+        }
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
@@ -447,7 +774,9 @@ impl XdgShellHandler for State {
     /// takes the keyboard only when that root can keep it: never for a layer surface whose
     /// interactivity is `none`, a bar, and while a layer surface holds the keyboard
     /// exclusively only for its own popups; any other grab takes the pointer only. A grab
-    /// refused leaves the popup shown without it, as a popover a client opens at start is.
+    /// refused leaves the popup shown without it, as a popover a client opens at start is,
+    /// except one of a window the user cannot see, minimised, on an inactive workspace, not
+    /// placed yet or drawing nothing, whose popup is dismissed.
     fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
         // While locked, the keyboard and the pointer stay with the lock surfaces.
         if self.lock.is_some() {
@@ -460,6 +789,17 @@ impl XdgShellHandler for State {
         let Ok(root) = find_popup_root_surface(&popup) else {
             return;
         };
+        // A popup of a window the user cannot see, minimised, on an inactive workspace, not
+        // placed yet or drawing nothing, takes neither the keyboard nor the pointer: it is
+        // dismissed.
+        if self.popup_root_place(&root).is_none()
+            || self.window_for(&root).is_some_and(|window| !shown(&window))
+        {
+            if let PopupKind::Xdg(surface) = &popup {
+                surface.send_popup_done();
+            }
+            return;
+        }
         let (keyboard, pointer) = (seat.get_keyboard(), seat.get_pointer());
         let Some(client) = root.client().map(|client| client.id()) else {
             return;
@@ -488,7 +828,10 @@ impl XdgShellHandler for State {
         };
         if let Some(keyboard) = keyboard.filter(|_| takes_keyboard) {
             let previous = grab.previous_serial().unwrap_or(serial);
-            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
+            if keyboard.is_grabbed()
+                && !(keyboard.has_grab(serial)
+                    || keyboard.has_grab(previous)
+                    || self.input_method_grabbed())
             {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
@@ -516,14 +859,58 @@ impl SeatHandler for State {
         &mut self.seat_state
     }
 
-    /// The clipboard follows the keyboard: the client that gains the focus is sent an offer of
-    /// the selection, and no other client is sent one. An offer a client already holds stays
+    /// A client set the cursor with `wl_pointer.set_cursor` or `wp_cursor_shape_v1`, or Smithay
+    /// reset it to the default when the pointer's focus changed. Its owner is the client of the
+    /// cursor surface, else the client the pointer is over.
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        let owner = match &image {
+            CursorImageStatus::Surface(surface) => surface.client(),
+            // Smithay resets from inside the pointer's motion, which holds the pointer: asking
+            // it for its focus there deadlocks, and the default needs no owner.
+            _ if image == CursorImageStatus::default_named() => None,
+            _ => seat
+                .get_pointer()
+                .and_then(|pointer| pointer.current_focus())
+                .and_then(|surface| surface.client()),
+        };
+        self.cursor_status = (image, owner.map(|client| client.id()));
+        self.request_redraw();
+    }
+
+    /// The clipboard and the primary selection follow the keyboard: the client that gains the
+    /// focus is sent an offer of each selection, and no other client is sent one. An offer a client already holds stays
     /// readable after it loses the focus, for as long as the selection's source answers:
     /// Smithay checks no focus on `wl_data_offer.receive` and keeps the offer's object data to
     /// itself, so the compositor cannot withdraw it.
+    ///
+    /// The text inputs follow the keyboard too, except while the session is locked
+    /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // The focus outline moves.
+        self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
+        self.aids_focus_changed(focused);
+        set_primary_focus(&self.display_handle, seat, client.clone());
         set_data_device_focus(&self.display_handle, seat, client);
+        self.text_input_focus(focused.cloned());
+        // A lock or a confinement follows the keyboard (decision 30), a trusted prompt focused
+        // or left starts or ends the aids' quiet (AX11), and the magnifier follows the keyboard
+        // unless the pointer moved it: the view then stays with the pointer. Once the dispatch
+        // is done: a popup's grab moves the keyboard while it holds the pointer, whose location
+        // the first and the last read, and Smithay calls this holding the keyboard, which the
+        // aids read.
+        self.loop_handle.insert_idle(|state| {
+            // The focus is one of what decides what stands above the top layer (`marks::lifted`).
+            if state.space.elements().any(is_full_screen) {
+                state.repoint();
+            }
+            state.refresh_constraint();
+            state.aids_quiet_changed();
+        });
+        if let Some(surface) = focused.cloned().filter(|_| !self.a11y.pointing) {
+            self.loop_handle
+                .insert_idle(move |state| state.zoom_to_focus(&surface));
+        }
     }
 }
 
@@ -540,14 +927,11 @@ impl DataDeviceHandler for State {
 // ponytail: the default cancels every drag and drop; a DnD grab with its icon when a client needs it.
 impl WaylandDndGrabHandler for State {}
 
-// cursor-shape-v1 serves tablet tools too.
-impl TabletSeatHandler for State {
-    type ToolFocus = WlSurface;
-}
-
 impl OutputHandler for State {
     fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
         self.workspace_output_bound(&output, &wl_output);
+        // A state object made before its client bound the output is sent it now.
+        self.send_toplevel_states();
     }
 }
 
@@ -574,9 +958,6 @@ impl IdleNotifierHandler for State {
         &mut self.idle_notifier_state
     }
 }
-
-// A pointer target needs it; no client gets a lock or a confinement yet.
-impl PointerConstraintsHandler for State {}
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
@@ -611,7 +992,8 @@ impl DrmSyncobjHandler for State {
 
 impl FractionalScaleHandler for State {
     fn new_fractional_scale(&mut self, surface: WlSurface) {
-        // ponytail: the first output's scale; per output once windows move between outputs.
+        // The first output's scale until a frame shows the surface: `frame_done` then sends the
+        // scale of the output it is shown on, and every later change of it.
         let scale = self
             .space
             .outputs()
@@ -663,6 +1045,17 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
+            // While the session is locked a token restores nothing (L14).
+            if self.lock.is_none() {
+                // A focused client can make a token at any time: it switches no workspace, and a
+                // window on an inactive one stays there.
+                if let Some(window) = self
+                    .window_or_minimised(&surface)
+                    .filter(|window| self.on_active_workspace(window))
+                {
+                    self.unminimise(&window);
+                }
+            }
             if let Some(window) = self.window_for(&surface) {
                 self.focus(&window);
             }
@@ -690,7 +1083,7 @@ fn names(toplevel: &ToplevelSurface) -> (String, String) {
 impl State {
     /// Sends the foreign toplevel list `toplevel`'s new title and app id.
     fn rename(&mut self, toplevel: &ToplevelSurface) {
-        let Some(window) = self.window_for(toplevel.wl_surface()) else {
+        let Some(window) = self.window_or_minimised(toplevel.wl_surface()) else {
             return;
         };
         if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {

@@ -7,7 +7,8 @@ bus, as that user, the way a screen reader at the greeter would read it. Prints 
 number per line for `attempts`; exits 1 with a reason on stderr when what it waited for did
 not appear.
 
-  tree                      every node of the greeter: role, name, showing, selected, focused
+  tree                      every node of the greeter: role, name, description, showing,
+                            selected, focused, checked
   cards                     the open card, then Escape to the list: card names in order, the selected one
   open-card FULL-NAME       to the list with Escape, to the card by its first letter, Enter
   open-other                the same for "Other user"; leaves its name field showing
@@ -126,10 +127,12 @@ class Greeter:
                 {
                     "role": role,
                     "name": name,
+                    "description": node.get_description() or "",
                     "text": self.text(node, name) if role in ("label", "alert") else "",
                     "showing": states.contains(self.Atspi.StateType.SHOWING),
                     "selected": states.contains(self.Atspi.StateType.SELECTED),
                     "focused": states.contains(self.Atspi.StateType.FOCUSED),
+                    "checked": states.contains(self.Atspi.StateType.CHECKED),
                 }
             )
             for index in range(node.get_child_count()):

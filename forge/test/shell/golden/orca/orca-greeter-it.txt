@@ -1,0 +1,7 @@
+Lettore schermo attivo.
+Athanor
+Password di Rig testo password.
+Accedi button.
+Torna all'elenco button.
+Password di Rig testo password.
+Lettore schermo disattivato.

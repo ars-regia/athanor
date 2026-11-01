@@ -8,7 +8,9 @@
 - **Status:** revision 4 (2026-10-15), approved by the maintainer on 2026-10-15
   ([ADR-0118](../decisions/0118-pipeline-revision-4-approval.md)): it places the three workflows that
   revision 3 left to #406, `bot-merge.yml` as a target entry of its own, `fuzz.yml` in
-  `maintenance.yml` and the shell rig build image in `bots.yml` (section 3.5).
+  `maintenance.yml` and the shell rig build image in `bots.yml` (section 3.5). PL42's GitHub
+  Release is settled by [ADR-0131](../decisions/0131-github-release-of-each-promotion.md)
+  (2026-10-24).
   Revision 3 (2026-10-09) was approved by the maintainer on 2026-10-11 with the fixes
   of its review, as an exception to the freeze of ADR-0103 D3 ([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md)): it moves
   the image signing into `release.yml`, signs `:latest` with no approval and gates the
@@ -149,7 +151,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 
 | Entry            | Triggers                                       | What it does                                                                                                                                                       |
 | ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pr.yml`         | `pull_request`, `merge_group`                  | change detection, `just check`, the build checks the change selects (specs, kernel, image, shell surfaces) on `pull_request` only (PL44), one aggregate job `gate`, the only required check |
+| `pr.yml`         | `pull_request`, `merge_group`                  | change detection, the `check-*` jobs (together `just check`), the build checks the change selects (specs, kernel, image, shell surfaces) on `pull_request` only (PL44), one aggregate job `gate`, the only required check |
 | `build.yml`      | `push` to `iso-v0` and `main`, `workflow_dispatch` | plan, packages, kernel and modules when their inputs changed, signing of the kernel, images pushed by `:<run_id>`; its last job dispatches `release.yml` for the run (PL54) |
 | `release.yml`    | `workflow_dispatch` only, from `build.yml` on `iso-v0` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence; its last job dispatches `accept.yml` (PL56) |
 | `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
@@ -203,7 +205,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`. Known gap: `deny.toml` belongs to no area yet (follow-up) |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`. Known gap: `deny.toml` belongs to no area yet (follow-up) |
 | `plan.json`                   | `build.yml` `plan`        | every build stage               | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |

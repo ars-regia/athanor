@@ -1,15 +1,20 @@
 //! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
-//! captured (spike Q7). The lock is confirmed once every output has been drawn locked.
+//! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
+//! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
+//! output has been drawn locked.
 
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
+use smithay::desktop::{find_popup_root_surface, Window};
+use smithay::input::keyboard::KeyboardSource;
 use smithay::input::pointer::MotionEvent;
 use smithay::output::Output;
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::SERIAL_COUNTER;
+use smithay::wayland::compositor::get_parent;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
@@ -60,12 +65,19 @@ impl SessionLockHandler for State {
         if self.lock.as_ref().is_some_and(|lock| lock.lock.is_alive()) {
             return;
         }
+        // A call a key asked for before the lock is not made after it (`session_calls`), and a
+        // Super held into the lock does not open the launcher after it.
+        self.lock_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.super_tap = None;
+        self.aids_drop_pending();
         // Capture stops here: the sessions are dropped, which stops them, and no new one starts
         // while locked (`capture_constraints`).
         self.capture_sessions.clear();
         if let Some(keyboard) = self.seat.get_keyboard() {
             keyboard.unset_grab(self);
         }
+        self.drop_input_method_grab();
         if let Some(pointer) = self.seat.get_pointer() {
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
         }
@@ -74,15 +86,21 @@ impl SessionLockHandler for State {
             locker: Some(locker),
             surfaces: Vec::new(),
         });
+        self.aids_quiet_changed();
+        self.text_input_focus(None);
         self.set_keyboard_focus(None);
         self.refresh_pointer();
+        self.refresh_tools();
         self.lock_taken();
     }
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.aids_drop_pending();
+        self.aids_quiet_changed();
         self.focus_top();
         self.refresh_pointer();
+        self.refresh_tools();
     }
 
     /// Sized to the output, before Smithay sends the first configure; the first lock surface
@@ -106,10 +124,28 @@ impl SessionLockHandler for State {
         lock.surfaces.push((output, surface));
         self.set_keyboard_focus(None);
         self.refresh_pointer();
+        self.refresh_tools();
     }
 }
 
 impl State {
+    /// Whether a virtual keyboard's key presses and a virtual pointer's motion, button presses
+    /// and scrolling reach no client: while the session is locked (open question 12 of the OS9
+    /// plan, and the maintainer's decision of 2026-10-23 for the pointer), so that no script
+    /// types into the lock surface, probes its password or clicks on it; and while the session
+    /// is paused on another virtual terminal, where the user cannot see what it would do, nor a
+    /// virtual Ctrl+Alt+F`n` switch the terminal (OS9 task 6 audit). A release of what the seat
+    /// holds still goes on, and the hardware's input is unaffected.
+    pub fn drops_virtual_input(&self) -> bool {
+        self.lock.is_some() || self.session_paused()
+    }
+
+    /// Whether a key pressed on `source` reaches no client: a virtual keyboard's while
+    /// `drops_virtual_input`.
+    pub fn drops_key(&self, source: KeyboardSource) -> bool {
+        source != KeyboardSource::Physical && self.drops_virtual_input()
+    }
+
     /// Gives the keyboard to `surface`; while the session is locked, to the first lock surface
     /// whatever `surface` is. Every change of the keyboard focus but a popup grab's goes
     /// through here, and `grab` refuses grabs while locked.
@@ -125,13 +161,19 @@ impl State {
                 .map(|(_, surface)| surface.wl_surface().clone()),
             None => surface,
         };
+        // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
+        // confinement follows the keyboard (decision 30, `constraints.rs`).
+        if surface.is_none() {
+            self.aids_focus_changed(None);
+            self.loop_handle.insert_idle(|state| state.refresh_constraint());
+        }
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
     }
 
     /// Gives the pointer to what is under it now. Locking and unlocking change that without a
     /// motion, and a button goes to the pointer's focus: without this, a click on the lock would
     /// reach the window under it.
-    fn refresh_pointer(&mut self) {
+    pub(crate) fn refresh_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -144,6 +186,38 @@ impl State {
         };
         pointer.motion(self, under, &motion);
         pointer.frame(self);
+    }
+
+    /// `refresh_pointer` for a change of what stands above what, in which nothing under the
+    /// pointer moves: a client that stays there hears nothing.
+    pub(crate) fn repoint(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let under = self.surface_under(pointer.current_location());
+        if under.map(|(surface, _)| surface) != pointer.current_focus() {
+            self.refresh_pointer();
+        }
+    }
+
+    /// `repoint` for `window`, which moved: its own client hears of it under the pointer, as
+    /// no other does while what is under the pointer stays.
+    pub(crate) fn repoint_moved(&mut self, window: &Window) {
+        let focus = self.seat.get_pointer().and_then(|pointer| pointer.current_focus());
+        let root = focus.map(|mut surface| {
+            while let Some(parent) = get_parent(&surface) {
+                surface = parent;
+            }
+            match self.popups.find_popup(&surface) {
+                Some(popup) => find_popup_root_surface(&popup).unwrap_or(surface),
+                None => surface,
+            }
+        });
+        if root.as_ref() == window.toplevel().map(|toplevel| toplevel.wl_surface()) {
+            self.refresh_pointer();
+        } else {
+            self.repoint();
+        }
     }
 
     /// After a frame of every output: a lock waiting for its confirmation has been drawn, and

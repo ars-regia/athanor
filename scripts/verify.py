@@ -17,6 +17,7 @@ Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
 """
 
+import ast
 import collections
 import datetime
 import fnmatch
@@ -2079,6 +2080,713 @@ def check_panics():
 
 
 # --------------------------------------------------------------------------- #
+# 7-bis. shell-failures — a script does not hide a failure
+# --------------------------------------------------------------------------- #
+
+# A line of a script that discards stderr, or the whole output, or swallows a failure with
+# `|| true`: AGENTS.md "No hidden failures". Each tree has its own budget, measured on the repo
+# on 2026-10-25 (forge/test) and 2026-10-31; like BUDGET they only go down. A probe whose failure
+# is the answer (`kill -0 "$pid" 2> /dev/null`) counts too, until it is written so that the check
+# can tell it from a hidden crash.
+SHELL_BUDGETS = {
+    "forge/build": 7,
+    "forge/builder": 1,
+    "forge/scripts": 15,
+    "forge/test": 15,
+    "forge/tools": 0,
+    "scripts": 43,
+    "system": 7,
+}
+# The same constructs in the steps of a workflow or of an action, with `continue-on-error`.
+WORKFLOW_DIRS = (".github/workflows", ".github/actions")
+WORKFLOW_BUDGET = 20
+# The guest's shell of the ISO test, held in the Python's byte strings.
+GUEST_SHELL_DIR = "forge/test/iso"
+GUEST_SHELL_FILE = "console.py"
+GUEST_SHELL_BUDGET = 8
+DEV_NULL = r"""["']?/dev/null["']?"""
+# Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
+# a quote that spans lines; text run through `eval` or `$(...)`; a construct split across byte
+# strings that the guest's shell joins with `+`.
+HIDDEN_FAILURE = re.compile(
+    rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
+    r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
+    r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
+    r"|2>&1\s*\|\|\s*(?:break|continue)\b")
+CONTINUE_ON_ERROR = re.compile(r"^\s*(?:-\s+)?continue-on-error:(?!\s*false\b)")
+SHELL_SHEBANG = re.compile(rb"#!.*\b(?:ba|da)?sh\b")
+HEREDOC_START = re.compile(r"(?<!<)<<(?!<)(-?)")
+HEREDOC_WORD = re.compile(r"""\s*\\?(['"]?)(\w+)\1""")
+ARITHMETIC = re.compile(r"\(\([^\n]*?\)\)")
+
+
+def shell_code(line):
+    """`(code, bare)` of `line`. `code` is the line without its comment: a `#` starts one only
+    outside quotes and after a space or at the start, so `${#x}`, `$#` and "a #b" stay. `bare`
+    is `code` with the text of every quoted string and every arithmetic expression blanked,
+    where a here-document can be looked for."""
+    quote, i, bare = "", 0, []
+    while i < len(line):
+        c = line[i]
+        if quote:
+            if c == "\\" and quote != "'":
+                bare.append("  ")
+                i += 2
+                continue
+            if c == quote[-1]:
+                quote = ""
+                bare.append(c)
+            else:
+                bare.append(" ")
+        elif line.startswith("$'", i):
+            # $'...': a backslash escapes the quote, unlike in a single-quoted string.
+            quote = "$'"
+            bare.append("$'")
+            i += 1
+        elif c == "\\":
+            bare.append("  ")
+            i += 2
+            continue
+        elif c in "'\"":
+            quote = c
+            bare.append(c)
+        elif c == "#" and (i == 0 or line[i - 1] in " \t"):
+            line = line[:i]
+            break
+        else:
+            bare.append(c)
+        i += 1
+    return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
+
+
+def scan_shell(text):
+    """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
+    hides a failure, and the line of a here-document still open at the end, whose rest no one
+    checked (0 when none is). Neither a comment nor the body of a here-document counts."""
+    found, pending = [], []
+    for i, line in enumerate(text.split("\n"), 1):
+        if pending:
+            word, tabs, _ = pending[0]
+            if (line.lstrip("\t") if tabs else line) == word:
+                pending.pop(0)
+            continue
+        code, bare = shell_code(line)
+        if HIDDEN_FAILURE.search(code):
+            found.append(i)
+        for m in HEREDOC_START.finditer(bare):
+            w = HEREDOC_WORD.match(code, m.end())
+            if w:
+                pending.append((w.group(2), m.group(1) == "-", i))
+    return found, pending[0][2] if pending else 0
+
+
+def hidden_failures(text):
+    return scan_shell(text)[0]
+
+
+def links(base):
+    """The links under `base`, to a file or a directory: `walk` follows neither."""
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        for name in dirnames + filenames:
+            if (Path(dirpath) / name).is_symlink():
+                yield Path(dirpath) / name
+
+
+def shell_scripts(base):
+    """The shell scripts under `base`: a `.sh` file, or one whose first line names a shell. A
+    link is no script, as `links` refuses it, nor is a socket or a pipe a run left behind."""
+    for p in walk(base, ""):
+        if p.is_symlink() or not p.is_file():
+            continue
+        if p.suffix == ".sh":
+            yield p
+            continue
+        with open(p, "rb") as f:
+            if SHELL_SHEBANG.match(f.readline(256)):
+                yield p
+
+
+def workflow_failures(text):
+    """The numbers of the lines of workflow `text` that hide a failure. A step's script is
+    indented in the YAML, so a here-document's end is not looked for: every line is read."""
+    return [i for i, line in enumerate(text.split("\n"), 1)
+            if CONTINUE_ON_ERROR.match(line) or HIDDEN_FAILURE.search(shell_code(line)[0])]
+
+
+def guest_failures(text):
+    """`(found, opened)` of the byte strings of Python `text`: the line of each string holding
+    shell that hides a failure, once per construct, as one string chains many commands on a
+    line, and the lines of those with a here-document still open at the end."""
+    found, opened = [], []
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+            shell = node.value.decode("utf-8", "replace")
+            lines, open_from = scan_shell(shell)
+            code = shell.split("\n")
+            for i in lines:
+                found += [node.lineno] * len(HIDDEN_FAILURE.findall(shell_code(code[i - 1])[0]))
+            if open_from:
+                opened.append(node.lineno)
+    return sorted(found), opened
+
+
+def over_budget(r, found, budget, constant, what):
+    """Fails `r` per finding when `found` is over `budget`, or notes that it can come down."""
+    if len(found) > budget:
+        # One finding per line, as for panics, so that known-red.txt can list each.
+        for at in found:
+            r.fail(f"{at}: hides a failure, over the budget of {budget} of {what}; "
+                   "send the output to a log or report it on stderr")
+        r.note(f"shell-failures: {what}: {len(found)} occorrenze, budget {budget}")
+    elif len(found) < budget:
+        r.note(f"shell-failures: {what}: {len(found)} (budget {budget}) — "
+               f"abbassa {constant} in scripts/verify.py")
+
+
+@check("shell-failures", "Il budget di fallimenti nascosti negli script e nei workflow non cresce")
+def check_shell_failures():
+    r = Result()
+    for tree, budget in SHELL_BUDGETS.items():
+        found = []
+        for p in sorted(links(ROOT / tree)):
+            r.fail(f"{p.relative_to(ROOT)}: a link hides a script from the budget: "
+                   "move the script here, or call it by its own path")
+        for p in sorted(shell_scripts(ROOT / tree)):
+            lines, opened = scan_shell(read(p))
+            found += [f"{rel(p)}:{i}" for i in lines]
+            if opened:
+                # Fail closed: the scanner skips a here-document body, so one it cannot close
+                # leaves the rest of the file unchecked.
+                r.fail(f"{rel(p)}:{opened}: unterminated here-document from line {opened}: "
+                       "the scanner cannot check the rest")
+        over_budget(r, found, budget, "SHELL_BUDGETS", tree)
+    found = [f"{rel(p)}:{i}" for tree in WORKFLOW_DIRS
+             for p in sorted(walk(ROOT / tree, (".yml", ".yaml")))
+             for i in workflow_failures(read(p))]
+    over_budget(r, found, WORKFLOW_BUDGET, "WORKFLOW_BUDGET", "workflows")
+    found = []
+    for p in walk(ROOT / GUEST_SHELL_DIR, GUEST_SHELL_FILE):
+        lines, opened = guest_failures(read(p))
+        found += [f"{rel(p)}:{i}" for i in lines]
+        for i in opened:
+            r.fail(f"{rel(p)}:{i}: unterminated here-document: the scanner cannot check the rest")
+    over_budget(r, found, GUEST_SHELL_BUDGET, "GUEST_SHELL_BUDGET", GUEST_SHELL_FILE)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# 7a. allow-list — a shell client that needs a privileged global has its line
+# --------------------------------------------------------------------------- #
+
+# The compositor's allow-list (doc_own_stack.md OS4) and the class of every global it offers.
+ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
+GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
+LAYER_SHELL = "zwlr_layer_shell_v1"
+# Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
+# step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
+# A line for it, or no spec installing it, ends the exemption with a failure.
+OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
+# Upstream clients with a line (doc_session.md revision 4, SN12 and SN15): no spec under
+# forge/specs installs them and no crate of the tree builds them, so neither the executable nor
+# its interfaces can be derived here; their interfaces come from SN12's derivation run. Each
+# must keep one line, for the unit it runs in, and a spec that comes to install one ends its
+# exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
+UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
+            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
+            "/usr/bin/cosmic-osd": "cosmic-osd.service",
+            "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
+SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
+PACKAGES_JSON = "forge/config/packages.json"
+# Settings keeps the main socket for this client's sake, and no longer than it stays upstream.
+SETTINGS_CLIENT = "/usr/bin/cosmic-randr"
+# The compositor serves those globals and the layers, and enforces the list: no client to check.
+# Its installed path and its bin target both, so that another binary installed there is checked.
+SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
+# The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
+# surface on its top or overlay layer, however the variant is reached, is refused without a grant.
+LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
+# What a spec puts under these directories is an executable a line can name.
+EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_sbindir}": "/usr/sbin", "%{_libexecdir}": "/usr/libexec",
+             "%{_prefix}": "/usr"}
+EXEC_ROOTS = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/")
+INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
+COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
+# A file of a path dependency that one public call alone enters counts for a target only when
+# code outside that crate makes the call, written as a method or as a path: athanor-compositor-
+# client binds the capture globals at the first `Client::capture`, the window actions at the
+# first action of `Client::window_actions`, the keyboard group at the first
+# `Client::watch_keyboard_group`, and athanor-compositor's accessibility manager at the first
+# `Client::watch_accessibility`; capture.rs, actions.rs, keyboard_group.rs and a11y.rs hold every
+# name of them in the crate.
+ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
+             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/actions.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/keyboard_group.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/a11y.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)"))}
+CLIENT_CRATE = "system/athanor-compositor-client"
+# Where athanor-compositor-client names the privileged globals it binds at connect, at the
+# first capture, at the first window action, at the first watch of the keyboard group and at the
+# first watch of the accessibility state. Each names at least one, or the check no longer sees
+# what the client binds.
+CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
+                "system/athanor-compositor-client/src/capture.rs": "at the first capture",
+                "system/athanor-compositor-client/src/actions.rs": "at the first window action",
+                "system/athanor-compositor-client/src/keyboard_group.rs":
+                "at the first watch of the keyboard group",
+                "system/athanor-compositor-client/src/a11y.rs":
+                "at the first watch of the accessibility state"}
+# The classes of data/globals, as the compositor's fixture reads them (`classified`).
+CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
+
+
+def top_layer(files):
+    """Where the first of `files` reaches the top or overlay variant of the layer enum, by its
+    name or an alias, a variant import or a glob import of it; None when none does."""
+    names = {"Layer"} | {a for text in files.values() for m in LAYER_ALIAS.finditer(text) for a in m.groups() if a}
+    variant = re.compile(rf"\b(?:{'|'.join(sorted(names))})\s*::\s*"
+                         r"(?:\*|\{[^}]*\b(?:Top|Overlay)\b|(?:Top|Overlay)\b)")
+    for where, text in sorted(files.items()):
+        found = variant.search(text)
+        if found:
+            return f"{where}:{text.count(chr(10), 0, found.start()) + 1}"
+    return None
+
+
+def spec_installs(spec):
+    """(source, executable) of each file an install or a cp of the spec puts under /usr/bin,
+    /usr/sbin or /usr/libexec: continued lines joined, a command after `do`, `then` or `else`,
+    quoted words, a target directory given by -t or as the last argument, a destination
+    directory given with or without its trailing slash."""
+    for command in re.split(r"&&|\|\||;|\n", spec.replace("\\\n", " ")):
+        words = [w.strip("\"'") for w in command.split()]
+        if words[:1] in (["do"], ["then"], ["else"]):
+            words = words[1:]
+        if not words or words[0] not in INSTALL | COPY:
+            continue
+        args, directory, i = [], None, 1
+        while i < len(words):
+            w = words[i]
+            if w in ("--target-directory", "--mode", "--owner", "--group", "--suffix"):
+                directory, i = (words[i + 1] if w == "--target-directory" and i + 1 < len(words) else directory), i + 1
+            elif w.startswith("--target-directory="):
+                directory = w.split("=", 1)[1]
+            elif w == "--directory" and words[0] in INSTALL:
+                break
+            elif w.startswith("-") and len(w) > 1 and not w.startswith("--"):
+                for k, c in enumerate(w[1:], 1):
+                    if c == "d" and words[0] in INSTALL:
+                        args = None
+                        break
+                    if c in "mogSt":
+                        value = w[k + 1:]
+                        if not value and i + 1 < len(words):
+                            i, value = i + 1, words[i + 1]
+                        directory = value if c == "t" else directory
+                        break
+                if args is None:
+                    break
+            elif not w.startswith("--"):
+                args.append(w)
+            i += 1
+        if not args:
+            continue  # install -d makes directories
+        if directory is None:
+            if len(args) < 2:
+                continue
+            *sources, directory = args
+            if len(sources) == 1 and not directory.endswith("/") and \
+                    executable_path(directory) not in EXEC_DIRS.values():
+                if executable_path(directory).startswith(EXEC_ROOTS):
+                    yield sources[0], executable_path(directory)
+                continue
+        else:
+            sources = args
+        for source in sources:
+            executable = executable_path(f"{directory}/{source.rsplit('/', 1)[-1]}")
+            if executable.startswith(EXEC_ROOTS):
+                yield source, executable
+
+
+def executable_path(destination):
+    """`destination` of a spec's %install as the path it has on the installed system."""
+    for root in ("%{buildroot}", "%buildroot", "${RPM_BUILD_ROOT}", "$RPM_BUILD_ROOT"):
+        destination = destination.replace(root, "")
+    destination = re.sub(r"%(_\w+)", r"%{\1}", destination)  # %_bindir is %{_bindir}
+    for macro, value in EXEC_DIRS.items():
+        destination = destination.replace(macro, value)
+    return re.sub(r"/+", "/", destination.strip("\"'")).rstrip("/") or "/"
+
+
+def binaries(crate, manifest):
+    """{name: entry file} of each bin target of `crate`, Cargo's auto-discovered ones (src/main.rs,
+    src/bin/*.rs, src/bin/*/main.rs) and those of `[[bin]]`."""
+    package = manifest.get("package", {})
+    found = {}
+    if package.get("autobins", True):
+        if package.get("name") and (crate / "src/main.rs").is_file():
+            found[package["name"]] = crate / "src/main.rs"
+        found.update((p.stem, p) for p in sorted((crate / "src/bin").glob("*.rs")))
+        found.update((p.parent.name, p) for p in sorted((crate / "src/bin").glob("*/main.rs")))
+    for b in manifest.get("bin", []):
+        entry = crate / b["path"] if "path" in b else found.get(b["name"], crate / "src/main.rs")
+        found = {n: p for n, p in found.items() if p != entry}
+        found[b["name"]] = entry
+    return found
+
+
+def without_comments(txt):
+    """`txt` with each comment blanked, newlines kept; strings stay, a global can be bound
+    by its name."""
+    out, at, i = [], 0, 0
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j == i:
+            i += 1
+            continue
+        if txt.startswith(("//", "/*"), i):
+            out.append(txt[at:i])
+            out.append(re.sub(r"[^\n]", " ", txt[i:j]))
+            at = j
+        i = j
+    out.append(txt[at:])
+    return "".join(out)
+
+
+def crate_sources(crate, start, entry=None):
+    """The production files of the target whose entry point, `entry` (the library when None),
+    lies in `start`: minus the crate's other bin targets inside it, each with its modules'
+    directory, tests, and the modules and items under `#[cfg(test)]`. Each as (path, text
+    without test items and comments)."""
+    manifest = tomllib.loads(read(crate / "Cargo.toml"))
+    others = [p for p in binaries(crate, manifest).values() if p != entry]
+    dirs = [p.parent if p.name == "main.rs" else p.with_suffix("") for p in others]
+    dirs = [d for d in dirs if d != start and d.is_relative_to(start)]
+    files = [p for p in walk(start, ".rs") if p not in others and not any(p.is_relative_to(d) for d in dirs)]
+    test_modules = test_module_files(files)
+    return [(p, without_comments(without_test_items(read(p))))
+            for p in files if not is_test_file(p) and p not in test_modules]
+
+
+def enabled_dependencies(manifest, features, defaults):
+    """The optional dependencies `features` turn on (and `default` with `defaults`), and the
+    features each enables on a dependency, as Cargo reads `[features]`."""
+    table = manifest.get("features", {})
+    todo = list(features) + (["default"] if defaults else [])
+    seen, on, sub, weak = set(), set(), collections.defaultdict(set), []
+    while todo:
+        f = todo.pop()
+        if f in seen:
+            continue
+        seen.add(f)
+        if f.startswith("dep:"):
+            on.add(f[4:])
+        elif "/" in f:
+            dep, feature = f.split("/", 1)
+            if dep.endswith("?"):
+                weak.append((dep[:-1], feature))
+            else:
+                on.add(dep)
+                sub[dep].add(feature)
+        elif f not in table:
+            on.add(f)  # the implicit feature of an optional dependency
+        else:
+            todo.extend(table[f])
+    for dep, feature in weak:
+        if dep in on:
+            sub[dep].add(feature)
+    return on, sub
+
+
+def path_dependencies(crate, manifest, root):
+    """(name in code, crate directory, entry) of each path dependency of `[dependencies]` and
+    of `[target.*.dependencies]`, through `workspace = true` too."""
+    workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {}) \
+        if (root / "Cargo.toml").is_file() else {}
+    tables = [manifest.get("dependencies", {})]
+    tables += [t.get("dependencies", {}) for t in manifest.get("target", {}).values()]
+    for table in tables:
+        for name, entry in table.items():
+            if not isinstance(entry, dict):
+                continue
+            base, path = crate, entry.get("path")
+            if entry.get("workspace") and isinstance(workspace.get(name), dict):
+                base, path = root, workspace[name].get("path")
+            if path:
+                yield name, entry, (base / path).resolve()
+
+
+def target_files(crate, entry, features, defaults, root):
+    """The production files a binary target is built from: its own, and those of the path
+    dependencies its code names, followed transitively with the features the build enables
+    (an optional dependency counts only when they turn it on)."""
+    files, done = {}, {}
+    todo = [(crate.resolve(), entry.parent.resolve(), entry.resolve(), set(features), defaults)]
+    while todo:
+        crate, start, entry, features, defaults = todo.pop()
+        before = done.get((crate, start))
+        if before and features <= before[0] and (before[1] or not defaults):
+            continue
+        features = features | (before[0] if before else set())
+        defaults = defaults or bool(before and before[1])
+        done[(crate, start)] = (features, defaults)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        sources = crate_sources(crate, start, entry)
+        files.update(sources)
+        # A bin target outside the library's directory (src/bin/*.rs) is built with the
+        # package's own library, which its code reaches by the package's name.
+        lib = crate / manifest.get("lib", {}).get("path", "src/lib.rs")
+        if entry is not None and lib.is_file() and lib not in dict(sources):
+            todo.append((crate, lib.parent, None, features, defaults))
+        code = "\n".join(text for _, text in sources)
+        on, sub = enabled_dependencies(manifest, features, defaults)
+        for name, entry, dep in path_dependencies(crate, manifest, root):
+            if entry.get("optional") and name not in on:
+                continue
+            ident = name if "package" in entry else \
+                tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("name", name)
+            # A dependency the code never names adds nothing that runs.
+            if not re.search(rf"\b{ident.replace('-', '_')}\b", code):
+                continue
+            lib = tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("path", "src/lib.rs")
+            wanted = set(entry.get("features", [])) | sub[name]
+            todo.append((dep, (dep / lib).parent, None, wanted, entry.get("default-features", True)))
+    return files
+
+
+def build_flags(spec, package):
+    """(features, defaults, all features) of the spec's `cargo build` of `package`."""
+    for line in spec.splitlines():
+        words = line.split()
+        if words[:2] != ["cargo", "build"]:
+            continue
+        named = [words[i + 1] for i, w in enumerate(words[:-1]) if w == "-p"]
+        if named and package not in named:
+            continue
+        features = set()
+        for i, w in enumerate(words):
+            if w in ("--features", "-F") and i + 1 < len(words):
+                features.update(re.split(r"[ ,]+", words[i + 1].strip("\"'")))
+            elif w.startswith("--features="):
+                features.update(re.split(r"[ ,]+", w.split("=", 1)[1].strip("\"'")))
+        return features, "--no-default-features" not in words, "--all-features" in words
+    return set(), True, False
+
+
+# The allow-list's mark of a trusted prompt, the one name of a line that is no interface
+# (doc_own_stack.md OS5, doc_accessibility.md AX11; identity.rs `MARK`).
+TRUSTED_PROMPT = "trusted-prompt"
+
+
+def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
+    """What `verify.py allow-list` reports: each binary a spec installs to /usr/bin, built from
+    a crate of the tree, that asks for the top or overlay layer or names a privileged global
+    of data/globals has a line in data/privileged-clients, and each of its lines grants
+    zwlr_layer_shell_v1 when it asks for those layers and every privileged global its code
+    names; each line names an executable a spec installs, and only interfaces of the
+    privileged and layer-gated rows. A grant beyond those is the maintainer's, never
+    derived here. An executable of `outside` (OUTSIDE_THE_LIST by default) is appended to
+    `notes` in place of its problem; one of `upstream` (UPSTREAM by default) has a line and
+    is installed by no spec."""
+    root = Path(root or ROOT)
+    notes = [] if notes is None else notes
+    outside = OUTSIDE_THE_LIST if outside is None else outside
+    upstream = UPSTREAM if upstream is None else upstream
+    problems = []
+    classes = {}
+    for number, line in enumerate(read(root / GLOBALS_FILE).splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        words = line.split()
+        if len(words) != 2 or words[1] not in CLASSES:
+            problems.append(f"{GLOBALS_FILE}:{number}: not `<interface> <class>` with a class of "
+                            f"{', '.join(CLASSES)}, which the compositor's fixture refuses: {line}")
+            continue
+        classes[words[0]] = words[1]
+    privileged = {i for i, c in classes.items() if c == "privileged"}
+    grantable = {i for i, c in classes.items() if c in ("privileged", "layer-gated")}
+    if not privileged:
+        problems.append(f"{GLOBALS_FILE} has no privileged row: no client would need a line")
+    if (root / CLIENT_CRATE / "Cargo.toml").is_file():
+        for where, when in CLIENT_BINDS.items():
+            text = without_comments(without_test_items(read(root / where))) if (root / where).is_file() else ""
+            if not any(re.search(rf"\b{i}\b", text) for i in privileged):
+                problems.append(f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
+                                f"longer sees what athanor-compositor-client binds {when}")
+    lines = collections.defaultdict(list)
+    for line in read(root / ALLOW_LIST).splitlines():
+        words = line.split()
+        if len(words) in (1, 2) and not words[0].startswith("#"):
+            problems.append(f"{ALLOW_LIST}: not `<executable> <unit> <interface>...`, which makes the "
+                            f"compositor grant nothing at all: {line.strip()}")
+        elif words and not words[0].startswith("#"):
+            lines[words[0]].append(words[1:])
+            problems += [f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
+                         f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
+                         for name in words[2:] if name not in grantable and name != TRUSTED_PROMPT]
+
+    bins = {}
+    for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
+        manifest = tomllib.loads(read(manifest_path))
+        name = manifest.get("package", {}).get("name")
+        for b, entry in binaries(manifest_path.parent, manifest).items():
+            bins[b] = (manifest_path.parent, name, entry)
+
+    installed, targets = set(), []
+    for spec_path in sorted((root / "forge/specs").glob("*/*.spec")):
+        spec = read(spec_path)
+        name = re.search(r"^Name:\s*(\S+)", spec, re.M)
+        if name:
+            spec = spec.replace("%{name}", name.group(1))
+        in_tree = any(walk(spec_path.parent, "Cargo.toml"))
+        for source, executable in spec_installs(spec):
+            installed.add(executable)
+            built = re.search(r"(?:^|/)release/([^/\s]+)$", source)
+            if built:
+                targets.append((built.group(1), executable, spec, spec_path, in_tree))
+
+    checked = 0
+    for built, executable, spec, spec_path, in_tree in targets:
+        if (built, executable) == SERVER:
+            continue
+        if built not in bins:
+            # Built from a source outside the tree (cosmic-comp, matugen), unless the spec
+            # carries a crate: then no bin target of the tree has the name it installs, or
+            # the name is a shell variable, a glob or a macro this check cannot expand.
+            if in_tree and re.search(r"[$*?\[{%`]", built):
+                problems.append(f"{spec_path.relative_to(root)}: an install of target/release/{built} "
+                                "names its binary through a shell variable, a glob or a macro the check "
+                                "cannot expand: name each binary in the spec")
+            elif in_tree:
+                problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
+                                f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
+            continue
+        checked += 1
+        crate, package, entry = bins[built]
+        features, defaults, every = build_flags(spec, package)
+        if every:
+            features = set(tomllib.loads(read(crate / "Cargo.toml")).get("features", {}))
+        layer, names = None, {}
+        files = {path.relative_to(root.resolve()): text for path, text in
+                 target_files(crate, entry, features, defaults, root).items()}
+        for where in [w for w in files if w.as_posix() in ON_DEMAND]:
+            owner, call = ON_DEMAND[where.as_posix()]
+            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
+                del files[where]
+        layer = top_layer(files)
+        for where, text in sorted(files.items()):
+            for i, line in enumerate(text.split("\n"), 1):
+                for interface in privileged:
+                    if interface not in names and re.search(rf"\b{interface}\b", line):
+                        names[interface] = f"{where}:{i}"
+        if layer is None and not names:
+            continue
+        asks = ([f"the top or overlay layer ({layer})"] if layer else []) + \
+            [f"{n} ({at})" for n, at in sorted(names.items())]
+        if executable in outside and executable not in lines:
+            notes.append(f"{executable}: asks for {', '.join(asks)}, outside the list until it moves "
+                         "(doc_session.md SN12)")
+        elif executable not in lines:
+            problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
+        else:
+            for line in lines[executable]:
+                if layer and LAYER_SHELL not in line[1:]:
+                    problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
+                                    f"for {line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)")
+                problems += [f"{executable}: binds {n} ({at}) and its line for {line[0]} does not grant it"
+                             for n, at in sorted(names.items()) if n not in line[1:]]
+
+    if not checked:
+        problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
+                        "builds: the check found no target")
+    for executable in lines:
+        if executable not in installed and executable not in upstream:
+            problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    components = read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
+    packages = json.loads(read(root / PACKAGES_JSON)) if (root / PACKAGES_JSON).is_file() else {}
+    image = {name for key, names in packages.items() if key.startswith("upstream_") for name in names}
+    launch = root / CLIENT_CRATE / "src/launch.rs"
+    if SETTINGS_CLIENT not in upstream and launch.is_file() and "fn keeps_main_socket" in read(launch):
+        problems.append(f"{launch.relative_to(root)}: keeps_main_socket outlives {SETTINGS_CLIENT}: "
+                        "remove it (doc_settings.md SE23)")
+    for executable, unit in sorted(upstream.items()):
+        if executable not in lines:
+            problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
+                            "remove it from UPSTREAM (doc_session.md SN12)")
+        elif [line[0] for line in lines[executable]] != [unit]:
+            problems.append(f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
+                            "the unit it runs in")
+        started = rf"^[ \t]*systemd-run(?:[ \t]+-\S*)*[ \t]+--unit={re.escape(unit)}(?:[ \t]|$)"
+        if unit.endswith(".scope") and not re.search(started, components, re.MULTILINE):
+            problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
+                            "names: the grant would reach nothing")
+        if Path(executable).name not in image:
+            problems.append(f"{executable} is upstream and {PACKAGES_JSON} no longer installs it: "
+                            f"remove its line and its entry in UPSTREAM (doc_settings.md SE23)")
+        if executable in installed:
+            problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
+                            "remove it from UPSTREAM, so that its line is derived")
+    for executable in sorted(outside):
+        if executable in lines:
+            problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
+                            "remove it from OUTSIDE_THE_LIST (doc_session.md SN12)")
+        if executable not in installed:
+            problems.append(f"{executable} is outside the list and installed by no spec under forge/specs: "
+                            "remove it from OUTSIDE_THE_LIST")
+    return problems
+
+
+# What an application behind a security context must not see, one list for the acceptance
+# scripts: the compositor's own privileged and layer-gated rows, and the names cosmic-comp has
+# for the same powers, which no table of the tree carries (#886).
+FORBIDDEN_GLOBALS = "forge/test/shell/forbidden-globals.txt"
+FORBIDDEN_READERS = ("forge/test/shell/compositor_e2e.py", "scripts/devvm/compositor-acceptance.sh",
+                     "scripts/devvm/dock-acceptance.sh", "scripts/devvm/launcher-acceptance.sh")
+
+
+def forbidden_globals_problems(root=None):
+    """What `verify.py forbidden-globals` reports: a privileged or layer-gated row of
+    data/globals that forge/test/shell/forbidden-globals.txt does not name, and a script of
+    FORBIDDEN_READERS that does not read that file."""
+    root = Path(root or ROOT)
+    forbidden = set(read(root / FORBIDDEN_GLOBALS).split())
+    rows = [line.split() for line in read(root / GLOBALS_FILE).splitlines() if not line.startswith("#")]
+    gated = {row[0] for row in rows if len(row) == 2 and row[1] in ("privileged", "layer-gated")}
+    problems = [f"{GLOBALS_FILE} has no privileged row: the list is checked against nothing"] if not gated else []
+    problems += [f"{FORBIDDEN_GLOBALS} does not name {name}, a global of {GLOBALS_FILE} no confined "
+                 "application may see" for name in sorted(gated - forbidden)]
+    problems += [f"{reader} does not read {FORBIDDEN_GLOBALS}"
+                 for reader in FORBIDDEN_READERS
+                 if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)]
+    return problems
+
+
+@check("forbidden-globals", "The acceptance scripts forbid every global the compositor privileges")
+def check_forbidden_globals():
+    r = Result()
+    for problem in forbidden_globals_problems():
+        r.fail(problem)
+    return r
+
+
+@check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
+def check_allow_list():
+    r, notes = Result(), []
+    for problem in allow_list_problems(notes=notes):
+        r.fail(problem)
+    for note in notes:
+        r.note(note)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7b. riga di comando del kernel — le decisioni di doc_kernel_profile.md
 # --------------------------------------------------------------------------- #
 
@@ -2453,9 +3161,21 @@ def check_specs():
 COSMIC_ALLOWED = (
     "system/athanor-compositor-client/",
     "forge/tools/calmo-cosmic-theme/",
+    # The own compositor reads cosmic-comp's keyboard layouts (doc_own_stack.md decision 27).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
+    # It reads and writes cosmic-comp's colour filter and reads its accessibility_zoom, so both
+    # sessions share one state, until cosmic-comp's session leaves the greeter
+    # (doc_own_stack.md decision 28, doc_accessibility.md AX10).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
+    # It reads the theme of the focus outline, read-only, until the store moves with the
+    # compositor client (doc_own_stack.md decision 31).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs",
+    # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
+    # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).
+    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
-COSMIC_DESKTOP_ID = re.compile(r"com\.system76\.\w+\.desktop\b")
+COSMIC_APPLICATION_ID = re.compile(r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+\*@\.service\b")
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
                      "build-dependencies", "build_dependencies")
 
@@ -2500,8 +3220,9 @@ def boundary_problems(root):
                 continue
             for i, line in enumerate(read(path).split("\n"), 1):
                 # A desktop id names an application, not a configuration (the favourites'
-                # successors of COSMIC's former default apps, doc_bar.md BR7).
-                if "com.system76" in COSMIC_DESKTOP_ID.sub("", line.split("//")[0]):
+                # successors of COSMIC's former default apps, doc_bar.md BR7), and so does the
+                # family of units an allow-list line names for it.
+                if "com.system76" in COSMIC_APPLICATION_ID.sub("", line.split("//")[0]):
                     problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
                                     f"through athanor-compositor-client")
     return problems
@@ -3214,6 +3935,299 @@ def check_services():
     for ident, why in SERVICE_EXEMPT.items():
         r.note(f"exempt: {ident}: {why}")
     return r
+
+
+# --------------------------------------------------------------------------- #
+# 11b. session-units — the shipped user units follow doc_session.md's rules
+# --------------------------------------------------------------------------- #
+
+# doc_session.md, SN12: every user unit Athanor ships for the session, with its crash class of
+# SN6, whether it connects to the compositor (SN3) and how the session starts it: through a
+# user preset under athanor-session.target, through D-Bus activation, by name in
+# athanor-session.target itself (the gate through Requires=, the others through Wants=), or by
+# its session's script alone.
+SESSION_UNITS = {
+    "athanor-bar.service": ("surface", True, "preset"),
+    "athanor-dock.service": ("surface", True, "preset"),
+    "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-launcher.service": ("surface", True, "activated"),
+    "athanor-control-center.service": ("surface", True, "activated"),
+    "athanor-update-notify.service": ("surface", False, "preset"),
+    # SN6 names no class for the Super+C oneshot (doc_control_center.md, CC9); it runs once
+    # per login and never restarts, as a session step does.
+    "athanor-control-center-shortcut.service": ("step", False, "preset"),
+    # Its file chooser, dialogs and pickers are windows (doc_portal.md).
+    "xdg-desktop-portal-athanor.service": ("helper", True, "activated"),
+    "athanor-desktop.service": ("step", False, "target"),
+    "athanor-skel-sync.service": ("step", False, "target"),
+    "athanor-appearance-reset.service": ("step", False, "preset"),
+    "cosmic-bg.service": ("cosmic", True, "target"),
+    "cosmic-osd.service": ("cosmic", True, "target"),
+    "cosmic-settings-daemon.service": ("cosmic", True, "target"),
+    # The own compositor (SN15): athanor-compositor-session starts it and waits on it, and its
+    # ExecStartPost= starts athanor-session.target, so it precedes the gate, which probes it.
+    "athanor-compositor.service": ("compositor", False, "script"),
+}
+SESSION_TARGET = "athanor-session.target"
+# Shipped user units that are not session units, and why.
+NOT_SESSION_UNITS = {
+    "athanor-launcher-rates.service": "the launcher's exchange-rate job, started by its timer",
+    "athanor-launcher-rates.timer": "the launcher's exchange-rate timer, under timers.target",
+}
+# SN6's policy per class: each setting's required value, None where the unit must not set it.
+# A time span is compared in seconds. Restart= unset is Restart=no (systemd.service(5)).
+SESSION_CLASSES = {
+    "guard": {
+        "Restart": "always",
+        "RestartSec": 0.1,
+        "RestartSteps": "5",
+        "RestartMaxDelaySec": 30,
+        "StartLimitIntervalSec": 0,
+    },
+    "surface": {
+        "Restart": "on-failure",
+        "RestartSec": 0.1,
+        "RestartSteps": None,
+        "RestartMaxDelaySec": None,
+        "StartLimitBurst": "10",
+        "StartLimitIntervalSec": 600,
+    },
+    "helper": {"Restart": "no"},
+    "step": {"Type": "oneshot", "Restart": "no"},
+    # COSMIC's units keep their own policy until they leave (SN6, exceptions).
+    "cosmic": {"Restart": "on-failure", "RestartSec": 2},
+    # The own compositor has no Restart=: its end ends the session (SN6, exceptions; SN15).
+    "compositor": {"Restart": "no"},
+}
+SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"}
+# Findings the units do not meet yet, each the exact text of the check's finding for that unit,
+# and why. An entry that no longer matches a finding fails the check, so the list cannot
+# outlive its reasons, and it covers that finding only: a new divergence of the same unit fails.
+SN3_CITE = "(doc_session.md, SN3)"
+NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
+ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
+ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
+SCRIPT_STARTED = (
+    f"started by its session's script alone, so no [Install], no user preset and not pulled in by "
+    f"{SESSION_TARGET} (doc_session.md, SN15)"
+)
+SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
+SESSION_EXEMPT = {
+    ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
+        "SN13 step 1 does not list it",
+    ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-bg.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("athanor-launcher.service", ACTIVATED_INSTALL):
+        "enabled by hand until the switch (doc_launcher.md, LA12)",
+    ("athanor-control-center.service", ACTIVATED_INSTALL):
+        "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
+    (
+        "athanor-control-center-shortcut.service",
+        f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
+    ): "SN6 names no class for it, and SN3 does not say whether it connects to the compositor",
+    ("athanor-update-notify.service", f"RestartSec=30, {SURFACE_WANTS} 0.1"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitBurst=(unset), {SURFACE_WANTS} 10"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitIntervalSec=(unset), {SURFACE_WANTS} 600"):
+        "SN13 step 1 changes only its [Install]",
+    (
+        "xdg-desktop-portal-athanor.service",
+        f"connects to the compositor, so After= and Requisite=athanor-desktop.service {SN3_CITE}",
+    ): "its dialogs connect to the compositor (doc_portal.md); SN13 step 1 does not list it",
+    ("xdg-desktop-portal-athanor.service", "Restart=on-failure, the helper class of doc_session.md, SN6, wants no"):
+        "until doc_portal.md PT3's next revision (doc_session.md, section 3)",
+}
+
+
+def unit_section(text, section):
+    """(key, value) of every assignment in one section of a unit file."""
+    current, found = None, []
+    for line in re.sub(r"\\[ \t]*\r?\n", " ", text).splitlines():
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+        elif current == section and "=" in line:
+            key, value = line.split("=", 1)
+            found.append((key.strip(), value.strip()))
+    return found
+
+
+def unit_names(pairs, key):
+    """The unit names every `key=` assignment lists, an empty assignment resetting the list."""
+    names = set()
+    for k, value in pairs:
+        if k == key:
+            names = names | set(value.split()) if value else set()
+    return names
+
+
+def time_span(value):
+    """A systemd time span in seconds (systemd.time(7)); a bare number is seconds."""
+    scale = {"us": 1e-6, "ms": 1e-3, "": 1, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600}
+    parts = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", value)
+    if not parts or "".join(n + u for n, u in parts) != value.replace(" ", ""):
+        return None
+    if any(u not in scale for _, u in parts):
+        return None
+    return sum(float(n) * scale[u] for n, u in parts)
+
+
+def session_unit_problems(units, enabled):
+    """((unit, rule), finding) for every rule of doc_session.md a shipped user unit breaks.
+
+    `units` maps every shipped user unit to its text; `enabled` holds the units a user preset
+    enables. The rules: SN3's binding, `[Install]` and compositor edges, SN4's edges in force
+    and SN6's policy per class."""
+    found = []
+
+    def fail(unit, rule, message):
+        found.append(((unit, rule), message))
+
+    for unit in sorted(units.keys() - SESSION_UNITS.keys() - NOT_SESSION_UNITS.keys() - {SESSION_TARGET}):
+        fail(unit, "class", "a shipped user unit with no entry in SESSION_UNITS (doc_session.md, SN6)")
+    for unit in sorted((SESSION_UNITS.keys() | NOT_SESSION_UNITS.keys() | {SESSION_TARGET}) - units.keys()):
+        fail(unit, "class", "listed in SESSION_UNITS but not shipped; remove the entry")
+
+    target = unit_section(units.get(SESSION_TARGET, ""), "Unit")
+    if "graphical-session.target" not in unit_names(target, "BindsTo"):
+        fail(SESSION_TARGET, "order", "no BindsTo=graphical-session.target (doc_session.md, SN3)")
+    if "xdg-desktop-autostart.target" not in unit_names(target, "Before"):
+        fail(SESSION_TARGET, "order", "not Before=xdg-desktop-autostart.target (doc_session.md, SN4)")
+    pulled = unit_names(target, "Wants") | unit_names(target, "Requires")
+
+    for unit, (cls, graphical, start) in sorted(SESSION_UNITS.items()):
+        if unit not in units:
+            continue
+        head = unit_section(units[unit], "Unit")
+        service = unit_section(units[unit], "Service")
+        install = unit_section(units[unit], "Install")
+        if "graphical-session.target" not in unit_names(head, "PartOf"):
+            fail(unit, "binding", "no PartOf=graphical-session.target (doc_session.md, SN3)")
+
+        wanted_by = unit_names(install, "WantedBy")
+        if wanted_by - {SESSION_TARGET}:
+            fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)")
+        if start == "preset" and (wanted_by != {SESSION_TARGET} or unit not in enabled):
+            fail(unit, "install", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)")
+        if start == "activated" and install:
+            fail(unit, "install", ACTIVATED_INSTALL)
+        if start == "activated" and unit in enabled:
+            fail(unit, "install", ACTIVATED_PRESET)
+        if start == "target" and unit not in pulled:
+            fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
+        if start == "script" and (install or unit in enabled or unit in pulled):
+            fail(unit, "install", SCRIPT_STARTED)
+
+        gate = "athanor-desktop.service"
+        edges = (gate in unit_names(head, "After"), gate in unit_names(head, "Requisite"))
+        if graphical and edges != (True, True):
+            fail(unit, "edge", f"connects to the compositor, so After= and Requisite={gate} (doc_session.md, SN3)")
+        if not graphical and any(edges):
+            fail(unit, "edge", f"headless, so neither After= nor Requisite={gate} (doc_session.md, SN3)")
+
+        # The start limits belong to [Unit], the rest to [Service] (systemd.unit(5), systemd.service(5)).
+        settings = dict(service)
+        settings.update((k, v) for k, v in head if k.startswith("StartLimit"))
+        for key, want in SESSION_CLASSES[cls].items():
+            have = settings.get(key, "no" if key == "Restart" else None)
+            if want is not None and key in SESSION_TIME_KEYS:
+                same = have is not None and time_span(have) == want
+            else:
+                same = have == want
+            if not same:
+                fail(unit, "class", f"{key}={have if have is not None else '(unset)'}, the {cls} class of doc_session.md, SN6, wants {want if want is not None else 'it unset'}")
+
+    bar = unit_section(units.get("athanor-bar.service", ""), "Unit")
+    if not {"athanor-shelld.service"} <= unit_names(bar, "Wants") & unit_names(bar, "After"):
+        fail("athanor-bar.service", "order", "does not want athanor-shelld.service and start after it (doc_session.md, SN4)")
+    return found
+
+
+def session_exempt_problems(found):
+    """The findings SESSION_EXEMPT does not name, and its entries no finding matches."""
+    failing = {(key[0], message) for key, message in found}
+    problems = [f"{unit}: {message}" for unit, message in sorted(failing - SESSION_EXEMPT.keys())]
+    problems += [
+        f"{unit}: exempt in SESSION_EXEMPT from '{finding}' but meets the rule; remove the entry"
+        for unit, finding in sorted(SESSION_EXEMPT.keys() - failing)
+    ]
+    return problems
+
+
+# A line that starts one of these sections ends the %files section; any other %word stays in it.
+FILES_END = re.compile(
+    r"^%(?:prep|build|install|check|clean|conf|changelog|description|package|pre|post|preun|postun"
+    r"|pretrans|posttrans|verifyscript|sepolicy|generate_buildrequires|patchlist|sourcelist"
+    r"|trigger\w*|filetrigger\w*|transfiletrigger\w*)\b"
+)
+# What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
+FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
+USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
+USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))")
+# A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
+USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
+USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
+
+
+def spec_user_units(text):
+    """(names, problems): the user units a spec's %files lists, and each %files line that
+    mentions the user unit directory but that this scan cannot classify (a glob, a macro it
+    does not know), which it would otherwise not see."""
+    names, problems, in_files = [], [], False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%files"):
+            in_files = True
+            continue
+        if FILES_END.match(line):
+            in_files = False
+        if not in_files or line.startswith("#") or not USER_UNIT_MENTION.search(line):
+            continue
+        path = FILES_DIRECTIVES.sub("", line)
+        path = re.sub(r"^%dir\s+", "", path)
+        unit = USER_UNIT_PATH.fullmatch(path)
+        if unit:
+            names.append(unit.group(1))
+        elif not USER_DROPIN_PATH.fullmatch(path):
+            problems.append(line)
+    return names, problems
+
+
+def shipped_user_units(root):
+    """({unit: text}, problems) for every unit a spec under forge/specs installs in
+    /usr/lib/systemd/user, read from the one file of that name in the spec's directory."""
+    units, problems = {}, []
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        names, unclassified = spec_user_units(read(spec))
+        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list each unit as a plain path, optionally after %attr(), %config or %verify()" for line in unclassified]
+        for name in names:
+            sources = [p for p in walk(spec.parent, name) if p.name == name and "skel" not in p.parts]
+            if len(sources) != 1:
+                problems.append(f"{rel(spec)}: ships {name}, found {len(sources)} source files of that name")
+                continue
+            units[name] = read(sources[0])
+    return units, problems
+
+
+@check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
+def check_session_units():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    enabled = {unit for verb, unit, _ in preset_lines(ROOT) if verb == "enable"}
+    for problem in session_exempt_problems(session_unit_problems(units, enabled)):
+        r.fail(problem)
+    for (unit, finding), why in SESSION_EXEMPT.items():
+        r.note(f"exempt: {unit}: {finding}: {why}")
+    return r
+
+
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
