@@ -259,10 +259,11 @@ impl Store {
     /// that a registry that names a new digest at each check cannot fill `/var`.
     ///
     /// # Errors
-    /// A directory cannot be listed, or an entry cannot be removed.
+    /// A directory cannot be listed, or an entry cannot be removed; the other directory is
+    /// pruned all the same.
     pub fn retain_objects(&self, keep: &[&str]) -> std::io::Result<()> {
-        self.retain("signatures", keep)?;
-        self.retain("attestations", keep)
+        let signatures = self.retain("signatures", keep);
+        signatures.and(self.retain("attestations", keep))
     }
 
     fn retain(&self, kind: &str, keep: &[&str]) -> std::io::Result<()> {
