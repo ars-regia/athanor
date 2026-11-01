@@ -131,7 +131,7 @@ attest() { # attest TAG KEY CLASS [ADVISORY...]: CLASS "none" writes a predicate
     '{class: $class, advisories: $ARGS.positional, class_reason: "", build_time: $built, revision: $revision, build_run_id: "0", updateinfo_timestamp: null}
      | if $class == "none" then del(.class) else . end' --args "$@" > "$predicate"
   COSIGN_PASSWORD='' nix run nixpkgs#cosign -- attest --yes --allow-insecure-registry --key "$keys/$key.private" --type "$PREDICATE_TYPE" \
-    --tlog-upload=false --new-bundle-format=false --predicate "$predicate" "$REPO@$digest"
+    --use-signing-config=false --tlog-upload=false --new-bundle-format=false --predicate "$predicate" "$REPO@$digest"
   rm -f "$predicate"
 }
 build vsec1 2026-09-15T11:00:00Z acc-1; sign vsec1 acc-1; attest vsec1 acc-1 security CVE-2026-1001
