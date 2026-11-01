@@ -61,7 +61,6 @@ fail() { # fail WHAT-WAS-READ
 
 unit() { in_session systemctl --user "$@" athanor-bar; }
 loaded() { [[ $(in_session systemctl --user show -p LoadState --value "$1") == loaded ]]; }
-unit_failed() { [[ $(unit show -p ActiveState --value) == failed ]]; }
 
 new_main_pid() { # new_main_pid OLD-PID: active, with a different, real MainPID
     [[ $(unit show -p ActiveState --value) == active ]] || return 1
@@ -239,10 +238,15 @@ stage_modules() {
     "$HERE/screenshot.sh" "$SHOTS/modules.png" > /dev/null
 }
 
+HIGH_CONTRAST_BEFORE=
+
+high_contrast_key() { in_session gsettings "$1" org.gnome.desktop.a11y.interface high-contrast "${@:2}"; }
+
 # Switches high contrast on and off through the bar's own menu over AT-SPI; the bar writes
 # the key from inside its confinement (bar_high_contrast.py).
 stage_high-contrast() {
     [[ $(unit is-active) == active ]] || fresh_start
+    HIGH_CONTRAST_BEFORE=$(high_contrast_key get) || fail "gsettings get high-contrast"
     in_session python3 - < "$HERE/bar_high_contrast.py" ||
         fail "the switch did not reach the GNOME key and COSMIC's built themes (steps above)"
     [[ $(unit is-active) == active ]] || fail "not active after switching: $(unit show -p Result --value)"
@@ -412,21 +416,29 @@ stage_cleanup() {
             failed=1
         }
     fi
+    # A bar that died before bar_high_contrast.py could switch back: the themes stay, and the
+    # next run's first check says so.
+    if [[ -n $HIGH_CONTRAST_BEFORE ]]; then
+        high_contrast_key set "$HIGH_CONTRAST_BEFORE" || {
+            echo "cleanup: restoring high-contrast $HIGH_CONTRAST_BEFORE failed" >&2
+            failed=1
+        }
+    fi
     if guest_ssh "test -e $HEAD2"; then
         second_head detect || {
             echo "cleanup: restoring $HEAD2 to detect failed" >&2
             failed=1
         }
     fi
-    if unit_failed; then
-        unit reset-failed || {
-            echo "cleanup: systemctl --user reset-failed athanor-bar failed" >&2
-            failed=1
-        }
-    fi
     if loaded athanor-bar; then
         unit stop || {
             echo "cleanup: systemctl --user stop athanor-bar failed" >&2
+            failed=1
+        }
+        # After the stop, and always: the stages' starts fill the rate counter, and the start
+        # below would hit start-limit-hit. See fresh_start.
+        unit reset-failed || {
+            echo "cleanup: systemctl --user reset-failed athanor-bar failed" >&2
             failed=1
         }
     fi
