@@ -525,12 +525,12 @@ def kernel_pins(pins, new, notes, locks):
         if nvr != pins["FEDORA_KERNEL_NVR"] or tag != pins["CACHYOS_RELEASE"]:
             new["FEDORA_KERNEL_NVR"], new["CACHYOS_RELEASE"] = nvr, tag
         # bump.py never rewrites FEDORA_KEY_FPR: a pair from the next Fedora release needs
-        # that release's key, set by a person, or build.sh's SRPM signature check fails.
+        # that release's key, set by a person, or the SRPM's signature is not found.
         if fedora_of(nvr) != fedora_of(pins["FEDORA_KERNEL_NVR"]):
             notes.append(
                 f"kernel: {nvr} is a Fedora {fedora_of(nvr)} build and FEDORA_KEY_FPR still names the "
-                f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key; set it to the Fedora {fedora_of(nvr)} key "
-                "before merging, or build.sh's SRPM signature check fails"
+                f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key, so prep fails; on this branch set it to the "
+                f"Fedora {fedora_of(nvr)} key and run the steps of the prep job again by hand (doc_kernel_build.md, section 8)"
             )
         # The linux-cachyos config in force at the release date: the one CachyOS shipped
         # that kernel with, not today's head, which may belong to the next series.

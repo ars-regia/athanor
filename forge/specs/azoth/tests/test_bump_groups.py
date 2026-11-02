@@ -152,10 +152,16 @@ class BumpGroups(unittest.TestCase):
         with mock.patch.object(bump, "kernel_pair", lambda pins, notes: pair):
             notes = bump.compute("kernel")["notes"]
         self.assertIn(
-            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key; "
-            "set it to the Fedora 44 key before merging, or build.sh's SRPM signature check fails",
+            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key, "
+            "so prep fails; on this branch set it to the Fedora 44 key and run the steps of the prep job "
+            "again by hand (doc_kernel_build.md, section 8)",
             notes,
         )
+
+    def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
+        workflow = (AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text()
+        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", workflow)
+        self.assertIn("if [[ $LOCKED != true ]]; then\n            outcome=FAIL", workflow)
 
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")
