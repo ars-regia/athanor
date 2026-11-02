@@ -370,11 +370,14 @@ class PodmanSources(Sources):
         )  # fmt: skip
 
     def updateinfo(self, ref):
-        """(timestamp, updateinfo.xml) of the updates repository of ref's VERSION_ID, through
-        the Fedora metalink, with the repomd.xml and the updateinfo checked against their
+        return self.updateinfo_of(self._read(ref)[1])
+
+    def updateinfo_of(self, version):
+        """(timestamp, updateinfo.xml) of the updates repository of a VERSION_ID, through the
+        Fedora metalink, with the repomd.xml and the updateinfo checked against their
         checksums; the timestamp is the one repomd.xml gives the updateinfo entry."""
         try:
-            metalink = ET.fromstring(self._fetch(METALINK.format(self._read(ref)[1])))
+            metalink = ET.fromstring(self._fetch(METALINK.format(version)))
         except ET.ParseError as error:
             raise ClassError(f"the Fedora metalink is not XML: {error}") from None
         want = next(

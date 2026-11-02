@@ -25,6 +25,35 @@ NVIDIA_LEGACY_VERSION=580.178.04
 """.format(c="c" * 40, p="1" * 40, o="0" * 40)
 
 
+class ClosedAdvisories(unittest.TestCase):
+    """Upstream versions decide, in the repository of the image's Fedora release, as in the
+    release's `candidate`."""
+
+    INFO = (
+        b'<updates><update type="security"><id>FEDORA-2026-aaaa</id><pkglist><package name="kernel"'
+        b' version="7.2.8" release="100.fc43"/></pkglist></update></updates>'
+    )
+
+    def closes(self, old, new):
+        pins, moved = {"FEDORA_KERNEL_NVR": old}, {"FEDORA_KERNEL_NVR": new} if new else {}
+        with (
+            mock.patch.object(bump, "fedora_version", lambda: 43),
+            mock.patch.object(bump.release_class.PodmanSources, "updateinfo_of", lambda s, v: (None, self.INFO)),
+        ):
+            return bump.closed_advisories(pins, moved)
+
+    def test_only_a_move_past_the_fixed_version_closes_it(self):
+        self.assertEqual(self.closes("7.2.5-100.fc43", "7.2.8-100.fc43"), ["FEDORA-2026-aaaa"])
+        self.assertEqual(self.closes("7.2.5-100.fc43", "7.2.7-100.fc43"), [])
+        self.assertEqual(self.closes("7.2.8-100.fc43", "7.2.9-100.fc43"), [])
+        self.assertEqual(self.closes("7.2.5-100.fc43", None), [])
+
+    def test_an_unreadable_repository_fails_the_bump(self):
+        self.INFO = b"not xml"
+        with self.assertRaises(SystemExit):
+            self.closes("7.2.5-100.fc43", "7.2.8-100.fc43")
+
+
 class BumpGroups(unittest.TestCase):
     """A fake checkout: the open lock was republished at its pin (a system change), the legacy
     pin moves to a packaged release (a kernel change), the kernel pair moves to 7.2.8 and
@@ -69,6 +98,7 @@ class BumpGroups(unittest.TestCase):
             "nvidia_open": lambda current: (current, "0" * 40),
             "toolkit_version": lambda: "1.20.1",
             "image_digest": lambda image, tag: NEW,
+            "closed_advisories": lambda pins, new: [],
         }
         for name, value in patches.items():
             patcher = mock.patch.object(bump, name, value)
@@ -104,6 +134,13 @@ class BumpGroups(unittest.TestCase):
         self.assertIn("FEDORA_KERNEL_NVR=7.2.8-100.fc43", self.pins.read_text())
         self.assertEqual(result["locks"], {"legacy": "580.190.01"})
         self.assertEqual(self.generated, [("legacy", "580.190.01")])
+
+    def test_a_closed_advisory_names_the_class_file_and_no_other_bump_does(self):
+        result = bump.compute("kernel")
+        self.assertNotIn("## Release class", bump.body(result))
+        body = bump.body({**result, "closes": ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]})
+        self.assertIn("\n## Release class\n", body)
+        self.assertIn('advisories = ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]\n', body)
 
     def test_a_pair_from_another_fedora_release_says_the_key_must_move(self):
         self.assertFalse([n for n in bump.compute("kernel")["notes"] if "FEDORA_KEY_FPR" in n])

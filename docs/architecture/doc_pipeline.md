@@ -707,6 +707,10 @@ same `VERSION_ID`, a kernel change that closes a Fedora advisory of `type="secur
 candidate's, fails `candidate` unless a `security` file for that repository is in the range.
 A Fedora advisory never sets the class of the kernel by itself: a release would apply
 without confirmation on an inference from version numbers (amended 2026-11-01, #655). The
+kernel bump reads the same advisories: one that closes an advisory names it in its pull
+request and is not auto-merged, and the bot never writes the file (amended 2026-11-02). The
+advisories of a repository change with it: the check sees only those it lists at that
+moment, so a kernel older than Fedora's newest update can close one that it no longer lists. The
 content of a release whose pending run was replaced (PL49) is in that difference, so the
 next release carries its class. The class is per repository: each image repository's own
 `:latest` is its baseline. The revision label is a build check: an image without it fails
