@@ -72,6 +72,7 @@ KERNEL_MD = HERE / "KERNEL.md"
 COSMIC_COMP_DIR = HERE.parents[0] / "cosmic-comp"
 COSMIC_COMP_SPEC = COSMIC_COMP_DIR / "cosmic-comp.spec"
 SYSTEM_CONTAINERFILE = HERE.parents[2] / "system" / "Containerfile"
+RELEASE_CLASS = "## Release class"  # kernel-bump.yml greps this line: no auto-merge
 LTS_SERIES = "6.18"  # KERNEL_CHANNEL=lts: the longterm Fedora and CachyOS maintain
 KERNEL_RELEASES = "https://www.kernel.org/releases.json"
 BODHI = "https://bodhi.fedoraproject.org/updates/"
@@ -618,7 +619,7 @@ def body(result):
         ids = ", ".join(f'"{i}"' for i in result["closes"])
         lines += [
             "",
-            "## Release class",
+            RELEASE_CLASS,
             "",
             "This kernel closes a Fedora security advisory, by upstream version alone. The release",
             "fails at `candidate` until a `security` file is in its range (`doc_pipeline.md`, PL55).",

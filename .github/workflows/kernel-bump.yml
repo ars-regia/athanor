@@ -242,7 +242,7 @@ jobs:
           reviewed=
           git diff --cached --quiet -- system/nvidia/locks || reviewed="moves an NVIDIA pin and its lock"
           # A release/class file states a security fix, and only a person writes it (PL55).
-          if grep -q '^## Release class$' body.md; then reviewed="closes a Fedora security advisory"; fi
+          if grep -q '^## Release class$' body.md; then reviewed+="${reviewed:+ and }closes a Fedora security advisory"; fi
           title="chore(kernel): bump $(paste -sd, - <<< "$keys" | sed 's/,/, /g')"
           outcome=$(cat prep-outcome)
           [[ $outcome != REFRESH ]] || title+=" (patch refresh needed)"

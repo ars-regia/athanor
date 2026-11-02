@@ -77,7 +77,9 @@ predicate type of point 1 as written below:
    half, since Azoth's package carries Fedora's name and an NEVRA of its own. Their upstream
    versions are compared, and a kernel change that closes an advisory fails `candidate`
    unless a `security` file of point 6 is in the range: an advisory never sets the class of
-   the kernel. The bump bot names that advisory in its pull request and does not auto-merge it.
+   the kernel.
+   *Amended on 2026-11-02:* the bump bot names that advisory in its pull request and does not
+   auto-merge it.
 8. **The opt-out wording.** UT6 and the last sentence of UT13's opt-out bullet are read with
    "it" as the opt-out: `SetAutomaticSecurityUpdates(false)` re-locks an unlocked security
    digest, and `SetAutomaticSecurityUpdates(true)` unlocks a waiting one and starts the lineage

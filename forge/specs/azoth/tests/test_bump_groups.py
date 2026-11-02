@@ -139,8 +139,12 @@ class BumpGroups(unittest.TestCase):
         result = bump.compute("kernel")
         self.assertNotIn("## Release class", bump.body(result))
         body = bump.body({**result, "closes": ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]})
-        self.assertIn("\n## Release class\n", body)
+        self.assertIn(f"\n{bump.RELEASE_CLASS}\n", body)
         self.assertIn('advisories = ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]\n', body)
+
+    def test_the_workflow_stops_the_auto_merge_on_the_same_heading(self):
+        workflow = AZOTH.parents[2] / ".github/workflows/kernel-bump.yml"
+        self.assertIn(f"grep -q '^{bump.RELEASE_CLASS}$' body.md", workflow.read_text())
 
     def test_a_pair_from_another_fedora_release_says_the_key_must_move(self):
         self.assertFalse([n for n in bump.compute("kernel")["notes"] if "FEDORA_KEY_FPR" in n])

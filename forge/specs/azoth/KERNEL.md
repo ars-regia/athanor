@@ -195,7 +195,7 @@ key 2 changes it.
 
 Il bot (`kernel-bump.yml`, spec sezione 8) apre ogni giorno, dal branch di default, una
 PR con i pin nuovi, i manifesti rigenerati, l'esito di `prep` e le opzioni derivate, e
-le mette l'auto-merge, che su `iso-v0` aspetta i check di `branch-protection.json` (`gate` di `pr.yml`, che include il controllo del kernel e quello delle spec), ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A mano, nella stessa
+le mette l'auto-merge, che su `iso-v0` aspetta i check di `branch-protection.json` (`gate` di `pr.yml`, che include il controllo del kernel e quello delle spec), ma solo se `prep` e' verde e nessun lock NVIDIA si muove: altrimenti la fonde una persona. A bump that closes a Fedora security advisory is not auto-merged either (`docs/architecture/doc_pipeline.md`, PL55). A mano, nella stessa
 sequenza:
 
 1. `python3 bump.py check --group kernel` mostra cosa muoverebbe;
