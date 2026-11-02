@@ -534,6 +534,8 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    (`ok`) `gh pr merge --auto --squash`, con prep rosso (`FAIL` o `REFRESH`)
    niente auto-merge: la PR resta aperta finché una persona non corregge e fa
    il merge a mano.
+   A bump that moves an NVIDIA lock, or whose kernel closes a Fedora security advisory
+   (`doc_pipeline.md`, PL55), has no auto-merge either, whatever prep says.
 
 Il gate della PR è il check `gate` di `pr.yml`, che include il controllo del
 kernel (sezione 7; `Kernel gate` di `kernel-build.yml` resta per le PR su `main`). Con prep verde e il check verde
