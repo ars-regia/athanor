@@ -534,14 +534,14 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    (`ok`) `gh pr merge --auto --squash`, con prep rosso (`FAIL` o `REFRESH`)
    niente auto-merge: la PR resta aperta finché una persona non corregge e fa
    il merge a mano.
-   A bump that moves an NVIDIA lock, or whose kernel closes a Fedora security advisory
-   (`doc_pipeline.md`, PL55), has no auto-merge either, whatever prep says.
 
 Il gate della PR è il check `gate` di `pr.yml`, che include il controllo del
 kernel (sezione 7; `Kernel gate` di `kernel-build.yml` resta per le PR su `main`). Con prep verde e il check verde
 la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
-già dove guardare. Al merge il push fa partire
+già dove guardare. This holds for a bump with no reason for review: one that moves an
+NVIDIA lock, or whose kernel closes a Fedora security advisory (`doc_pipeline.md`, PL55),
+has no auto-merge whatever prep says, and a person merges it. Al merge il push fa partire
 Kernel Build, che pubblica il kernel e avvia l'Orchestrator: questo chiama
 `nvidia-kmod.yml` per boot e pubblicazione dei moduli (firmati prima dal job `nvidia-kmod-sign`
 dell'Orchestrator) e poi costruisce le
