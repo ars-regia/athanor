@@ -153,8 +153,8 @@ class BumpGroups(unittest.TestCase):
             notes = bump.compute("kernel")["notes"]
         self.assertIn(
             "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key, "
-            "so prep fails; on this branch set it to the Fedora 44 key and run the steps of the prep job "
-            "again by hand (doc_kernel_build.md, section 8)",
+            "so prep fails; on this branch set it to the Fedora 44 key, make sure the base image ships that "
+            "key's file, and run the steps of the prep job again by hand (doc_kernel_build.md, section 8)",
             notes,
         )
 

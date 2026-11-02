@@ -530,7 +530,8 @@ def kernel_pins(pins, new, notes, locks):
             notes.append(
                 f"kernel: {nvr} is a Fedora {fedora_of(nvr)} build and FEDORA_KEY_FPR still names the "
                 f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key, so prep fails; on this branch set it to the "
-                f"Fedora {fedora_of(nvr)} key and run the steps of the prep job again by hand (doc_kernel_build.md, section 8)"
+                f"Fedora {fedora_of(nvr)} key, make sure the base image ships that key's file, and run the "
+                "steps of the prep job again by hand (doc_kernel_build.md, section 8)"
             )
         # The linux-cachyos config in force at the release date: the one CachyOS shipped
         # that kernel with, not today's head, which may belong to the next series.
