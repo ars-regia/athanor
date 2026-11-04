@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        17%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -53,6 +53,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- On a tiled workspace a dialog, or a window of one size, floats above the tiles instead
+  of taking one, and a tile dropped on another swaps places with it; a client's resize of
+  a tile moves the split beside the edge it moved, no further than the area (#894).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - A confined pointer keeps its confinement, a oneshot one included, when it moves over a
   subsurface of its window: the window keeps the pointer's focus, and the pointer stays on

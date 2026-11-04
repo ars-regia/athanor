@@ -377,6 +377,26 @@ fn tiles(run: &Running, id: WorkspaceId) -> usize {
         .map_or(0, |(_, tree)| tree.windows().len())
 }
 
+/// The rectangle the tree of `id` gives `window` in its workspace's area.
+fn tile_of(run: &Running, id: WorkspaceId, window: &Window) -> Rectangle<i32, Logical> {
+    let area = run
+        .state
+        .output_of_workspace(id)
+        .and_then(|output| run.state.window_area_on(&output))
+        .expect("an area");
+    let (_, tree) = run
+        .state
+        .tilings
+        .iter()
+        .find(|(kept, _)| *kept == id)
+        .expect("a tree");
+    tree.layout(area)
+        .into_iter()
+        .find(|(kept, _)| *kept == window)
+        .map(|(_, tile)| tile)
+        .expect("a tile")
+}
+
 /// Whether `local` was sent a configure since it last answered one, after a roundtrip.
 fn configured(run: &mut Running, local: &mut Local) -> bool {
     local.roundtrip(run);
@@ -920,8 +940,8 @@ fn a_dropped_tile_goes_back_to_the_layout() {
     run.stop();
 }
 
-/// A drop that puts the tile back from under the pointer gives the pointer to the client now
-/// under it.
+/// A drop that moves the tiles at once gives the pointer to the client under it once they
+/// moved: on the other tile, the dragged one, which takes that tile's place (D11).
 #[test]
 fn a_dropped_tile_reaches_the_client_under_the_pointer() {
     let mut run = Running::start(None);
@@ -930,16 +950,16 @@ fn a_dropped_tile_reaches_the_client_under_the_pointer() {
     move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
     run.state
         .pointer_to(at + Point::from((700.0, 0.0)), InputTime::now());
-    pair.lower.roundtrip(&mut run);
-    pair.lower.client.pointer_enter = None;
+    pair.upper.roundtrip(&mut run);
+    pair.upper.client.pointer_enter = None;
 
     release(&mut run);
 
-    pair.lower
-        .pump(&mut run, "the pointer enters the lower tile", |client, _| {
+    pair.upper
+        .pump(&mut run, "the pointer enters the dropped tile", |client, _| {
             client.pointer_enter.is_some()
         });
-    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.above), rect(RIGHT));
     run.stop();
 }
 
@@ -1001,8 +1021,9 @@ fn a_resized_tile_ends_at_its_tile() {
     release(&mut run);
     let (width, height, _) = pair.upper.redraw(&mut run);
 
-    assert_eq!((width, height), (LEFT.2, LEFT.3));
-    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    let tile = tile_of(&run, pair.id, &pair.above);
+    assert_eq!((width, height), (tile.size.w, tile.size.h));
+    assert_eq!(geometry(&run, &pair.above), tile);
     run.stop();
 }
 
@@ -1154,5 +1175,601 @@ fn the_toggle_keeps_the_order_of_the_stack() {
     let window = new.server_window(&run, &surface);
     assert_eq!(geometry(&run, &top), rect(LEFT_TOP));
     assert_eq!(geometry(&run, &window), rect(LEFT_BOTTOM));
+    run.stop();
+}
+
+/// The place of `window` in the stack, from the bottom.
+fn level(run: &Running, window: &Window) -> usize {
+    stack(run)
+        .iter()
+        .position(|kept| kept == window)
+        .expect("in the stack")
+}
+
+/// A dialog takes no tile and stands above its parent, whose tile stays as it was, and stays
+/// above it when the parent is clicked (D5).
+#[test]
+fn a_dialog_floats_above_its_parent() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+
+    let (width, height, _) = pair.upper.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "no tile in the initial configure");
+    let dialog = pair.upper.server_window(&run, &surface);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(tiled_states(&dialog), 0);
+    assert!(!configured(&mut run, &mut pair.lower));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.below), rect(RIGHT));
+    assert!(level(&run, &dialog) > level(&run, &pair.above), "above its parent");
+    run.state.focus(&pair.above);
+    assert!(
+        level(&run, &dialog) > level(&run, &pair.above),
+        "still above its parent once the parent is clicked"
+    );
+    run.stop();
+}
+
+/// A dialog stays above the tiles when another tile is clicked: a tile never covers a window D5
+/// floats.
+#[test]
+fn a_click_on_another_tile_leaves_a_dialog_on_top() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let dialog = pair.upper.server_window(&run, &surface);
+
+    press(&mut run, Point::from((1200.0, 700.0)));
+    release(&mut run);
+    pair.lower.roundtrip(&mut run);
+
+    assert_eq!(stack(&run).last(), Some(&dialog), "the dialog is on top");
+    assert!(level(&run, &pair.below) > level(&run, &pair.above), "the click raised the tile");
+    run.stop();
+}
+
+/// A window whose minimum and maximum size are one size takes no tile, and stands above the
+/// tiles though it did not take the keyboard (D5).
+#[test]
+fn a_window_of_one_size_floats() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "no tile in the initial configure");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    let tiles_top = level(&run, &pair.above).max(level(&run, &pair.below));
+    assert!(level(&run, &window) > tiles_top, "above the tiles");
+    assert!(!configured(&mut run, &mut pair.upper));
+    assert!(!configured(&mut run, &mut pair.lower));
+    run.stop();
+}
+
+/// A tile of a new client, beneath the upper one, then `change`, which D5 floats: it leaves its
+/// tile with the floating configure of a window born tiled, is placed at the size it answers
+/// with, above the tiles, and the upper tile takes its space back.
+fn leaves_its_tile(
+    change: impl FnOnce(
+        &mut Running,
+        &mut Local,
+        &xdg_toplevel::XdgToplevel,
+        &wl_surface::WlSurface,
+    ),
+) {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    surface.commit();
+    new.redraw(&mut run);
+    pair.upper.redraw(&mut run);
+    let window = new.server_window(&run, &surface);
+    assert_eq!(geometry(&run, &window), rect(LEFT_BOTTOM));
+
+    change(&mut run, &mut new, &toplevel, &surface);
+    new.roundtrip(&mut run);
+
+    assert_eq!(tiles(&run, pair.id), 2, "it left its tile");
+    let (width, height, _) = new.redraw(&mut run);
+    assert_eq!((width, height), (0, 0), "no floating size: it was born tiled");
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    let tiles_top = level(&run, &pair.above).max(level(&run, &pair.below));
+    assert!(level(&run, &window) > tiles_top, "above the tiles");
+    let (width, height, _) = pair.upper.redraw(&mut run);
+    assert_eq!((width, height), (LEFT.2, LEFT.3));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A tile given a parent leaves its tile (D5). The parent is a toplevel the client has not
+/// mapped, so that the client answers the configures of one window.
+#[test]
+fn a_window_that_gains_a_parent_leaves_its_tile() {
+    leaves_its_tile(|_, new, toplevel, _| {
+        let compositor: wl_compositor::WlCompositor = new.bind(4);
+        let wm_base: xdg_wm_base::XdgWmBase = new.bind(1);
+        let qh = new.queue.handle();
+        let parent_surface = compositor.create_surface(&qh, ());
+        let parent_xdg = wm_base.get_xdg_surface(&parent_surface, &qh, ());
+        let parent = parent_xdg.get_toplevel(&qh, ());
+        toplevel.set_parent(Some(&parent));
+    });
+}
+
+/// A tile that commits a minimum and a maximum of one size leaves its tile (D5).
+#[test]
+fn a_tile_that_takes_one_size_leaves_its_tile() {
+    leaves_its_tile(|_, _, toplevel, surface| {
+        toplevel.set_min_size(WIDTH, HEIGHT);
+        toplevel.set_max_size(WIDTH, HEIGHT);
+        surface.commit();
+    });
+}
+
+/// A tile dropped on the other tile swaps places with it (D11); of one size, both move at once.
+#[test]
+fn dropping_a_tile_on_a_tile_swaps_them() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((700.0, 0.0)), InputTime::now());
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+
+    assert_eq!(geometry(&run, &pair.above), rect(RIGHT));
+    assert_eq!(geometry(&run, &pair.below), rect(LEFT));
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(RIGHT));
+    assert_eq!(tile_of(&run, pair.id, &pair.below), rect(LEFT));
+    run.stop();
+}
+
+/// A tile dropped on no tile, here in the gap between the two, goes back to its own (D11).
+#[test]
+fn a_drop_elsewhere_puts_a_tile_back() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(Point::from((640.0, 400.0)), InputTime::now());
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.below), rect(RIGHT));
+    assert!(!configured(&mut run, &mut pair.lower));
+    run.stop();
+}
+
+/// A tile resized by its client moves the split by its right edge, and the tile beside it gives
+/// up what it took; its bottom edge, at the area's, has no split to move (D11).
+#[test]
+fn resizing_a_tile_moves_its_split() {
+    const WIDER: (i32, i32, i32, i32) = (8, 8, 658, 784);
+    const NARROWER: (i32, i32, i32, i32) = (674, 8, 598, 784);
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.redraw(&mut run);
+
+    let answers = answer_all(&mut run, &mut [&mut pair.upper, &mut pair.lower], release);
+
+    assert_eq!((answers[0].0, answers[0].1), (WIDER.2, WIDER.3));
+    assert_eq!((answers[1].0, answers[1].1), (NARROWER.2, NARROWER.3));
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(WIDER));
+    assert_eq!(geometry(&run, &pair.above), rect(WIDER));
+    assert_eq!(geometry(&run, &pair.below), rect(NARROWER));
+    run.stop();
+}
+
+/// A tile whose client takes a minimum size of `i32::MAX` and is resized moves its split no
+/// further than the area: every tile stays inside it, and the compositor goes on.
+#[test]
+fn a_resize_to_any_size_keeps_the_tiles_in_the_area() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, _) = pair.upper.window.clone().expect("a window");
+    pair.upper_toplevel.set_min_size(i32::MAX, i32::MAX);
+    surface.commit();
+    pair.upper.roundtrip(&mut run);
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.roundtrip(&mut run);
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+    pair.lower.roundtrip(&mut run);
+
+    let area = run
+        .state
+        .output_of_workspace(pair.id)
+        .and_then(|output| run.state.window_area_on(&output))
+        .expect("an area");
+    for window in [&pair.above, &pair.below] {
+        let tile = tile_of(&run, pair.id, window);
+        assert!(area.contains_rect(tile), "{tile:?} inside {area:?}");
+    }
+    assert_eq!(tiles(&run, pair.id), 2);
+    run.stop();
+}
+
+/// A full-screen tile, focused, stays above a window D5 floats on its workspace (D6).
+#[test]
+fn a_focused_full_screen_tile_stays_above_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    new.redraw(&mut run);
+    let window = new.server_window(&run, &surface);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+
+    run.state.focus(&pair.above);
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    assert!(level(&run, &window) > level(&run, &pair.below), "above the other tile");
+    run.stop();
+}
+
+/// A window sent a tile in its initial configure that D5 floats by its first buffer is sent
+/// D8's floating configure: no tiled states, and a size of its own choosing.
+#[test]
+fn a_window_that_floats_by_its_first_buffer_is_sent_no_tile() {
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    surface.commit();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    let (width, height, _) = new.redraw(&mut run);
+    assert!(width > 0 && height > 0, "a tile in the initial configure");
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "the floating configure");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(geometry(&run, &window).size, (WIDTH, HEIGHT).into());
+    run.stop();
+}
+
+/// A tile whose client draws smaller than its tile is resized from its tile: its right edge
+/// moves the split by what the pointer moved, not by the edge the client drew (D11).
+#[test]
+fn a_tile_drawn_smaller_is_resized_from_its_tile() {
+    const WIDER: (i32, i32, i32, i32) = (8, 8, 658, 784);
+    const NARROWER: (i32, i32, i32, i32) = (674, 8, 598, 784);
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, _) = pair.upper.window.clone().expect("a window");
+    let shm: wl_shm::WlShm = pair.upper.bind(1);
+    let (buffer, _) = pair.upper.buffer(&shm, 600, 700, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    pair.upper.roundtrip(&mut run);
+    let at = Point::from((590.0, 690.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.redraw(&mut run);
+
+    answer_all(&mut run, &mut [&mut pair.upper, &mut pair.lower], release);
+
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(WIDER));
+    assert_eq!(tile_of(&run, pair.id, &pair.below), rect(NARROWER));
+    run.stop();
+}
+
+/// A client of one size, floating above the tiles of `pair`'s workspace (D5).
+fn one_size(run: &mut Running) -> (Local, Window) {
+    let mut new = Local::connect(run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    new.redraw(run);
+    let window = new.server_window(&*run, &surface);
+    (new, window)
+}
+
+/// A tile that goes full screen stands above a window D5 floats on its workspace (D6).
+#[test]
+fn a_tile_gone_full_screen_stands_above_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    assert_eq!(stack(&run).last(), Some(&float));
+
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    run.stop();
+}
+
+/// A tile that leaves full screen goes back under a window D5 floats on its workspace.
+#[test]
+fn a_tile_leaving_full_screen_goes_under_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+    assert_eq!(stack(&run).last(), Some(&pair.above));
+
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.leave_full_screen(&pair.above)
+    });
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float is on top again");
+    run.stop();
+}
+
+/// A window that floats on a workspace with a full-screen tile, placed without the keyboard,
+/// stays under the full-screen tile (D6).
+#[test]
+fn a_float_placed_under_a_full_screen_tile_stays_under_it() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    let (_new, float) = one_size(&mut run);
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    assert!(level(&run, &float) > level(&run, &pair.below), "above the other tile");
+    run.stop();
+}
+
+/// Asserts that the stack holds each of `layers`' windows in the order of their layers: the
+/// tiles 0, the windows D5 floats 1, the full-screen windows 2 (D6), a float with the keyboard 3.
+fn layered(run: &Running, step: &str, layers: &[(&Window, u8)]) {
+    let order: Vec<u8> = stack(run)
+        .iter()
+        .filter_map(|kept| layers.iter().find(|(window, _)| *window == kept))
+        .map(|(_, layer)| *layer)
+        .collect();
+    assert_eq!(order.len(), layers.len(), "{step}: every window is in the stack");
+    assert!(
+        order.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{step}: the layers, bottom to top, are {order:?}"
+    );
+}
+
+/// The windows of a tiled workspace keep their layers through every change of state: the
+/// tiles under the windows D5 floats, those under a full-screen window and its dialogs, and a
+/// float the user focuses on top.
+#[test]
+fn a_tiled_workspace_keeps_its_layers() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (below, above) = (pair.below.clone(), pair.above.clone());
+    layered(&run, "tiles", &[(&below, 0), (&above, 0)]);
+
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let dialog = pair.upper.server_window(&run, &surface);
+    let (_new, float) = one_size(&mut run);
+    let floating = [(&below, 0), (&above, 0), (&dialog, 1), (&float, 1)];
+    layered(&run, "a dialog and a float", &floating);
+
+    run.state.full_screen(&above, None);
+    let full = [(&below, 0), (&float, 1), (&above, 2), (&dialog, 2)];
+    layered(&run, "full screen", &full);
+    assert_eq!(level(&run, &dialog), level(&run, &above) + 1, "its dialog just above it");
+
+    assert!(run.state.minimise(&below));
+    assert!(run.state.unminimise(&below));
+    // The tile unminimised takes the keyboard: the full-screen tile and its dialog go down with
+    // the tiles, under it, and the float stays above every tile.
+    let under = [(&above, 0), (&dialog, 0), (&below, 0), (&float, 1)];
+    layered(&run, "unminimised", &under);
+    assert!(level(&run, &below) > level(&run, &dialog), "the tile with the keyboard above");
+    run.state.focus(&above);
+    layered(&run, "the full-screen tile focused again", &full);
+
+    let output = output_at(&run, 0);
+    let next = run.state.workspaces(&output)[1];
+    assert!(run.state.activate_workspace(next));
+    assert!(run.state.activate_workspace(pair.id));
+    layered(&run, "parked and back", &full);
+    assert_eq!(level(&run, &dialog), level(&run, &above) + 1, "its dialog just above it");
+
+    run.state.maximise(&below);
+    layered(&run, "maximised", &full);
+    run.state.restore(&below);
+    layered(&run, "restored", &full);
+
+    run.state.leave_full_screen(&above);
+    layered(&run, "left full screen", &floating);
+
+    run.state.focus(&float);
+    assert_eq!(stack(&run).last(), Some(&float), "the focused float on top");
+    layered(&run, "a float focused", &floating);
+    run.stop();
+}
+
+/// A full-screen application's own float that takes the keyboard stands above it: the float
+/// with the keyboard is on top, whichever client it belongs to.
+#[test]
+fn a_full_screen_apps_own_float_with_the_keyboard_is_on_top() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let float = pair.upper.server_window(&run, &surface);
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float with the keyboard is on top");
+    assert!(level(&run, &pair.above) > level(&run, &pair.below), "over the other tile");
+    run.stop();
+}
+
+/// A full-screen application's float with the keyboard, its own on its workspace.
+fn float_of_full_screen_app(run: &mut Running) -> (Pair, Window) {
+    let mut pair = tiled_pair(run);
+    answer_all(run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    pair.upper.redraw(run);
+    let float = pair.upper.server_window(&*run, &surface);
+    assert_eq!(stack(run).last(), Some(&float), "the float with the keyboard is on top");
+    (pair, float)
+}
+
+/// A popup of the float with the keyboard that grabs it keeps the float on top through the
+/// layout a layer commit asks for (`fit_tiles`): the popup's window holds the keyboard.
+#[test]
+fn a_float_whose_popup_holds_the_keyboard_stays_on_top() {
+    let mut run = Running::start(None);
+    let (mut pair, float) = float_of_full_screen_app(&mut run);
+    let (_, xdg) = pair.upper.window.clone().expect("the float");
+    let (_popup, _menu) = grabbing_popup(&mut pair.upper, &mut run, &xdg);
+    let focus = keyboard_focus(&run).expect("a keyboard focus");
+    assert!(run.state.popups.find_popup(&focus).is_some(), "the popup holds the keyboard");
+
+    run.state.fit_tiles();
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float stays on top");
+    run.stop();
+}
+
+/// An exclusive layer surface that takes the keyboard from the float on top and gives it back
+/// leaves the float on top, with the keyboard.
+#[test]
+fn a_float_stays_on_top_while_a_layer_surface_holds_the_keyboard() {
+    let mut run = Running::start(None);
+    let (_pair, float) = float_of_full_screen_app(&mut run);
+
+    let mut shell = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = shell.bind(4);
+    let shm: wl_shm::WlShm = shell.bind(1);
+    let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = shell.bind(4);
+    let qh = shell.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = layer_shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "launcher".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    assert!(shell.answer(&mut run, &surface), "the surface is configured");
+    let (serial, width, height) = shell.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let (buffer, _) = shell.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    shell.roundtrip(&mut run);
+    assert!(run.state.exclusive_layer().is_some(), "the layer is mapped");
+    assert_eq!(keyboard_focus(&run), run.state.exclusive_layer(), "and holds the keyboard");
+    assert_eq!(stack(&run).last(), Some(&float), "the float stays on top");
+
+    surface.attach(None, 0, 0);
+    surface.commit();
+    shell.roundtrip(&mut run);
+
+    assert!(run.state.exclusive_layer().is_none(), "the layer is unmapped");
+    assert_eq!(stack(&run).last(), Some(&float), "the float is still on top");
+    assert_eq!(
+        keyboard_focus(&run),
+        float.toplevel().map(|toplevel| toplevel.wl_surface().clone()),
+        "with the keyboard"
+    );
+    run.stop();
+}
+
+/// A maximised tile with the keyboard that goes full screen and leaves it is maximised again,
+/// back under the windows D5 floats (D6).
+#[test]
+fn a_maximised_tile_leaving_full_screen_goes_under_a_float() {
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    run.state.focus(&pair.above);
+    run.state.maximise(&pair.above);
+    run.state.full_screen(&pair.above, None);
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+
+    run.state.leave_full_screen(&pair.above);
+
+    let maximised = pair.above.toplevel().expect("a toplevel").with_pending_state(|state| {
+        state.states.contains(
+            smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State::Maximized,
+        )
+    });
+    assert!(maximised, "maximised again");
+    assert!(level(&run, &float) > level(&run, &pair.above), "the float above it again");
+    run.stop();
+}
+
+/// A tile activated while another is full screen stands above it, with the keyboard.
+#[test]
+fn a_tile_activated_under_a_full_screen_tile_comes_above_it() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    run.state.focus(&pair.below);
+
+    assert!(level(&run, &pair.below) > level(&run, &pair.above), "above the full-screen tile");
     run.stop();
 }

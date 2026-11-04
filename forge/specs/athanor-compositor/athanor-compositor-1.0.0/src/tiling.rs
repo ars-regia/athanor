@@ -105,6 +105,62 @@ impl<T: PartialEq> Node<T> {
         }
     }
 
+    /// Moves to `at` the split nearest `window`'s `side`, the one after the window if `end` and
+    /// the one before it if not: whether one did. `place` is this node's.
+    fn move_split(
+        &mut self,
+        window: &T,
+        side: Along,
+        end: bool,
+        at: i32,
+        place: Rectangle<i32, Logical>,
+    ) -> bool {
+        let Self::Split {
+            along,
+            share,
+            first,
+            second,
+        } = self
+        else {
+            return false;
+        };
+        let (one, other) = divided(place, *along, *share);
+        let in_first = first.holds(window);
+        let nearer = if in_first {
+            first.move_split(window, side, end, at, one)
+        } else {
+            second.move_split(window, side, end, at, other)
+        };
+        if nearer || *along != side || in_first != end {
+            return nearer;
+        }
+        let (start, room) = match along {
+            Along::Width => (place.loc.x, place.size.w.max(2)),
+            Along::Height => (place.loc.y, place.size.h.max(2)),
+        };
+        let part = at.saturating_sub(start);
+        // Each part keeps room for a tile and its gaps, so that no tile leaves its place.
+        let least = (2 * GAP + 1).min(room / 2);
+        let part = part.clamp(least, room - least);
+        *share = f64::from(part) / f64::from(room);
+        true
+    }
+
+    fn swap(&mut self, one: &T, other: &T)
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Tile(tile) if tile == one => *tile = other.clone(),
+            Self::Tile(tile) if tile == other => *tile = one.clone(),
+            Self::Tile(_) => {}
+            Self::Split { first, second, .. } => {
+                first.swap(one, other);
+                second.swap(one, other);
+            }
+        }
+    }
+
     fn holds(&self, window: &T) -> bool {
         match self {
             Self::Tile(tile) => tile == window,
@@ -162,7 +218,7 @@ fn divided(
 
 /// The tile a `place` of `area` leaves: `GAP` off a side at the edge of the area, half of it off a
 /// side another tile shares. A tile of a nested split can so be a few pixels narrower than its
-/// sibling, as in the reference, and it keeps a pixel however small.
+/// sibling, as in the reference, and it keeps a pixel however small, inside its place.
 fn gapped(
     place: Rectangle<i32, Logical>,
     area: Rectangle<i32, Logical>,
@@ -176,7 +232,12 @@ fn gapped(
     let bottom = gap(place.loc.y + place.size.h == area.loc.y + area.size.h);
     let size = (place.size.w - left - right, place.size.h - top - bottom);
     let size = (size.0.max(1), size.1.max(1));
-    Rectangle::new(place.loc + Point::from((left, top)), size.into())
+    // A place narrower than its gaps keeps its tile inside it.
+    let at = (
+        left.min(place.size.w - size.0).max(0),
+        top.min(place.size.h - size.1).max(0),
+    );
+    Rectangle::new(place.loc + Point::from(at), size.into())
 }
 
 /// What a workspace tiles.
@@ -243,6 +304,61 @@ impl<T: PartialEq + Clone> Tree<T> {
     pub fn remove(&mut self, window: &T) {
         self.root = self.root.take().and_then(|root| root.without(window));
         self.focused.retain(|kept| kept != window);
+    }
+
+    /// Gives `one` the tile of `other` and `other` that of `one` (D11); unless it holds both,
+    /// nothing changes.
+    pub fn swap(&mut self, one: &T, other: &T) {
+        if one == other || !self.holds(one) || !self.holds(other) {
+            return;
+        }
+        if let Some(root) = &mut self.root {
+            root.swap(one, other);
+        }
+    }
+
+    /// Moves the splits by the tile of `window` in `area` so that its sides go where `to` has
+    /// them (D11): each side that moved moves the split nearest it, and a side at the edge of
+    /// the area has none. `to` is the client's, and counts only as far as the area. Each split
+    /// goes where the side of `to` puts it, half a gap beyond, whatever another moved first.
+    pub fn resize(
+        &mut self,
+        window: &T,
+        to: Rectangle<i32, Logical>,
+        area: Rectangle<i32, Logical>,
+    ) {
+        let tiles = self.layout(area);
+        let Some(tile) = tiles
+            .into_iter()
+            .find(|(kept, _)| *kept == window)
+            .map(|(_, tile)| tile)
+        else {
+            return;
+        };
+        let Some(root) = &mut self.root else {
+            return;
+        };
+        let within = |start: i32, size: i32, from: i32, room: i32| {
+            let end = from.saturating_add(room.max(0));
+            (
+                start.clamp(from, end),
+                start.saturating_add(size).clamp(from, end),
+            )
+        };
+        let (left, right) = within(to.loc.x, to.size.w, area.loc.x, area.size.w);
+        let (top, bottom) = within(to.loc.y, to.size.h, area.loc.y, area.size.h);
+        let half = GAP / 2;
+        let sides = [
+            (Along::Width, false, tile.loc.x, left, left.saturating_sub(half)),
+            (Along::Width, true, tile.loc.x + tile.size.w, right, right.saturating_add(half)),
+            (Along::Height, false, tile.loc.y, top, top.saturating_sub(half)),
+            (Along::Height, true, tile.loc.y + tile.size.h, bottom, bottom.saturating_add(half)),
+        ];
+        for (side, end, was, now, at) in sides {
+            if was != now {
+                root.move_split(window, side, end, at, area);
+            }
+        }
     }
 
     /// Notes that the focus went to `window`, which the next tile will split.
@@ -465,6 +581,21 @@ mod tests {
         }
         for (_, tile) in tiles(&tree, whole) {
             assert!(tile.size.w >= 1 && tile.size.h >= 1, "{tile:?}");
+        }
+    }
+
+    /// A | (B | C) laid out in an area narrower than their gaps: each tile stays inside its
+    /// place, so inside the area, with a pixel at least.
+    #[test]
+    fn a_squeezed_nested_split_keeps_every_tile_in_the_area() {
+        let mut tree = Tree::default();
+        for window in 1..=3 {
+            tree.insert(window, area(1000, 100));
+        }
+        let squeezed = area(12, 10);
+        for (_, tile) in tiles(&tree, squeezed) {
+            assert!(tile.size.w >= 1 && tile.size.h >= 1, "{tile:?}");
+            assert!(squeezed.contains_rect(tile), "{tile:?} inside {squeezed:?}");
         }
     }
 
