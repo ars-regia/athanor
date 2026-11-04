@@ -279,8 +279,11 @@ impl State {
     /// Places a window, at its first commit with a size, in what the layer surfaces' exclusive
     /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
     /// windows after it are not cascaded as cosmic-comp's are yet (#918). It takes the keyboard
-    /// only when no live surface holds it or its own client does: mapping a window is not the
-    /// user's input, so a client cannot take the focus from another by opening one; a window
+    /// only when no live surface holds it or its own application does, through the same client
+    /// or another of the same security context's instance (`same_instance`): mapping a window
+    /// is not the user's input, so a client cannot take the focus from another application by
+    /// opening one. A command run in a terminal is the terminal's own, so wl-copy's window,
+    /// which waits for the keyboard to set the selection, gets it from the terminal. A window
     /// with a parent follows it (`follow_parent`).
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
@@ -301,14 +304,20 @@ impl State {
             window.user_data().insert_if_missing(|| handle);
         }
         let (x, y) = crate::state::placed(area, geometry).into();
-        let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
         let holder = self
             .seat
             .get_keyboard()
             .and_then(|keyboard| keyboard.current_focus())
-            .and_then(|surface| owner(&surface));
-        let own = window.toplevel().and_then(|t| owner(t.wl_surface()));
-        if holder.is_none() || holder == own {
+            .and_then(|surface| surface.client());
+        let own = window.toplevel().and_then(|t| t.wl_surface().client());
+        let takes = match (&holder, &own) {
+            (None, _) => true,
+            (Some(holder), Some(own)) => {
+                holder.id() == own.id() || crate::state::same_instance(holder, own)
+            }
+            (Some(_), None) => false,
+        };
+        if takes {
             self.space.map_element(window.clone(), (x, y), true);
             self.focus(window);
         } else {
