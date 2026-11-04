@@ -1033,6 +1033,24 @@ impl State {
         }
     }
 
+    /// Raises the windows D5 floats on the workspace of `window`, a tile, over it, in their
+    /// order: a tile never covers them.
+    pub(crate) fn keep_floats_above(&mut self, window: &Window) {
+        if !self.is_tile(window) {
+            return;
+        }
+        let id = on(window);
+        let floats: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|kept| on(kept) == id && crate::handlers::floats(kept))
+            .cloned()
+            .collect();
+        for float in &floats {
+            self.space.raise_element(float, false);
+        }
+    }
+
     /// A tile destroyed: its workspace is laid out without it.
     pub(crate) fn drop_tile(&mut self, window: &Window) {
         if let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) {
@@ -1155,6 +1173,7 @@ impl State {
         if self.enter_tile(window, !focused).is_none() {
             return;
         }
+        self.keep_floats_above(window);
         if kept_before(window).is_none() {
             let tile = self
                 .output_of_workspace(id)

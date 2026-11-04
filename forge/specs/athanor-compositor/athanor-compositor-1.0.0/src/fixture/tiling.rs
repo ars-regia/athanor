@@ -1214,6 +1214,27 @@ fn a_dialog_floats_above_its_parent() {
     run.stop();
 }
 
+/// A dialog stays above the tiles when another tile is clicked: a tile never covers a window D5
+/// floats.
+#[test]
+fn a_click_on_another_tile_leaves_a_dialog_on_top() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let dialog = pair.upper.server_window(&run, &surface);
+
+    press(&mut run, Point::from((1200.0, 700.0)));
+    release(&mut run);
+    pair.lower.roundtrip(&mut run);
+
+    assert_eq!(stack(&run).last(), Some(&dialog), "the dialog is on top");
+    assert!(level(&run, &pair.below) > level(&run, &pair.above), "the click raised the tile");
+    run.stop();
+}
+
 /// A window whose minimum and maximum size are one size takes no tile, and stands above the
 /// tiles though it did not take the keyboard (D5).
 #[test]
@@ -1364,3 +1385,4 @@ fn resizing_a_tile_moves_its_split() {
     assert_eq!(geometry(&run, &pair.below), rect(NARROWER));
     run.stop();
 }
+

@@ -631,10 +631,11 @@ impl State {
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
         self.focus_tile(window);
-        // The window's own dialogs stay above it.
+        // The window's own dialogs stay above it, and a tile stays under what D5 floats.
         for dialog in self.subtree(window) {
             self.space.raise_element(&dialog, false);
         }
+        self.keep_floats_above(window);
         for other in self.space.elements() {
             other.set_activated(other == window);
             if let Some(toplevel) = other.toplevel() {
