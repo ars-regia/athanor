@@ -141,7 +141,7 @@ Run after the open pull requests merge, because the moved files are touched by m
 The components Athanor owns that a user or a developer recognises as products (pillars) take
 alchemical proper names; every other package keeps a descriptive `athanor-<function>` name
 ([ADR-0134](../decisions/0134-alchemical-names-for-the-pillars.md)). Azoth is the kernel;
-Sulphur the compositor (`athanor-compositor`, `athanor-compositor-client` and the planned
+Sulphur the compositor (`athanor-compositor`, `athanor-compositor-client` and the session script
 `athanor-compositor-session` become `athanor-sulphur`, `athanor-sulphur-client` and
 `athanor-sulphur-session`); Sal the toolkit (`athanor-toolkit` becomes `athanor-sal`); Sigillum
 the updates and the chain of trust (`athanor-update`, `athanor-trust-state`, the image and kernel

@@ -193,7 +193,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | amended by ADR-0128, ADR-0132 | process, docs, platform, security, update, shell |
 | ADR-0124 | 0124 | [Visual language revision 3: materials in tiers, the accent's measure, springs and the toolkit's surfaces](0124-visual-language-revision-3.md) | accepted | shell, accessibility |
 | ADR-0125 | 0125 | [A change of the Fedora base lands through a protected rebase integration branch](0125-rebase-integration-branches.md) | accepted | process, build, security |
-| ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | accepted | shell, process, security |
+| ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | amended by ADR-0134 | shell, process, security |
 | ADR-0127 | 0127 | [Settle the release attestation and the open details of security-class updates](0127-release-attestation-and-ut13-details.md) | accepted | update, security, build, release |
 | ADR-0128 | 0128 | [Move row 7 and image key 2 to 1.0, with a transitional release 0.11](0128-row-7-and-key-2-in-1-0.md) | accepted | process, docs, security, update, build |
 | ADR-0129 | 0129 | [Release 0.9 ships without screenshot and screen share](0129-capture-leaves-0-9.md) | accepted | process, docs, shell |

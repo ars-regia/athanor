@@ -2,7 +2,7 @@
 id: ADR-0126
 title: "The toolkit stays in this repository and is kept ready to leave it"
 date: 2026-10-19
-status: accepted
+status: amended by ADR-0134
 issues: []
 areas: [shell, process, security]
 ---
