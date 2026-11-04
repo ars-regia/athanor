@@ -373,15 +373,7 @@ impl Dock {
         indicator: Option<Side>,
     ) -> WidgetId {
         let button = match self.image(icon, size, scale) {
-            Some(image) => ui.add(
-                parent,
-                Kind::IconButton {
-                    label: label.to_owned(),
-                    image,
-                    size: f32::from(size),
-                    indicator,
-                },
-            ),
+            Some(image) => ui.icon_button(parent, label, image, f32::from(size), indicator),
             None => ui.add(parent, Kind::Button(label.to_owned())),
         };
         ui.set_tooltip(button, Some(label));
@@ -399,13 +391,7 @@ impl Dock {
         acts: &mut Vec<(WidgetId, Act)>,
     ) -> WidgetId {
         let anchor = placement.anchor;
-        let island = ui.add(
-            Ui::ROOT,
-            Kind::Island {
-                vertical: anchor.vertical(),
-                margin: edge::margin(anchor),
-            },
-        );
+        let island = ui.island(Ui::ROOT, anchor.vertical(), edge::margin(anchor));
         let own = self.client.as_ref().is_some_and(|client| client.own_compositor());
         let opener =
             |dock: &mut Dock, ui: &mut Ui, acts: &mut Vec<(WidgetId, Act)>, opener: Opener| {
@@ -914,7 +900,7 @@ impl Application for Dock {
                     self.hold(shell, true);
                 }
             }
-            Event::DragEnded { from, to } => {
+            Event::DragEnded { from, to, .. } => {
                 self.drop_drag(shell);
                 let dragged = self.pinned(surface, from);
                 let onto = to.and_then(|to| self.pinned(surface, to));

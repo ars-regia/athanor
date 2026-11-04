@@ -43,31 +43,27 @@ pub fn look(appearance: &Appearance) -> Look {
     }
     let base = Theme::default();
     let colour = |name: &str, default: Rgba| named.get(name).copied().unwrap_or(default);
-    let dock = Theme {
-        background: Rgba([0, 0, 0, 0]),
-        surface: colour("ath_chip", base.surface),
-        text: colour("ath_ink", base.text),
-        accent: colour("ath_acc_fg", base.accent),
-        on_accent: colour("ath_acc_ink", base.on_accent),
-        border: colour("ath_line", base.border),
-        title_bar: colour("ath_bar", base.title_bar),
-        focus: colour("ath_acc_fg", base.focus),
-        font_size: 13.0,
-        padding: 8.0,
-        margin: 0.0,
-        gap: 2.0,
-        radius: 8.0,
-        island: colour("ath_bar", base.island),
-        island_radius: dock::RADIUS as f32,
-        island_padding: dock::PADDING as f32,
-        button_min: dock::BUTTON as f32,
-        ..base
-    };
-    let menu = Theme {
-        background: colour("ath_surf", base.background),
-        margin: 4.0,
-        ..dock.clone()
-    };
+    let mut dock = base.clone();
+    dock.background = Rgba([0, 0, 0, 0]);
+    dock.surface = colour("ath_chip", base.surface);
+    dock.text = colour("ath_ink", base.text);
+    dock.accent = colour("ath_acc_fg", base.accent);
+    dock.on_accent = colour("ath_acc_ink", base.on_accent);
+    dock.border = colour("ath_line", base.border);
+    dock.title_bar = colour("ath_bar", base.title_bar);
+    dock.focus = colour("ath_acc_fg", base.focus);
+    dock.font_size = 13.0;
+    dock.padding = 8.0;
+    dock.margin = 0.0;
+    dock.gap = 2.0;
+    dock.radius = 8.0;
+    dock.island = colour("ath_bar", base.island);
+    dock.island_radius = dock::RADIUS as f32;
+    dock.island_padding = dock::PADDING as f32;
+    dock.button_min = dock::BUTTON as f32;
+    let mut menu = dock.clone();
+    menu.background = colour("ath_surf", base.background);
+    menu.margin = 4.0;
     Look { dock, menu }
 }
 

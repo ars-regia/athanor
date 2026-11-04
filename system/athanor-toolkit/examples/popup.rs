@@ -54,15 +54,11 @@ impl Application for Dock {
         print("button", ui.widget(button).rect);
         let (menu, first) = menu();
         print("item", menu.widget(first).rect);
-        let options = LayerOptions {
-            layer: Layer::Top,
-            namespace: "athanor-toolkit-popup".into(),
-            anchor: Anchor::BOTTOM,
-            margin: [0; 4],
-            exclusive_zone: 0,
-            keyboard: KeyboardInteractivity::OnDemand,
-            input_region: None,
-        };
+        let mut options = LayerOptions::default();
+        options.layer = Layer::Top;
+        options.namespace = "athanor-toolkit-popup".into();
+        options.anchor = Anchor::BOTTOM;
+        options.keyboard = KeyboardInteractivity::OnDemand;
         Some((ui, options))
     }
 
