@@ -189,23 +189,23 @@ impl App {
         }
     }
 
-    /// Offers `text` as the primary selection: the source already offered takes the new text,
-    /// until another client's selection cancels it.
+    /// Offers `text` as the primary selection, through a new source each time: one the
+    /// compositor refused, for a serial it no longer takes, would never be cancelled, and
+    /// would hold the text no one can read. Without the protocol nothing is offered.
     fn select(&mut self, text: String) {
         let clipboards = &mut self.clipboards;
-        if let Some((_, selected)) = &mut clipboards.selected {
-            *selected = text;
+        let (Some(manager), Some(device)) =
+            (&clipboards.primary_manager, &clipboards.primary_device)
+        else {
             return;
-        }
-        let (Some(manager), Some(device), Some(serial)) = (
-            &clipboards.primary_manager,
-            &clipboards.primary_device,
-            self.shell.grab.serial(),
-        ) else {
+        };
+        let Some(serial) = self.shell.grab.serial() else {
+            eprintln!("athanor-toolkit: nothing selected: no key or button to select with");
             return;
         };
         let source = manager.create_selection_source(&self.shell.qh, MIMES);
         source.set_selection(device, serial);
+        // The source it replaces is destroyed as it drops.
         clipboards.selected = Some((source, text));
     }
 
