@@ -1,11 +1,11 @@
 # branch legacy
-# version 580.178.04
-# repository https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/
-526db18b4a7bf0e180b492d2f91ce96420521d12e739c2e7fdc1780fb6b51d6e  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/n/nvidia-modprobe-580.178.04-1.fc43.x86_64.rpm
-e60fba89f0f9778b2dbf1e425e82857046a6bcc79fd19760c5b4a78eea9ac678  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/n/nvidia-persistenced-580.178.04-1.fc43.x86_64.rpm
-07e327c4a79ba846c4470d03b5a8cb551effeb061da2311b31dc8d5f22977dac  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/n/nvidia-settings-580.178.04-1.fc43.x86_64.rpm
-a04d08a46d88d6f6fbb5573a9fe0e8e16d015cbb3772d5c392f00bc4f83da985  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/x/xorg-x11-drv-nvidia-580.178.04-1.fc43.x86_64.rpm
-092450818e0c30604412d1d4c1048ba8316f6b7ab09f84226a8ba31d954960e5  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/x/xorg-x11-drv-nvidia-cuda-580.178.04-1.fc43.x86_64.rpm
-9f3e046dbeaf71050594d9b28ed74d76fdb387abc7249cd689f31a56518867af  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/x/xorg-x11-drv-nvidia-cuda-libs-580.178.04-1.fc43.x86_64.rpm
-47eee63760b17d82bfb2bae8243dc132718e4aa808fd7665693ca8a1c727f5bb  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/x/xorg-x11-drv-nvidia-libs-580.178.04-1.fc43.x86_64.rpm
-9ef9a263fb733e340e24cdcf7d7bcdd9ab5a524b261983668b6b54382f4a0a02  https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/x/xorg-x11-drv-nvidia-power-580.178.04-1.fc43.x86_64.rpm
+# version 580.196.07
+# repository https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/
+ca361710c18e62923c37682577add5b3633b14a511f8336c8516b2981cb25dcd  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/n/nvidia-modprobe-615.78.08-1.fc45.x86_64.rpm
+ad901bba9d5974863139268ebc698e450dc95321d1fccc4d97e81ea261ac3494  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/n/nvidia-persistenced-615.78.08-1.fc45.x86_64.rpm
+6d217253d08c3b63ae7eb429325fa9687c45897fe8ce8f4d23c19a0357f7d849  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/n/nvidia-settings-580xx-580.196.07-1.fc45.x86_64.rpm
+bc27fa05db138719e11a6905007181630de194a8b1d8322a44d9ea0fabbdb2a0  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/x/xorg-x11-drv-nvidia-580xx-580.196.07-1.fc45.x86_64.rpm
+9787bd014169168b1e71a30981044856aad9e33f481462ac29cea967d6010873  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/x/xorg-x11-drv-nvidia-580xx-cuda-580.196.07-1.fc45.x86_64.rpm
+2f2298d89f78a6700cbc5c8798051759527c3747ab46b71d10ef6a0199f208bc  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/x/xorg-x11-drv-nvidia-580xx-cuda-libs-580.196.07-1.fc45.x86_64.rpm
+06da8bc53e85a470476c796707851ce67fb66cc2a2f8b3b07d3fae716ba4b0ef  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/x/xorg-x11-drv-nvidia-580xx-libs-580.196.07-1.fc45.x86_64.rpm
+2217f74287ea8c467364c968bd63f7d8ccdbd11ee5dc8236129f1d2ffd8c23f3  https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/Packages/x/xorg-x11-drv-nvidia-580xx-power-580.196.07-1.fc45.x86_64.rpm
