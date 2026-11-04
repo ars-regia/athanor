@@ -1929,7 +1929,29 @@ def check_docs():
 
 # Valori misurati sul repo il 2026-09-30, senza tests/, benches/ ed examples/. Sono un cricchetto: si abbassano,
 # non si alzano. Se un controllo fallisce qui, propaga con `?`.
-BUDGET = {".unwrap()": 0, ".expect(": 0, "panic!(": 0}
+# Every macro below ends the process under `panic = "abort"`; `debug_assert!` is compiled out of release
+# and is not counted. The two assertions left are in the fuzz entry of shelld (`shelld.rs`) and in
+# `Ui::add` of the toolkit, documented under `# Panics` (measured 2026-11-04).
+BUDGET = {
+    ".unwrap()": 0,
+    ".expect(": 0,
+    "panic!(": 0,
+    "assert!(": 2,
+    "assert_eq!(": 1,
+    "assert_ne!(": 0,
+    "unreachable!(": 0,
+    "todo!(": 0,
+    "unimplemented!(": 0,
+}
+
+
+def count_panic(code, k):
+    """The occurrences of `k` in `code`. A macro name does not match inside a longer one
+    (`assert!(` is not `debug_assert!(`), and a macro counts with any delimiter and with
+    space before it (`assert! {`, `assert![`)."""
+    if k.endswith("!("):
+        return len(re.findall(r"(?<![\w])" + re.escape(k[:-1]) + r"\s*[(\[{]", code))
+    return code.count(k)
 
 
 def is_test_file(p):
@@ -2061,7 +2083,7 @@ def check_panics():
         for i, line in enumerate(txt.split("\n"), 1):
             code = line.split("//")[0]
             for k in BUDGET:
-                n = code.count(k)
+                n = count_panic(code, k)
                 if n:
                     counts[k] += n
                     where[k].append(f"{rel(p)}:{i}")
