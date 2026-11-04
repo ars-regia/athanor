@@ -105,15 +105,14 @@ impl<T: PartialEq> Node<T> {
         }
     }
 
-    /// Moves by `by` the split nearest `window`'s `side`, the one after the window if `end` and
-    /// the one before it if not, so that the window's part grows by `by`: whether one did.
-    /// `place` is this node's.
+    /// Moves to `at` the split nearest `window`'s `side`, the one after the window if `end` and
+    /// the one before it if not: whether one did. `place` is this node's.
     fn move_split(
         &mut self,
         window: &T,
         side: Along,
         end: bool,
-        by: i32,
+        at: i32,
         place: Rectangle<i32, Logical>,
     ) -> bool {
         let Self::Split {
@@ -128,22 +127,18 @@ impl<T: PartialEq> Node<T> {
         let (one, other) = divided(place, *along, *share);
         let in_first = first.holds(window);
         let nearer = if in_first {
-            first.move_split(window, side, end, by, one)
+            first.move_split(window, side, end, at, one)
         } else {
-            second.move_split(window, side, end, by, other)
+            second.move_split(window, side, end, at, other)
         };
         if nearer || *along != side || in_first != end {
             return nearer;
         }
-        let (part, room) = match along {
-            Along::Width => (one.size.w, place.size.w.max(2)),
-            Along::Height => (one.size.h, place.size.h.max(2)),
+        let (start, room) = match along {
+            Along::Width => (place.loc.x, place.size.w.max(2)),
+            Along::Height => (place.loc.y, place.size.h.max(2)),
         };
-        let part = if in_first {
-            part.saturating_add(by)
-        } else {
-            part.saturating_sub(by)
-        };
+        let part = at.saturating_sub(start);
         // Each part keeps room for a tile and its gaps, so that no tile leaves its place.
         let least = (2 * GAP + 1).min(room / 2);
         let part = part.clamp(least, room - least);
@@ -319,7 +314,8 @@ impl<T: PartialEq + Clone> Tree<T> {
 
     /// Moves the splits by the tile of `window` in `area` so that its sides go where `to` has
     /// them (D11): each side that moved moves the split nearest it, and a side at the edge of
-    /// the area has none. `to` is the client's, and counts only as far as the area.
+    /// the area has none. `to` is the client's, and counts only as far as the area. Each split
+    /// goes where the side of `to` puts it, half a gap beyond, whatever another moved first.
     pub fn resize(
         &mut self,
         window: &T,
@@ -346,15 +342,16 @@ impl<T: PartialEq + Clone> Tree<T> {
         };
         let (left, right) = within(to.loc.x, to.size.w, area.loc.x, area.size.w);
         let (top, bottom) = within(to.loc.y, to.size.h, area.loc.y, area.size.h);
+        let half = GAP / 2;
         let sides = [
-            (Along::Width, false, tile.loc.x - left),
-            (Along::Width, true, right - (tile.loc.x + tile.size.w)),
-            (Along::Height, false, tile.loc.y - top),
-            (Along::Height, true, bottom - (tile.loc.y + tile.size.h)),
+            (Along::Width, false, tile.loc.x, left, left.saturating_sub(half)),
+            (Along::Width, true, tile.loc.x + tile.size.w, right, right.saturating_add(half)),
+            (Along::Height, false, tile.loc.y, top, top.saturating_sub(half)),
+            (Along::Height, true, tile.loc.y + tile.size.h, bottom, bottom.saturating_add(half)),
         ];
-        for (side, end, by) in sides {
-            if by != 0 {
-                root.move_split(window, side, end, by, area);
+        for (side, end, was, now, at) in sides {
+            if was != now {
+                root.move_split(window, side, end, at, area);
             }
         }
     }

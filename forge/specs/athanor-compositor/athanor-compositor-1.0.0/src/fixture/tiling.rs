@@ -1465,3 +1465,30 @@ fn a_window_that_floats_by_its_first_buffer_is_sent_no_tile() {
     assert_eq!(geometry(&run, &window).size, (WIDTH, HEIGHT).into());
     run.stop();
 }
+
+/// A tile whose client draws smaller than its tile is resized from its tile: its right edge
+/// moves the split by what the pointer moved, not by the edge the client drew (D11).
+#[test]
+fn a_tile_drawn_smaller_is_resized_from_its_tile() {
+    const WIDER: (i32, i32, i32, i32) = (8, 8, 658, 784);
+    const NARROWER: (i32, i32, i32, i32) = (674, 8, 598, 784);
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, _) = pair.upper.window.clone().expect("a window");
+    let shm: wl_shm::WlShm = pair.upper.bind(1);
+    let (buffer, _) = pair.upper.buffer(&shm, 600, 700, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    pair.upper.roundtrip(&mut run);
+    let at = Point::from((590.0, 690.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.redraw(&mut run);
+
+    answer_all(&mut run, &mut [&mut pair.upper, &mut pair.lower], release);
+
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(WIDER));
+    assert_eq!(tile_of(&run, pair.id, &pair.below), rect(NARROWER));
+    run.stop();
+}

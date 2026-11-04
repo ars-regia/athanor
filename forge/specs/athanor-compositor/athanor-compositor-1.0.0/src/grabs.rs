@@ -299,8 +299,7 @@ impl PointerGrab<State> for ResizeGrab {
         }
         if last {
             if let Some(size) = self.asked {
-                let to = Rectangle::new(anchored(self.edges, self.from, size), size);
-                data.resize_tile(&self.window, to);
+                data.resize_tile(&self.window, self.edges, self.from.size, size);
             }
             data.grab_ended(&self.window);
         }
@@ -385,12 +384,34 @@ impl State {
         }
     }
 
-    /// D11 for `window`, a tile its client resized to `to`: the splits by the sides that moved
-    /// move with them, before the grab's end lays the workspace out.
-    fn resize_tile(&mut self, window: &Window, to: Rectangle<i32, Logical>) {
-        if let Some((tree, area)) = self.tree_of(window) {
-            tree.resize(window, to, area);
-        }
+    /// D11 for `window`, a tile whose `edges` a resize took from a size of `from` to `size`: the
+    /// splits by the sides that moved move with them, before the grab's end lays the workspace
+    /// out. The change applies to the tile, which the client's geometry need not fill.
+    fn resize_tile(
+        &mut self,
+        window: &Window,
+        edges: ResizeEdge,
+        from: Size<i32, Logical>,
+        size: Size<i32, Logical>,
+    ) {
+        let Some((tree, area)) = self.tree_of(window) else {
+            return;
+        };
+        let Some(tile) = tree
+            .layout(area)
+            .into_iter()
+            .find(|(kept, _)| *kept == window)
+            .map(|(_, tile)| tile)
+        else {
+            return;
+        };
+        let grown = |tile: i32, from: i32, size: i32| tile.saturating_add(size - from).max(1);
+        let size = Size::from((
+            grown(tile.size.w, from.w, size.w),
+            grown(tile.size.h, from.h, size.h),
+        ));
+        let to = Rectangle::new(anchored(edges, tile, size), size);
+        tree.resize(window, to, area);
     }
 
     /// The tree that holds `window`, a tile, with the area of its workspace.
