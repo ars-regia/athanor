@@ -2,7 +2,7 @@
 //! 30; `clipboard.rs`). A child of `fixture`, which owns the compositor and the client they run
 //! against; the selection protocols' client side is here, as user data on each object.
 
-use super::{focused_window, sandbox, Client, Fake, Local, Running, FIXTURE_ALLOW_LIST};
+use super::{focused_window, focused_window_in, sandbox, Client, Fake, Local, Running, FIXTURE_ALLOW_LIST};
 use crate::identity::{AllowList, FileId, Process};
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -788,6 +788,41 @@ fn a_granted_client_reads_and_sets_the_selections_through_data_control() {
                 "{name}: the application reads what the manager set as {label}"
             );
         }
+        run.stop();
+    }
+}
+
+/// The regular selection, the one Ctrl+Shift+C sets, reaches the copier itself and the client
+/// that gets the focus next, for clients outside a context and inside one, as a terminal is.
+#[test]
+fn the_clipboard_reaches_the_copier_and_the_next_focus() {
+    for confined in [false, true] {
+        let mut run = Running::start(None);
+        let context = |run: &Running| confined.then(|| sandbox(run));
+        let first = context(&run);
+        let (mut copier, copier_window) = focused_window_in(&mut run, first);
+        let second = context(&run);
+        let (mut pasting, pasting_window) = focused_window_in(&mut run, second);
+        let copier_devices = Devices::application(&mut copier, &mut run);
+        let pasting_devices = Devices::application(&mut pasting, &mut run);
+        run.state.focus(&copier_window);
+        copier.roundtrip(&mut run);
+        pasting.roundtrip(&mut run);
+        pasting_devices.forget();
+        copier_devices.set(&copier, Which::Clipboard, "copied text");
+        copier.roundtrip(&mut run);
+        let own = copier_devices.offered(&mut copier, &mut run, Which::Clipboard);
+        assert!(
+            own.mimes().iter().any(|mime| mime == TEXT),
+            "the copier is offered its own copy (confined: {confined})"
+        );
+        run.state.focus(&pasting_window);
+        let offer = pasting_devices.offered(&mut pasting, &mut run, Which::Clipboard);
+        assert_eq!(
+            read(&mut run, &mut pasting, &offer, &mut copier, &copier_devices),
+            "copied text",
+            "the next focus pastes it (confined: {confined})"
+        );
         run.stop();
     }
 }
