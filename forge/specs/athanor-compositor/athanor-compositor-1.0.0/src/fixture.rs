@@ -11216,3 +11216,6 @@ mod parented;
 
 #[cfg(test)]
 mod instance;
+
+#[cfg(test)]
+mod tiling;

@@ -251,6 +251,11 @@ impl<T: PartialEq + Clone> Tree<T> {
         }
     }
 
+    /// The windows it holds, the one focused last at the end.
+    pub fn windows(&self) -> &[T] {
+        &self.focused
+    }
+
     pub fn holds(&self, window: &T) -> bool {
         self.root.as_ref().is_some_and(|root| root.holds(window))
     }

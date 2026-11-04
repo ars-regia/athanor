@@ -15,7 +15,7 @@ use crate::output_power::OutputPower;
 use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelStateV1;
 use crate::udev::Drm;
 use crate::winit::Nested;
-use crate::workspace::{Bound, Strip};
+use crate::workspace::{Bound, Strip, WorkspaceId};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::InputTime;
@@ -229,6 +229,8 @@ pub struct State {
     pub next_workspace: u64,
     /// The windows of the inactive workspaces, out of the space, each with its location.
     pub parked: Vec<(Window, Point<i32, Logical>)>,
+    /// The tree of each tiled workspace (OS12); a workspace without one floats.
+    pub tilings: Vec<(WorkspaceId, crate::tiling::Tree<Window>)>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -426,6 +428,7 @@ impl State {
             workspaces: Vec::new(),
             next_workspace: 0,
             parked: Vec::new(),
+            tilings: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
@@ -828,7 +831,11 @@ impl State {
 
     /// Where a window goes back to `kept`: there, or the middle of its `home_area` when its home
     /// output no longer shows that place.
-    fn kept_place(&self, window: &Window, kept: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+    pub(crate) fn kept_place(
+        &self,
+        window: &Window,
+        kept: Rectangle<i32, Logical>,
+    ) -> Point<i32, Logical> {
         match self
             .home_area(window)
             .filter(|_| !self.shown_at_home(window, kept))
@@ -891,7 +898,7 @@ impl State {
 
     /// Where `window` stands, or will once a move on its way lands, at the size that move
     /// asked; out of the space, where it comes back; empty on its way to where `placed` puts it.
-    fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
+    pub(crate) fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
         let size = window.geometry().size;
         let moving = window
             .user_data()
@@ -1628,7 +1635,7 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
 }
 
 /// `relocate` to where `placed` puts the window at the size it then has.
-fn place_again(window: &Window, serial: Option<Serial>) {
+pub(crate) fn place_again(window: &Window, serial: Option<Serial>) {
     window
         .user_data()
         .get_or_insert(Relocate::default)
@@ -1653,6 +1660,25 @@ pub fn full_screen_area(window: &Window) -> Option<Rectangle<i32, Logical>> {
 
 pub fn is_full_screen(window: &Window) -> bool {
     full_screen_area(window).is_some()
+}
+
+/// The geometry a maximised or full-screen `window` returns to; none while it is neither. Of a
+/// window that is both, the one it had before it was maximised (`forget_maximised`).
+pub(crate) fn kept_before(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    let data = window.user_data();
+    let maximised = data.get::<Maximised>().and_then(|kept| kept.0.get());
+    let full = data.get::<FullScreen>().and_then(|kept| kept.0.get());
+    maximised.or(full).map(|kept| kept.before)
+}
+
+/// Gives a maximised or full-screen `window` `before` to return to, in each record it has.
+pub(crate) fn set_kept_before(window: &Window, before: Rectangle<i32, Logical>) {
+    let data = window.user_data();
+    let maximised = data.get::<Maximised>().map(|kept| &kept.0);
+    let full = data.get::<FullScreen>().map(|kept| &kept.0);
+    for slot in [maximised, full].into_iter().flatten() {
+        slot.set(slot.get().map(|kept| Kept { before, ..kept }));
+    }
 }
 
 /// Where an output was when `map_output` or `changed_outputs` last saw it.

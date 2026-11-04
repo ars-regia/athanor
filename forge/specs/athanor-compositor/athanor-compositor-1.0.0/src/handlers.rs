@@ -491,9 +491,11 @@ impl State {
     }
 
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
-    /// the keyboard exclusively; the others are deactivated.
+    /// the keyboard exclusively; the others are deactivated. Its workspace's tree, if it is
+    /// tiled, splits it next (D2).
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
+        self.focus_tile(window);
         // The window's own dialogs stay above it.
         for dialog in self.subtree(window) {
             self.space.raise_element(&dialog, false);
@@ -659,11 +661,7 @@ impl XdgShellHandler for State {
                 self.move_window(&window, kept_reachable(area, from, kept.size));
             }
         }
-        let grab = MoveGrab {
-            start,
-            window,
-            from,
-        };
+        let grab = MoveGrab::new(start, window, from);
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
