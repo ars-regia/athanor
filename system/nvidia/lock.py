@@ -28,7 +28,8 @@ keep only the newest builds, so a lock outlives their files.
 
 Exit codes: 0 success, 3 the requested version is not published, 4 (verify) the repository
 publishes V with other files or checksums than the lock, 5 (mirrored) the mirror lacks a locked
-RPM, 1 any other error (network, metadata, lock file), 2 usage.
+RPM, 6 (verify) the set's successor repository publishes it, so the set must move there, 1 any
+other error (network, metadata, lock file), 2 usage.
 
 Locks always record SHA-256, the mirror's blob digest; a repository whose metadata gives
 SHA-512 (NVIDIA's) is checked by SHA-512 when the lock is written. GPG signatures are verified
@@ -59,6 +60,7 @@ ARCHES = ("x86_64", "noarch")
 NOT_PUBLISHED = 3
 STALE = 4
 NOT_MIRRORED = 5
+MOVED = 6
 MIRROR = "athanor-nvidia-rpms"
 # The repository metadata checksums a lock can be generated from, with their names in messages.
 CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
@@ -117,6 +119,10 @@ class LockError(Exception):
 
 class NotPublished(LockError):
     """The repository does not publish the branch at the requested version."""
+
+
+class Moved(LockError):
+    """The branch's successor repository publishes it: the lock reads a tree that has gone stale."""
 
 
 def http_get(url):
@@ -420,11 +426,12 @@ def resolve(branch, version, download):
 
 
 def moved_to(branch, download):
-    """LockError when the branch's successor repository publishes its primary package."""
+    """Moved when the branch's successor repository publishes its primary package; a successor
+    that cannot be read is an error like any other (exit 1), never a move."""
     successor, name = BRANCHES[branch]["successor"], BRANCHES[branch]["primary"]
     if successor and any(pkg.findtext(f"{COMMON}name") == name
                          for pkg in parse_xml(primary_xml(successor, download)).iter(f"{COMMON}package")):
-        raise LockError(f"{successor} publishes {name}: the {branch} set must move there from {BRANCHES[branch]['baseurl']}")
+        raise Moved(f"{successor} publishes {name}: the {branch} set must move there from {BRANCHES[branch]['baseurl']}")
 
 
 def downloaded_sha256(entry, url, download):
@@ -522,6 +529,9 @@ def main(argv=None, download=http_get, mirror=None):
     except NotPublished as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return NOT_PUBLISHED
+    except Moved as error:
+        print(f"lock.py: {error}", file=sys.stderr)
+        return MOVED
     except (LockError, OSError) as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return 1

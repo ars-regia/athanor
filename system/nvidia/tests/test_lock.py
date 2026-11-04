@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
@@ -575,8 +576,23 @@ class Verify(unittest.TestCase):
         # Even with the lock matching the releases tree: the frozen tree never sees an update.
         updates = [package("xorg-x11-drv-nvidia-580xx", 3, "580.205.01", "1.fc45", "x86_64", "x/new.rpm", "f" * 64)]
         code, _, err = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, lock.MOVED)
+        self.assertEqual(lock.MOVED, 6)
         self.assertIn(f"{UPDATES} publishes xorg-x11-drv-nvidia-580xx: the legacy set must move there from {LEGACY}", err)
+
+    def test_an_unreadable_successor_fails_and_is_not_a_move(self):
+        # The releases tree answers; only the updates tree fails, by 404 or by a network error.
+        releases = legacy_repo(*legacy_family("580.178.04", 1, "a" * 64))
+        for failure in (urllib.error.HTTPError(UPDATES + "repodata/repomd.xml", 404, "Not Found", None, None),
+                        OSError("connection reset")):
+            def download(url, failure=failure):
+                if url.startswith(UPDATES):
+                    raise failure
+                return releases(url)
+            with self.subTest(failure=failure):
+                code, _, err = self.verify(download)
+                self.assertEqual(code, 1)
+                self.assertNotIn("must move there", err)
 
     def test_updates_with_other_nvidia_packages_only_is_not_a_move(self):
         updates = [package(n, 3, "615.80.01", "1.fc45", "x86_64", f"x/{n}.rpm", "f" * 64)
