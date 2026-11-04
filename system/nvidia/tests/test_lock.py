@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import unittest.mock
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 
 HERE = pathlib.Path(__file__).resolve().parents[1]
@@ -375,12 +376,16 @@ class Repomd(unittest.TestCase):
 
 
 LEGACY = lock.BRANCHES["legacy"]["baseurl"]
+# The legacy set's successor repository: verify reads it on every run.
+UPDATES = "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/"
 REPOMD = b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>'
 
 
-def legacy_repo(*packages):
-    """A download function serving RPM Fusion metadata that lists `packages`."""
-    files = {LEGACY + "repodata/repomd.xml": REPOMD, LEGACY + "repodata/p.xml.gz": gzip.compress(primary(*packages))}
+def legacy_repo(*packages, updates=()):
+    """A download function serving RPM Fusion metadata that lists `packages`, and the legacy
+    set's successor tree listing `updates` (empty on 2026-11-04)."""
+    files = {LEGACY + "repodata/repomd.xml": REPOMD, LEGACY + "repodata/p.xml.gz": gzip.compress(primary(*packages)),
+             UPDATES + "repodata/repomd.xml": REPOMD, UPDATES + "repodata/p.xml.gz": gzip.compress(primary(*updates))}
     return lambda url: files[url]
 
 
@@ -419,6 +424,34 @@ class LegacyFedora45(unittest.TestCase):
         # The bump reads the branch's newest version from its primary package: the 615 driver
         # under the unsuffixed name must not answer for the 580 branch.
         self.assertEqual(run(["latest", "legacy", "--major", "580"], legacy_repo(*published))[:2], (0, "580.196.07\n"))
+
+    def companions_at(self, epoch, version, release="1.fc45"):
+        """The legacy set at 580.196.07 with its companions at epoch:version-release."""
+        return legacy_repo(
+            *[package(n, 3, "580.196.07", "1.fc45", "x86_64", f"x/{n}.rpm", "a" * 64) for n in lock.BRANCHES["legacy"]["packages"]],
+            *[package(n, epoch, version, release, "x86_64", f"{n[0]}/{n}.rpm", "b" * 64) for n in lock.BRANCHES["legacy"]["companions"]],
+        )
+
+    def test_a_companion_below_the_driver_is_refused(self):
+        # The 580xx packages require nvidia-modprobe and nvidia-persistenced >= 3:<their version>.
+        for epoch, version in ((3, "580.142"), (3, "580.196.06"), (2, "615.78.08")):
+            with self.subTest(epoch=epoch, version=version):
+                with self.assertRaisesRegex(lock.LockError, rf"older than 3:580.196.07, which the set requires: nvidia-modprobe {epoch}:{version}-1.fc45, nvidia-persistenced {epoch}:{version}-1.fc45"):
+                    lock.resolve("legacy", "580.196.07", self.companions_at(epoch, version))
+                code, _, err = run(["check", "legacy", "--version", "580.196.07"], self.companions_at(epoch, version))
+                self.assertEqual(code, 1)
+                self.assertIn("nvidia-persistenced", err)
+
+    def test_a_companion_at_or_above_the_driver_is_accepted(self):
+        for epoch, version in ((3, "580.196.07"), (3, "615.78.08"), (4, "1.0")):
+            with self.subTest(epoch=epoch, version=version):
+                got = {e["name"] for e in lock.resolve("legacy", "580.196.07", self.companions_at(epoch, version))}
+                self.assertIn("nvidia-persistenced", got)
+
+    def test_only_the_legacy_set_floors_its_companions(self):
+        # nvidia-driver-selinux follows its own versions, far below the open driver's.
+        self.assertEqual({b: s["floor"] for b, s in lock.BRANCHES.items()},
+                         {"open": False, "legacy": True, "container-toolkit": False})
 
     def test_the_fedora_45_releases_tree(self):
         self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
@@ -538,6 +571,39 @@ class Verify(unittest.TestCase):
             raise OSError("connection reset")
         code, _, _ = self.verify(download)
         self.assertEqual(code, 1)
+
+    def test_updates_publishing_the_primary_package_fails_naming_the_move(self):
+        # Even with the lock matching the releases tree: the frozen tree never sees an update.
+        updates = [package("xorg-x11-drv-nvidia-580xx", 3, "580.205.01", "1.fc45", "x86_64", "x/new.rpm", "f" * 64)]
+        code, _, err = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
+        self.assertEqual(code, lock.MOVED)
+        self.assertEqual(lock.MOVED, 6)
+        self.assertIn(f"{UPDATES} publishes xorg-x11-drv-nvidia-580xx: the legacy set must move there from {LEGACY}", err)
+
+    def test_an_unreadable_successor_fails_and_is_not_a_move(self):
+        # The releases tree answers; only the updates tree fails, by 404 or by a network error.
+        releases = legacy_repo(*legacy_family("580.178.04", 1, "a" * 64))
+        for failure in (urllib.error.HTTPError(UPDATES + "repodata/repomd.xml", 404, "Not Found", None, None),
+                        OSError("connection reset")):
+            def download(url, failure=failure):
+                if url.startswith(UPDATES):
+                    raise failure
+                return releases(url)
+            with self.subTest(failure=failure):
+                code, _, err = self.verify(download)
+                self.assertEqual(code, 1)
+                self.assertNotIn("must move there", err)
+
+    def test_updates_with_other_nvidia_packages_only_is_not_a_move(self):
+        updates = [package(n, 3, "615.80.01", "1.fc45", "x86_64", f"x/{n}.rpm", "f" * 64)
+                   for n in ("xorg-x11-drv-nvidia", "nvidia-persistenced", "akmod-nvidia-580xx")]
+        code, _, _ = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
+        self.assertEqual(code, 0)
+
+    def test_the_successor_is_fedora_45_updates_and_only_for_legacy(self):
+        self.assertEqual({b: s["successor"] for b, s in lock.BRANCHES.items()}, {
+            "open": None, "container-toolkit": None,
+            "legacy": UPDATES})
 
 
 

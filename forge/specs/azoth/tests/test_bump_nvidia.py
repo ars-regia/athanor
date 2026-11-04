@@ -11,6 +11,9 @@ AZOTH = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AZOTH))
 import bump  # noqa: E402
 
+sys.path.insert(0, str(AZOTH.parents[2] / "system" / "nvidia"))
+import lock  # noqa: E402
+
 
 def never(*_):
     raise AssertionError("not expected to be called")
@@ -128,6 +131,21 @@ class LockProblems(unittest.TestCase):
         seen = []
         bump.lock_problems(self.PINS, "1.20.1", [], verify=lambda branch, version: seen.append((branch, version)) or "ok")
         self.assertEqual(seen, [("open", "615.71.09"), ("legacy", "580.178.04"), ("container-toolkit", "1.20.1")])
+
+class LockExitCodes(unittest.TestCase):
+    def test_a_moved_set_aborts_the_bot_with_lock_py_stderr(self):
+        # verify allows only ok, gone and stale: a set whose successor publishes it fails the job.
+        self.assertNotIn(lock.MOVED, (0, bump.LOCK_NOT_PUBLISHED, bump.LOCK_STALE))
+        moved = subprocess.CompletedProcess([], lock.MOVED, stdout="", stderr="lock.py: <updates> publishes xorg-x11-drv-nvidia-580xx\n")
+        with mock.patch.object(bump.subprocess, "run", return_value=moved):
+            with self.assertRaises(SystemExit) as raised:
+                bump.lock_verify("legacy", "580.196.07")
+        self.assertIn(f"exit {lock.MOVED}", str(raised.exception.code))
+        self.assertIn("publishes xorg-x11-drv-nvidia-580xx", str(raised.exception.code))
+
+    def test_lock_py_agrees_on_the_shared_exit_codes(self):
+        self.assertEqual((bump.LOCK_NOT_PUBLISHED, bump.LOCK_STALE), (lock.NOT_PUBLISHED, lock.STALE))
+
 
 class ToolkitInSystemGroup(unittest.TestCase):
     """The container toolkit moves with the system group, never with the kernel group."""
