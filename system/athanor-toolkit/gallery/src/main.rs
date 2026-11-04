@@ -13,7 +13,15 @@ const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 5] = ["buttons", "choices", "values", "lists", "text"];
+const PAGES: [&str; 6] = ["buttons", "choices", "values", "lists", "text", "states"];
+
+/// The window's widgets the gallery acts on.
+struct Gallery {
+    /// Each page's toggle and group.
+    pages: Vec<(WidgetId, WidgetId)>,
+    /// The states page's switch and the button it makes sensitive.
+    states: (WidgetId, WidgetId),
+}
 
 /// The command line.
 struct Options {
@@ -64,8 +72,13 @@ fn tr(lang: usize, key: &str) -> Result<&'static str, String> {
         .ok_or(format!("strings.tsv has no {:?} for {key:?}", LANGUAGES[lang]))
 }
 
-/// The widgets of page `name` under `group`.
-fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), String> {
+/// The widgets of page `name` under `group`; for the states page, its switch and its button.
+fn page(
+    ui: &mut Ui,
+    group: WidgetId,
+    name: &str,
+    lang: usize,
+) -> Result<Option<(WidgetId, WidgetId)>, String> {
     let t = |key| tr(lang, key);
     match name {
         "buttons" => {
@@ -98,14 +111,21 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), Str
             let text = t("notes.text")?.replace("\\n", "\n");
             ui.text_area(group, t("notes")?, &text, 4);
         }
+        "states" => {
+            // The button takes input once the switch is on.
+            let switch = ui.switch(group, t("enable")?, false);
+            let button = ui.add(group, Kind::Button(t("waiting")?.into()));
+            ui.set_sensitive(button, false);
+            return Ok(Some((switch, button)));
+        }
         _ => return Err(format!("no page {name:?}")),
     }
-    Ok(())
+    Ok(None)
 }
 
-/// The window, with the page toggles that show one page each; returns it with each page's
-/// toggle and group.
-fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
+/// The window, with the page toggles that show one page each, and the widgets the gallery acts
+/// on.
+fn build(options: &Options) -> Result<(Ui, Gallery), String> {
     let lang = options.lang;
     // The GTK twin's margins and spacings, as the GTK chooser's: 24 around, 18 between the
     // groups, 8 inside one.
@@ -130,17 +150,25 @@ fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
         .collect::<Result<_, String>>()?;
 
     let mut shown = Vec::new();
+    let mut states = None;
     for (i, name) in PAGES.iter().enumerate() {
         let title = tr(lang, &format!("page.{name}"))?;
         let group = ui.add(Ui::ROOT, Kind::Group(title.into()));
         ui.add(group, Kind::Label(title.into()));
-        page(&mut ui, group, name, lang)?;
+        states = page(&mut ui, group, name, lang)?.or(states);
         ui.set_visible(group, i == options.page);
         shown.push((toggles[i], group));
     }
     ui.set_focus(Some(toggles[options.page]));
     ui.layout();
-    Ok((ui, shown))
+    let states = states.ok_or("no states page")?;
+    Ok((
+        ui,
+        Gallery {
+            pages: shown,
+            states,
+        },
+    ))
 }
 
 /// Shows the page of `selected` and hides the others; a selection that is not a page toggle,
@@ -153,15 +181,23 @@ fn show_page(ui: &mut Ui, pages: &[(WidgetId, WidgetId)], selected: WidgetId) {
     }
 }
 
+/// Answers an event of the window: a page toggle shows its page, and the states page's switch
+/// makes its button sensitive or insensitive.
+fn on_event(ui: &mut Ui, gallery: &Gallery, event: Event) {
+    match event {
+        Event::Selected(selected) => show_page(ui, &gallery.pages, selected),
+        Event::Toggled(id) if id == gallery.states.0 => {
+            ui.set_sensitive(gallery.states.1, ui.is_active(id));
+        }
+        _ => {}
+    }
+}
+
 fn main() -> ExitCode {
     let run = || -> Result<(), String> {
         let options = Options::parse(std::env::args().skip(1))?;
-        let (ui, pages) = build(&options)?;
-        let on_event = move |ui: &mut Ui, event: Event| {
-            if let Event::Selected(selected) = event {
-                show_page(ui, &pages, selected);
-            }
-        };
+        let (ui, gallery) = build(&options)?;
+        let on_event = move |ui: &mut Ui, event: Event| on_event(ui, &gallery, event);
         driver::run_window(ui, "athanor-toolkit-gallery", Box::new(on_event))
             .map_err(|error| error.to_string())
     };
@@ -180,7 +216,8 @@ mod tests {
 
     #[test]
     fn a_selection_inside_a_page_keeps_the_page() -> Result<(), String> {
-        let (mut ui, pages) = build(&Options::parse(std::iter::empty())?)?;
+        let (mut ui, gallery) = build(&Options::parse(std::iter::empty())?)?;
+        let pages = gallery.pages;
         let (first, second) = (pages[0], pages[1]);
         assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
         // Not a page toggle: the group's own id stands for any widget inside a page.
@@ -188,6 +225,23 @@ mod tests {
         assert!(ui.is_visible(first.1) && !ui.is_visible(second.1));
         show_page(&mut ui, &pages, second.0);
         assert!(!ui.is_visible(first.1) && ui.is_visible(second.1));
+        Ok(())
+    }
+
+    #[test]
+    fn the_states_switch_makes_its_button_sensitive() -> Result<(), String> {
+        let options = Options::parse(["--page", "states"].map(String::from).into_iter())?;
+        let (mut ui, gallery) = build(&options)?;
+        let (switch, button) = gallery.states;
+        assert!(!ui.is_active(switch) && !ui.is_sensitive(button));
+        let event = ui.activate(switch).ok_or("the switch does not toggle")?;
+        on_event(&mut ui, &gallery, event);
+        assert!(ui.is_sensitive(button));
+        let event = ui
+            .set_active(switch, false)
+            .ok_or("the switch does not toggle")?;
+        on_event(&mut ui, &gallery, event);
+        assert!(!ui.is_sensitive(button));
         Ok(())
     }
 }

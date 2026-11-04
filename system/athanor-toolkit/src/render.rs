@@ -42,6 +42,10 @@ pub trait Canvas {
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
     fn pop_clip(&mut self);
+    /// Draws what follows at `opacity`, from 0 to 1, until the matching [`Canvas::pop_layer`].
+    fn push_opacity_layer(&mut self, opacity: f32);
+    /// Ends the innermost layer.
+    fn pop_layer(&mut self);
     /// Fills a run of glyphs of one font and size, hinted.
     fn glyphs(
         &mut self,
@@ -100,6 +104,12 @@ macro_rules! canvas {
             fn pop_clip(&mut self) {
                 <$canvas>::pop_clip(self);
             }
+            fn push_opacity_layer(&mut self, opacity: f32) {
+                <$canvas>::push_opacity_layer(self, opacity);
+            }
+            fn pop_layer(&mut self) {
+                <$canvas>::pop_layer(self);
+            }
             fn glyphs(
                 &mut self,
                 resources: &mut $resources,
@@ -151,9 +161,8 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 
 /// How much of its text colour a hovered control's fill takes.
 const HOVER: f32 = 0.05;
-/// How much of its text colour a disabled item's label keeps, over the background: half, as
-/// Adwaita's insensitive widgets.
-const DISABLED: f32 = 0.5;
+/// How much of its opacity an insensitive widget keeps: half, as Adwaita's.
+const INSENSITIVE: f32 = 0.5;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
@@ -266,6 +275,10 @@ pub fn paint<C: Canvas>(
         if let Some(c) = clip {
             ctx.push_clip_path(&rounded(c, 0.0, t.radius));
         }
+        let faint = !ui.is_sensitive(id);
+        if faint {
+            ctx.push_opacity_layer(INSENSITIVE);
+        }
         let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
@@ -356,8 +369,7 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer, and
-            // faint when the item is disabled.
+            // A flat row with its label at the start edge, filled only under the pointer.
             Kind::MenuItem(_) => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
@@ -370,12 +382,7 @@ pub fn paint<C: Canvas>(
                         r.x + t.padding
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
-                    let ink = if widget.disabled {
-                        mix(t.background, t.text, DISABLED)
-                    } else {
-                        t.text
-                    };
-                    draw_text(ctx, resources, layout, at, ink)?;
+                    draw_text(ctx, resources, layout, at, t.text)?;
                 }
             }
             Kind::TitleBar => {
@@ -587,6 +594,9 @@ pub fn paint<C: Canvas>(
             ctx.set_stroke(Stroke::new(f64::from(t.focus_width)));
             ctx.stroke_path(&rounded(r, outset, radius));
         }
+        if faint {
+            ctx.pop_layer();
+        }
         if clip.is_some() {
             ctx.pop_clip();
         }
@@ -738,6 +748,39 @@ mod tests {
             ui.pointer_leave();
             assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn an_insensitive_widget_is_drawn_at_half_its_opacity() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Sensitive", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
+        let plain = render(&mut ui, 1.0)?;
+        ui.set_sensitive(button, false);
+        let faint = render(&mut ui, 1.0)?;
+        let r = ui.widget(button).rect;
+        let at = |p: &Pixmap| {
+            let i =
+                4 * (usize::from(p.width()) * (r.y + r.h / 2.0) as usize + (r.x + 4.0) as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let t = &ui.theme;
+        assert_eq!(at(&plain), t.surface.0.to_vec());
+        // Half the button's fill over the window's background, give or take the rounding.
+        let half = mix(t.background, t.surface, INSENSITIVE).0;
+        let off = at(&faint)
+            .iter()
+            .zip(half)
+            .map(|(&a, b)| a.abs_diff(b))
+            .max();
+        assert!(
+            off.is_some_and(|d| d <= 1),
+            "{:?} is not {half:?}",
+            at(&faint)
+        );
+        assert_ne!(hash(&faint), hash(&plain));
+        ui.set_sensitive(button, true);
+        assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         Ok(())
     }
 

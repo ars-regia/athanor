@@ -116,6 +116,18 @@ def fill_page(page, container, text):
         )
         scroll.set_child(view)
         container.append(scroll)
+    elif page == "states":
+        # The button takes input once the switch is on.
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        label = Gtk.Label(label=text["enable"], xalign=0, hexpand=True)
+        switch = Gtk.Switch(active=False, valign=Gtk.Align.CENTER)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [text["enable"]])
+        row.append(label)
+        row.append(switch)
+        container.append(row)
+        button = Gtk.Button(label=text["waiting"], sensitive=False)
+        switch.connect("notify::active", lambda s, _: button.set_sensitive(s.get_active()))
+        container.append(button)
     else:
         raise ValueError(f"no page {page!r}")
 

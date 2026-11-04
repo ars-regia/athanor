@@ -41,8 +41,8 @@ from golden_report import exemptions
 # anything else, a single-line field's line included.
 #
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
-# button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` key
-# of its strings.tsv) with the role and the state words together is rewritten: a real check box,
+# button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` and
+# `enable` keys of its strings.tsv) with the role and the state words together is rewritten: a real check box,
 # whatever its label, spoken as a toggle button still fails.
 
 
@@ -59,7 +59,7 @@ def gallery_labels(key):
     ][0]
 
 
-SWITCH_LABELS = gallery_labels("switch")
+SWITCH_LABELS = gallery_labels("switch") + gallery_labels("enable")
 AREA_LABELS = gallery_labels("notes")
 SWITCH_SPEECH = {
     "check box checked.": "toggle button pressed.",
