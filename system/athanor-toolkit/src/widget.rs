@@ -99,7 +99,8 @@ pub enum Kind {
     /// A button with a label; activating it raises [`Event::Clicked`].
     Button(String),
     /// A toggle button. The toggles that share a parent form a radio group: activating one
-    /// releases the others.
+    /// releases the others. Add it with [`Ui::toggle`].
+    #[non_exhaustive]
     Toggle {
         /// The text of the toggle.
         label: String,
@@ -107,7 +108,9 @@ pub enum Kind {
         active: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
-    /// that share a parent are independent; activating one raises [`Event::Toggled`].
+    /// that share a parent are independent; activating one raises [`Event::Toggled`]. Add it
+    /// with [`Ui::check`].
+    #[non_exhaustive]
     Check {
         /// The text beside the box.
         label: String,
@@ -117,6 +120,8 @@ pub enum Kind {
     /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
     /// on its own. It fills the width of its column or group, or its cell in a row, where every
     /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
+    /// Add it with [`Ui::switch`].
+    #[non_exhaustive]
     Switch {
         /// The text of the switch, which names it for assistive technologies.
         label: String,
@@ -140,6 +145,7 @@ pub enum Kind {
     /// `ScrolledWindow`. What lies outside the viewport is not drawn and takes no pointer input;
     /// a thin indicator at the end edge shows the position while the child is taller. Add it
     /// with [`Ui::scroll`].
+    #[non_exhaustive]
     Scroll {
         /// The height of the viewport, in logical pixels.
         height: f32,
@@ -153,6 +159,7 @@ pub enum Kind {
     /// on the last leave the list as Shift+Tab and Tab do. A row chosen by the keyboard, a click
     /// or Enter raises [`Event::Selected`]. It fills the width of its column, group or scroll.
     /// Add it with [`Ui::list`] and its rows with [`Ui::list_row`].
+    #[non_exhaustive]
     List {
         /// The name assistive technologies read for the list.
         name: String,
@@ -178,7 +185,8 @@ pub enum Kind {
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
     /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
-    /// with its aspect ratio kept, centred. It takes no input.
+    /// with its aspect ratio kept, centred. It takes no input. Add it with [`Ui::image`].
+    #[non_exhaustive]
     Image {
         /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
         image: crate::icon::Image,
@@ -193,6 +201,8 @@ pub enum Kind {
     /// all centred along it. As the root's child it fills the window, so a surface stretched
     /// along the edge keeps the island in its middle. Only the children and the theme's
     /// `island_padding` around them are filled, with `island` and rounded by `island_radius`.
+    /// Add it with [`Ui::island`].
+    #[non_exhaustive]
     Island {
         /// Whether the children are stacked top to bottom.
         vertical: bool,
@@ -202,7 +212,9 @@ pub enum Kind {
     /// A flat button that shows an image, named by its label for assistive technologies;
     /// activating it raises [`Event::Clicked`]. It is at least the theme's `button_min` on
     /// each side, with the theme's padding added left and right, as GTK's min-width and
-    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme.
+    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme. Add it with
+    /// [`Ui::icon_button`].
+    #[non_exhaustive]
     IconButton {
         /// The name assistive technologies read.
         label: String,
@@ -367,6 +379,7 @@ pub enum Event {
     /// activates the widget.
     DragStarted(WidgetId),
     /// The button that started a drag was released, over the widget `to` if any.
+    #[non_exhaustive]
     DragEnded {
         /// The widget the drag started from.
         from: WidgetId,
@@ -563,6 +576,96 @@ impl Ui {
         // The caret follows the text, as gtk_text_buffer_set_text leaves a text view's.
         area.move_to_end(&mut self.text);
         self.add(parent, Kind::TextArea(Box::new(area)))
+    }
+
+    /// Adds a toggle showing `label`, the active one of its group when `active`. See
+    /// [`Kind::Toggle`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn toggle(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Toggle { label, active })
+    }
+
+    /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn check(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Check { label, active })
+    }
+
+    /// Adds a switch named `label`, on when `active`. See [`Kind::Switch`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn switch(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Switch { label, active })
+    }
+
+    /// Adds an island, its children stacked top to bottom when `vertical`, with `margin` kept
+    /// free around its fill: top, right, bottom and left. Add its children to the id it
+    /// returns. See [`Kind::Island`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn island(&mut self, parent: WidgetId, vertical: bool, margin: [f32; 4]) -> WidgetId {
+        self.add(parent, Kind::Island { vertical, margin })
+    }
+
+    /// Adds a flat button named `label` for assistive technologies, showing `image` in a
+    /// square of `size` logical pixels, with the accent line of `indicator` along that side.
+    /// See [`Kind::IconButton`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn icon_button(
+        &mut self,
+        parent: WidgetId,
+        label: &str,
+        image: crate::icon::Image,
+        size: f32,
+        indicator: Option<crate::driver::Side>,
+    ) -> WidgetId {
+        let label = label.to_owned();
+        let kind = Kind::IconButton {
+            label,
+            image,
+            size,
+            indicator,
+        };
+        self.add(parent, kind)
+    }
+
+    /// Adds `image` in a square of `size` logical pixels, named by `description` for assistive
+    /// technologies; an empty description marks an image that only decorates. See
+    /// [`Kind::Image`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn image(
+        &mut self,
+        parent: WidgetId,
+        image: crate::icon::Image,
+        size: f32,
+        description: &str,
+    ) -> WidgetId {
+        let description = description.to_owned();
+        let kind = Kind::Image {
+            image,
+            size,
+            description,
+        };
+        self.add(parent, kind)
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
@@ -2027,6 +2130,50 @@ fn is_invisible_format(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_constructors_add_each_kind_with_its_fields() {
+        use crate::driver::Side;
+
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let image = crate::icon::Image {
+            pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(1, 1)),
+        };
+        let toggle = ui.toggle(Ui::ROOT, "A", true);
+        let check = ui.check(Ui::ROOT, "B", false);
+        let switch = ui.switch(Ui::ROOT, "C", true);
+        let island = ui.island(Ui::ROOT, true, [1.0, 2.0, 3.0, 4.0]);
+        let button = ui.icon_button(island, "D", image.clone(), 24.0, Some(Side::Bottom));
+        let picture = ui.image(Ui::ROOT, image, 16.0, "E");
+
+        assert_eq!(
+            ui.widget(Ui::ROOT).children,
+            [toggle, check, switch, island, picture]
+        );
+        assert_eq!(ui.widget(island).children, [button]);
+        assert_eq!(
+            [toggle, check, switch].map(|id| ui.is_active(id)),
+            [true, false, true]
+        );
+        let kinds = [toggle, check, switch, island, button, picture].map(|id| &ui.widget(id).kind);
+        let [toggle, check, switch, island, button, picture] = kinds;
+        assert!(matches!(toggle, Kind::Toggle { label, .. } if label == "A"));
+        assert!(matches!(check, Kind::Check { label, .. } if label == "B"));
+        assert!(matches!(switch, Kind::Switch { label, .. } if label == "C"));
+        assert!(matches!(
+            island,
+            Kind::Island { vertical: true, margin } if *margin == [1.0, 2.0, 3.0, 4.0]
+        ));
+        assert!(matches!(
+            button,
+            Kind::IconButton { label, size, indicator: Some(Side::Bottom), .. }
+                if label == "D" && *size == 24.0
+        ));
+        assert!(matches!(
+            picture,
+            Kind::Image { size, description, .. } if *size == 16.0 && description == "E"
+        ));
+    }
 
     #[test]
     fn a_toggle_group_is_exclusive() {

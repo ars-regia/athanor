@@ -16,15 +16,12 @@ impl Application for Bars {
         let name = output.name.clone().unwrap_or_else(|| output.id.to_string());
         let mut ui = Ui::new(&name, Theme::default(), false);
         ui.add(Ui::ROOT, Kind::Button(name));
-        let options = LayerOptions {
-            layer: Layer::Top,
-            namespace: "athanor-toolkit-layer".into(),
-            anchor: Anchor::BOTTOM,
-            margin: [0, 0, 8, 0],
-            exclusive_zone: 0,
-            keyboard: KeyboardInteractivity::OnDemand,
-            input_region: None,
-        };
+        let mut options = LayerOptions::default();
+        options.layer = Layer::Top;
+        options.namespace = "athanor-toolkit-layer".into();
+        options.anchor = Anchor::BOTTOM;
+        options.margin = [0, 0, 8, 0];
+        options.keyboard = KeyboardInteractivity::OnDemand;
         Some((ui, options))
     }
 

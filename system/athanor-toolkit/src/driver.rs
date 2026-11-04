@@ -98,7 +98,9 @@ fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SurfaceId(u64);
 
-/// How a surface is shown: the same widgets, in a window or on a layer of the shell.
+/// How a surface is shown: the same widgets, in a window or on a layer of the shell. New roles
+/// are added over time: match with a `_` arm.
+#[non_exhaustive]
 pub enum Role {
     /// An xdg-toplevel, which draws its own title bar.
     Window {
@@ -110,7 +112,9 @@ pub enum Role {
     Layer(LayerOptions),
 }
 
-/// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets.
+/// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets. New fields are
+/// added over time: start from [`LayerOptions::default`] and set the fields that differ.
+#[non_exhaustive]
 pub struct LayerOptions {
     /// The layer of the shell the surface sits on.
     pub layer: Layer,
@@ -128,10 +132,28 @@ pub struct LayerOptions {
     pub input_region: Option<Vec<Rect>>,
 }
 
+impl Default for LayerOptions {
+    /// The protocol's defaults where it has them: no anchor, no margin, an exclusive zone of 0,
+    /// no keyboard and the pointer on the whole surface. The layer is the top one, as
+    /// gtk-layer-shell's default, and the namespace is empty.
+    fn default() -> Self {
+        Self {
+            layer: Layer::Top,
+            namespace: String::new(),
+            anchor: Anchor::empty(),
+            margin: [0; 4],
+            exclusive_zone: 0,
+            keyboard: KeyboardInteractivity::None,
+            input_region: None,
+        }
+    }
+}
+
 /// The side of its widget a popup opens on, as GTK's `GtkPositionType`; left and right are the
 /// physical sides. The compositor flips the popup to the opposite side, and slides it along, to
-/// keep it on the output, as GTK's popovers ask.
+/// keep it on the output, as GTK's popovers ask. New sides may be added: match with a `_` arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Side {
     /// Above the widget: from a dock along the bottom edge.
     Top,

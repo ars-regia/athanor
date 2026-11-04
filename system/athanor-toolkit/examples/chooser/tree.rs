@@ -23,14 +23,15 @@ pub struct Chooser {
 
 /// The chooser in the catalogue's language, with the first choice of every group active: the
 /// factory layout, as the GTK chooser shows it without a user document.
+// The theme is set field by field: the example cannot write a literal of the non-exhaustive
+// `Theme`, which the crate's tests, compiling this file inside the crate, could.
+#[allow(clippy::field_reassign_with_default)]
 pub fn build(catalog: &Catalog, rtl: bool) -> Chooser {
     // The GTK chooser's margins and spacings: 24 around, 18 between the groups, 8 inside one.
-    let theme = Theme {
-        margin: 24.0,
-        section_gap: 18.0,
-        gap: 8.0,
-        ..Theme::default()
-    };
+    let mut theme = Theme::default();
+    theme.margin = 24.0;
+    theme.section_gap = 18.0;
+    theme.gap = 8.0;
     let mut ui = Ui::new(catalog.tr(TITLE), theme, rtl);
     ui.min_width = 420.0;
     let mut choices = Vec::new();
@@ -40,14 +41,7 @@ pub fn build(catalog: &Catalog, rtl: bool) -> Chooser {
         ui.add(container, Kind::Label(heading.into()));
         let row = ui.add(container, Kind::Row);
         for (i, &name) in names.iter().enumerate() {
-            let label = catalog.tr(name).into();
-            let id = ui.add(
-                row,
-                Kind::Toggle {
-                    label,
-                    active: i == 0,
-                },
-            );
+            let id = ui.toggle(row, catalog.tr(name), i == 0);
             choices.push((id, group, name));
         }
     }

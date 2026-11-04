@@ -64,14 +64,6 @@ fn tr(lang: usize, key: &str) -> Result<&'static str, String> {
         .ok_or(format!("strings.tsv has no {:?} for {key:?}", LANGUAGES[lang]))
 }
 
-/// A toggle of a group: the first one is active.
-fn toggle(label: &str, active: bool) -> Kind {
-    Kind::Toggle {
-        label: label.into(),
-        active,
-    }
-}
-
 /// The widgets of page `name` under `group`.
 fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), String> {
     let t = |key| tr(lang, key);
@@ -81,24 +73,14 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<(), Str
             ui.add(group, Kind::Button(t("button")?.into()));
             let row = ui.add(group, Kind::Row);
             for (i, key) in ["one", "two", "three"].into_iter().enumerate() {
-                ui.add(row, toggle(t(key)?, i == 0));
+                ui.toggle(row, t(key)?, i == 0);
             }
             ui.field(group, t("field")?, "");
         }
         "choices" => {
-            let check = |label: &str, active| Kind::Check {
-                label: label.into(),
-                active,
-            };
-            ui.add(group, check(t("check1")?, true));
-            ui.add(group, check(t("check2")?, false));
-            ui.add(
-                group,
-                Kind::Switch {
-                    label: t("switch")?.into(),
-                    active: true,
-                },
-            );
+            ui.check(group, t("check1")?, true);
+            ui.check(group, t("check2")?, false);
+            ui.switch(group, t("switch")?, true);
         }
         "values" => {
             ui.slider(group, t("slider")?, 0.0, 100.0, 1.0, 50.0)
@@ -127,12 +109,10 @@ fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
     let lang = options.lang;
     // The GTK twin's margins and spacings, as the GTK chooser's: 24 around, 18 between the
     // groups, 8 inside one.
-    let theme = Theme {
-        margin: 24.0,
-        section_gap: 18.0,
-        gap: 8.0,
-        ..Theme::default()
-    };
+    let mut theme = Theme::default();
+    theme.margin = 24.0;
+    theme.section_gap = 18.0;
+    theme.gap = 8.0;
     let mut ui = Ui::new(tr(lang, "title")?, theme, options.rtl);
     ui.min_width = 420.0;
 
@@ -145,7 +125,7 @@ fn build(options: &Options) -> Result<(Ui, Vec<(WidgetId, WidgetId)>), String> {
         .enumerate()
         .map(|(i, name)| {
             let label = tr(lang, &format!("page.{name}"))?;
-            Ok(ui.add(row, toggle(label, i == options.page)))
+            Ok(ui.toggle(row, label, i == options.page))
         })
         .collect::<Result<_, String>>()?;
 
