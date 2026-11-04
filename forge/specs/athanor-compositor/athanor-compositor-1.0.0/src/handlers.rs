@@ -283,8 +283,9 @@ impl State {
     /// or another of the same security context's instance (`same_instance`): mapping a window
     /// is not the user's input, so a client cannot take the focus from another application by
     /// opening one. A command run in a terminal is the terminal's own, so wl-copy's window,
-    /// which waits for the keyboard to set the selection, gets it from the terminal. A window
-    /// with a parent follows it (`follow_parent`).
+    /// which waits for the keyboard to set the selection, gets it from the terminal; so does
+    /// any other process sharing the terminal's socket, which stays inside that one
+    /// application. A window with a parent follows it (`follow_parent`).
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
