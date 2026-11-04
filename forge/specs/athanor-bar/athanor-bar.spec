@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        19%{?dist}
+Release:        20%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-20
+- The accessibility menu's screen reader row reads and writes the GNOME key
+  screen-reader-enabled in place of org.a11y.Status.ScreenReaderEnabled, which
+  at-spi2-core 2.61 dropped, so the row is shown on Fedora 45 as on Fedora 43; without the
+  key the row is hidden and the missing key is logged (doc_accessibility.md AX2, #699).
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-19
 - The bar sends the keys of org.gnome.desktop.a11y.keyboard to athanor-compositor at its start and
   at each change, a delay out of bounds clamped and logged, and writes stickykeys-enable false
