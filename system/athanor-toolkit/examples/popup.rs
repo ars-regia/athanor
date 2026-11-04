@@ -8,11 +8,11 @@ use athanor_toolkit::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell, Side,
     SurfaceId,
 };
-use athanor_toolkit::{Event, Kind, Rect, Theme, Ui};
+use athanor_toolkit::{Event, Kind, Rect, Theme, Ui, WidgetId};
 use std::process::ExitCode;
 
 /// The menu's widgets, laid out, and its first item.
-fn menu() -> (Ui, usize) {
+fn menu() -> (Ui, WidgetId) {
     let mut ui = Ui::new("Files", Theme::default(), false);
     let list = ui.add(Ui::ROOT, Kind::Menu);
     let first = ui.add(list, Kind::MenuItem("New Window".into()));

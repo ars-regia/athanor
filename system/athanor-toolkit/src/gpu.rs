@@ -247,7 +247,8 @@ impl Painter {
     /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
     /// holds any more. An image that would pass [`ATLAS_BUDGET`] is left out, and logged.
     fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
-        let wanted: Vec<&Arc<Pixmap>> = (0..ui.len())
+        let wanted: Vec<&Arc<Pixmap>> = ui
+            .ids()
             .filter_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. } | Kind::IconButton { image, .. } => Some(image.pixmap()),
                 _ => None,
