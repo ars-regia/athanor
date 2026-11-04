@@ -58,7 +58,11 @@ mod tests {
             .status()
             .expect("glib-compile-schemas");
         assert!(status.success(), "glib-compile-schemas: {status}");
-        gio::SettingsSchemaSource::from_directory(&dir, None, false).expect("the source")
+        let source =
+            gio::SettingsSchemaSource::from_directory(&dir, None, false).expect("the source");
+        // The source has read the compiled schemas: the directory is no longer needed.
+        std::fs::remove_dir_all(&dir).expect("the schema directory removed");
+        source
     }
 
     #[test]
