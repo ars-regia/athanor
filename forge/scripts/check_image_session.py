@@ -8,7 +8,7 @@ system/check-image-session.sh runs it inside a built image (IMAGE_ROOT defaults 
 ADR-0115 ships upstream components for 0.9, chosen in docs/spikes/lock-and-polkit-agent-0-9.md:
 cosmic-greeter as the locker and cosmic-idle as the idle trigger, both run inside the
 logind session by the supervisor /usr/libexec/athanor/session-components (SN15), which
-athanor-desktop and athanor-compositor-session start, and cosmic-osd as the polkit agent on polkit 127's
+athanor-desktop and athanor-sulphur-session start, and cosmic-osd as the polkit agent on polkit 127's
 socket-activated helper. Each line below is a way the image has lost one of them without a
 build failure: a package dropped from packages.json, a supervisor line removed, the agent's unit
 no longer wanted by the session, masked, taken out of NoNewPrivileges or given another ExecStart
@@ -37,8 +37,8 @@ from check_image_contacts import enabled_units, is_masked
 LAUNCHER = "usr/bin/athanor-desktop"
 BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/cosmic-idle", "usr/bin/cosmic-osd")
 SUPERVISOR = "usr/libexec/athanor/session-components"
-COMPOSITOR = "usr/bin/athanor-compositor"
-COMPOSITOR_SESSION = "usr/bin/athanor-compositor-session"
+COMPOSITOR = "usr/bin/athanor-sulphur"
+COMPOSITOR_SESSION = "usr/bin/athanor-sulphur-session"
 # What each script must hold as a whole active line (doc_session.md SN15): the sessions start
 # the supervisor, which runs the locker and the idle daemon, each in a scope of its own.
 LAUNCHER_LINES = (

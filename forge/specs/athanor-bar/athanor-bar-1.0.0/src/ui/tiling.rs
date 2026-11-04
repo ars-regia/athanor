@@ -1,12 +1,12 @@
 //! The tiling switch (doc_bar.md, BR3), for the active workspace of this surface's output.
 //! Hidden until the compositor reports the workspace's mode: cosmic-comp through its workspace
-//! extension, athanor-compositor through a manager bound only by who watches the tiling.
+//! extension, athanor-sulphur through a manager bound only by who watches the tiling.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use athanor_bar::tiling::{self, Tiling, WorkspaceView};
-use athanor_compositor_client::WorkspaceId;
+use athanor_sulphur_client::WorkspaceId;
 use gtk4::glib;
 use gtk4::prelude::*;
 

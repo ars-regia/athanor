@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 # session-components - the supervisor of the session's screen locker and idle daemon
 # (doc_session.md, SN15), sourced by athanor-desktop (cosmic-comp's session) and by
-# athanor-compositor-session (the own compositor's), so that both sessions run them the same
+# athanor-sulphur-session (the own compositor's), so that both sessions run them the same
 # way. It defines functions and runs nothing.
 #
 # The locker and the idle daemon are not units: they run as children of this supervisor,

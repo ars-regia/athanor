@@ -2280,8 +2280,8 @@ def check_shell_failures():
 # --------------------------------------------------------------------------- #
 
 # The compositor's allow-list (doc_own_stack.md OS4) and the class of every global it offers.
-ALLOW_LIST = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients"
-GLOBALS_FILE = "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/globals"
+ALLOW_LIST = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privileged-clients"
+GLOBALS_FILE = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/globals"
 LAYER_SHELL = "zwlr_layer_shell_v1"
 # Outside the list until it moves (doc_session.md revision 3, SN12; doc_own_stack.md section 6,
 # step 5): the greeter runs on cosmic-comp in greetd's own session, not under this compositor.
@@ -2302,7 +2302,7 @@ PACKAGES_JSON = "forge/config/packages.json"
 SETTINGS_CLIENT = "/usr/bin/cosmic-randr"
 # The compositor serves those globals and the layers, and enforces the list: no client to check.
 # Its installed path and its bin target both, so that another binary installed there is checked.
-SERVER = ("athanor-compositor", "/usr/bin/athanor-compositor")
+SERVER = ("athanor-sulphur", "/usr/bin/athanor-sulphur")
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
 LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
@@ -2313,40 +2313,40 @@ EXEC_ROOTS = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/")
 INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # A file of a path dependency that one public call alone enters counts for a target only when
-# code outside that crate makes the call, written as a method or as a path: athanor-compositor-
+# code outside that crate makes the call, written as a method or as a path: athanor-sulphur-
 # client binds the capture globals at the first `Client::capture`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
-# `Client::watch_keyboard_group`, athanor-compositor's accessibility manager at the first
+# `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
 # `Client::watch_accessibility`, and its tiling manager at the first `Client::watch_tiling`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs and workspace_tiling.rs hold every name of
 # them in the crate.
-ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
-             ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
-             "system/athanor-compositor-client/src/actions.rs":
-             ("system/athanor-compositor-client",
+ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
+             ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/actions.rs":
+             ("system/athanor-sulphur-client",
               re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
-             "system/athanor-compositor-client/src/keyboard_group.rs":
-             ("system/athanor-compositor-client",
+             "system/athanor-sulphur-client/src/keyboard_group.rs":
+             ("system/athanor-sulphur-client",
               re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)")),
-             "system/athanor-compositor-client/src/a11y.rs":
-             ("system/athanor-compositor-client",
+             "system/athanor-sulphur-client/src/a11y.rs":
+             ("system/athanor-sulphur-client",
               re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)")),
-             "system/athanor-compositor-client/src/workspace_tiling.rs":
-             ("system/athanor-compositor-client",
+             "system/athanor-sulphur-client/src/workspace_tiling.rs":
+             ("system/athanor-sulphur-client",
               re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)"))}
-CLIENT_CRATE = "system/athanor-compositor-client"
-# Where athanor-compositor-client names the privileged globals it binds at connect, at the
+CLIENT_CRATE = "system/athanor-sulphur-client"
+# Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
 # first watch of the accessibility state and at the first watch of the tiling. Each names at least
 # one, or the check no longer sees what the client binds.
-CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
-                "system/athanor-compositor-client/src/capture.rs": "at the first capture",
-                "system/athanor-compositor-client/src/actions.rs": "at the first window action",
-                "system/athanor-compositor-client/src/keyboard_group.rs":
+CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
+                "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
+                "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
+                "system/athanor-sulphur-client/src/keyboard_group.rs":
                 "at the first watch of the keyboard group",
-                "system/athanor-compositor-client/src/a11y.rs":
+                "system/athanor-sulphur-client/src/a11y.rs":
                 "at the first watch of the accessibility state",
-                "system/athanor-compositor-client/src/workspace_tiling.rs":
+                "system/athanor-sulphur-client/src/workspace_tiling.rs":
                 "at the first watch of the tiling"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
@@ -2625,7 +2625,7 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
             text = without_comments(without_test_items(read(root / where))) if (root / where).is_file() else ""
             if not any(re.search(rf"\b{i}\b", text) for i in privileged):
                 problems.append(f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
-                                f"longer sees what athanor-compositor-client binds {when}")
+                                f"longer sees what athanor-sulphur-client binds {when}")
     lines = collections.defaultdict(list)
     for line in read(root / ALLOW_LIST).splitlines():
         words = line.split()
@@ -3165,20 +3165,20 @@ def check_specs():
 # SH2: the compositor client is the protocol boundary; the theme tool generates COSMIC's
 # theme files. Nothing else may depend on COSMIC.
 COSMIC_ALLOWED = (
-    "system/athanor-compositor-client/",
+    "system/athanor-sulphur-client/",
     "forge/tools/calmo-cosmic-theme/",
     # The own compositor reads cosmic-comp's keyboard layouts (doc_own_stack.md decision 27).
-    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/xkb_config.rs",
     # It reads and writes cosmic-comp's colour filter and reads its accessibility_zoom, so both
     # sessions share one state, until cosmic-comp's session leaves the greeter
     # (doc_own_stack.md decision 28, doc_accessibility.md AX10).
-    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/screen_filter.rs",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/screen_filter.rs",
     # It reads the theme of the focus outline, read-only, until the store moves with the
     # compositor client (doc_own_stack.md decision 31).
-    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/focus_theme.rs",
     # Its volume, brightness and screen-reader keys call cosmic-settings-daemon until
     # athanor-osd and athanor-a11y take them (doc_own_stack.md decision 29).
-    "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
 COSMIC_APPLICATION_ID = re.compile(r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+\*@\.service\b")
@@ -3218,7 +3218,7 @@ def boundary_problems(root):
                 problems.append(f"{relative}: not valid TOML ({error})")
                 continue
             for crate in cosmic_dependencies(manifest):
-                problems.append(f"{relative} depends on {crate}: only athanor-compositor-client "
+                problems.append(f"{relative} depends on {crate}: only athanor-sulphur-client "
                                 f"may depend on COSMIC")
         for path in walk(root / base, ".rs"):
             relative = path.relative_to(root).as_posix()
@@ -3230,7 +3230,7 @@ def boundary_problems(root):
                 # family of units an allow-list line names for it.
                 if "com.system76" in COSMIC_APPLICATION_ID.sub("", line.split("//")[0]):
                     problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
-                                    f"through athanor-compositor-client")
+                                    f"through athanor-sulphur-client")
     return problems
 
 
@@ -3970,9 +3970,9 @@ SESSION_UNITS = {
     "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
-    # The own compositor (SN15): athanor-compositor-session starts it and waits on it, and its
+    # The own compositor (SN15): athanor-sulphur-session starts it and waits on it, and its
     # ExecStartPost= starts athanor-session.target, so it precedes the gate, which probes it.
-    "athanor-compositor.service": ("compositor", False, "script"),
+    "athanor-sulphur.service": ("compositor", False, "script"),
 }
 SESSION_TARGET = "athanor-session.target"
 # Shipped user units that are not session units, and why.

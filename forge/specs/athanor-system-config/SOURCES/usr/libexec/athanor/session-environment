@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 # session-environment - the user's language, region and cursor (doc_session.md SN2;
 # doc_languages.md LN6 and LN7; doc_accessibility.md AX9), sourced by athanor-session
-# (cosmic-comp's session) and by athanor-compositor-session (the own compositor's), so that
+# (cosmic-comp's session) and by athanor-sulphur-session (the own compositor's), so that
 # both sessions export the same values, which the import list carries into the user manager.
 # It defines functions and runs nothing.
 

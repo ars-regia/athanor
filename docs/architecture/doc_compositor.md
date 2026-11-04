@@ -39,7 +39,7 @@ scrolling layouts, window rules, gestures and the like are judged like any other
 shell: an entry in `shell-features.md` with its sources, approved or excluded by the maintainer
 (`doc_shell_standard.md`, ST3). Version 1 of the register has no surface for them; version 2
 proposes an eleventh surface, **Window management**. An approved entry is met, in order of
-preference, by cosmic-comp as it is, by its configuration through `athanor-compositor-client`
+preference, by cosmic-comp as it is, by its configuration through `athanor-sulphur-client`
 (SH2), by a patch proposed upstream, or by a patch of our own (CO3).
 
 **CO3. The patch set stays small, and each patch has an exit.**

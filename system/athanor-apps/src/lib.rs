@@ -23,7 +23,7 @@ pub mod timing;
 use std::rc::Rc;
 
 #[cfg(feature = "gtk")]
-use athanor_compositor_client::Client;
+use athanor_sulphur_client::Client;
 
 /// What the row needs from the program that shows it.
 #[cfg(feature = "gtk")]

@@ -16,7 +16,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was
   - Nothing is written to disk but the do-not-disturb switch (`src/dnd.rs`); the crash file of ST5 is specified and not built.
   - The unit sets `MemoryHigh=48M` and `MemoryMax=192M` around a budget of 16 MB PSS at rest (`data/athanor-shelld.service`, after `doc_bar.md`, section 5, item 17).
   - The bar's clock opens a `gtk4::Calendar` in a popover (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/clock.rs:146`).
-  - `athanor-compositor-client` binds `zcosmic_toplevel_info_v1` (`system/athanor-compositor-client/src/connection.rs:746`), which reports each window's fullscreen and activated states. Spike P4 found that cosmic-comp 1.8 withholds privileged globals only from clients inside a Wayland security context; a session service on the main socket receives them all.
+  - `athanor-sulphur-client` binds `zcosmic_toplevel_info_v1` (`system/athanor-sulphur-client/src/connection.rs:746`), which reports each window's fullscreen and activated states. Spike P4 found that cosmic-comp 1.8 withholds privileged globals only from clients inside a Wayland security context; a session service on the main socket receives them all.
 
 ## 2. Decisions
 
@@ -86,7 +86,7 @@ The `desktop-entry` hint and `app_name` are declared by the sender and may lie. 
 
 1. **manual:** the switch, until `until` when one is set (one hour, until 08:00, CC7);
 2. **schedule:** a daily window in local time, which may cross midnight, on the chosen days of the week (every day by default);
-3. **fullscreen:** a window that is fullscreen and activated on any output, observed by the bar, which already holds `athanor-compositor-client`, and reported to the daemon through `ReportFullscreen` (NC8); the headless daemon does not link that client, which connects through a `gdk::Display` (SH4). While no bar is connected the trigger is unavailable;
+3. **fullscreen:** a window that is fullscreen and activated on any output, observed by the bar, which already holds `athanor-sulphur-client`, and reported to the daemon through `ReportFullscreen` (NC8); the headless daemon does not link that client, which connects through a `gdk::Display` (SH4). While no bar is connected the trigger is unavailable;
 4. **screen sharing:** a capture session open in the portal backend, that is a non-empty `CaptureSessions` property of `os.athanor.Portal1`, which admits `athanor-shelld.service` to read it (`doc_portal.md` PT10).
 
 Rules of the state:

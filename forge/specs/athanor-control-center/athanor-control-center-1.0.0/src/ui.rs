@@ -4,7 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_compositor_client::{outputs, theme, Client};
+use athanor_sulphur_client::{outputs, theme, Client};
 use athanor_control_center::{anchor, focused_output, parse_page, Page, Side, GAP};
 use athanor_layout::loader::{Paths, Source};
 use athanor_style::appearance::{self, Appearance};

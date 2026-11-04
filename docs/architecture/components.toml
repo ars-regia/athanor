@@ -247,7 +247,7 @@ item = "LA1"
 purpose = "The Athanor launcher"
 
 [[component]]
-path = "forge/specs/athanor-compositor"
+path = "forge/specs/athanor-sulphur"
 kind = "rpm spec"
 area = "shell"
 status = "specified"
@@ -563,7 +563,7 @@ status = "missing"
 purpose = "The polkit subject check every system service uses"
 
 [[component]]
-path = "system/athanor-compositor-client"
+path = "system/athanor-sulphur-client"
 kind = "crate"
 area = "shell"
 status = "specified"

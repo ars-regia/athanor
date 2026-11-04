@@ -89,7 +89,7 @@ class WalkTest(unittest.TestCase):
             )
             self.assertEqual(len(presses), len([c for c in commands if "Quit" not in c]), compositor)
 
-    def test_orca_runs_in_orca_service_under_athanor_compositor(self):
+    def test_orca_runs_in_orca_service_under_athanor_sulphur(self):
         for compositor, prefix in [
             ("athanor", ["/repo/forge/test/shell/in-unit.sh", "orca.service", "/usr/bin/orca"]),
             ("cosmic", ["orca"]),

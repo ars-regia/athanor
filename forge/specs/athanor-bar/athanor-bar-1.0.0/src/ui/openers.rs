@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use athanor_compositor_client::Opener;
+use athanor_sulphur_client::Opener;
 use gtk4::prelude::*;
 
 use super::{Bar, Changed, ModuleUi};

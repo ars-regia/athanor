@@ -16,8 +16,8 @@ systemctl --user reset-failed
 # the scopes of the locker and the idle daemon, and its variables (doc_session.md, SN15).
 # The compositor's unit is stopped only where its package is installed: stopping a unit that
 # is not loaded fails, and would end this session.
-if [ -e /usr/lib/systemd/user/athanor-compositor.service ]; then
-    systemctl --user stop athanor-compositor.service
+if [ -e /usr/lib/systemd/user/athanor-sulphur.service ]; then
+    systemctl --user stop athanor-sulphur.service
 fi
 # shellcheck source=SCRIPTDIR/../libexec/athanor/session-components
 . /usr/libexec/athanor/session-components

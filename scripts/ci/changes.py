@@ -59,7 +59,7 @@ AREAS = {
         "forge/specs/athanor-greeter-ui/",
         "system/athanor-layout/",
         "forge/specs/athanor-layout-chooser/",
-        "system/athanor-compositor-client/",
+        "system/athanor-sulphur-client/",
         "system/athanor-i18n/",
         "forge/specs/athanor-shelld/",
         "forge/specs/athanor-bar/",

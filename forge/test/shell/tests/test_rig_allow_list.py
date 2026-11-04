@@ -8,7 +8,7 @@ from pathlib import Path
 
 SHELL = Path(__file__).resolve().parent.parent
 ROOT = SHELL.parent.parent.parent
-DATA = ROOT / "forge/specs/athanor-compositor/athanor-compositor-1.0.0/data"
+DATA = ROOT / "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data"
 RIG_LIST = SHELL / "rig-privileged-clients"
 
 

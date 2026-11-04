@@ -262,7 +262,7 @@ def compositor():
             "XDG_RUNTIME_DIR and WAYLAND_DISPLAY are not set: run matrix.py from inside the session"
         )
     exe = os.readlink(f"/proc/{peer_pid(str(pathlib.Path(runtime) / name))}/exe")
-    return ("pass" if exe == "/usr/bin/athanor-compositor" else "fail"), exe
+    return ("pass" if exe == "/usr/bin/athanor-sulphur" else "fail"), exe
 
 
 CHECKS = {

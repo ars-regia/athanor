@@ -69,5 +69,5 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # Each git dependency is added here with its exact URL. Smithay is taken at a pinned revision,
-# as niri and cosmic-comp take it (doc_own_stack.md OS3; forge/specs/athanor-compositor).
+# as niri and cosmic-comp take it (doc_own_stack.md OS3; forge/specs/athanor-sulphur).
 allow-git = ["https://github.com/Smithay/smithay"]

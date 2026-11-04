@@ -5,7 +5,7 @@
 # toolkit binary (task 6). Runs in the build stage of the rig: rig.sh no-gtk.
 set -euo pipefail
 
-crates=(athanor-apps athanor-compositor-client athanor-style athanor-dock)
+crates=(athanor-apps athanor-sulphur-client athanor-style athanor-dock)
 status=0
 for crate in "${crates[@]}"; do
     toolkit=()
@@ -27,6 +27,6 @@ packages=()
 for crate in "${crates[@]}"; do
     packages+=(-p "$crate")
 done
-features=(--no-default-features --features athanor-compositor-client/calloop --features athanor-dock/toolkit)
+features=(--no-default-features --features athanor-sulphur-client/calloop --features athanor-dock/toolkit)
 cargo clippy --locked "${features[@]}" "${packages[@]}" --all-targets -- -D warnings
 cargo test --locked "${features[@]}" "${packages[@]}"
