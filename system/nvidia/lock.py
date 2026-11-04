@@ -41,6 +41,7 @@ import argparse
 import functools
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import pathlib
@@ -148,8 +149,9 @@ def http_get(url):
             if error.code not in TRANSIENT or attempt == ATTEMPTS:
                 raise
             reason = f"HTTP {error.code}"
-        # After HTTPError, its subclass. A timeout or a reset during the read is not wrapped.
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        # After HTTPError, its subclass. A timeout, a reset or a body cut short during the read is
+        # not wrapped, and http.client's errors are not OSErrors.
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
             if attempt == ATTEMPTS:
                 raise
             reason = str(error)

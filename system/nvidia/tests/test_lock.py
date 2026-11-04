@@ -2,6 +2,7 @@
 
 import gzip
 import hashlib
+import http.client
 import io
 import pathlib
 import re
@@ -517,6 +518,10 @@ class HttpGet(unittest.TestCase):
         result, slept, calls = self.get(http_error(503), http_error(429), urllib.error.URLError("reset"),
                                         TimeoutError("read timed out"), b"body")
         self.assertEqual((result, slept, calls), (b"body", [15, 30, 60, 120], 5))
+
+    def test_a_body_cut_short_is_retried(self):
+        result, slept, calls = self.get(http.client.IncompleteRead(b"part"), b"body")
+        self.assertEqual((result, slept, calls), (b"body", [15], 2))
 
     def test_the_last_transient_failure_is_raised(self):
         result, slept, calls = self.get(*[http_error(500)] * 5)
