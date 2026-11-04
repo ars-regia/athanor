@@ -101,6 +101,10 @@ class PanickingMacrosTest(unittest.TestCase):
         src = "".join(f"fn f{i}() {{ {m}(x); }}\n" for i, m in enumerate(MACROS))
         self.assertEqual(self.counts(src), sorted(MACROS))
 
+    def test_a_macro_counts_with_any_delimiter_and_space(self):
+        src = "fn f() { assert! (a); unreachable! {}; todo![]; }\n"
+        self.assertEqual(self.counts(src), ["assert!(", "todo!(", "unreachable!("])
+
     def test_debug_assert_and_test_code_are_not_counted(self):
         src = (
             "fn f() { debug_assert!(a); debug_assert_eq!(a, b); debug_assert_ne!(a, b); }\n"

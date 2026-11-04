@@ -1946,10 +1946,11 @@ BUDGET = {
 
 
 def count_panic(code, k):
-    """The occurrences of `k` in `code`; a macro name does not match inside a longer one
-    (`assert!(` is not `debug_assert!(`)."""
-    if k[0].isalnum():
-        return len(re.findall(r"(?<![\w])" + re.escape(k), code))
+    """The occurrences of `k` in `code`. A macro name does not match inside a longer one
+    (`assert!(` is not `debug_assert!(`), and a macro counts with any delimiter and with
+    space before it (`assert! {`, `assert![`)."""
+    if k.endswith("!("):
+        return len(re.findall(r"(?<![\w])" + re.escape(k[:-1]) + r"\s*[(\[{]", code))
     return code.count(k)
 
 
@@ -2092,7 +2093,7 @@ def check_panics():
             # One finding per occurrence, so that scripts/ci/known-red.txt can list each and
             # a new one is red even while an old one is fixed.
             for at in where[k]:
-                r.fail(f"{at}: {k} over the budget of {budget}, propagate with `?`")
+                r.fail(f"{at}: {k} over the budget of {budget}, return an error instead (`?`)")
             r.note(f"{k}: {counts[k]} occorrenze, budget {budget}")
         elif counts[k] < budget:
             r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
