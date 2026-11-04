@@ -118,6 +118,12 @@ KERNEL_BUILD_PATHS=('forge/specs/azoth/*' '.github/workflows/kernel-build.yml' '
 # The files .github/workflows/kernel-bump.yml regenerates with the pins, except
 # system/Containerfile: a base bump is reviewed with its package delta (O8).
 NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/specs/azoth/nvidia/sources.sha256 system/nvidia/locks/open.lock system/nvidia/locks/legacy.lock)
+# A pull request that moves NVIDIA pins may also change the NVIDIA packaging that reads them and
+# the documents that describe it (a branch moving to another repository tree changes its lock and
+# lock.py together, #669): only the NVIDIA variants use the packaging, and the check builds them
+# after the merge. Only the files that read the pins and locks: never the keys, the mirror
+# scripts or athanor-nvidia-config.
+NVIDIA_PIN_COMPANIONS=(system/nvidia/lock.py system/nvidia/azoth-nvidia-kmod.spec system/nvidia/build-rpms.sh system/nvidia/gate.sh 'system/nvidia/tests/*' 'docs/*')
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
 # Kept by hand, not by kernel-bump.yml, but inputs of the kernel build like the pins
 # (build-inputs.py): a builder move changes them with the pins (clang 23 drops kernel-local's
@@ -407,7 +413,8 @@ resolve() {
 
 changed_files() { # changed_files BASE HEAD
   git cat-file -e "$1^{commit}" 2> /dev/null || retry git fetch --no-tags --depth=1 origin "$1"
-  git diff --name-only "$1" "$2"
+  # Both sides of a rename: a file moved out of a checked path still changed it.
+  git diff --name-only --no-renames "$1" "$2"
 }
 
 matches_any() { # matches_any PATH PATTERN...
@@ -546,7 +553,7 @@ check_plan() {
   while IFS= read -r file; do
     [[ -n $file ]] || continue
     matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" || only_kernel_pins=false
-    matches_any "$file" "${NVIDIA_PIN_FILES[@]}" || only_nvidia_pins=false
+    matches_any "$file" "${NVIDIA_PIN_FILES[@]}" "${NVIDIA_PIN_COMPANIONS[@]}" || only_nvidia_pins=false
   done <<< "$files"
   keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
   while IFS= read -r key; do
@@ -569,7 +576,7 @@ check_plan() {
         gpus='none nvidia' delta=true
         annotate warning "the legacy NVIDIA modules of azoth:$nvr are not published: the check builds the default and nvidia images only (ADR-0103 D24)"
       else
-        [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request"
+        [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request, with only the NVIDIA packaging and documents"
         grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
         gpus=none delta=true
         annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
