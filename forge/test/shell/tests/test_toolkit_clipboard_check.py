@@ -3,10 +3,30 @@
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import toolkit_clipboard_check as check
+
+
+class MenuTest(unittest.TestCase):
+    def walk(self, opener, *keys):
+        with unittest.mock.patch.object(check, "keys") as pressed:
+            check.menu(opener, *keys)
+        return [c.args for c in pressed.call_args_list]
+
+    def test_the_menu_key_opens_it_and_the_walk_follows(self):
+        self.assertEqual(
+            self.walk("Menu", "Down", "Return"),
+            [("-k", "Menu"), ("-k", "Down"), ("-k", "Return")],
+        )
+
+    def test_shift_f10_opens_it_with_shift_released(self):
+        self.assertEqual(
+            self.walk("F10", "Escape"),
+            [("-M", "shift", "-k", "F10", "-m", "shift"), ("-k", "Escape")],
+        )
 
 
 class ShownTest(unittest.TestCase):

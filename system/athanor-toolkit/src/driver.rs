@@ -2122,6 +2122,9 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
         Keysym::Return | Keysym::KP_Enter => !in_area,
         Keysym::space => !in_field,
         Keysym::c | Keysym::C | Keysym::x | Keysym::X | Keysym::v | Keysym::V => ctrl,
+        // The field's menu takes the keys once open: a repeat would reach it as a context-menu
+        // event of the item in focus.
+        Keysym::Menu | Keysym::F10 => true,
         _ => false,
     }
 }
@@ -2146,6 +2149,9 @@ mod tests {
         assert!(!once_per_press(Keysym::Return, false, true, true));
         assert!(once_per_press(Keysym::space, false, false, false));
         assert!(!once_per_press(Keysym::space, false, true, false));
+        // A held Menu key or Shift+F10 opens the field's menu once, and does not repeat into it.
+        assert!(once(Keysym::Menu, false));
+        assert!(once(Keysym::F10, false));
     }
 
     #[test]
