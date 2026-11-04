@@ -1727,3 +1727,27 @@ fn a_float_stays_on_top_while_a_layer_surface_holds_the_keyboard() {
     );
     run.stop();
 }
+
+/// A maximised tile that goes full screen and leaves it is maximised again, back under the
+/// windows D5 floats, whichever tile has the keyboard (D6).
+#[test]
+fn a_maximised_tile_leaving_full_screen_goes_under_a_float() {
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    run.state.focus(&pair.below);
+    run.state.maximise(&pair.above);
+    run.state.full_screen(&pair.above, None);
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+
+    run.state.leave_full_screen(&pair.above);
+
+    let maximised = pair.above.toplevel().expect("a toplevel").with_pending_state(|state| {
+        state.states.contains(
+            smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State::Maximized,
+        )
+    });
+    assert!(maximised, "maximised again");
+    assert!(level(&run, &float) > level(&run, &pair.above), "the float above it again");
+    run.stop();
+}
