@@ -349,8 +349,11 @@ pub enum PointerButton {
 /// serves on Wayland.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Clip {
-    /// The text copied or cut, for the clipboard.
+    /// The text copied, for the clipboard.
     Copy(String),
+    /// The text cut from the field, for the clipboard: the field deletes it with [`Ui::cut`]
+    /// once the clipboard took it, and keeps it when there is no clipboard to take it.
+    Cut(WidgetId, String),
     /// The text selected, for the primary selection.
     Select(String),
     /// The clipboard's text is to be pasted into the field, with [`Ui::paste`].
@@ -1360,6 +1363,21 @@ impl Ui {
         Some(Event::Edited(id))
     }
 
+    /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
+    /// field that composes, or whose selection is no longer `text`, keeps it.
+    pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets.get_mut(id)?.kind
+        else {
+            return None;
+        };
+        if field.is_composing() || field.selected_text().as_deref() != Some(text) {
+            return None;
+        }
+        field.insert(&mut self.text, "");
+        field.scroll_to_caret(&mut self.text);
+        Some(Event::Edited(id))
+    }
+
     /// Whether a press in a field is selecting its text, which follows the pointer until the
     /// release.
     pub(crate) fn selecting(&self) -> bool {
@@ -1480,14 +1498,10 @@ impl Ui {
                         self.clips.extend(field.selected_text().map(Clip::Copy));
                         false
                     }
-                    Key::Cut => match field.selected_text() {
-                        Some(text) => {
-                            self.clips.push(Clip::Copy(text));
-                            field.insert(cx, "");
-                            true
-                        }
-                        None => false,
-                    },
+                    Key::Cut => {
+                        self.clips.extend(field.selected_text().map(|t| Clip::Cut(id, t)));
+                        false
+                    }
                     Key::Paste => {
                         self.clips.push(Clip::Paste(id));
                         false
@@ -3020,8 +3034,13 @@ mod tests {
         assert_eq!(selected.last(), Some(&Clip::Select("bc".into())));
         assert_eq!(ui.key(Key::Copy), None, "a copy edits nothing");
         assert_eq!(ui.take_clips(), [Clip::Copy("bc".into())]);
-        assert_eq!(ui.key(Key::Cut), Some(Event::Edited(name)));
-        assert_eq!(ui.take_clips(), [Clip::Copy("bc".into())]);
+        // A cut leaves the text until the clipboard took it.
+        assert_eq!(ui.key(Key::Cut), None);
+        assert_eq!(ui.take_clips(), [Clip::Cut(name, "bc".into())]);
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        assert_eq!(ui.cut(name, "b"), None, "a text that is not the selection stays");
+        assert_eq!(ui.cut(Ui::ROOT, "bc"), None);
+        assert_eq!(ui.cut(name, "bc"), Some(Event::Edited(name)));
         assert_eq!(ui.field_text(name).as_deref(), Some("a"));
 
         // Paste asks the driver for the clipboard's text, which comes back through paste and

@@ -146,7 +146,14 @@ impl App {
         };
         for clip in surface.ui.take_clips() {
             match clip {
-                Clip::Copy(text) => self.copy(text),
+                Clip::Copy(text) => {
+                    self.copy(text);
+                }
+                Clip::Cut(widget, text) => {
+                    if self.copy(text.clone()) {
+                        self.cut(id, widget, &text);
+                    }
+                }
                 Clip::Select(text) => self.select(text),
                 Clip::Paste(widget) => self.paste(id, widget, false),
                 Clip::PastePrimary(widget) => self.paste(id, widget, true),
@@ -154,19 +161,32 @@ impl App {
         }
     }
 
-    /// Offers `text` on the clipboard, with the serial of the key that copied it.
-    fn copy(&mut self, text: String) {
+    /// Offers `text` on the clipboard, with the serial of the key that copied it; whether it
+    /// could.
+    fn copy(&mut self, text: String) -> bool {
         let clipboards = &mut self.clipboards;
         let (Some(manager), Some(device)) = (&clipboards.manager, &clipboards.device) else {
             eprintln!("athanor-toolkit: nothing copied: the compositor has no clipboard");
-            return;
+            return false;
         };
         let Some(serial) = self.shell.grab.serial() else {
-            return;
+            eprintln!("athanor-toolkit: nothing copied: no key or button to copy with");
+            return false;
         };
         let source = manager.create_copy_paste_source(&self.shell.qh, MIMES);
         source.set_selection(device, serial);
         clipboards.copied = Some((source, text));
+        true
+    }
+
+    /// Ends the cut of `text` from `widget` of `id`, which the clipboard took.
+    fn cut(&mut self, id: SurfaceId, widget: WidgetId, text: &str) {
+        let Some(surface) = self.shell.get_mut(id) else {
+            return;
+        };
+        if let Some(event) = surface.ui.cut(widget, text) {
+            self.changed(id, Some(event));
+        }
     }
 
     /// Offers `text` as the primary selection: the source already offered takes the new text,
