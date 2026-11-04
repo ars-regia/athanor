@@ -7,7 +7,6 @@
 #   #736: athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: at scale 1.5 cosmic-comp places a window at a fractional logical offset and athanor-compositor at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides
-#   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
 #   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
@@ -325,19 +324,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-power-light-1.0-rtl"
@@ -345,19 +334,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-power-light-1.5-de"
@@ -365,19 +344,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-power-dark-1.0-en"
@@ -385,19 +354,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-power-dark-1.0-rtl"
@@ -405,19 +364,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-power-dark-1.5-de"
@@ -425,19 +374,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-power-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-power-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-light-1.0-en"
@@ -445,19 +384,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-light-1.0-rtl"
@@ -465,19 +394,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-light-1.5-de"
@@ -485,19 +404,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-dark-1.0-en"
@@ -505,19 +414,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-dark-1.0-rtl"
@@ -525,19 +424,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-input-dark-1.5-de"
@@ -545,19 +434,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-input-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-input-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-light-1.0-en"
@@ -565,19 +444,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-light-1.0-rtl"
@@ -585,19 +454,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-light-1.5-de"
@@ -605,19 +464,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-dark-1.0-en"
@@ -625,19 +474,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-dark-1.0-rtl"
@@ -645,19 +484,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-calendar-dark-1.5-de"
@@ -665,19 +494,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-calendar-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-calendar-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-light-1.0-en"
@@ -685,19 +504,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-light-1.0-rtl"
@@ -705,19 +514,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-light-1.5-de"
@@ -725,19 +524,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-dark-1.0-en"
@@ -745,19 +534,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-dark-1.0-rtl"
@@ -765,19 +544,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-accessibility-dark-1.5-de"
@@ -785,19 +554,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-accessibility-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-accessibility-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-light-1.0-en"
@@ -805,19 +564,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-light-1.0-rtl"
@@ -825,19 +574,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-light-1.5-de"
@@ -845,19 +584,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-dark-1.0-en"
@@ -865,19 +594,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-dark-1.0-rtl"
@@ -885,19 +604,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tiling-dark-1.5-de"
@@ -905,19 +614,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tiling-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tiling-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-light-1.0-en"
@@ -925,19 +624,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-light-1.0-rtl"
@@ -945,19 +634,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-light-1.5-de"
@@ -965,19 +644,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-dark-1.0-en"
@@ -985,19 +654,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-dark-1.0-rtl"
@@ -1005,19 +664,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-popups-dark-1.5-de"
@@ -1025,19 +674,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-popups-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-popups-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-light-1.0-en"
@@ -1045,19 +684,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-light-1.0-rtl"
@@ -1065,19 +694,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-light-1.5-de"
@@ -1085,19 +704,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-dark-1.0-en"
@@ -1105,19 +714,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-dark-1.0-rtl"
@@ -1125,19 +724,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-notifications-dark-1.5-de"
@@ -1145,19 +734,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-notifications-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-notifications-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-light-1.0-en"
@@ -1165,19 +744,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-light-1.0-rtl"
@@ -1185,19 +754,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-light-1.5-de"
@@ -1205,19 +764,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-dark-1.0-en"
@@ -1225,19 +774,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-dark-1.0-rtl"
@@ -1245,19 +784,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-tray-dark-1.5-de"
@@ -1265,19 +794,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-tray-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-tray-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-light-1.0-en"
@@ -1285,19 +804,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-light-1.0-rtl"
@@ -1305,19 +814,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-light-1.5-de"
@@ -1325,19 +824,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-dark-1.0-en"
@@ -1345,19 +834,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-dark-1.0-rtl"
@@ -1365,19 +844,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-network-dark-1.5-de"
@@ -1385,19 +854,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-network-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-network-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-light-1.0-en"
@@ -1405,19 +864,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-light-1.0-rtl"
@@ -1425,19 +874,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-light-1.5-de"
@@ -1445,19 +884,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-dark-1.0-en"
@@ -1465,19 +894,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-dark-1.0-rtl"
@@ -1485,19 +904,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-bluetooth-dark-1.5-de"
@@ -1505,19 +914,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-bluetooth-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-bluetooth-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-light-1.0-en"
@@ -1525,19 +924,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-light-1.0-rtl"
@@ -1545,19 +934,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-light-1.5-de"
@@ -1565,19 +944,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-dark-1.0-en"
@@ -1585,19 +954,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-dark-1.0-rtl"
@@ -1605,19 +964,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-audio-dark-1.5-de"
@@ -1625,19 +974,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-audio-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-audio-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-light-1.0-en"
@@ -1645,19 +984,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-light-1.0-rtl"
@@ -1665,19 +994,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-light-1.5-de"
@@ -1685,19 +1004,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-dark-1.0-en"
@@ -1705,19 +1014,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-dark-1.0-rtl"
@@ -1725,19 +1024,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-battery-dark-1.5-de"
@@ -1745,19 +1034,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-battery-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-battery-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-light-1.0-en"
@@ -1765,19 +1044,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-light-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-light-1.0-rtl"
@@ -1785,19 +1054,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-light-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-light-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-light-1.5-de"
@@ -1805,19 +1064,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-light-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-light-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-dark-1.0-en"
@@ -1825,19 +1074,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-dark-1.0-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.0-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-dark-1.0-rtl"
@@ -1845,19 +1084,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-dark-1.0-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-dark-1.5-en"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.5-en"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-shield-dark-1.5-de"
@@ -1865,19 +1094,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "bar-shield-dark-1.5-de"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "bar-shield-dark-1.5-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.5-rtl"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "dock-light-1.0-en"
@@ -2185,29 +1404,14 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-float-top-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-top-visible-1o-1.5-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
 
 [[difference]]
-case = "layout-float-top-visible-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
@@ -2218,11 +1422,6 @@ issue = 744
 case = "layout-float-top-visible-2o-1.5-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
@@ -2235,29 +1434,14 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-bar-bottom-1o-1.5-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
@@ -2268,11 +1452,6 @@ issue = 744
 case = "layout-bar-bottom-2o-1.5-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
@@ -2285,29 +1464,14 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-minimal-top-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-top-none-1o-1.5-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
 
 [[difference]]
-case = "layout-minimal-top-none-1o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
@@ -2321,11 +1485,6 @@ issue = 736
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.5-land"
 cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none"
 issue = 744
 
@@ -2335,19 +1494,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-float-top-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-top-none-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-top-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-float-bottom-visible-1o-1.0-land"
@@ -2355,19 +1504,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-float-bottom-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-bottom-auto-hide-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-bottom-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-float-bottom-none-1o-1.0-land"
@@ -2375,19 +1514,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-float-bottom-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-bar-top-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-bar-top-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-minimal-top-visible-1o-1.0-land"
@@ -2395,19 +1524,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-minimal-top-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-top-auto-hide-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-minimal-top-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-minimal-bottom-visible-1o-1.0-land"
@@ -2415,19 +1534,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-minimal-bottom-visible-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-bottom-auto-hide-1o-1.0-land"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-minimal-bottom-auto-hide-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-minimal-bottom-none-1o-1.0-land"
@@ -2435,19 +1544,9 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-minimal-bottom-none-1o-1.0-land"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-top-visible-1o-1.0-port"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "layout-bar-bottom-1o-1.0-port"
@@ -2455,29 +1554,14 @@ cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clea
 issue = 736
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-minimal-top-none-1o-1.0-port"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
 
 [[difference]]
-case = "layout-minimal-top-none-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
-
-[[difference]]
 case = "layout-float-bottom-visible-1o-1.0-port"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
-
-[[difference]]
-case = "layout-float-bottom-visible-1o-1.0-port"
-cause = "the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve"
-issue = 739
 
 [[difference]]
 case = "bar-light-1.0-en"

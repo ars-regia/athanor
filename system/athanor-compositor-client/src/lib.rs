@@ -22,6 +22,7 @@ mod protocols;
 pub mod shortcuts;
 pub mod theme;
 mod unit;
+mod workspace_tiling;
 
 /// GLib's default main context has one owner at a time, and the tests of a binary run on
 /// threads of their own: a test that acquires the context holds this lock while it does.

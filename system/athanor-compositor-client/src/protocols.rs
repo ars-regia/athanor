@@ -92,3 +92,10 @@ pub mod keyboard_group {
 pub mod athanor_a11y {
     generated!("protocols/athanor-a11y-v1.xml", []);
 }
+
+pub mod workspace_tiling {
+    generated!(
+        "protocols/athanor-workspace-tiling-v1.xml",
+        [wayland_protocols::ext::workspace::v1]
+    );
+}

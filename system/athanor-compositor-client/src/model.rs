@@ -72,8 +72,8 @@ pub struct Workspace {
     pub id: WorkspaceId,
     pub name: String,
     pub active: bool,
-    /// `None` until the compositor reports it, and on compositors without COSMIC's
-    /// workspace extension.
+    /// `None` until the compositor reports it: cosmic-comp through COSMIC's workspace
+    /// extension, athanor-compositor after `Client::watch_tiling`.
     pub tiling: Option<Tiling>,
     /// The connector of the first output of the workspace's group, as GDK names it.
     pub output: Option<String>,
@@ -206,6 +206,11 @@ impl<K: Ord + Copy, T: Clone + PartialEq> Table<K, T> {
 
     pub(crate) fn pending_values(&mut self) -> impl Iterator<Item = &mut T> {
         self.pending.values_mut()
+    }
+
+    /// The copy a reader has seen, for a value that comes outside the double buffer.
+    pub(crate) fn committed(&mut self, key: &K) -> Option<&mut T> {
+        self.committed.get_mut(key)
     }
 
     /// Makes the pending copy current. `None` when nothing a reader can see changed.
