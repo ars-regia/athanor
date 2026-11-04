@@ -72,8 +72,8 @@ pub struct Workspace {
     pub id: WorkspaceId,
     pub name: String,
     pub active: bool,
-    /// `None` until the compositor reports it, and on compositors without COSMIC's
-    /// workspace extension.
+    /// `None` until the compositor reports it: cosmic-comp through COSMIC's workspace
+    /// extension, athanor-compositor after `Client::watch_tiling`.
     pub tiling: Option<Tiling>,
     /// The connector of the first output of the workspace's group, as GDK names it.
     pub output: Option<String>,

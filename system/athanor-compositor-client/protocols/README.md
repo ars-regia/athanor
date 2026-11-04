@@ -49,4 +49,5 @@ is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either. The client bin
 whether a workspace of ext-workspace-v1 is tiled, made by `athanor_workspace_tiling_manager_v1`
 for an `ext_workspace_handle_v1`, and the request that tiles it or floats it, served by
 athanor-compositor from `src/workspace_tiling.rs`. It is MIT, 2026 Athanor Forge, and it is not
-in `SHA256SUMS` either.
+in `SHA256SUMS` either. The client binds it in `src/workspace_tiling.rs` at the first
+`Client::watch_tiling`, and only under athanor-compositor (`Client::own_compositor`).
