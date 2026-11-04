@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import yaml
+
 AZOTH = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AZOTH))
 import bump  # noqa: E402
@@ -159,9 +161,15 @@ class BumpGroups(unittest.TestCase):
         )
 
     def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
-        workflow = (AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text()
-        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", workflow)
-        self.assertIn("if [[ $LOCKED != true ]]; then\n            outcome=FAIL", workflow)
+        jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]
+        steps = {step.get("name"): step for step in jobs["prep"]["steps"]}
+        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", steps["Toolchain lock for the new pins"]["run"])
+        for name in ("Build the kernel builder image", "Manifests for the new pins"):
+            self.assertEqual(steps[name]["if"], "${{ steps.lock.outputs.locked == 'true' }}", name)
+        prep = steps["Prep (signatures, patches, config gate)"]
+        self.assertEqual(prep["env"]["LOCKED"], "${{ steps.lock.outputs.locked }}")
+        self.assertRegex(prep["run"], r"if \[\[ \$LOCKED != true \]\]; then\s+outcome=FAIL")
+        self.assertEqual(jobs["pr"]["needs"], ["kernel", "prep"])
 
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")
