@@ -628,8 +628,8 @@ impl State {
 
     /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
     /// its place among those of its layer: the tiles; the windows D5 floats, and any other that
-    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, when
-    /// the user gave it to a client other than a full-screen window's. A window's dialogs stand
+    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, which
+    /// the user or the full-screen application gave it. A window's dialogs stand
     /// just above it, in its layer, but those of a tile float above the tiles as windows of their
     /// own. The windows of the other workspaces keep their places. Every change of state that
     /// moves a window between layers ends here, so that the order is one rule, not a raise on
@@ -647,11 +647,6 @@ impl State {
         let index = |surface: &WlSurface| {
             here.iter()
                 .position(|kept| kept.toplevel().is_some_and(|t| t.wl_surface() == surface))
-        };
-        let client = |kept: &Window| {
-            kept.toplevel()
-                .and_then(|t| t.wl_surface().client())
-                .map(|client| client.id())
         };
         let parent: Vec<Option<usize>> = here
             .iter()
@@ -675,16 +670,11 @@ impl State {
             at
         };
         let roots: Vec<usize> = (0..here.len()).map(root).collect();
-        let full_clients: Vec<_> = (0..here.len())
-            .filter(|at| full[*at])
-            .filter_map(|at| client(&here[at]))
-            .collect();
         let focused = self
             .seat
             .get_keyboard()
             .and_then(|keyboard| keyboard.current_focus())
-            .and_then(|surface| index(&surface))
-            .filter(|at| client(&here[*at]).is_none_or(|own| !full_clients.contains(&own)));
+            .and_then(|surface| index(&surface));
         let layer = |at: usize| {
             if full[at] {
                 2

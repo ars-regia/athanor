@@ -1622,3 +1622,26 @@ fn a_tiled_workspace_keeps_its_layers() {
     layered(&run, "a float focused", &floating);
     run.stop();
 }
+
+/// A full-screen application's own float that takes the keyboard stands above it: the float
+/// with the keyboard is on top, whichever client it belongs to.
+#[test]
+fn a_full_screen_apps_own_float_with_the_keyboard_is_on_top() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let float = pair.upper.server_window(&run, &surface);
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float with the keyboard is on top");
+    assert!(level(&run, &pair.above) > level(&run, &pair.below), "over the other tile");
+    run.stop();
+}
