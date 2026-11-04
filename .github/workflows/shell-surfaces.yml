@@ -155,6 +155,25 @@ jobs:
       - name: The toolkit's GPU tests on llvmpipe
         run: bash forge/test/shell/rig.sh toolkit-gpu
 
+  toolkit-clipboard:
+    name: The toolkit's text field against wl-clipboard
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rig image
+        run: bash forge/test/shell/rig.sh build-image
+      - name: Build and test the toolkit
+        run: bash forge/test/shell/rig.sh build-toolkit
+      - name: Copy, cut, paste and the primary selection under cosmic-comp
+        run: bash forge/test/shell/rig.sh toolkit-clipboard
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-toolkit-clipboard
+          path: .scratch/shell-rig/*.log
+
   shelld:
     name: Shell daemon, notifications and the tray watcher
     needs: lint
