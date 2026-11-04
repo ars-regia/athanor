@@ -8,7 +8,7 @@ use accesskit::{
 };
 use std::ops::Range;
 
-/// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
+/// The AccessKit node id of a widget.
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(id as u64)
 }
@@ -264,6 +264,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
 
 /// The visible widgets that `update` leaves without a usable node: missing, of an unknown role,
 /// or focusable without a name or with a blank one.
+#[cfg(test)]
 pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
     (0..ui.len())
         .filter(|&id| ui.is_visible(id))
@@ -280,7 +281,7 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 
 impl Ui {
     /// Carries out an assistive technology's request on the widget it names.
-    pub fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
+    pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
         let id = usize::try_from(request.target_node.0)
             .ok()
             .filter(|&id| id < self.len() && self.is_visible(id))?;

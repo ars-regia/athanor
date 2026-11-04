@@ -7,19 +7,21 @@
 // The chooser's tree is shared by the example and the tests, which name the crate.
 extern crate self as athanor_toolkit;
 
-pub mod a11y;
+pub(crate) mod a11y;
 pub mod driver;
-pub mod focus;
-pub mod icon;
+pub(crate) mod focus;
 #[cfg(feature = "gpu")]
-pub mod gpu;
+pub(crate) mod gpu;
+mod icon;
 mod popup;
-pub mod render;
-pub mod text;
-pub mod theme;
-pub mod widget;
+pub(crate) mod render;
+pub(crate) mod text;
+mod theme;
+mod widget;
 
-pub use icon::{IconTheme, Image};
+pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
+pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
+pub use render::Error;
 pub use theme::{Rgba, Theme};
 pub use widget::{
     Event, Key, Kind, PointerButton, Rect, Slider, Ui, Widget, WidgetId, WindowButton,
