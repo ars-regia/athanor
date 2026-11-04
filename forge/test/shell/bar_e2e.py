@@ -14,6 +14,8 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
   favourites file and whose row follows the pinned state;
 - the accessibility popover offers high contrast, which writes the GNOME key and COSMIC's
   built themes, and a failed write of the second leaves the switch on (VL4);
+- the accessibility popover offers the screen reader, whose switch writes its GNOME key
+  (doc_accessibility.md AX2), whatever at-spi2-core serves on org.a11y.Status;
 - the power menu asks first, with Cancel focused, and calls logind only on confirmation;
 - a logind that never answers hides the action, logs it and leaves the bar running with
   the other actions still offered;
@@ -231,6 +233,15 @@ def high_contrast_files():
 def high_contrast_key():
     return subprocess.run(
         ["gsettings", "get", "org.gnome.desktop.a11y.interface", "high-contrast"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def screen_reader_key():
+    return subprocess.run(
+        ["gsettings", "get", "org.gnome.desktop.a11y.applications", "screen-reader-enabled"],
         capture_output=True,
         text=True,
         check=True,
@@ -471,6 +482,20 @@ def main():
     # Switched back off so the checks after this one run in the normal, non-high-contrast
     # variant, same as every other capture in the rig.
     check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
+
+    # at-spi2-core 2.61 dropped org.a11y.Status.ScreenReaderEnabled; the row reads the key.
+    check(
+        "Screen reader shows",
+        wait_for(lambda: labelled(app, Atspi, "check box", "Screen reader"), 5),
+    )
+    for value in ("true", "false"):
+        switches = labelled(app, Atspi, "check box", "Screen reader")
+        if switches:
+            switches[0].do_action(0)
+        check(
+            f"the screen reader switch writes {value} to its GNOME key within 2 s",
+            wait_for(lambda value=value: screen_reader_key() == value, 2),
+        )
 
     # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
     # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
