@@ -1136,13 +1136,18 @@ impl State {
     /// tiles, with or without the keyboard, and any other restores the other maximised
     /// windows there (D6), takes its tile, behind the one focused last when it did not take the
     /// keyboard, and stands there at once unless it asked to be maximised or full screen; it was
-    /// born tiled. On a floating one, a window sent a tile in its initial configure before the
-    /// toggle went off is sent D8's floating configure and placed at the size it answers with.
+    /// born tiled. A window sent a tile in its initial configure that takes none, on a floating
+    /// workspace since the toggle went off or one D5 floats since it set a parent or its size
+    /// limits, is sent D8's floating configure and placed at the size it answers with.
     pub(crate) fn tile_placed(&mut self, window: &Window, focused: bool) {
         let Some(id) = on(window) else {
             return;
         };
-        if !self.is_tiled(id) {
+        let floats = self.is_tiled(id) && crate::handlers::floats(window);
+        if floats {
+            self.raise_float(window);
+        }
+        if !self.is_tiled(id) || floats {
             let Some(toplevel) = window.toplevel() else {
                 return;
             };
@@ -1159,10 +1164,6 @@ impl State {
                 let serial = toplevel.send_pending_configure();
                 place_again(window, serial);
             }
-            return;
-        }
-        if crate::handlers::floats(window) {
-            self.raise_float(window);
             return;
         }
         let maximised: Vec<Window> = self

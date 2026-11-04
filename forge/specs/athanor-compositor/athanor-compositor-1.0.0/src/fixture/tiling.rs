@@ -1441,3 +1441,27 @@ fn a_focused_full_screen_tile_stays_above_a_float() {
     assert!(level(&run, &window) > level(&run, &pair.below), "above the other tile");
     run.stop();
 }
+
+/// A window sent a tile in its initial configure that D5 floats by its first buffer is sent
+/// D8's floating configure: no tiled states, and a size of its own choosing.
+#[test]
+fn a_window_that_floats_by_its_first_buffer_is_sent_no_tile() {
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    surface.commit();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    let (width, height, _) = new.redraw(&mut run);
+    assert!(width > 0 && height > 0, "a tile in the initial configure");
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "the floating configure");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(geometry(&run, &window).size, (WIDTH, HEIGHT).into());
+    run.stop();
+}
