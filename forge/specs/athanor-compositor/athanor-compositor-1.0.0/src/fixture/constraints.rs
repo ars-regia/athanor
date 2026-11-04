@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::bindings::Action;
+use smithay::wayland::pointer_constraints::with_pointer_constraint;
 use wayland_client::protocol::{wl_region, wl_subcompositor, wl_subsurface};
 use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
     zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
@@ -214,32 +215,43 @@ impl Game {
         (confined, log)
     }
 
-    /// A 40 by 40 pixel subsurface in the window's middle, and its surface in the compositor.
-    fn subsurface(&mut self, run: &mut Running) -> (wl_subsurface::WlSubsurface, WlSurface) {
+    /// A subsurface of `size` at `at` on the window's surface, and its surface in the
+    /// compositor.
+    fn subsurface(
+        &mut self,
+        run: &mut Running,
+        at: (i32, i32),
+        size: (i32, i32),
+    ) -> (wl_subsurface::WlSubsurface, WlSurface) {
         let compositor: wl_compositor::WlCompositor = self.local.bind(4);
         let subcompositor: wl_subcompositor::WlSubcompositor = self.local.bind(1);
         let shm: wl_shm::WlShm = self.local.bind(1);
         let qh = self.local.queue.handle();
         let child = compositor.create_surface(&qh, ());
         let subsurface = subcompositor.get_subsurface(&child, &self.surface, &qh, ());
-        subsurface.set_position(WIDTH / 2 - 20, HEIGHT / 2 - 20);
-        let (buffer, _) = self.local.buffer(&shm, 40, 40, [0, 0, 255, 255]);
+        subsurface.set_position(at.0, at.1);
+        let (buffer, _) = self.local.buffer(&shm, size.0, size.1, [0, 0, 255, 255]);
         child.attach(Some(&buffer), 0, 0);
         child.commit();
         self.surface.commit();
         self.settle(run);
-        let middle = run
-            .state
-            .space
-            .element_location(&self.window)
-            .expect("a location")
-            .to_f64()
-            + Point::from((WIDTH / 2, HEIGHT / 2)).to_f64();
+        let middle =
+            self.origin(run) + Point::from((at.0 + size.0 / 2, at.1 + size.1 / 2)).to_f64();
         let on = run.state.surface_under(middle).map(|(surface, _)| surface);
         let server = on
             .filter(|on| *on != self.server && on.client().map(|c| c.id()) == self.local.id)
-            .expect("the subsurface is in the window's middle");
+            .expect("the subsurface is where it was put");
         (subsurface, server)
+    }
+
+    /// Where the window's surface is in the space.
+    fn origin(&self, run: &Running) -> Point<f64, Logical> {
+        let location = run
+            .state
+            .space
+            .element_location(&self.window)
+            .expect("a location");
+        (location - self.window.geometry().loc).to_f64()
     }
 
     /// The pointer's location in the compositor.
@@ -696,7 +708,8 @@ fn middle(local: &mut Local) -> wl_region::WlRegion {
     region
 }
 
-/// A confined pointer moves inside its region and never out of it.
+/// A confined pointer moves inside its region and never out of it: a motion that would take it
+/// out stops at the region's edge.
 #[test]
 fn a_confined_pointer_stays_in_its_region() {
     let mut run = Running::start(None);
@@ -708,9 +721,11 @@ fn a_confined_pointer_stays_in_its_region() {
     let inside = game.at + Point::from((5.0, 5.0));
     assert_eq!(Game::location(&run), inside, "it moves inside the region");
     Game::nudge(&mut run, (20.0, 0.0));
-    assert_eq!(Game::location(&run), inside, "and not out of it");
+    let right = Point::from((game.at.x + 9.0, inside.y));
+    assert_eq!(Game::location(&run), right, "and to its edge, not out of it");
     Game::nudge(&mut run, (0.0, -40.0));
-    assert_eq!(Game::location(&run), inside, "on no side");
+    let corner = Point::from((right.x, game.at.y - 10.0));
+    assert_eq!(Game::location(&run), corner, "on any side");
     run.stop();
 }
 
@@ -751,7 +766,8 @@ fn a_confined_pointer_stays_on_the_outputs() {
 fn a_lock_holds_over_a_subsurface() {
     let mut run = Running::start(None);
     let mut game = Game::start(&mut run);
-    let (_subsurface, child) = game.subsurface(&mut run);
+    let (_subsurface, child) =
+        game.subsurface(&mut run, (WIDTH / 2 - 20, HEIGHT / 2 - 20), (40, 40));
     run.state.pointer_to(game.at, InputTime::now());
     let pointer = run.state.seat.get_pointer().expect("a pointer");
     assert_eq!(
@@ -766,23 +782,18 @@ fn a_lock_holds_over_a_subsurface() {
     run.stop();
 }
 
-/// Known limit, pinned (`State::refresh_constraint`): a confined pointer that moves from its
-/// window onto the window's subsurface stays on it, but Smithay's leave of the window ends the
-/// confinement first: a persistent one is confined again, a oneshot one has ended.
+/// A confined pointer that moves from its window onto the window's subsurface, over the
+/// window, stays confined, a oneshot confinement as well: the confinement keeps the pointer's
+/// focus on the window's surface (`State::pointer_target`), which it was made for.
 #[test]
-fn a_move_onto_a_subsurface_reconfines() {
+fn a_move_onto_a_subsurface_keeps_a_confinement() {
     let mut run = Running::start(None);
     let mut game = Game::start(&mut run);
-    let (_subsurface, child) = game.subsurface(&mut run);
+    let (_subsurface, _child) =
+        game.subsurface(&mut run, (WIDTH / 2 - 20, HEIGHT / 2 - 20), (40, 40));
     let middle = game.at;
     let pointer = run.state.seat.get_pointer().expect("a pointer");
-    for (lifetime, expected) in [
-        (
-            Lifetime::Persistent,
-            &["confined", "unconfined", "confined"][..],
-        ),
-        (Lifetime::Oneshot, &["confined", "unconfined"][..]),
-    ] {
+    for lifetime in [Lifetime::Persistent, Lifetime::Oneshot] {
         game.at = middle - Point::from((WIDTH / 2 - 10, HEIGHT / 2 - 10)).to_f64();
         run.state.pointer_to(game.at, InputTime::now());
         assert_eq!(
@@ -794,23 +805,127 @@ fn a_move_onto_a_subsurface_reconfines() {
         game.wait(&mut run, &log, &["confined"], "confined");
         let delta = middle - game.at;
         Game::nudge(&mut run, (delta.x, delta.y));
+        assert_eq!(Game::location(&run), middle, "{lifetime:?}: onto the subsurface");
+        game.settle(&mut run);
+        assert_eq!(events(&log), ["confined"], "{lifetime:?}: still confined");
+        let active = with_pointer_constraint(&game.server, &pointer, |constraint| {
+            constraint.is_some_and(|constraint| constraint.is_active())
+        });
+        assert!(active, "{lifetime:?}: the confinement is active");
         assert_eq!(
             pointer.current_focus(),
-            Some(child.clone()),
-            "{lifetime:?}: onto the subsurface"
+            Some(game.server.clone()),
+            "{lifetime:?}: the window keeps the pointer"
         );
-        game.settle(&mut run);
-        assert_eq!(events(&log), expected, "{lifetime:?}");
         confined.destroy();
         game.settle(&mut run);
     }
     run.stop();
 }
 
+/// A confined pointer stays on its window's surface: a subsurface beside the window, as a
+/// decoration drawn by libdecor is, is no place for it, and a motion towards one stops at the
+/// window's edge, not short of it, with the confinement and the pointer's focus kept.
+#[test]
+fn a_confined_pointer_stops_at_its_surface_edge() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_subsurface, _border) = game.subsurface(&mut run, (WIDTH, 0), (20, HEIGHT));
+    let origin = game.origin(&run);
+    game.at = origin + Point::from((WIDTH - 10, HEIGHT / 2)).to_f64();
+    run.state.pointer_to(game.at, InputTime::now());
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert_eq!(
+        pointer.current_focus(),
+        Some(game.server.clone()),
+        "the pointer is on the window"
+    );
+    let (_confined, log) = game.confine(None, Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    Game::nudge(&mut run, (25.0, 3.0));
+    let edge = Point::from((origin.x + f64::from(WIDTH - 1), game.at.y + 3.0));
+    assert_eq!(Game::location(&run), edge, "it stops at the window's edge");
+    game.settle(&mut run);
+    assert_eq!(events(&log), ["confined"], "still confined");
+    assert_eq!(
+        pointer.current_focus(),
+        Some(game.server.clone()),
+        "the window keeps the pointer"
+    );
+    run.stop();
+}
+
+/// A confined pointer stays in its window's input region, which the confinement's area is
+/// intersected with: a motion out of an input region inset from the window's edge, as a
+/// client that draws its shadow does, stops at the input region's edge.
+#[test]
+fn a_confined_pointer_stops_at_its_input_region_edge() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let compositor: wl_compositor::WlCompositor = game.local.bind(4);
+    let input = compositor.create_region(&game.local.queue.handle(), ());
+    input.add(10, 10, WIDTH - 20, HEIGHT - 20);
+    game.surface.set_input_region(Some(&input));
+    game.surface.commit();
+    game.settle(&mut run);
+    let origin = game.origin(&run);
+    let (_confined, log) = game.confine(None, Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    Game::nudge(&mut run, (150.0, 3.0));
+    let edge = Point::from((origin.x + f64::from(WIDTH - 11), game.at.y + 3.0));
+    assert_eq!(Game::location(&run), edge, "it stops at the input region's edge");
+    assert_eq!(events(&log), ["confined"], "still confined");
+    run.stop();
+}
+
+/// A confined pointer stays out of a hole in its region: a motion into one stops at the
+/// hole's nearest edge.
+#[test]
+fn a_confined_pointer_stops_at_a_hole_in_its_region() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let compositor: wl_compositor::WlCompositor = game.local.bind(4);
+    let region = compositor.create_region(&game.local.queue.handle(), ());
+    region.add(0, 0, WIDTH, HEIGHT);
+    region.subtract(WIDTH / 2 + 5, 0, 10, HEIGHT);
+    let (_confined, log) = game.confine(Some(&region), Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    Game::nudge(&mut run, (7.0, 2.0));
+    let edge = Point::from((game.at.x + 4.0, game.at.y + 2.0));
+    assert_eq!(Game::location(&run), edge, "it stops at the hole's edge");
+    run.stop();
+}
+
+/// A confinement that activates while the pointer is on a subsurface of its window gives the
+/// pointer's focus to the window's surface at once, as "confined" promises: a click before the
+/// next motion goes to the window.
+#[test]
+fn a_confinement_over_a_subsurface_takes_the_focus() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_subsurface, child) =
+        game.subsurface(&mut run, (WIDTH / 2 - 20, HEIGHT / 2 - 20), (40, 40));
+    run.state.pointer_to(game.at, InputTime::now());
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert_eq!(
+        pointer.current_focus(),
+        Some(child),
+        "the pointer is on the subsurface"
+    );
+    let (_confined, log) = game.confine(None, Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined over the subsurface");
+    assert_eq!(
+        pointer.current_focus(),
+        Some(game.server.clone()),
+        "the window has the pointer"
+    );
+    run.stop();
+}
+
 /// Under a lock, a virtual pointer's absolute motion moves the pointer not, and the window is
 /// sent the move from where the same device last was: nothing at a device's first sample, and
 /// nothing at the first sample of a pointer made after one is gone. Under a confinement it
-/// does not take the pointer out of the region.
+/// does not take the pointer out of the region, and one aimed out of it stops at its edge.
 #[test]
 fn an_absolute_motion_keeps_a_lock_and_a_confinement() {
     let mut run = Running::start(None);
@@ -895,7 +1010,8 @@ fn an_absolute_motion_keeps_a_lock_and_a_confinement() {
     point(&mut game, &mut run, &second, inside);
     assert!(near(&run, inside), "it moves inside the region");
     point(&mut game, &mut run, &second, at + Point::from((60.0, 5.0)));
-    assert!(near(&run, inside), "and not out of it");
+    let edge = at + Point::from((9.0, 5.0));
+    assert!(near(&run, edge), "and to its edge, not out of it");
     run.stop();
 }
 
@@ -1060,7 +1176,8 @@ fn a_pens_motion_keeps_a_lock() {
     run.stop();
 }
 
-/// A pen moves the pointer as any absolute device does: a confined pointer stays in its region.
+/// A pen moves the pointer as any absolute device does: a confined pointer stays in its region,
+/// at its edge when the pen goes out of it.
 #[test]
 fn a_pens_motion_keeps_a_confinement() {
     let mut run = Running::start(None);
@@ -1070,7 +1187,8 @@ fn a_pens_motion_keeps_a_confinement() {
     let (_confined, log) = game.confine(Some(&region), Lifetime::Persistent);
     game.wait(&mut run, &log, &["confined"], "confined");
     let inside = at + Point::from((5.0, 5.0));
-    for (to, stays) in [(inside, inside), (at + Point::from((60.0, 5.0)), inside)] {
+    let edge = at + Point::from((9.0, 5.0));
+    for (to, stays) in [(inside, inside), (at + Point::from((60.0, 5.0)), edge)] {
         run.state.tool_motion(
             "pen".into(),
             &tool,

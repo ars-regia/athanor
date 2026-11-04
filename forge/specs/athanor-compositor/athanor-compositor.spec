@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        16%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -53,6 +53,13 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- A confined pointer keeps its confinement, a oneshot one included, when it moves over a
+  subsurface of its window: the window keeps the pointer's focus, and the pointer stays on
+  the window's own surface and stops at the edge of its input region, or the region's,
+  instead of short of it; a confinement that activates over a subsurface gives the window
+  the pointer's focus at once (#860).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - Tile the windows of a workspace while its tiling is on, each new window beside the one
   focused last, with gaps of 8, and return each to its floating place when it is turned
