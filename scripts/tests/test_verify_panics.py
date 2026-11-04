@@ -6,6 +6,7 @@ import importlib.util
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
 spec = importlib.util.spec_from_file_location("verify", SCRIPT)
@@ -80,6 +81,38 @@ class WithoutTestItemsTest(unittest.TestCase):
             "#[cfg(test)]\nmatch x { _ => y.unwrap(), }\n"
         )
         self.assertNotIn("unwrap", kept)
+
+
+class PanickingMacrosTest(unittest.TestCase):
+    """`assert!` and the other macros that panic are counted as code outside tests, a
+    `debug_assert!` is not, and a test item is excluded as before."""
+
+    def counts(self, src):
+        with (
+            mock.patch.object(verify, "rust_files", lambda: [pathlib.Path("a.rs")]),
+            mock.patch.object(verify, "read", lambda p: src),
+            mock.patch.object(verify, "BUDGET", {k: 0 for k in MACROS}),
+        ):
+            res = verify.check_panics()
+        return sorted(p.split(": ")[1].split(" over")[0] for p in res.problems)
+
+    def test_each_panicking_macro_is_counted(self):
+        self.assertLessEqual(set(MACROS), set(verify.BUDGET))
+        src = "".join(f"fn f{i}() {{ {m}(x); }}\n" for i, m in enumerate(MACROS))
+        self.assertEqual(self.counts(src), sorted(MACROS))
+
+    def test_debug_assert_and_test_code_are_not_counted(self):
+        src = (
+            "fn f() { debug_assert!(a); debug_assert_eq!(a, b); debug_assert_ne!(a, b); }\n"
+            "#[cfg(test)]\nmod tests { fn t() { assert!(a); assert_eq!(a, b); todo!(); } }\n"
+            "fn g() { // assert!(a)\n}\n"
+        )
+        self.assertEqual(self.counts(src), [])
+
+
+MACROS = (
+    "assert!(", "assert_eq!(", "assert_ne!(", "unreachable!(", "todo!(", "unimplemented!(",
+)
 
 
 if __name__ == "__main__":
