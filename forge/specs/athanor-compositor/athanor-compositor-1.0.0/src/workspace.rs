@@ -934,6 +934,7 @@ impl State {
                 self.go_to(&window, tile.loc, serial);
             }
         }
+        self.restack(Some(id));
     }
 
     /// Moves `window` to `at`: at the commit that answers the configure of `serial` when there is
@@ -1009,8 +1010,9 @@ impl State {
 
     /// A window drawn again, or brought back: it takes a tile if its workspace is tiled.
     pub(crate) fn tile_shown(&mut self, window: &Window) {
-        if let Some(id) = self.enter_tile(window, false) {
-            self.tile_layout(id);
+        match self.enter_tile(window, false) {
+            Some(id) => self.tile_layout(id),
+            None => self.restack(on(window)),
         }
     }
 
@@ -1025,46 +1027,10 @@ impl State {
     }
 
     /// A tile that a change of its parent or its size limits makes one D5 floats: it leaves its
-    /// tree, as `leave_tile` takes it out, and stands above the tiles.
+    /// tree, as `leave_tile` takes it out, and the layout's `restack` stands it above the tiles.
     pub(crate) fn float_tile(&mut self, window: &Window) {
         if self.is_tile(window) && crate::handlers::floats(window) {
             self.leave_tile(window);
-            self.raise_float(window);
-        }
-    }
-
-    /// Raises `window`, which D5 floats, over the tiles of its workspace; a full-screen tile there
-    /// is raised again over it, with its own dialogs (D6).
-    fn raise_float(&mut self, window: &Window) {
-        let id = on(window);
-        let full_screen: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|kept| on(kept) == id && crate::state::is_full_screen(kept))
-            .cloned()
-            .collect();
-        self.space.raise_element(window, false);
-        for tile in full_screen {
-            self.raise_full_screen_tile(&tile);
-        }
-    }
-
-    /// Raises the windows D5 floats on the workspace of `window`, a tile, over it, in their
-    /// order: a tile never covers them. A full-screen tile stays above them (D6), and a
-    /// maximised one under them.
-    pub(crate) fn keep_floats_above(&mut self, window: &Window) {
-        if !self.is_tile(window) || crate::state::is_full_screen(window) {
-            return;
-        }
-        let id = on(window);
-        let floats: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|kept| on(kept) == id && crate::handlers::floats(kept))
-            .cloned()
-            .collect();
-        for float in &floats {
-            self.space.raise_element(float, false);
         }
     }
 
@@ -1095,14 +1061,13 @@ impl State {
     }
 
     /// After `restore` or `leave_full_screen` sent a tile back to its kept geometry: the
-    /// layout's configure and move replace those (D6), and the windows D5 floats go back above
-    /// it.
+    /// layout's configure and move replace those (D6), and its `restack` puts the windows D5
+    /// floats back above it.
     pub(crate) fn back_to_tile(&mut self, window: &Window) {
         if self.is_tile(window) {
             if let Some(id) = on(window) {
                 self.tile_layout(id);
             }
-            self.keep_floats_above(window);
         }
     }
 
@@ -1150,7 +1115,7 @@ impl State {
         };
         let floats = self.is_tiled(id) && crate::handlers::floats(window);
         if floats {
-            self.raise_float(window);
+            self.restack(Some(id));
         }
         if !self.is_tiled(id) || floats {
             let Some(toplevel) = window.toplevel() else {
@@ -1193,7 +1158,6 @@ impl State {
         if self.enter_tile(window, !focused).is_none() {
             return;
         }
-        self.keep_floats_above(window);
         if kept_before(window).is_none() {
             let tile = self
                 .output_of_workspace(id)

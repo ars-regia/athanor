@@ -1558,3 +1558,67 @@ fn a_float_placed_under_a_full_screen_tile_stays_under_it() {
     assert!(level(&run, &float) > level(&run, &pair.below), "above the other tile");
     run.stop();
 }
+
+/// Asserts that the stack holds each of `layers`' windows in the order of their layers: the
+/// tiles 0, the windows D5 floats 1, the full-screen windows 2 (D6), a float with the keyboard 3.
+fn layered(run: &Running, step: &str, layers: &[(&Window, u8)]) {
+    let order: Vec<u8> = stack(run)
+        .iter()
+        .filter_map(|kept| layers.iter().find(|(window, _)| *window == kept))
+        .map(|(_, layer)| *layer)
+        .collect();
+    assert_eq!(order.len(), layers.len(), "{step}: every window is in the stack");
+    assert!(
+        order.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{step}: the layers, bottom to top, are {order:?}"
+    );
+}
+
+/// The windows of a tiled workspace keep their layers through every change of state: the
+/// tiles under the windows D5 floats, those under a full-screen window and its dialogs, and a
+/// float the user focuses on top.
+#[test]
+fn a_tiled_workspace_keeps_its_layers() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (below, above) = (pair.below.clone(), pair.above.clone());
+    layered(&run, "tiles", &[(&below, 0), (&above, 0)]);
+
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+    pair.upper.redraw(&mut run);
+    let dialog = pair.upper.server_window(&run, &surface);
+    let (_new, float) = one_size(&mut run);
+    let floating = [(&below, 0), (&above, 0), (&dialog, 1), (&float, 1)];
+    layered(&run, "a dialog and a float", &floating);
+
+    run.state.full_screen(&above, None);
+    let full = [(&below, 0), (&float, 1), (&above, 2), (&dialog, 2)];
+    layered(&run, "full screen", &full);
+    assert_eq!(level(&run, &dialog), level(&run, &above) + 1, "its dialog just above it");
+
+    assert!(run.state.minimise(&below));
+    assert!(run.state.unminimise(&below));
+    layered(&run, "unminimised", &full);
+
+    let output = output_at(&run, 0);
+    let next = run.state.workspaces(&output)[1];
+    assert!(run.state.activate_workspace(next));
+    assert!(run.state.activate_workspace(pair.id));
+    layered(&run, "parked and back", &full);
+    assert_eq!(level(&run, &dialog), level(&run, &above) + 1, "its dialog just above it");
+
+    run.state.maximise(&below);
+    layered(&run, "maximised", &full);
+    run.state.restore(&below);
+    layered(&run, "restored", &full);
+
+    run.state.leave_full_screen(&above);
+    layered(&run, "left full screen", &floating);
+
+    run.state.focus(&float);
+    assert_eq!(stack(&run).last(), Some(&float), "the focused float on top");
+    layered(&run, "a float focused", &floating);
+    run.stop();
+}

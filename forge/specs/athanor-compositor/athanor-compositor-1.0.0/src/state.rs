@@ -909,9 +909,7 @@ impl State {
             .is_initial_configure_sent()
             .then(|| toplevel.send_configure());
         relocate(window, area.loc, serial);
-        if visible {
-            self.raise_full_screen_tile(window);
-        }
+        self.restack(self.workspace_of(window));
     }
 
     /// Where `window` stands, or will once a move on its way lands, at the size that move
@@ -962,11 +960,11 @@ impl State {
             .is_some_and(|maximised| maximised.0.get().is_some());
         if maximised {
             self.maximise(window);
-            self.keep_floats_above(window);
         } else {
             self.back_to(window, kept.before);
             self.back_to_tile(window);
         }
+        self.restack(self.workspace_of(window));
     }
 
     /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,

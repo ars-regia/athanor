@@ -3,6 +3,7 @@
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
 use crate::state::{is_full_screen, ClientState, State};
+use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
@@ -625,15 +626,111 @@ impl State {
         Some((pointer, start, window))
     }
 
-    /// Raises `window`, a tile gone full screen, with its own dialogs over the windows D5 floats
-    /// on its workspace (D6).
-    pub(crate) fn raise_full_screen_tile(&mut self, window: &Window) {
-        if !self.is_tile(window) {
+    /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
+    /// its place among those of its layer: the tiles; the windows D5 floats, and any other that
+    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, when
+    /// the user gave it to a client other than a full-screen window's. A window's dialogs stand
+    /// just above it, in its layer, but those of a tile float above the tiles as windows of their
+    /// own. The windows of the other workspaces keep their places. Every change of state that
+    /// moves a window between layers ends here, so that the order is one rule, not a raise on
+    /// each path.
+    pub(crate) fn restack(&mut self, id: Option<WorkspaceId>) {
+        let Some(id) = id.filter(|id| self.is_tiled(*id)) else {
+            return;
+        };
+        let order: Vec<Window> = self.space.elements().cloned().collect();
+        let here: Vec<Window> = order
+            .iter()
+            .filter(|kept| self.workspace_of(kept) == Some(id))
+            .cloned()
+            .collect();
+        let index = |surface: &WlSurface| {
+            here.iter()
+                .position(|kept| kept.toplevel().is_some_and(|t| t.wl_surface() == surface))
+        };
+        let client = |kept: &Window| {
+            kept.toplevel()
+                .and_then(|t| t.wl_surface().client())
+                .map(|client| client.id())
+        };
+        let parent: Vec<Option<usize>> = here
+            .iter()
+            .map(|kept| kept.toplevel().and_then(|t| t.parent()).and_then(|p| index(&p)))
+            .collect();
+        let full: Vec<bool> = here.iter().map(is_full_screen).collect();
+        let tile: Vec<bool> = here
+            .iter()
+            .zip(&full)
+            .map(|(kept, full)| !full && self.is_tile(kept))
+            .collect();
+        // The window each one stands with: itself when it is full screen, has no parent here, or
+        // its parent is a tile; else its parent's. A loop of parents ends after one pass.
+        let root = |mut at: usize| {
+            for _ in 0..here.len() {
+                match parent[at] {
+                    Some(up) if !full[at] && !tile[up] => at = up,
+                    _ => break,
+                }
+            }
+            at
+        };
+        let roots: Vec<usize> = (0..here.len()).map(root).collect();
+        let full_clients: Vec<_> = (0..here.len())
+            .filter(|at| full[*at])
+            .filter_map(|at| client(&here[at]))
+            .collect();
+        let focused = self
+            .seat
+            .get_keyboard()
+            .and_then(|keyboard| keyboard.current_focus())
+            .and_then(|surface| index(&surface))
+            .filter(|at| client(&here[*at]).is_none_or(|own| !full_clients.contains(&own)));
+        let layer = |at: usize| {
+            if full[at] {
+                2
+            } else if tile[at] {
+                0
+            } else if focused.is_some_and(|f| roots[f] == at) {
+                3
+            } else {
+                1
+            }
+        };
+        // Each root with the windows that stand with it, in their order, under the key of its
+        // layer and its topmost window's place: raising any of them raises them all.
+        let mut heads = roots.clone();
+        heads.sort_unstable();
+        heads.dedup();
+        let mut groups: Vec<(u8, usize, Vec<usize>)> = heads
+            .into_iter()
+            .map(|head| {
+                let mut members: Vec<usize> =
+                    (0..here.len()).filter(|at| roots[*at] == head).collect();
+                members.sort_by_key(|at| *at != head);
+                let top = members.iter().copied().max().unwrap_or(head);
+                (layer(head), top, members)
+            })
+            .collect();
+        groups.sort_by_key(|(layer, top, _)| (*layer, *top));
+        let mut sorted = groups
+            .into_iter()
+            .flat_map(|(_, _, members)| members)
+            .map(|at| here[at].clone());
+        let wanted: Vec<Window> = order
+            .iter()
+            .map(|kept| {
+                if self.workspace_of(kept) == Some(id) {
+                    sorted.next().unwrap_or_else(|| kept.clone())
+                } else {
+                    kept.clone()
+                }
+            })
+            .collect();
+        if wanted == order {
             return;
         }
-        self.space.raise_element(window, false);
-        for dialog in self.subtree(window) {
-            self.space.raise_element(&dialog, false);
+        for kept in &wanted {
+            self.space.raise_element(kept, false);
         }
     }
 
@@ -643,11 +740,10 @@ impl State {
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
         self.focus_tile(window);
-        // The window's own dialogs stay above it, and a tile stays under what D5 floats.
+        // The window's own dialogs stay above it.
         for dialog in self.subtree(window) {
             self.space.raise_element(&dialog, false);
         }
-        self.keep_floats_above(window);
         for other in self.space.elements() {
             other.set_activated(other == window);
             if let Some(toplevel) = other.toplevel() {
@@ -660,6 +756,7 @@ impl State {
         if target.is_some() {
             self.set_keyboard_focus(target);
         }
+        self.restack(self.workspace_of(window));
     }
 
     /// When `gone`, a destroyed window or a layer surface that gave the keyboard up, held the
