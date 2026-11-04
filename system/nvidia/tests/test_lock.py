@@ -2,8 +2,10 @@
 
 import gzip
 import hashlib
+import http.client
 import io
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -456,6 +458,88 @@ class LegacyFedora45(unittest.TestCase):
     def test_the_fedora_45_releases_tree(self):
         self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
                          "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/")
+
+
+# The base release, read as system/build-image.sh reads it.
+BASE_ARG = re.compile(r"^ARG FEDORA_VERSION=(\d+)$", re.MULTILINE)
+# The Fedora release a repository URL names: negativo17's fedora-N/, RPM Fusion's releases/N/ and updates/N/.
+URL_RELEASE = re.compile(r"/fedora(?:-|/(?:releases|updates)/)(\d+)/")
+
+
+class FedoraRelease(unittest.TestCase):
+    """Every lock reads the repository of the base's Fedora release (#669): a lock left on another
+    release installs that release's userspace on the base."""
+
+    def test_every_lock_reads_the_base_release(self):
+        found = BASE_ARG.search((HERE.parent / "Containerfile").read_text())
+        self.assertIsNotNone(found, "system/Containerfile has no 'ARG FEDORA_VERSION=<N>' line")
+        base = found.group(1)
+        bound = set()
+        for branch, spec in lock.BRANCHES.items():
+            _, _, locked, entries = lock.read_lock(lock.LOCKS / f"{branch}.lock")
+            for url in filter(None, (locked, *(u for _, u in entries), spec["baseurl"], spec["successor"])):
+                release = URL_RELEASE.search(url)
+                if release:
+                    bound.add(branch)
+                    with self.subTest(branch=branch, url=url):
+                        self.assertEqual(release.group(1), base, f"{url} is not of Fedora {base}, the base release")
+        # Both driver sets read Fedora trees, so the pattern must find their release; NVIDIA's
+        # container toolkit repository names none.
+        self.assertEqual(bound, {"open", "legacy"})
+
+
+def http_error(code):
+    return urllib.error.HTTPError("https://repo/x", code, "error", {}, None)
+
+
+class HttpGet(unittest.TestCase):
+    """http_get retries what passes, with retry.sh's attempts and doubling delay, and nothing else."""
+
+    def get(self, *outcomes):
+        """http_get against urlopen answering `outcomes` in turn: an exception is raised, bytes are
+        the body. Returns the result (or the exception raised), the delays slept, the calls made."""
+        answers = iter(outcomes)
+
+        def urlopen(url, timeout):
+            answer = next(answers)
+            if isinstance(answer, BaseException):
+                raise answer
+            return io.BytesIO(answer)
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=urlopen) as opened, \
+                unittest.mock.patch("time.sleep") as slept, redirect_stderr(io.StringIO()):
+            try:
+                result = lock.http_get("https://repo/x")
+            except Exception as error:
+                result = error
+        return result, [c.args[0] for c in slept.call_args_list], opened.call_count
+
+    def test_transient_failures_are_retried_with_a_doubling_delay(self):
+        result, slept, calls = self.get(http_error(503), http_error(429), urllib.error.URLError("reset"),
+                                        TimeoutError("read timed out"), b"body")
+        self.assertEqual((result, slept, calls), (b"body", [15, 30, 60, 120], 5))
+
+    def test_a_body_cut_short_is_retried(self):
+        result, slept, calls = self.get(http.client.IncompleteRead(b"part"), b"body")
+        self.assertEqual((result, slept, calls), (b"body", [15], 2))
+
+    def test_the_last_transient_failure_is_raised(self):
+        result, slept, calls = self.get(*[http_error(500)] * 5)
+        self.assertIsInstance(result, urllib.error.HTTPError)
+        self.assertEqual((result.code, slept, calls), (500, [15, 30, 60, 120], 5))
+
+    def test_a_final_answer_is_not_retried(self):
+        for code in (401, 403, 404):
+            with self.subTest(code=code):
+                result, slept, calls = self.get(http_error(code), b"body")
+                self.assertEqual((result.code, slept, calls), (code, [], 1))
+
+    def test_a_failed_attempt_is_reported(self):
+        err = io.StringIO()
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=[http_error(502), io.BytesIO(b"ok")]), \
+                unittest.mock.patch("time.sleep"), redirect_stderr(err):
+            self.assertEqual(lock.http_get("https://repo/x"), b"ok")
+        self.assertIn("https://repo/x: HTTP 502, attempt 1 of 5: retrying in 15 s", err.getvalue())
 
 
 def run(argv, download):
