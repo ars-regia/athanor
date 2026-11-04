@@ -15,7 +15,7 @@ use athanor_apps::entries::{self, app_name, entry_label, Apps, State, FALLBACK_I
 use athanor_apps::favorites::Store;
 use athanor_apps::i18n::{tr, tr_with};
 use athanor_apps::model::{self, Open, Primary};
-use athanor_compositor_client::{Client, Event as Compositor, Opener, WindowId};
+use athanor_sulphur_client::{Client, Event as Compositor, Opener, WindowId};
 use athanor_dock::autohide::{self, AutoHide, Event as Hide, Timer};
 use athanor_dock::i18n;
 use athanor_dock::placement::{self, Placement};

@@ -184,7 +184,7 @@ class HiddenTest(unittest.TestCase):
                 self.assertEqual(sum(" hidden; decision 28 hides " in line for line in lines), 2)
 
     def test_the_bar_walk_under_the_own_compositor_speaks_the_tiling_button(self):
-        # athanor-compositor serves athanor_workspace_tiling_v1, so the bar shows its tiling
+        # athanor-sulphur serves athanor_workspace_tiling_v1, so the bar shows its tiling
         # button there as under cosmic-comp: only the buttons decision 28 hides are exempt.
         for lang, golden in (("en", "orca-bar.txt"), ("it", "orca-bar-it.txt")):
             with self.subTest(lang=lang):

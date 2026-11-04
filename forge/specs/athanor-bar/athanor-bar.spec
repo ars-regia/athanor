@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        21%{?dist}
+Release:        22%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
+- Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
+  binaries, user unit, session script and data directory.
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Under athanor-compositor the tiling switch reads and sets the active workspace's tiling
   through athanor_workspace_tiling_v1, and is shown there as under cosmic-comp, whose session

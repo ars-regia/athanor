@@ -152,9 +152,9 @@ dependencies = [
 name = "athanor-apps"
 version = "1.0.0"
 dependencies = [
- "athanor-compositor-client",
  "athanor-i18n",
  "athanor-layout",
+ "athanor-sulphur-client",
  "athanor-unit",
  "gio",
  "gio-unix",
@@ -168,12 +168,12 @@ name = "athanor-bar"
 version = "1.0.0"
 dependencies = [
  "athanor-apps",
- "athanor-compositor-client",
  "athanor-controls",
  "athanor-i18n",
  "athanor-layout",
  "athanor-services",
  "athanor-style",
+ "athanor-sulphur-client",
  "athanor-trust-state",
  "athanor-unit",
  "gio-unix",
@@ -182,27 +182,6 @@ dependencies = [
  "gtk4-layer-shell",
  "libc",
  "tracing",
-]
-
-[[package]]
-name = "athanor-compositor-client"
-version = "1.0.0"
-dependencies = [
- "athanor-layout",
- "athanor-style",
- "bitflags",
- "futures-util",
- "gdk4-wayland",
- "gio",
- "gio-unix",
- "glib",
- "gtk4",
- "serde_json",
- "thiserror",
- "tracing",
- "wayland-client",
- "wayland-protocols",
- "wayland-scanner",
 ]
 
 [[package]]
@@ -229,9 +208,9 @@ name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
  "athanor-bar",
- "athanor-compositor-client",
  "athanor-layout",
  "athanor-shelld",
+ "athanor-sulphur-client",
  "athanor-trust-state",
  "base64",
  "chrono",
@@ -296,6 +275,27 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "zbus",
+]
+
+[[package]]
+name = "athanor-sulphur-client"
+version = "1.0.0"
+dependencies = [
+ "athanor-layout",
+ "athanor-style",
+ "bitflags",
+ "futures-util",
+ "gdk4-wayland",
+ "gio",
+ "gio-unix",
+ "glib",
+ "gtk4",
+ "serde_json",
+ "thiserror",
+ "tracing",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-scanner",
 ]
 
 [[package]]

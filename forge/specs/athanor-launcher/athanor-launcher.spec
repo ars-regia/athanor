@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
@@ -67,6 +67,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-launche
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-launcher.mo
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
+  binaries, user unit, session script and data directory.
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - Settings and its pages, from the image's desktop entries, start on the main socket until
   cosmic-settings leaves the image, since the output manager cosmic-randr waits on reaches no

@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -51,6 +51,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   approved by the maintainer with #957.
 - Amended on 2026-11-04: OS7, the text field's clipboard and primary selection.
 - Amended on 2026-11-04: OS7, the text field's context menu.
+- Amended on 2026-11-04: the compositor's identifiers renamed to Sulphur (ADR-0134), name only,
+  approved by the maintainer with #970.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -64,7 +66,7 @@ results the paragraph above names.
 
 - **cosmic-comp 1.8 is the compositor** (`doc_shell.md` SH2, SH3; `doc_compositor.md`). Of COSMIC
   only cosmic-comp stays. The shell's bar, dock, greeter, launcher, layout chooser and control
-  centre are GTK4 programs of our own, and `athanor-compositor-client` is the only crate that knows
+  centre are GTK4 programs of our own, and `athanor-sulphur-client` is the only crate that knows
   the compositor (SH2).
 - **The patch register** (`doc_compositor.md` CO3) carries or plans the features that only a
   compositor can give: the trusted path for credential prompts (row 5, ADR-0041 as
@@ -256,7 +258,7 @@ grab dropped while locked, is a requirement tested in the fixture of OS6 (#750).
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
 S3 says what behaviour the namespace needs (OS9 plan, question 8).
 
-**OS5. The shell does not change to move.** `athanor-compositor-client` keeps its interface; its
+**OS5. The shell does not change to move.** `athanor-sulphur-client` keeps its interface; its
 inside is rewritten for the new compositor, as SH2 foresees. Before it replaces cosmic-comp, the
 own compositor provides what the shell and the components 1.0 keeps take from cosmic-comp today:
 
@@ -283,7 +285,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   32 adds what the overview needs: a private `athanor_workspace_manager_v1`, with a grant of its
   own.
   *Amended on 2026-10-30 (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* `athanor_a11y_v1` is
-  described in `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`, one privileged
+  described in `system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml`, one privileged
   global, `athanor_a11y_manager_v1`, granted to the bar and, once it exists, to `athanor-a11y watch`,
   each by its line, whose requests turn the magnifier on
   and off, zoom in and out, set the colour inversion and one of the four filters of
@@ -346,7 +348,7 @@ Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7)
 magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
 decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
 (decision 29); and the switch to a text console. The bindings a user
-assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
+assigns in Settings, system actions and custom commands, keep `athanor_sulphur_client::shortcuts`
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
@@ -570,7 +572,7 @@ dock's window geometry (ADR-0124).
 ## 5. The first two milestones
 
 Both start at once, beside release 0.9, as the first steps of the real crates: the compositor
-`athanor-compositor` under `forge/specs/`, built on the desktop, where it comes before release
+`athanor-sulphur` under `forge/specs/`, built on the desktop, where it comes before release
 0.9's rig work (decision 11), and the
 toolkit `athanor-toolkit` under `system/`, built on the reference laptop. Their measurements are
 recorded under `docs/spikes/` and go into revision 2. Their plans are named in the status line.
@@ -743,7 +745,7 @@ audit found that the plan crossed SH2's boundary:
     it refuses (malformed, more than the four layouts LN9 allows, a keymap libxkbcommon cannot
     compile) changes nothing and is logged; without a file the keymap is the one `XKB_DEFAULT_*`
     gives (SN15). The reader is an exception to SH2's containment outside
-    `athanor-compositor-client`: one source file of the compositor, which reads that file, writes
+    `athanor-sulphur-client`: one source file of the compositor, which reads that file, writes
     nothing in the user's configuration and names no other COSMIC key, named by path in SH2's
     exceptions and in `verify.py boundary`. It leaves when the store moves with the compositor
     client (LN9). Not taken: `XKB_DEFAULT_*` alone, which has no live change and gives the
@@ -841,7 +843,7 @@ amendment's audit:
       missing element or utterance, gain with the switch's code a list of exemptions, each
       naming this decision as its reason and the control's issue, and an exemption for an
       element that is present fails, as `golden_report.py` fails an explanation without a
-      difference. `athanor-compositor-session`, before it starts the
+      difference. `athanor-sulphur-session`, before it starts the
       compositor, starts cosmic-comp's session in its place when the user has either on, and
       says why in the journal, whichever entry the greeter had checked. The magnifier is on
       when `ATHANOR_A11Y`, the greeter's hand-off (`doc_accessibility.md` AX13), names
@@ -850,7 +852,7 @@ amendment's audit:
       read; the script reads both, so it does not depend on `athanor-a11y apply-greeter`
       having run first. The filters persist in cosmic-comp's `a11y_screen_filter.ron`
       (`doc_accessibility.md` section 1): the script asks the compositor's binary,
-      `athanor-compositor --screen-filter-on`, since a shell script does not parse RON, whether
+      `athanor-sulphur --screen-filter-on`, since a shell script does not parse RON, whether
       the file holds an inversion or a filter; an absent file, or one that holds neither, is off
       (exit status 0), and a file that holds either is on (status 10); any other status, a
       file that cannot be read or parsed, an abort or a signal, counts as on. Its reader, one source file of the
@@ -865,7 +867,7 @@ amendment's audit:
       exception, so widened, keeps its path and leaves as before. The hand-off above and the
       hidden controls below, for the magnifier and the filters, leave when the own compositor
       has them (#864). *Done in #864 (2026-10-30):* the hand-off and
-      `athanor-compositor --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
+      `athanor-sulphur --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
       these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
       Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
@@ -907,7 +909,7 @@ amendment's audit:
       Super+1 to Super+0 and Super+Ctrl with the arrows stay bound and switch workspaces
       without the indicator of `doc_overview.md` OV12, a loss the switch's pull request names;
     - the Launcher buttons of the bar and of the dock, which open cosmic-launcher today
-      (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
+      (`system/athanor-sulphur-client/src/launch.rs`), a client without a line in the
       allow-list: under the own compositor they open `athanor-launcher`, which has its line,
       through its D-Bus activation (`doc_launcher.md` LA8), before LA12's switch, which this
       decision does not change for cosmic-comp's session. The client chooses the program by the
@@ -1073,7 +1075,7 @@ compositor and that the own compositor did not yet offer:
       filters as every capture is, and a capture of a window shows neither. On the output the
       magnifier and the colour filters act on them as on the rest of the frame.
     - The theme is read by one source file of the compositor,
-      `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs`, which reads
+      `forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/focus_theme.rs`, which reads
       the mode, `window_hint`, `active_hint` and the accent of `CosmicTheme` and the
       `active_hint` setting of `com.system76.CosmicComp`, follows them live and writes nothing. A
       confined application that can write those files (`doc_session_daemons.md` SD8) changes the

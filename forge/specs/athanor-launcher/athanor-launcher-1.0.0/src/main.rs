@@ -16,7 +16,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::rc::Rc;
 
-use athanor_compositor_client::shortcuts::{self, Binding};
+use athanor_sulphur_client::shortcuts::{self, Binding};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, journal, sandbox};

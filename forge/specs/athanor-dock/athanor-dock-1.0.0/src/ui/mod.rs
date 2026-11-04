@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
-use athanor_compositor_client::{outputs, Client, Event};
+use athanor_sulphur_client::{outputs, Client, Event};
 use athanor_dock::placement;
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;

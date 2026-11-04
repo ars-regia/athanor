@@ -7,7 +7,7 @@ and sets the clipboards with wl-paste and wl-copy. The field's text is the last 
 printed, after its last edit, in the scene's client log.
 
 Under cosmic-comp only: wl-clipboard reaches the selection through wlr-data-control, which
-athanor-compositor does not offer, and there it waits for a focus it never gets. A clipboard owner
+athanor-sulphur does not offer, and there it waits for a focus it never gets. A clipboard owner
 that never sends its text is the driver's unit test: wl-copy always sends it.
 """
 
@@ -40,7 +40,7 @@ def shown(log):
 def refusal(environ, which=shutil.which):
     """Why the check cannot run here, or None."""
     if environ.get("RIG_COMPOSITOR") == "athanor":
-        return "wl-clipboard hangs under athanor-compositor, which has no wlr-data-control: run it under cosmic-comp"
+        return "wl-clipboard hangs under athanor-sulphur, which has no wlr-data-control: run it under cosmic-comp"
     missing = [tool for tool in TOOLS if which(tool) is None]
     if missing:
         return f"the rig image has no {', '.join(missing)}: it needs wl-clipboard (forge/test/shell/Containerfile)"

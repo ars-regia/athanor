@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """toolkit_layer_check.py - the dock plan, task 3: athanor-toolkit's layer surfaces as outputs
 are added, removed, added again and scaled from 1 to 1.5, against sway on its headless backend,
-which can add and remove outputs (athanor-compositor's fixture cannot yet: C1 task 8).
+which can add and remove outputs (athanor-sulphur's fixture cannot yet: C1 task 8).
 
 Runs inside the rig. Starts sway, then `athanor-toolkit-layer` with WAYLAND_DEBUG, which opens one
 layer surface per output; after each step, the client's own trace must hold exactly one live

@@ -23,7 +23,7 @@ SERVICE = "org.gnome.Orca.Service"
 # Orca logs each utterance quoted, then the voice it speaks with: SPEECH OUTPUT: 'text' {voice}.
 SPEECH = re.compile(r"SPEECH OUTPUT: '(.*?)'(?: \{|$)", re.MULTILINE)
 STARTUP, PAUSE = 30, 1.5
-# Under athanor-compositor only an allow-listed unit holds the virtual keyboard (rig-privileged-clients).
+# Under athanor-sulphur only an allow-listed unit holds the virtual keyboard (rig-privileged-clients).
 IN_UNIT = ["/repo/forge/test/shell/in-unit.sh", "rig-wtype.service", "/usr/bin/wtype"]
 # The same holds for Orca's keyboard monitor (AX4): only a process in orca.service's cgroup is
 # admitted, so Orca's own commands reach Orca in the unit of the image's session.

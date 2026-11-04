@@ -1,7 +1,7 @@
 //! Files under the user's COSMIC configuration, which any application with a config
 //! permission can rewrite.
 
-use athanor_compositor_client::shortcuts;
+use athanor_sulphur_client::shortcuts;
 
 use crate::Setup;
 

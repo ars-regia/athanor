@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# athanor-compositor's headless soak (doc_own_stack.md, C1 task 2): the compositor on virtual
+# athanor-sulphur's headless soak (doc_own_stack.md, C1 task 2): the compositor on virtual
 # outputs, its clients drawing for a while, then the frame times it logged and every warning or
 # error line, of the compositor and of each client.
 #

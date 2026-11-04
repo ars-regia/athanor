@@ -10,7 +10,7 @@ width=$1 height=$2 scale=$3 tag=$4
 shift 4
 [ "${1:-}" = "--" ] && shift
 settle=${RIG_SETTLE:-4}
-# RIG_COMPOSITOR=athanor runs athanor-compositor in place of cosmic-comp, on its headless
+# RIG_COMPOSITOR=athanor runs athanor-sulphur in place of cosmic-comp, on its headless
 # backend with RIG_HEADLESS_OUTPUTS (default 1) virtual outputs of this size, at this scale
 # from its start (session.sh): headless-0, headless-1 and so on, left to right. The capture
 # goes through the compositor itself, with grim run as its rig unit (in-unit.sh,
@@ -42,7 +42,7 @@ cp /usr/share/glib-2.0/schemas/*.xml /repo/forge/specs/athanor-system-config/SOU
 glib-compile-schemas --strict "$schemas"
 export GSETTINGS_SCHEMA_DIR=$schemas
 # The accent variants athanor-calmo ships: applying an appearance writes the built
-# CosmicTheme from them (system/athanor-compositor-client/src/theme.rs).
+# CosmicTheme from them (system/athanor-sulphur-client/src/theme.rs).
 install -D -m 0644 /repo/system/athanor-style/calmo/generated/cosmic/variants.json /usr/share/athanor/cosmic-variants.json
 if [ -n "${RIG_CONFIG_SEED:-}" ] && [ -e "$RIG_CONFIG_SEED.gsettings" ]; then
     # A last line without a newline is read too.
@@ -122,7 +122,7 @@ elif [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
     session=$!
     compositor_alive() { # fails the scene at once if the compositor exited
         if ! kill -0 "$session" 2> /dev/null; then
-            echo "scene.sh: athanor-compositor exited during its start; see /out/$tag-compositor.log" >&2
+            echo "scene.sh: athanor-sulphur exited during its start; see /out/$tag-compositor.log" >&2
             exit 1
         fi
     }

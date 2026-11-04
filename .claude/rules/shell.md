@@ -10,7 +10,7 @@ paths:
   - "forge/specs/athanor-desktop-ui/**"
   - "forge/specs/athanor-calmo/**"
   - "forge/specs/athanor-xdg-desktop-portal-athanor/**"
-  - "system/athanor-compositor-client/**"
+  - "system/athanor-sulphur-client/**"
   - "system/athanor-layout/**"
   - "system/athanor-style/**"
   - "system/athanor-portal/**"

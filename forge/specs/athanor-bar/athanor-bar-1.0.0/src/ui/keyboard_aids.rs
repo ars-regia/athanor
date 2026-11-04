@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use athanor_bar::keyboard_aids::{self, KEYS, SCHEMA};
-use athanor_compositor_client::{Event, KeyboardAid, Modifier};
+use athanor_sulphur_client::{Event, KeyboardAid, Modifier};
 use gtk4::gio;
 
 use super::Bar;
@@ -178,7 +178,7 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_compositor_client::Accessibility;
+    use athanor_sulphur_client::Accessibility;
 
     fn held(latched: u32, locked: u32) -> Event {
         Event::Accessibility(Accessibility {

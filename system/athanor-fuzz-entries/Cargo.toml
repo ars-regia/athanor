@@ -22,11 +22,11 @@ default = ["update", "shelld", "layout", "gtk"]
 update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:chrono", "dep:tracing"]
 shelld = ["dep:athanor-shelld", "dep:zbus"]
 layout = ["dep:athanor-layout", "dep:athanor-trust-state"]
-gtk = ["dep:athanor-bar", "dep:athanor-compositor-client", "dep:glib"]
+gtk = ["dep:athanor-bar", "dep:athanor-sulphur-client", "dep:glib"]
 
 [dependencies]
 athanor-bar = { path = "../../forge/specs/athanor-bar/athanor-bar-1.0.0", optional = true }
-athanor-compositor-client = { path = "../athanor-compositor-client", optional = true }
+athanor-sulphur-client = { path = "../athanor-sulphur-client", optional = true }
 athanor-layout = { path = "../athanor-layout", optional = true }
 athanor-shelld = { path = "../../forge/specs/athanor-shelld/athanor-shelld-1.0.0", optional = true }
 athanor-trust-state = { path = "../athanor-trust-state", optional = true }

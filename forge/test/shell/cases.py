@@ -63,7 +63,7 @@ SURFACES = {
     # library's 12 cases come with plan 3b.
     "launcher": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
     # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
-    # athanor-compositor, in the GTK chooser's catalogs. The toolkit has no dark theme yet:
+    # athanor-sulphur, in the GTK chooser's catalogs. The toolkit has no dark theme yet:
     # one variant.
     "toolkit-chooser": {"variants": ("light",), "scales": ("1.0", "1.5")},
 }
