@@ -1356,9 +1356,11 @@ impl App {
     }
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
-    /// send for a surface that is gone: the next `enter` then sends `enable` again.
+    /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
+    /// selection its fields offered ends with it.
     fn close(&mut self, id: SurfaceId) {
         self.shell.close(id);
+        self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
         }

@@ -356,6 +356,9 @@ pub(crate) enum Clip {
     Cut(WidgetId, String),
     /// The text selected, for the primary selection.
     Select(String),
+    /// The selection offered as the primary selection is gone: its field's selection ended,
+    /// by a collapse or an edit, and no other selection of these widgets replaced it.
+    Unselect,
     /// The clipboard's text is to be pasted into the field, with [`Ui::paste`].
     Paste(WidgetId),
     /// The primary selection's text is to be pasted into the field, with [`Ui::paste`].
@@ -442,6 +445,9 @@ pub struct Ui {
     press: Option<Press>,
     /// What the fields asked of the clipboards since the driver last took it.
     clips: Vec<Clip>,
+    /// The field whose selection these widgets offered last as the primary selection, and its
+    /// text, until the selection ends.
+    offered: Option<(WidgetId, String)>,
 }
 
 impl Ui {
@@ -461,6 +467,7 @@ impl Ui {
             hover: None,
             press: None,
             clips: Vec::new(),
+            offered: None,
         }
     }
 
@@ -1336,8 +1343,22 @@ impl Ui {
         }
     }
 
-    /// What the fields asked of the clipboards since the last call, in order.
+    /// What the fields asked of the clipboards since the last call, in order, ending with
+    /// [`Clip::Unselect`] once the selection offered last is no longer its field's, as a GTK
+    /// entry gives up the primary selection it owns when its selection ends.
     pub(crate) fn take_clips(&mut self) -> Vec<Clip> {
+        if let Some((id, text)) = &self.offered {
+            let kept = match self.widgets.get(*id).map(|w| &w.kind) {
+                Some(Kind::Field(field) | Kind::TextArea(field)) => {
+                    field.selected_text().as_ref() == Some(text)
+                }
+                _ => false,
+            };
+            if !kept {
+                self.offered = None;
+                self.clips.push(Clip::Unselect);
+            }
+        }
         std::mem::take(&mut self.clips)
     }
 
@@ -1422,7 +1443,10 @@ impl Ui {
             Kind::Slider(_) => return None,
             // The text a drag selected is the primary selection.
             Kind::Field(field) | Kind::TextArea(field) => {
-                self.clips.extend(field.selected_text().map(Clip::Select));
+                if let Some(text) = field.selected_text() {
+                    self.offered = Some((press.widget, text.clone()));
+                    self.clips.push(Clip::Select(text));
+                }
                 return None;
             }
             _ => {}
@@ -1514,8 +1538,10 @@ impl Ui {
                     _ => return self.navigate(key),
                 };
                 // A new selection is the primary selection, as in GTK's entries.
-                if field.selection() != before {
-                    self.clips.extend(field.selected_text().map(Clip::Select));
+                let selected = (field.selection() != before).then(|| field.selected_text());
+                if let Some(text) = selected.flatten() {
+                    self.offered = Some((id, text.clone()));
+                    self.clips.push(Clip::Select(text));
                 }
                 field.scroll_to_caret(cx);
                 return edited.then_some(Event::Edited(id));
@@ -3051,7 +3077,8 @@ mod tests {
         // Paste asks the driver for the clipboard's text, which comes back through paste and
         // is taken as typed text is.
         assert_eq!(ui.key(Key::Paste), None);
-        assert_eq!(ui.take_clips(), [Clip::Paste(name)]);
+        // The cut ended the selection, and with it its offer.
+        assert_eq!(ui.take_clips(), [Clip::Paste(name), Clip::Unselect]);
         assert_eq!(ui.paste(name, "x\ny\u{7}"), Some(Event::Edited(name)));
         assert_eq!(ui.field_text(name).as_deref(), Some("axy"));
 
@@ -3087,6 +3114,37 @@ mod tests {
     }
 
     #[test]
+    fn the_primary_selection_ends_with_the_fields_selection() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.field(Ui::ROOT, "Other", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.take_clips().last(), Some(&Clip::Select("bc".into())));
+        // The caret moving collapses the selection: its offer ends, once.
+        ui.key(Key::Right);
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
+        assert!(ui.take_clips().is_empty());
+        // An edit that replaces the selection ends it too, as a cut does.
+        ui.key(Key::SelectAll);
+        assert_eq!(ui.take_clips(), [Clip::Select("abc".into())]);
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
+        // Another field's selection replaces the offer: the first field's end ends nothing.
+        ui.key(Key::SelectAll);
+        ui.set_focus(Some(other));
+        ui.commit("de");
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.take_clips().last(), Some(&Clip::Select("e".into())));
+        ui.set_focus(Some(name));
+        ui.key(Key::Right);
+        assert!(ui.take_clips().is_empty());
+    }
+
+    #[test]
     fn a_paste_drops_the_bidirectional_formats() {
         // As text set from outside: "invoice<RLO>gpj.exe" would read "invoiceexe.jpg".
         let mut ui = Ui::new("Text", Theme::default(), false);
@@ -3110,9 +3168,9 @@ mod tests {
         assert!(ui.take_clips().is_empty(), "the selection is offered at the release");
         ui.pointer_release(end, y, PointerButton::Primary);
         assert_eq!(ui.take_clips(), [Clip::Select("abc".into())]);
-        // A click selects nothing, and offers nothing.
+        // A click selects nothing, and ends the offer of the selection it collapses.
         ui.click(start, y);
-        assert!(ui.take_clips().is_empty());
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
 
         // The middle button focuses the field and pastes the primary selection where it is
         // pressed, as in GTK's entries.

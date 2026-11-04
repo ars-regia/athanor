@@ -56,8 +56,9 @@ pub(super) struct Clipboards {
     primary_device: Option<PrimarySelectionDevice>,
     /// The text copied last, and the source that offers it until another one replaces it.
     copied: Option<(CopyPasteSource, String)>,
-    /// The text selected last, and the source that offers it until another one replaces it.
-    selected: Option<(PrimarySelectionSource, String)>,
+    /// The text selected last, the source that offers it until another one replaces it, and
+    /// the surface whose field selected it.
+    selected: Option<(PrimarySelectionSource, String, SurfaceId)>,
     /// The paste being read, at most one: a new one replaces it.
     pending: Option<Pending>,
 }
@@ -227,7 +228,8 @@ impl App {
                         self.cut(id, widget, &text);
                     }
                 }
-                Clip::Select(text) => self.select(text),
+                Clip::Select(text) => self.select(id, text),
+                Clip::Unselect => self.unselect(id),
                 Clip::Paste(widget) => self.paste(id, widget, false),
                 Clip::PastePrimary(widget) => self.paste(id, widget, true),
             }
@@ -265,7 +267,7 @@ impl App {
     /// Offers `text` as the primary selection, through a new source each time: one the
     /// compositor refused, for a serial it no longer takes, would never be cancelled, and
     /// would hold the text no one can read. Without the protocol nothing is offered.
-    fn select(&mut self, text: String) {
+    fn select(&mut self, id: SurfaceId, text: String) {
         let clipboards = &mut self.clipboards;
         let (Some(manager), Some(device)) =
             (&clipboards.primary_manager, &clipboards.primary_device)
@@ -279,7 +281,16 @@ impl App {
         let source = manager.create_selection_source(&self.shell.qh, MIMES);
         source.set_selection(device, serial);
         // The source it replaces is destroyed as it drops.
-        clipboards.selected = Some((source, text));
+        clipboards.selected = Some((source, text, id));
+    }
+
+    /// Ends the primary selection the fields of `id` offered, if it is still theirs: its source
+    /// is destroyed, and with it the selection the compositor holds.
+    pub(super) fn unselect(&mut self, id: SurfaceId) {
+        let selected = self.clipboards.selected.as_ref();
+        if selected.is_some_and(|(_, _, by)| *by == id) {
+            self.clipboards.selected = None;
+        }
     }
 
     /// Reads the clipboard's text, or the primary selection's, into `widget` of `id`, as the
@@ -461,8 +472,8 @@ impl PrimarySelectionSourceHandler for App {
     ) {
         let selected = self.clipboards.selected.as_ref();
         let text = selected
-            .filter(|(s, _)| s.inner() == source)
-            .map(|(_, t)| t.clone());
+            .filter(|(s, ..)| s.inner() == source)
+            .map(|(_, t, _)| t.clone());
         self.offer(text, pipe);
     }
 
@@ -473,7 +484,7 @@ impl PrimarySelectionSourceHandler for App {
         source: &ZwpPrimarySelectionSourceV1,
     ) {
         let selected = self.clipboards.selected.as_ref();
-        if selected.is_some_and(|(s, _)| s.inner() == source) {
+        if selected.is_some_and(|(s, ..)| s.inner() == source) {
             self.clipboards.selected = None;
         }
     }
