@@ -3,6 +3,7 @@
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
 use crate::state::{is_full_screen, ClientState, State};
+use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
@@ -20,7 +21,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
@@ -43,13 +44,14 @@ use smithay::wayland::selection::data_device::{
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
-    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    Configure, PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
+    XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -96,6 +98,43 @@ pub(crate) fn shown(window: &Window) -> bool {
     window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
 }
 
+/// Whether `window` floats on a tiled workspace (D5, cosmic-comp's `layout::is_dialog`): it has
+/// a parent, or a minimum and a maximum size that are set and the same. The modal hint of
+/// xdg-dialog-v1, the reference's third case, reaches no window here: the global is not served.
+pub(crate) fn floats(window: &Window) -> bool {
+    let Some(toplevel) = window.toplevel() else {
+        return false;
+    };
+    let (min, max) = size_limits(toplevel);
+    toplevel.parent().is_some() || (min != Size::default() && min == max)
+}
+
+/// A minimum and a maximum size; 0 on an axis is no limit.
+type SizeLimits = (Size<i32, Logical>, Size<i32, Logical>);
+
+/// The size limits `toplevel` committed last.
+fn size_limits(toplevel: &ToplevelSurface) -> SizeLimits {
+    with_states(toplevel.wl_surface(), |states| {
+        let mut cached = states.cached_state.get::<SurfaceCachedState>();
+        let limits = cached.current();
+        (limits.min_size, limits.max_size)
+    })
+}
+
+/// The size limits a window committed last, so that a commit that changes them is seen (D5).
+#[derive(Default)]
+struct Limits(Cell<Option<SizeLimits>>);
+
+/// Whether this commit of `window` changed its size limits; its first commit does.
+fn limits_changed(window: &Window) -> bool {
+    let Some(toplevel) = window.toplevel() else {
+        return false;
+    };
+    let limits = Some(size_limits(toplevel));
+    let kept = window.user_data().get_or_insert(Limits::default);
+    kept.0.replace(limits) != limits
+}
+
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
@@ -129,6 +168,9 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
+                if limits_changed(&window) {
+                    self.float_tile(&window);
+                }
                 // Only a null buffer takes a placed window back to before its initial configure,
                 // and the end of this function sends a new one.
                 let unmapped = window.user_data().get::<Placed>().is_some()
@@ -349,8 +391,9 @@ impl State {
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
     /// and is left out of it, and so is one maximised or full screen before its first commit,
-    /// and one on a tiled workspace, which takes a tile (`tile_placed`) and is sent nothing
-    /// here. A window too tall for where it lands is sent the height that fits.
+    /// and one on a tiled workspace, which takes a tile (`tile_placed`) or, one D5 floats, goes
+    /// where the first window of the cascade goes, and is sent nothing here. A window too tall
+    /// for where it lands is sent the height that fits.
     fn spawn(
         &mut self,
         window: &Window,
@@ -583,10 +626,117 @@ impl State {
         Some((pointer, start, window))
     }
 
+    /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
+    /// its place among those of its layer: the tiles; the windows D5 floats, and any other that
+    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, or
+    /// whose popup does, and while a layer surface or nothing holds it the float that held it
+    /// last (`lifted`). While a tile holds the keyboard, the full-screen windows go down with the
+    /// tiles, so that the tile, raised last, stands above them under the floats (D5). A window's
+    /// dialogs stand
+    /// just above it, in its layer, but those of a tile float above the tiles as windows of their
+    /// own. The windows of the other workspaces keep their places. Every change of state that
+    /// moves a window between layers ends here, so that the order is one rule, not a raise on
+    /// each path.
+    pub(crate) fn restack(&mut self, id: Option<WorkspaceId>) {
+        let Some(id) = id.filter(|id| self.is_tiled(*id)) else {
+            return;
+        };
+        if let Some(window) = self.focused_window() {
+            self.lifted = Some(window);
+        }
+        let order: Vec<Window> = self.space.elements().cloned().collect();
+        let here: Vec<Window> = order
+            .iter()
+            .filter(|kept| self.workspace_of(kept) == Some(id))
+            .cloned()
+            .collect();
+        let index = |surface: &WlSurface| {
+            here.iter()
+                .position(|kept| kept.toplevel().is_some_and(|t| t.wl_surface() == surface))
+        };
+        let parent: Vec<Option<usize>> = here
+            .iter()
+            .map(|kept| kept.toplevel().and_then(|t| t.parent()).and_then(|p| index(&p)))
+            .collect();
+        let full: Vec<bool> = here.iter().map(is_full_screen).collect();
+        let tile: Vec<bool> = here
+            .iter()
+            .zip(&full)
+            .map(|(kept, full)| !full && self.is_tile(kept))
+            .collect();
+        // The window each one stands with: itself when it is full screen, has no parent here, or
+        // its parent is a tile; else its parent's. A loop of parents ends after one pass.
+        let root = |mut at: usize| {
+            for _ in 0..here.len() {
+                match parent[at] {
+                    Some(up) if !full[at] && !tile[up] => at = up,
+                    _ => break,
+                }
+            }
+            at
+        };
+        let roots: Vec<usize> = (0..here.len()).map(root).collect();
+        let focused = self
+            .lifted
+            .as_ref()
+            .and_then(|lifted| here.iter().position(|kept| kept == lifted));
+        // A tile with the keyboard stands above the full-screen windows: they go down with the
+        // tiles, where it is the last raised.
+        let tile_holds = focused.is_some_and(|f| tile[roots[f]]);
+        let layer = |at: usize| {
+            if full[at] && !tile_holds {
+                2
+            } else if tile[at] || full[at] {
+                0
+            } else if focused.is_some_and(|f| roots[f] == at) {
+                3
+            } else {
+                1
+            }
+        };
+        // Each root with the windows that stand with it, in their order, under the key of its
+        // layer and its topmost window's place: raising any of them raises them all.
+        let mut heads = roots.clone();
+        heads.sort_unstable();
+        heads.dedup();
+        let mut groups: Vec<(u8, usize, Vec<usize>)> = heads
+            .into_iter()
+            .map(|head| {
+                let mut members: Vec<usize> =
+                    (0..here.len()).filter(|at| roots[*at] == head).collect();
+                members.sort_by_key(|at| *at != head);
+                let top = members.iter().copied().max().unwrap_or(head);
+                (layer(head), top, members)
+            })
+            .collect();
+        groups.sort_by_key(|(layer, top, _)| (*layer, *top));
+        let mut sorted = groups
+            .into_iter()
+            .flat_map(|(_, _, members)| members)
+            .map(|at| here[at].clone());
+        let wanted: Vec<Window> = order
+            .iter()
+            .map(|kept| {
+                if self.workspace_of(kept) == Some(id) {
+                    sorted.next().unwrap_or_else(|| kept.clone())
+                } else {
+                    kept.clone()
+                }
+            })
+            .collect();
+        if wanted == order {
+            return;
+        }
+        for kept in &wanted {
+            self.space.raise_element(kept, false);
+        }
+    }
+
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
     /// the keyboard exclusively; the others are deactivated. Its workspace's tree, if it is
     /// tiled, splits it next (D2).
     pub fn focus(&mut self, window: &Window) {
+        self.lifted = Some(window.clone());
         self.space.raise_element(window, true);
         self.focus_tile(window);
         // The window's own dialogs stay above it.
@@ -605,6 +755,7 @@ impl State {
         if target.is_some() {
             self.set_keyboard_focus(target);
         }
+        self.restack(self.workspace_of(window));
     }
 
     /// When `gone`, a destroyed window or a layer surface that gave the keyboard up, held the
@@ -707,6 +858,7 @@ impl XdgShellHandler for State {
         // Before its first placement `place` stacks the window; a re-parent never gives it the keyboard.
         if let Some(window) = self.window_for(surface.wl_surface()) {
             if window.user_data().get::<Placed>().is_some() {
+                self.float_tile(&window);
                 self.follow_parent(&window, false);
             }
         }
