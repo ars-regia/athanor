@@ -218,7 +218,7 @@ fn divided(
 
 /// The tile a `place` of `area` leaves: `GAP` off a side at the edge of the area, half of it off a
 /// side another tile shares. A tile of a nested split can so be a few pixels narrower than its
-/// sibling, as in the reference, and it keeps a pixel however small.
+/// sibling, as in the reference, and it keeps a pixel however small, inside its place.
 fn gapped(
     place: Rectangle<i32, Logical>,
     area: Rectangle<i32, Logical>,
@@ -232,7 +232,12 @@ fn gapped(
     let bottom = gap(place.loc.y + place.size.h == area.loc.y + area.size.h);
     let size = (place.size.w - left - right, place.size.h - top - bottom);
     let size = (size.0.max(1), size.1.max(1));
-    Rectangle::new(place.loc + Point::from((left, top)), size.into())
+    // A place narrower than its gaps keeps its tile inside it.
+    let at = (
+        left.min(place.size.w - size.0).max(0),
+        top.min(place.size.h - size.1).max(0),
+    );
+    Rectangle::new(place.loc + Point::from(at), size.into())
 }
 
 /// What a workspace tiles.
@@ -576,6 +581,21 @@ mod tests {
         }
         for (_, tile) in tiles(&tree, whole) {
             assert!(tile.size.w >= 1 && tile.size.h >= 1, "{tile:?}");
+        }
+    }
+
+    /// A | (B | C) laid out in an area narrower than their gaps: each tile stays inside its
+    /// place, so inside the area, with a pixel at least.
+    #[test]
+    fn a_squeezed_nested_split_keeps_every_tile_in_the_area() {
+        let mut tree = Tree::default();
+        for window in 1..=3 {
+            tree.insert(window, area(1000, 100));
+        }
+        let squeezed = area(12, 10);
+        for (_, tile) in tiles(&tree, squeezed) {
+            assert!(tile.size.w >= 1 && tile.size.h >= 1, "{tile:?}");
+            assert!(squeezed.contains_rect(tile), "{tile:?} inside {squeezed:?}");
         }
     }
 
