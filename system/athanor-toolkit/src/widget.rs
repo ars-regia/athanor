@@ -1247,9 +1247,10 @@ impl Ui {
                 .any(|w| Some(w) == self.title_bar)
     }
 
-    /// Moves the focus off a widget that can no longer hold it, hidden or insensitive, to the
-    /// first stop of the focus chain after it in the order of the tree, or else the last one
-    /// before it: another row of its list, when one still takes it.
+    /// Moves the focus off a widget that can no longer hold it, hidden or insensitive. A row of a
+    /// list that still has a stop in the focus chain moves it to that stop, wherever it lies;
+    /// any other widget moves it to the first stop of the chain after it in the order of the
+    /// tree, or else the last one before it.
     fn keep_focus(&mut self) {
         let Some(focused) = self.focus else {
             return;
@@ -1267,9 +1268,13 @@ impl Ui {
         let place = |w: &WidgetId| tree.iter().position(|t| t == w);
         let here = place(&focused);
         let chain = focus::chain(self);
+        let list = self.widgets[focused]
+            .parent
+            .filter(|&p| matches!(self.widgets[p].kind, Kind::List { .. }));
+        let row = list.and_then(|l| chain.iter().find(|&&w| self.widgets[w].parent == Some(l)));
         let next = chain.iter().find(|w| place(w) > here);
         let previous = chain.iter().rev().find(|w| place(w) < here);
-        self.move_focus(next.or(previous).copied());
+        self.move_focus(row.or(next).or(previous).copied());
     }
 
     /// Whether `id` and all its ancestors are visible: what the user can see and reach.
@@ -3981,6 +3986,20 @@ mod tests {
             set(&mut ui, a, true);
             set(&mut ui, b, false);
             assert_eq!(ui.focus(), Some(a), "the previous row, hidden: {hide}");
+
+            // The list's stop takes the focus, though it comes before the row that went and a
+            // button comes after the list.
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let a = ui.list_row(list, "A");
+            ui.list_row(list, "B");
+            let c = ui.list_row(list, "C");
+            ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(a));
+            assert_eq!(ui.key(Key::End), Some(Event::Selected(c)));
+            set(&mut ui, c, false);
+            assert_eq!(ui.focus(), Some(a), "the list's stop, hidden: {hide}");
         }
     }
 
