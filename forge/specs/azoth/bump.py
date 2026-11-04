@@ -53,6 +53,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts" / "ci"))
+import release_class  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 PINS = HERE / "pins.env"
 # The Containerfiles of each group (docs/architecture/doc_system_image.md, S1): every FROM
@@ -69,6 +72,7 @@ KERNEL_MD = HERE / "KERNEL.md"
 COSMIC_COMP_DIR = HERE.parents[0] / "cosmic-comp"
 COSMIC_COMP_SPEC = COSMIC_COMP_DIR / "cosmic-comp.spec"
 SYSTEM_CONTAINERFILE = HERE.parents[2] / "system" / "Containerfile"
+RELEASE_CLASS = "## Release class"  # kernel-bump.yml greps this line: no auto-merge
 LTS_SERIES = "6.18"  # KERNEL_CHANNEL=lts: the longterm Fedora and CachyOS maintain
 KERNEL_RELEASES = "https://www.kernel.org/releases.json"
 BODHI = "https://bodhi.fedoraproject.org/updates/"
@@ -491,7 +495,25 @@ def compute(group):
         "images": images,
         "locks": locks,
         "notes": notes,
+        "closes": closed_advisories(pins, new),
     }
+
+
+def closed_advisories(pins, new):
+    """Ids of the Fedora security advisories of `kernel` that the moved kernel pin closes, read
+    as the release's `candidate` reads them (release_class.py). The image's Fedora release
+    names the repository; the kernel's may differ."""
+    if "FEDORA_KERNEL_NVR" not in new:
+        return []
+    try:
+        xml = release_class.PodmanSources(None).updateinfo_of(fedora_version())[1]
+        return release_class.kernel_half(
+            {"kernel": pins["FEDORA_KERNEL_NVR"]},
+            {"kernel": new["FEDORA_KERNEL_NVR"]},
+            release_class.parse_updateinfo(xml),
+        )
+    except release_class.ClassError as error:
+        sys.exit(f"kernel: the Fedora advisories: {error}")
 
 
 def kernel_pins(pins, new, notes, locks):
@@ -503,12 +525,13 @@ def kernel_pins(pins, new, notes, locks):
         if nvr != pins["FEDORA_KERNEL_NVR"] or tag != pins["CACHYOS_RELEASE"]:
             new["FEDORA_KERNEL_NVR"], new["CACHYOS_RELEASE"] = nvr, tag
         # bump.py never rewrites FEDORA_KEY_FPR: a pair from the next Fedora release needs
-        # that release's key, set by a person, or build.sh's SRPM signature check fails.
+        # that release's key, set by a person, or the SRPM's signature is not found.
         if fedora_of(nvr) != fedora_of(pins["FEDORA_KERNEL_NVR"]):
             notes.append(
                 f"kernel: {nvr} is a Fedora {fedora_of(nvr)} build and FEDORA_KEY_FPR still names the "
-                f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key; set it to the Fedora {fedora_of(nvr)} key "
-                "before merging, or build.sh's SRPM signature check fails"
+                f"Fedora {fedora_of(pins['FEDORA_KERNEL_NVR'])} key, so prep fails; on this branch set it to the "
+                f"Fedora {fedora_of(nvr)} key, make sure the base image ships that key's file, and run the "
+                "steps of the prep job again by hand (doc_kernel_build.md, section 8)"
             )
         # The linux-cachyos config in force at the release date: the one CachyOS shipped
         # that kernel with, not today's head, which may belong to the next series.
@@ -593,6 +616,22 @@ def body(result):
     ]
     if result["notes"]:
         lines += ["", "## Notes", ""] + [f"- {n}" for n in result["notes"]]
+    if result["closes"]:
+        ids = ", ".join(f'"{i}"' for i in result["closes"])
+        lines += [
+            "",
+            RELEASE_CLASS,
+            "",
+            "This kernel closes a Fedora security advisory, by upstream version alone. The release",
+            "fails at `candidate` until a `security` file is in its range (`doc_pipeline.md`, PL55).",
+            "The bot never writes it: once the fix is confirmed in this kernel, add",
+            "`release/class/<YYYY-MM-DD>-<slug>.toml` to this branch:",
+            "",
+            "```toml",
+            'class = "security"',
+            f"advisories = [{ids}]",
+            "```",
+        ]
     return "\n".join(lines) + "\n"
 
 

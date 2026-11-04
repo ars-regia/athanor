@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
+- Tab leaves the card for the high contrast and power buttons (#751).
+- The password field shows the focus ring round the field (AX8, #751).
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
 - cosmic-comp's session entry reads "Workspace overview and Alt+Tab": the magnifier and the
   colour filters are the default session's since #864.

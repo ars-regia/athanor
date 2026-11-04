@@ -525,6 +525,12 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    verde o rosso. Prima del builder, `lock.sh generate` riscrive i lock degli
    ambienti i cui input si sono spostati (la base per tutti, il SRPM pinnato per il
    builder): una PR di soli pin NVIDIA o CachyOS li lascia come sono. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
+   A failed `lock.sh generate` is a `FAIL` too: the builder and manifest steps are skipped
+   and the pull request opens with the end of the lock's log.
+   A pair from the next Fedora release fails there, because only a person moves
+   `FEDORA_KEY_FPR`: on the branch of the red pull request they set the key and run the
+   steps of this job again by hand. `lock.sh` reads that release's key file from the base
+   image, so the base must ship it: `fedora:43` has the keys of Fedora 44 and 45, not 46.
 3. **pr** (runner GitHub-hosted, con un token della GitHub App dei bot: le PR aperte
    con il `GITHUB_TOKEN` non fanno partire i check): branch `bump/kernel-<data>`,
    un commit con `pins.env`, i manifesti, i Containerfile, i lock degli ambienti
@@ -539,7 +545,9 @@ Il gate della PR è il check `gate` di `pr.yml`, che include il controllo del
 kernel (sezione 7; `Kernel gate` di `kernel-build.yml` resta per le PR su `main`). Con prep verde e il check verde
 la PR va in merge da sola; con prep rosso, o con il check rosso, resta aperta
 con il log del gate fallito. È l'unico momento in cui serve una persona, e sa
-già dove guardare. Al merge il push fa partire
+già dove guardare. This holds for a bump with no reason for review: one that moves an
+NVIDIA lock, or whose kernel closes a Fedora security advisory (`doc_pipeline.md`, PL55),
+has no auto-merge whatever prep says, and a person merges it. Al merge il push fa partire
 Kernel Build, che pubblica il kernel e avvia l'Orchestrator: questo chiama
 `nvidia-kmod.yml` per boot e pubblicazione dei moduli (firmati prima dal job `nvidia-kmod-sign`
 dell'Orchestrator) e poi costruisce le

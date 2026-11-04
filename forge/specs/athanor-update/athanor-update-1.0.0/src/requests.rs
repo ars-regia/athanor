@@ -187,8 +187,15 @@ pub fn postpone<T: Tools>(ctx: &Context<'_, T>) -> Result<i64, Refusal> {
     })?;
     let status = ctx.tools.status().map_err(|_| Refusal::Failed)?;
     // With the opt-out on nothing applies by itself, so there is nothing to postpone.
-    let staged = status.staged.as_ref().filter(|_| automatic && !status.rollback_queued).ok_or(Refusal::NothingDownloaded)?;
+    if !automatic || status.rollback_queued {
+        return Err(Refusal::NothingDownloaded);
+    }
     let postponed = lineage.open.as_ref().is_some_and(|open| open.postponed);
+    // A locked deployment does not survive a reboot, and the postpone stays spent until the
+    // check downloads the digest again.
+    let Some(staged) = status.staged.as_ref() else {
+        return Err(if postponed { Refusal::AlreadyPostponed } else { Refusal::NothingDownloaded });
+    };
     // Locked and not postponed: nothing applies at the next shutdown.
     if staged.download_only && !postponed {
         return Err(Refusal::NothingDownloaded);
@@ -656,6 +663,16 @@ mod tests {
         let (machine, tools) = staged_for_shutdown("postpone-newer", security(), &open_lineage(NOW - 86_400, true));
         refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
         assert_eq!(first_notice_at(&machine), Some(NOW - 86_400));
+    }
+
+    #[test]
+    fn a_postpone_spent_before_a_reboot_is_already_postponed() {
+        // The reboot took the locked deployment, and the check has not downloaded it again.
+        let (machine, tools) = offered_attested("postpone-rebooted", Some(security()));
+        store_attestation(&machine, &tools);
+        machine.store.set_lineage(&open_lineage(NOW - 86_400, true)).expect("write");
+        tools.calls.borrow_mut().clear();
+        refused_untouched(&machine, &tools, NOW, Refusal::AlreadyPostponed);
     }
 
     #[test]

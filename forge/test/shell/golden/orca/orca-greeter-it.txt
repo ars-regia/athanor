@@ -2,6 +2,10 @@ Lettore schermo attivo.
 Athanor
 Password di Rig testo password
 Accedi pulsante
+Contrasto elevato pulsante di commutazione non premuto
+Sospendi pulsante
+Riavvia pulsante
+Spegni pulsante
 Torna all'elenco pulsante
 Password di Rig testo password
 Lettore schermo disattivato.

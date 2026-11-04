@@ -394,6 +394,7 @@ impl State {
         if from == id {
             return true;
         }
+        crate::handlers::moved(window);
         if self.output_of_workspace(from).as_ref() != Some(&output) {
             if let Some(at) = self
                 .window_area_on(&output)
@@ -604,6 +605,7 @@ impl State {
                     let id = on.0.get();
                     if !self.workspaces.iter().any(|strip| strip.list.contains(&id)) {
                         on.0.set(home);
+                        crate::handlers::moved(window);
                         moved = true;
                     }
                 }

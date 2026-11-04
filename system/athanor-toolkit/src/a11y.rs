@@ -257,7 +257,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
 }
 
 /// The visible widgets that `update` leaves without a usable node: missing, of an unknown role,
-/// or focusable without a name.
+/// or focusable without a name or with a blank one.
 pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
     (0..ui.len())
         .filter(|&id| ui.is_visible(id))
@@ -265,7 +265,9 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
             let Some((_, node)) = update.nodes.iter().find(|(n, _)| *n == node_id(id)) else {
                 return true;
             };
-            node.role() == Role::Unknown || (ui.widget(id).is_focusable() && node.label().is_none())
+            node.role() == Role::Unknown
+                || (ui.widget(id).is_focusable()
+                    && node.label().is_none_or(|l| l.trim().is_empty()))
         })
         .collect()
 }
@@ -329,6 +331,10 @@ mod tests {
         update.nodes.retain(|(n, _)| *n != node_id(row));
         if let Some((_, node)) = update.nodes.iter_mut().find(|(n, _)| *n == node_id(field)) {
             node.clear_label();
+        }
+        assert_eq!(missing(&ui, &update), vec![row, field]);
+        if let Some((_, node)) = update.nodes.iter_mut().find(|(n, _)| *n == node_id(field)) {
+            node.set_label(" ");
         }
         assert_eq!(missing(&ui, &update), vec![row, field]);
     }

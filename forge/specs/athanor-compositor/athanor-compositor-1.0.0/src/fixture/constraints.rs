@@ -886,10 +886,16 @@ fn an_absolute_motion_keeps_a_lock_and_a_confinement() {
     let (_confined, confined) = game.confine(Some(&region), Lifetime::Persistent);
     game.wait(&mut run, &confined, &["confined"], "confined");
     let inside = at + Point::from((5.0, 5.0));
+    // An absolute motion is a fraction of the area, so the pointer lands within a rounding of
+    // the point asked for.
+    let near = |run: &Running, to: Point<f64, Logical>| {
+        let from = Game::location(run);
+        (from.x - to.x).abs() < 1e-6 && (from.y - to.y).abs() < 1e-6
+    };
     point(&mut game, &mut run, &second, inside);
-    assert_eq!(Game::location(&run), inside, "it moves inside the region");
+    assert!(near(&run, inside), "it moves inside the region");
     point(&mut game, &mut run, &second, at + Point::from((60.0, 5.0)));
-    assert_eq!(Game::location(&run), inside, "and not out of it");
+    assert!(near(&run, inside), "and not out of it");
     run.stop();
 }
 

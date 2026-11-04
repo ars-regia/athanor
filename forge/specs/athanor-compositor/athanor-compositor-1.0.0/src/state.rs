@@ -200,6 +200,8 @@ pub struct State {
     pub frame_stats: Option<FrameStats>,
     /// The commits waiting on a fence, each with the event source that waits on it.
     pub held: Vec<HeldCommit>,
+    /// The windows `place` cascaded, or placed first, in that order (`cascaded`).
+    pub spawned: Vec<Window>,
     /// The sequence number of the next held commit.
     pub next_held: u64,
     /// Given to each client's `ClientState`, which sends its id on disconnection.
@@ -409,6 +411,7 @@ impl State {
             syncobj_state: None,
             frame_stats: None,
             held: Vec::new(),
+            spawned: Vec::new(),
             next_held: 0,
             client_gone,
             foreign_toplevel_state,
@@ -473,12 +476,17 @@ impl State {
                 }
             },
         };
+        let instance = context.as_ref().and_then(|context| {
+            let id = context.instance_id.clone()?;
+            Some((context.creator_client_id.clone(), id))
+        });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
             identity,
+            instance,
         })
     }
 
@@ -491,6 +499,7 @@ impl State {
             confined: true,
             grants: Vec::new(),
             identity: None,
+            instance: None,
         })
     }
 
@@ -750,6 +759,7 @@ impl State {
         let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_area(window)) else {
             return;
         };
+        crate::handlers::moved(window);
         let maximised = window.user_data().get_or_insert(Maximised::default);
         let before = match maximised.0.get() {
             Some(kept) => kept.before,
@@ -852,6 +862,7 @@ impl State {
     /// minimised stays there, whichever output it names: only the user brings it to the one they
     /// see.
     pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
+        crate::handlers::moved(window);
         let visible = self.on_active_workspace(window) && !self.is_minimised(window);
         let named = output.filter(|_| visible);
         if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
@@ -948,6 +959,7 @@ impl State {
         else {
             return false;
         };
+        crate::handlers::moved(window);
         self.end_window_grab(window);
         self.dismiss_popups(window);
         window.set_activated(false);
@@ -1524,6 +1536,10 @@ pub struct ClientState {
     grants: Vec<Privilege>,
     /// What the grants were decided on, when the process could be read.
     identity: Option<Identity>,
+    /// The application instance its security context names: the context's creator and its
+    /// instance id. The clients that share it are one application, as a terminal and the
+    /// commands it runs are (`same_instance`).
+    instance: Option<(ClientId, String)>,
 }
 
 /// The identity `client` connected with, when it could be read.
@@ -1531,6 +1547,19 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `a` and `b` connected through security contexts that name one application instance:
+/// the same creator, which is the launcher, and the same instance id. A context without an
+/// instance id names none, and neither does xwayland-satellite's socket.
+pub fn same_instance(a: &Client, b: &Client) -> bool {
+    let instance = |client: &Client| {
+        client
+            .get_data::<ClientState>()
+            .and_then(|data| data.instance.clone())
+    };
+    let first = instance(a);
+    first.is_some() && first == instance(b)
 }
 
 /// Whether `client` was granted `privilege` when it connected.
@@ -1696,6 +1725,65 @@ pub fn placed(
         .into()
 }
 
+/// Where a window of `size` goes when windows were placed before it on its workspace, as
+/// cosmic-comp cascades a floating window with no place of its own (`map_internal` at
+/// epoch-1.11.0): `spawned` are their geometries in the order they were placed, the last one
+/// last, and `origin` is the output's top left, from which cosmic-comp counts. None when the
+/// window, or the last one, is three quarters of `area`'s width or more (and at least 360), or
+/// the last one is not wholly in `area`: the window is then placed as the first (`placed`).
+///
+/// The window goes 48 below the last one; beside it, its right edge 96 left of the last one's
+/// when the narrow windows before it are even in number, or 48 right of it when they are odd,
+/// as long as `min_height` still fits 16 above `area`'s bottom and the left edge stays on the
+/// output. Otherwise it opens a column: 16 above the highest of the narrow windows and 144 left
+/// of the last one, or, past the output's left edge, at `area`'s right less the last one's
+/// width and 16. It keeps 16 from `area`'s left and top, and the height returned is what fits
+/// 16 above the bottom. Every step on the window's own size saturates.
+pub fn cascaded(
+    origin: Point<i32, Logical>,
+    area: Rectangle<i32, Logical>,
+    spawned: &[Rectangle<i32, Logical>],
+    size: Size<i32, Logical>,
+    min_height: i32,
+) -> Option<(Point<i32, Logical>, i32)> {
+    let wide = (area.size.w / 4 * 3).max(360);
+    let last = *spawned.last()?;
+    if last.size.w >= wide || size.w >= wide || !area.contains_rect(last) {
+        return None;
+    }
+    let narrow = || spawned.iter().filter(|geometry| geometry.size.w < wide);
+    // In the output's own coordinates, where cosmic-comp keeps its windows.
+    let (left, top) = (area.loc.x - origin.x, area.loc.y - origin.y);
+    let bottom = top + area.size.h - 16;
+    let (last_x, last_y) = (last.loc.x - origin.x, last.loc.y - origin.y);
+    let last_right = last_x + last.size.w;
+    let mut y = last_y + 48;
+    let beside = (y.saturating_add(min_height) <= bottom)
+        .then(|| {
+            if narrow().count() % 2 == 0 {
+                last_right - 96 - size.w
+            } else {
+                last_right - size.w.saturating_sub(48).max(0)
+            }
+        })
+        .filter(|x| *x >= 0);
+    let x = beside.unwrap_or_else(|| {
+        let highest = narrow().map(|geometry| geometry.loc.y - origin.y).min();
+        y = (highest.unwrap_or(last_y) - 16).max(0);
+        match last_x - 144 {
+            x if x >= 0 => x,
+            _ => (left + area.size.w - last.size.w - 16).max(0),
+        }
+    });
+    let (x, y) = (x.max(left + 16), y.max(top + 16));
+    let height = if y.saturating_add(size.h) > bottom {
+        (bottom - y).max(1)
+    } else {
+        size.h
+    };
+    Some(((origin.x + x, origin.y + y).into(), height))
+}
+
 /// `area`, the output's rectangle in the space, less the insets the layer map's `zone` leaves of
 /// the output laid out at `laid_out`. Each inset is kept inside the output, so that a client's
 /// exclusive zone, however large, cannot place windows outside it or overflow; zones that leave
@@ -1721,7 +1809,7 @@ pub(crate) fn inset(
 
 #[cfg(test)]
 mod tests {
-    use super::{inset, placed, GrabSerials};
+    use super::{cascaded, inset, placed, GrabSerials};
     use smithay::reexports::wayland_server::backend::{ClientData, ClientId};
     use smithay::reexports::wayland_server::Display;
     use smithay::utils::{Logical, Rectangle, Serial};
@@ -1730,6 +1818,113 @@ mod tests {
 
     fn rect(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
         Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    #[test]
+    fn a_window_after_others_cascades_as_cosmic_comp_places_it() {
+        let (origin, output) = ((0, 0).into(), rect(0, 0, 1280, 800));
+        let size = (200, 100).into();
+        let first = rect(540, 100, 200, 100);
+        let cascade = |spawned: &[_]| cascaded(origin, output, spawned, size, 240);
+        assert_eq!(
+            cascade(&[]),
+            None,
+            "the first is placed as `placed` places it"
+        );
+        // One narrow window before: odd, so 48 right of its right edge less the width.
+        assert_eq!(cascade(&[first]), Some(((588, 148).into(), 100)));
+        let second = rect(588, 148, 200, 100);
+        // Two: even, so 96 left of the last one's right edge.
+        assert_eq!(cascade(&[first, second]), Some(((492, 196).into(), 100)));
+        let third = rect(492, 196, 200, 100);
+        assert_eq!(
+            cascade(&[first, second, third]),
+            Some(((540, 244).into(), 100))
+        );
+        // Counted from the output's top left, wherever the output is in the space.
+        assert_eq!(
+            cascaded(
+                (1280, 0).into(),
+                rect(1280, 0, 1280, 800),
+                &[rect(1820, 100, 200, 100)],
+                size,
+                240
+            ),
+            Some(((1868, 148).into(), 100))
+        );
+    }
+
+    #[test]
+    fn a_cascade_opens_a_column_and_fits_the_height() {
+        let (origin, output) = ((0, 0).into(), rect(0, 0, 1280, 800));
+        let size = (200, 100).into();
+        // No room 48 lower for the minimum height: a column 144 to the left, 16 above the
+        // highest.
+        let low = [rect(540, 100, 200, 100), rect(588, 500, 200, 100)];
+        assert_eq!(
+            cascaded(origin, output, &low, size, 240),
+            Some(((444, 84).into(), 100))
+        );
+        // Past the output's left edge, the column goes to the right.
+        let left = [rect(100, 100, 200, 100), rect(100, 600, 200, 100)];
+        assert_eq!(
+            cascaded(origin, output, &left, size, 240),
+            Some(((1064, 84).into(), 100))
+        );
+        // Beside the last one would cross the left edge: a column, on the right.
+        let edge = [rect(540, 100, 200, 100), rect(50, 148, 200, 100)];
+        assert_eq!(
+            cascaded(origin, output, &edge, size, 240),
+            Some(((1064, 84).into(), 100))
+        );
+        // Too tall for what is left: sent the height 16 above the bottom.
+        let first = [rect(540, 100, 200, 100)];
+        let tall = (200, 700).into();
+        assert_eq!(
+            cascaded(origin, output, &first, tall, 240),
+            Some(((588, 148).into(), 636))
+        );
+        // A client's size, however large, does not overflow.
+        let huge = (200, i32::MAX).into();
+        assert_eq!(
+            cascaded(origin, output, &first, huge, i32::MAX),
+            Some(((396, 84).into(), 700))
+        );
+    }
+
+    #[test]
+    fn a_wide_window_or_one_after_a_wide_one_does_not_cascade() {
+        let (origin, output) = ((0, 0).into(), rect(0, 0, 1280, 800));
+        let narrow = rect(540, 100, 200, 100);
+        assert_eq!(
+            cascaded(origin, output, &[narrow], (960, 100).into(), 240),
+            None
+        );
+        assert_eq!(
+            cascaded(
+                origin,
+                output,
+                &[rect(0, 0, 960, 100)],
+                (200, 100).into(),
+                240
+            ),
+            None
+        );
+        // The last one not wholly on the area, as one dragged half off it.
+        assert_eq!(
+            cascaded(
+                origin,
+                output,
+                &[rect(1200, 100, 200, 100)],
+                (200, 100).into(),
+                240
+            ),
+            None
+        );
+        assert_eq!(
+            cascaded(origin, output, &[narrow], (i32::MAX, 100).into(), 240),
+            None
+        );
     }
 
     #[test]
