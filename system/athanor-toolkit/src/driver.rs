@@ -1534,8 +1534,8 @@ impl App {
         }
     }
 
-    /// A key held down: as pressed again, except Enter outside a text area, and Space outside
-    /// a field, which activate once.
+    /// A key held down: as pressed again, with the serial of its press, which the repeat does
+    /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
         let focused = self
             .keyboard_focus
@@ -1544,13 +1544,10 @@ impl App {
         let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
         let in_area =
             focused.is_some_and(|(ui, id)| matches!(ui.widget(id).kind, Kind::TextArea(_)));
-        let activates = match event.keysym {
-            Keysym::Return | Keysym::KP_Enter => !in_area,
-            Keysym::space => !in_field,
-            _ => false,
-        };
-        if !activates {
+        if !once_per_press(event.keysym, self.modifiers.ctrl, in_field, in_area) {
+            self.shell.grab.repeat();
             self.key(event);
+            self.shell.grab.key(None);
         }
     }
 
@@ -2046,9 +2043,39 @@ impl ProvidesRegistryState for App {
 
 smithay_client_toolkit::delegate_dispatch2!(App);
 
+/// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
+/// area and Space outside a field, which activate, and Ctrl+C, Ctrl+X and Ctrl+V, which copy,
+/// cut and paste once per press.
+fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> bool {
+    match keysym {
+        Keysym::Return | Keysym::KP_Enter => !in_area,
+        Keysym::space => !in_field,
+        Keysym::c | Keysym::C | Keysym::x | Keysym::X | Keysym::v | Keysym::V => ctrl,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_held_key_acts_again_but_the_clipboard_keys_and_the_activating_ones() {
+        let once = |keysym, ctrl| once_per_press(keysym, ctrl, true, false);
+        assert!(!once(Keysym::Right, false), "an arrow repeats");
+        assert!(!once(Keysym::Right, true));
+        assert!(!once(Keysym::c, false), "a letter repeats");
+        assert!(!once(Keysym::a, true), "Ctrl+A selecting all again changes nothing");
+        for keysym in [Keysym::c, Keysym::C, Keysym::x, Keysym::X, Keysym::v, Keysym::V] {
+            assert!(once(keysym, true), "{keysym:?}");
+        }
+        // Enter breaks lines in a text area and activates once elsewhere; Space activates once
+        // outside a field.
+        assert!(once_per_press(Keysym::Return, false, true, false));
+        assert!(!once_per_press(Keysym::Return, false, true, true));
+        assert!(once_per_press(Keysym::space, false, false, false));
+        assert!(!once_per_press(Keysym::space, false, true, false));
+    }
 
     #[test]
     fn the_renderer_variable_takes_cpu_or_gpu_only() {

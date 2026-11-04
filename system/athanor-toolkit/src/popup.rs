@@ -99,6 +99,8 @@ pub(crate) fn focused_window<S: Copy>(
 pub(crate) struct GrabSerial {
     press: Option<u32>,
     key: Option<u32>,
+    /// The serial of the key pressed last, which its repeats are handled with.
+    pressed_key: Option<u32>,
 }
 
 impl GrabSerial {
@@ -115,6 +117,13 @@ impl GrabSerial {
     /// The key pressed with `serial` is being handled; `None` once it has been.
     pub fn key(&mut self, serial: Option<u32>) {
         self.key = serial;
+        self.pressed_key = serial.or(self.pressed_key);
+    }
+
+    /// The key pressed last repeats: it is handled again with its press's serial, until
+    /// `key(None)`.
+    pub fn repeat(&mut self) {
+        self.key = self.pressed_key;
     }
 
     /// The serial to grab with, while an input is under way.
@@ -359,6 +368,21 @@ mod tests {
         assert_eq!(grab.serial(), Some(8), "the button is still down");
         // The pointer left with the button down: the release goes elsewhere.
         grab.released();
+        assert_eq!(grab.serial(), None);
+    }
+
+    #[test]
+    fn a_held_key_repeats_with_the_serial_of_its_press() {
+        let mut grab = GrabSerial::default();
+        grab.repeat();
+        assert_eq!(grab.serial(), None, "no key was pressed");
+        grab.key(Some(4));
+        grab.key(None);
+        assert_eq!(grab.serial(), None);
+        // A repeat comes with no serial of its own: the press's names it while it is handled.
+        grab.repeat();
+        assert_eq!(grab.serial(), Some(4));
+        grab.key(None);
         assert_eq!(grab.serial(), None);
     }
 }
