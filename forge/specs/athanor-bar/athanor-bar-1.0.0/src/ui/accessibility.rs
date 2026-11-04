@@ -1,7 +1,8 @@
 //! The accessibility menu (doc_bar.md, BR3). High contrast through athanor-style's apply
-//! function, read back by the bar's appearance watch. The screen reader through the AT-SPI bus's status.
-//! The magnifier, inverted colours and the colour filter through the compositor. Each row
-//! shows only when its source answers; with none, the button is hidden (SH1).
+//! function, read back by the bar's appearance watch. The screen reader through its GNOME key
+//! (doc_accessibility.md AX2). The magnifier, inverted colours and the colour filter through
+//! the compositor. Each row shows only when its source answers; with none, the button is hidden
+//! (SH1).
 //! The magnifier's GNOME key decides whether it is on for a session (doc_accessibility.md AX10):
 //! the bar turns it on at its start when the key is true and sends each change, and the
 //! magnifier row writes the key, tells the compositor and shows the state the compositor sends.
@@ -11,6 +12,7 @@ use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
 
 use athanor_bar::magnifier::{self, KEY as MAGNIFIER_KEY, SCHEMA as MAGNIFIER_SCHEMA};
+use athanor_bar::screen_reader;
 use athanor_compositor_client::{theme, ScreenFilter};
 use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
@@ -20,13 +22,6 @@ use super::keyboard_aids::offer_text;
 use super::popup::{expose_choose_action, switch_row, Popup};
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
-
-const A11Y_BUS: &str = "org.a11y.Bus";
-const A11Y_PATH: &str = "/org/a11y/bus";
-const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
-const STATUS: &str = "org.a11y.Status";
-const READER: &str = "ScreenReaderEnabled";
-const TIMEOUT_MS: i32 = 5000;
 
 /// The filters a user can choose. `Unknown` is read, never offered.
 const FILTERS: [ScreenFilter; 5] = [
@@ -74,40 +69,14 @@ fn watch_magnifier(bar: &Rc<Bar>) -> Option<gio::Settings> {
     Some(settings)
 }
 
-async fn a11y_call(method: &str, args: glib::Variant) -> Result<glib::Variant, glib::Error> {
-    let bus = gio::bus_get_future(gio::BusType::Session).await?;
-    bus.call_future(
-        Some(A11Y_BUS),
-        A11Y_PATH,
-        PROPERTIES,
-        method,
-        Some(&args),
-        None,
-        gio::DBusCallFlags::NONE,
-        TIMEOUT_MS,
-    )
-    .await
-}
-
-/// `None` when the AT-SPI bus does not answer, or answers something else than a boolean.
-async fn reader_enabled() -> Option<bool> {
-    match a11y_call("Get", (STATUS, READER).to_variant()).await {
-        Ok(reply) => reply
-            .get::<(glib::Variant,)>()
-            .and_then(|(value,)| value.get::<bool>()),
-        Err(err) => {
-            tracing::warn!(error = %err, "the AT-SPI bus does not answer; the screen reader row is hidden");
-            None
-        }
-    }
-}
-
 struct Inner {
     popup: Popup,
     high_contrast_row: gtk4::Box,
     high_contrast: gtk4::Switch,
     reader_row: gtk4::Box,
     reader: gtk4::Switch,
+    /// The screen reader's key; `None` without it, and the row hidden.
+    reader_key: Option<gio::Settings>,
     compositor_rows: gtk4::Box,
     magnifier: gtk4::Switch,
     inverted: gtk4::Switch,
@@ -151,22 +120,13 @@ impl Inner {
         }
     }
 
-    fn show_reader(self: &Rc<Self>, bar: &Rc<Bar>) {
-        let (inner, weak) = (self.clone(), Rc::downgrade(bar));
-        glib::spawn_future_local(async move {
-            let enabled = reader_enabled().await;
-            inner.reader_row.set_visible(enabled.is_some());
-            if let Some(enabled) = enabled {
-                inner.updating.set(true);
-                inner.reader.set_active(enabled);
-                inner.updating.set(false);
-            }
-            inner.fit();
-            if let Some(bar) = weak.upgrade() {
-                // The group may have gained or lost its only visible button.
-                bar.refresh(Changed::Accessibility);
-            }
-        });
+    /// The screen reader's key is read again whenever the popover is about to be seen.
+    fn sync_reader(&self) {
+        if let Some(key) = &self.reader_key {
+            self.updating.set(true);
+            self.reader.set_active(key.boolean(screen_reader::KEY));
+            self.updating.set(false);
+        }
     }
 }
 
@@ -248,7 +208,15 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     offer_row.set_visible(false);
     content.append(&offer_row);
     popup.popover.set_child(Some(&content));
-    reader_row.set_visible(false);
+    let reader_key = screen_reader::settings(gio::SettingsSchemaSource::default().as_ref(), None);
+    if reader_key.is_none() {
+        tracing::warn!(
+            "{} has no {}; the screen reader row is hidden",
+            screen_reader::SCHEMA,
+            screen_reader::KEY
+        );
+    }
+    reader_row.set_visible(reader_key.is_some());
     compositor_rows.set_visible(false);
 
     let inner = Rc::new(Inner {
@@ -257,6 +225,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         high_contrast,
         reader_row,
         reader,
+        reader_key,
         compositor_rows,
         magnifier,
         inverted,
@@ -267,6 +236,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         offer,
     });
     inner.sync_high_contrast();
+    inner.sync_reader();
     inner.fit();
 
     let weak_bar = Rc::downgrade(bar);
@@ -299,14 +269,22 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     });
     let weak_inner = Rc::downgrade(&inner);
     inner.reader.connect_state_set(move |_, enabled| {
-        if weak_inner
+        let written = weak_inner
             .upgrade()
-            .is_some_and(|inner| !inner.updating.get())
-        {
-            glib::spawn_future_local(async move {
-                let args = (STATUS, READER, enabled.to_variant()).to_variant();
-                if let Err(err) = a11y_call("Set", args).await {
-                    tracing::error!(error = %err, "cannot switch the screen reader");
+            .filter(|inner| !inner.updating.get())
+            .and_then(|inner| {
+                inner
+                    .reader_key
+                    .as_ref()
+                    .map(|key| key.set_boolean(screen_reader::KEY, enabled))
+            });
+        if let Some(Err(err)) = written {
+            tracing::error!(error = %err, "cannot switch the screen reader");
+            // Show what the key holds, once this handler has returned.
+            let weak_inner = weak_inner.clone();
+            glib::idle_add_local_once(move || {
+                if let Some(inner) = weak_inner.upgrade() {
+                    inner.sync_reader();
                 }
             });
         }
@@ -377,14 +355,11 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         });
     }
 
-    inner.show_reader(bar);
-    let (weak_bar, weak_inner) = (Rc::downgrade(bar), Rc::downgrade(&inner));
+    let weak_inner = Rc::downgrade(&inner);
     inner.popup.popover.connect_show(move |_| {
         if let Some(inner) = weak_inner.upgrade() {
             inner.sync_high_contrast();
-        }
-        if let (Some(bar), Some(inner)) = (weak_bar.upgrade(), weak_inner.upgrade()) {
-            inner.show_reader(&bar);
+            inner.sync_reader();
         }
     });
     Some(Box::new(AccessibilityUi { inner }))
