@@ -979,22 +979,20 @@ impl State {
             .collect()
     }
 
-    /// athanor_workspace_tiling_v1 has no `done`: a state a reader has seen the workspace for
-    /// is news at once, and one that comes first waits for the workspace's own `done`.
+    /// athanor_workspace_tiling_v1 has no `done`: the state goes into both copies of the
+    /// workspace, and a reader that has seen it gets that value alone at once. What else is
+    /// pending still waits for the manager's `done`; a workspace no reader has seen waits whole.
     pub(crate) fn set_workspace_tiling(&mut self, id: WorkspaceId, tiling: Option<Tiling>) {
         let Some(workspace) = self.workspaces.pending(&id) else {
             return;
         };
         workspace.tiling = tiling;
-        if !self.workspaces.values().any(|workspace| workspace.id == id) {
-            return;
-        }
-        match self.workspaces.commit(&id) {
-            Some(Change::Added(workspace)) => self.events.push(Event::WorkspaceAdded(workspace)),
-            Some(Change::Changed(workspace)) => {
-                self.events.push(Event::WorkspaceChanged(workspace));
+        if let Some(seen) = self.workspaces.committed(&id) {
+            if seen.tiling != tiling {
+                seen.tiling = tiling;
+                let seen = seen.clone();
+                self.events.push(Event::WorkspaceChanged(seen));
             }
-            None => {}
         }
     }
 
@@ -1613,5 +1611,46 @@ mod tests {
             })
             .collect();
         assert_eq!(added, [(unseen, Some(Tiling::Floating))]);
+    }
+
+    #[test]
+    fn a_tiling_state_does_not_commit_what_waits_for_done() {
+        let id = WorkspaceId(1);
+        let mut state = State::default();
+        state.workspaces.insert(
+            id,
+            Workspace {
+                id,
+                name: "1".to_owned(),
+                active: true,
+                tiling: None,
+                output: None,
+            },
+        );
+        state.workspaces.commit_all();
+        // ext-workspace-v1 renames it; the manager's `done` has not come yet.
+        if let Some(workspace) = state.workspaces.pending(&id) {
+            workspace.name = "one".to_owned();
+        }
+        state.set_workspace_tiling(id, Some(Tiling::Tiled));
+        let seen: Vec<_> = state
+            .events
+            .iter()
+            .map(|event| match event {
+                Event::WorkspaceChanged(workspace) => (workspace.name.as_str(), workspace.tiling),
+                other => panic!("not a workspace change: {other:?}"),
+            })
+            .collect();
+        assert_eq!(seen, [("1", Some(Tiling::Tiled))]);
+        let done: Vec<_> = state
+            .workspaces
+            .commit_all()
+            .into_iter()
+            .map(|change| match change {
+                Change::Changed(workspace) => (workspace.name, workspace.tiling),
+                Change::Added(workspace) => panic!("not seen: {workspace:?}"),
+            })
+            .collect();
+        assert_eq!(done, [("one".to_owned(), Some(Tiling::Tiled))]);
     }
 }

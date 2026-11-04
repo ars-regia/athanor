@@ -208,6 +208,11 @@ impl<K: Ord + Copy, T: Clone + PartialEq> Table<K, T> {
         self.pending.values_mut()
     }
 
+    /// The copy a reader has seen, for a value that comes outside the double buffer.
+    pub(crate) fn committed(&mut self, key: &K) -> Option<&mut T> {
+        self.committed.get_mut(key)
+    }
+
     /// Makes the pending copy current. `None` when nothing a reader can see changed.
     pub(crate) fn commit(&mut self, key: &K) -> Option<Change<T>> {
         let next = self.pending.get(key)?;
