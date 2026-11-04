@@ -759,6 +759,7 @@ impl State {
         let (Some(toplevel), Some(area)) = (window.toplevel(), self.home_area(window)) else {
             return;
         };
+        crate::handlers::moved(window);
         let maximised = window.user_data().get_or_insert(Maximised::default);
         let before = match maximised.0.get() {
             Some(kept) => kept.before,
@@ -861,6 +862,7 @@ impl State {
     /// minimised stays there, whichever output it names: only the user brings it to the one they
     /// see.
     pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
+        crate::handlers::moved(window);
         let visible = self.on_active_workspace(window) && !self.is_minimised(window);
         let named = output.filter(|_| visible);
         if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
@@ -957,6 +959,7 @@ impl State {
         else {
             return false;
         };
+        crate::handlers::moved(window);
         self.end_window_grab(window);
         self.dismiss_popups(window);
         window.set_activated(false);

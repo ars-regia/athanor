@@ -3048,9 +3048,7 @@ fn the_windows_after_the_first_cascade_until_the_first_is_moved() {
         open.push((local, toplevel));
     }
     // As a move grab marks it.
-    fixture
-        .user_data()
-        .insert_if_missing(|| crate::handlers::Moved);
+    crate::handlers::moved(&fixture);
     let mut local = Local::connect(&mut run, None);
     let _toplevel = local.toplevel(&mut run);
     let window = window_of_client(&run, local.id.as_ref().expect("an id"));

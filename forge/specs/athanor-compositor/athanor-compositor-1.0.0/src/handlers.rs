@@ -79,8 +79,15 @@ pub struct HeldCommit {
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
 
-/// Marks a window the user has moved since it was placed: the cascade no longer follows it.
-pub(crate) struct Moved;
+/// Marks a window the user has moved, resized, maximised, minimised or made full screen since it
+/// was placed, or that went to another workspace: the cascade no longer follows it. A destroyed
+/// window ends the cascade too, at the next window `spawn` places.
+struct Moved;
+
+/// Takes `window` out of the cascade, as cosmic-comp does when the window leaves its place.
+pub(crate) fn moved(window: &Window) {
+    window.user_data().insert_if_missing(|| Moved);
+}
 
 /// Whether the user can see `window` in the space: placed, and still drawing something, since a
 /// client can unmap a placed window by committing a null buffer.
@@ -336,8 +343,8 @@ impl State {
     /// cascaded from the windows placed there before it (`cascaded`), or as the first
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
-    /// and is left out of it. A window too tall for where it lands is sent the height that
-    /// fits.
+    /// and is left out of it, and so is one maximised or full screen before its first commit.
+    /// A window too tall for where it lands is sent the height that fits.
     fn spawn(
         &mut self,
         window: &Window,
@@ -348,7 +355,7 @@ impl State {
         let Some(output) = self.space.outputs().next().cloned() else {
             return first;
         };
-        if self.parent_window(window).is_some() {
+        if self.parent_window(window).is_some() || window.user_data().get::<Moved>().is_some() {
             return first;
         }
         let workspace = self.active_workspace(&output);
@@ -385,11 +392,11 @@ impl State {
                     let mut cached = states
                         .cached_state
                         .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
-                    cached.current().min_size.h
+                    cached.current().min_size
                 })
             })
-            .filter(|height| *height > 0)
-            .unwrap_or(240);
+            .filter(|size| size.w != 0 || size.h != 0)
+            .map_or(240, |size| size.h);
         let Some((at, height)) =
             crate::state::cascaded(origin, area, &geometries, geometry.size, min_height)
         else {
@@ -764,6 +771,7 @@ impl XdgShellHandler for State {
         let Some(from) = self.space.element_geometry(&window) else {
             return;
         };
+        moved(&window);
         let grab = ResizeGrab::new(start, window, edges, from);
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
