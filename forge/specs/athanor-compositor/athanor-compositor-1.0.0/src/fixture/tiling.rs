@@ -377,6 +377,26 @@ fn tiles(run: &Running, id: WorkspaceId) -> usize {
         .map_or(0, |(_, tree)| tree.windows().len())
 }
 
+/// The rectangle the tree of `id` gives `window` in its workspace's area.
+fn tile_of(run: &Running, id: WorkspaceId, window: &Window) -> Rectangle<i32, Logical> {
+    let area = run
+        .state
+        .output_of_workspace(id)
+        .and_then(|output| run.state.window_area_on(&output))
+        .expect("an area");
+    let (_, tree) = run
+        .state
+        .tilings
+        .iter()
+        .find(|(kept, _)| *kept == id)
+        .expect("a tree");
+    tree.layout(area)
+        .into_iter()
+        .find(|(kept, _)| *kept == window)
+        .map(|(_, tile)| tile)
+        .expect("a tile")
+}
+
 /// Whether `local` was sent a configure since it last answered one, after a roundtrip.
 fn configured(run: &mut Running, local: &mut Local) -> bool {
     local.roundtrip(run);
@@ -920,8 +940,8 @@ fn a_dropped_tile_goes_back_to_the_layout() {
     run.stop();
 }
 
-/// A drop that puts the tile back from under the pointer gives the pointer to the client now
-/// under it.
+/// A drop that moves the tiles at once gives the pointer to the client under it once they
+/// moved: on the other tile, the dragged one, which takes that tile's place (D11).
 #[test]
 fn a_dropped_tile_reaches_the_client_under_the_pointer() {
     let mut run = Running::start(None);
@@ -930,16 +950,16 @@ fn a_dropped_tile_reaches_the_client_under_the_pointer() {
     move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
     run.state
         .pointer_to(at + Point::from((700.0, 0.0)), InputTime::now());
-    pair.lower.roundtrip(&mut run);
-    pair.lower.client.pointer_enter = None;
+    pair.upper.roundtrip(&mut run);
+    pair.upper.client.pointer_enter = None;
 
     release(&mut run);
 
-    pair.lower
-        .pump(&mut run, "the pointer enters the lower tile", |client, _| {
+    pair.upper
+        .pump(&mut run, "the pointer enters the dropped tile", |client, _| {
             client.pointer_enter.is_some()
         });
-    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.above), rect(RIGHT));
     run.stop();
 }
 
@@ -1001,8 +1021,9 @@ fn a_resized_tile_ends_at_its_tile() {
     release(&mut run);
     let (width, height, _) = pair.upper.redraw(&mut run);
 
-    assert_eq!((width, height), (LEFT.2, LEFT.3));
-    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    let tile = tile_of(&run, pair.id, &pair.above);
+    assert_eq!((width, height), (tile.size.w, tile.size.h));
+    assert_eq!(geometry(&run, &pair.above), tile);
     run.stop();
 }
 
@@ -1279,4 +1300,67 @@ fn a_tile_that_takes_one_size_leaves_its_tile() {
         toplevel.set_max_size(WIDTH, HEIGHT);
         surface.commit();
     });
+}
+
+/// A tile dropped on the other tile swaps places with it (D11); of one size, both move at once.
+#[test]
+fn dropping_a_tile_on_a_tile_swaps_them() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((700.0, 0.0)), InputTime::now());
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+
+    assert_eq!(geometry(&run, &pair.above), rect(RIGHT));
+    assert_eq!(geometry(&run, &pair.below), rect(LEFT));
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(RIGHT));
+    assert_eq!(tile_of(&run, pair.id, &pair.below), rect(LEFT));
+    run.stop();
+}
+
+/// A tile dropped on no tile, here in the gap between the two, goes back to its own (D11).
+#[test]
+fn a_drop_elsewhere_puts_a_tile_back() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(Point::from((640.0, 400.0)), InputTime::now());
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.below), rect(RIGHT));
+    assert!(!configured(&mut run, &mut pair.lower));
+    run.stop();
+}
+
+/// A tile resized by its client moves the split by its right edge, and the tile beside it gives
+/// up what it took; its bottom edge, at the area's, has no split to move (D11).
+#[test]
+fn resizing_a_tile_moves_its_split() {
+    const WIDER: (i32, i32, i32, i32) = (8, 8, 658, 784);
+    const NARROWER: (i32, i32, i32, i32) = (674, 8, 598, 784);
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.redraw(&mut run);
+
+    let answers = answer_all(&mut run, &mut [&mut pair.upper, &mut pair.lower], release);
+
+    assert_eq!((answers[0].0, answers[0].1), (WIDER.2, WIDER.3));
+    assert_eq!((answers[1].0, answers[1].1), (NARROWER.2, NARROWER.3));
+    assert_eq!(tile_of(&run, pair.id, &pair.above), rect(WIDER));
+    assert_eq!(geometry(&run, &pair.above), rect(WIDER));
+    assert_eq!(geometry(&run, &pair.below), rect(NARROWER));
+    run.stop();
 }

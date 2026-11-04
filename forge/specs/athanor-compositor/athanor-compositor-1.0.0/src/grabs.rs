@@ -176,7 +176,12 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
+            let at = handle.current_location();
+            let from = data.workspace_of(&self.window);
             data.settle(&self.window);
+            if data.workspace_of(&self.window) == from {
+                data.drop_on_tile(&self.window, at);
+            }
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -199,6 +204,8 @@ pub struct ResizeGrab {
     edges: ResizeEdge,
     /// The window's geometry at the press.
     from: Rectangle<i32, Logical>,
+    /// The size the last motion asked for.
+    asked: Option<Size<i32, Logical>>,
 }
 
 impl ResizeGrab {
@@ -224,6 +231,7 @@ impl ResizeGrab {
             window,
             edges,
             from,
+            asked: None,
         }
     }
 }
@@ -247,6 +255,7 @@ impl PointerGrab<State> for ResizeGrab {
         });
         let delta = event.location - self.start.location;
         let size = resized(self.edges, self.from.size, delta, min, max);
+        self.asked = Some(size);
         toplevel.with_pending_state(|state| {
             state.states.set(xdg_toplevel::State::Resizing);
             state.size = Some(size);
@@ -270,7 +279,8 @@ impl PointerGrab<State> for ResizeGrab {
 
     /// The release, or the lock: a configure without the `resizing` state, and the window
     /// stays anchored until the commit that answers it. A grab that replaced this one keeps its
-    /// own record; a tile is not anchored, since its layout places it.
+    /// own record; a tile is not anchored, since its layout places it, with the splits the
+    /// resize moved (D11).
     fn unset(&mut self, data: &mut State) {
         let last = let_go(&self.window);
         if let Some(toplevel) = self.window.toplevel() {
@@ -288,6 +298,10 @@ impl PointerGrab<State> for ResizeGrab {
             }
         }
         if last {
+            if let Some(size) = self.asked {
+                let to = Rectangle::new(anchored(self.edges, self.from, size), size);
+                data.resize_tile(&self.window, to);
+            }
             data.grab_ended(&self.window);
         }
     }
@@ -353,6 +367,45 @@ impl State {
         if let Some(resizing) = window.user_data().get::<Resizing>() {
             resizing.0.set(None);
         }
+    }
+
+    /// D11 for `window`, a tile dropped with the pointer at `at`: it swaps places with the tile
+    /// under the pointer. A drop on no other tile changes nothing, and the layout puts it back.
+    fn drop_on_tile(&mut self, window: &Window, at: Point<f64, Logical>) {
+        let Some((tree, area)) = self.tree_of(window) else {
+            return;
+        };
+        let under = tree
+            .layout(area)
+            .into_iter()
+            .find(|(kept, tile)| *kept != window && tile.to_f64().contains(at))
+            .map(|(kept, _)| kept.clone());
+        if let Some(under) = under {
+            tree.swap(window, &under);
+        }
+    }
+
+    /// D11 for `window`, a tile its client resized to `to`: the splits by the sides that moved
+    /// move with them, before the grab's end lays the workspace out.
+    fn resize_tile(&mut self, window: &Window, to: Rectangle<i32, Logical>) {
+        if let Some((tree, area)) = self.tree_of(window) {
+            tree.resize(window, to, area);
+        }
+    }
+
+    /// The tree that holds `window`, a tile, with the area of its workspace.
+    fn tree_of(
+        &mut self,
+        window: &Window,
+    ) -> Option<(&mut crate::tiling::Tree<Window>, Rectangle<i32, Logical>)> {
+        let id = self.workspace_of(window)?;
+        let area = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))?;
+        self.tilings
+            .iter_mut()
+            .find(|(kept, tree)| *kept == id && tree.holds(window))
+            .map(|(_, tree)| (tree, area))
     }
 
     /// Keeps the edges opposite a resize's where they were, at each commit while the resize

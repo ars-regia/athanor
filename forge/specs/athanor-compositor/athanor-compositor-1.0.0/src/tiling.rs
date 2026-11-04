@@ -105,6 +105,60 @@ impl<T: PartialEq> Node<T> {
         }
     }
 
+    /// Moves by `by` the split nearest `window`'s `side`, the one after the window if `end` and
+    /// the one before it if not, so that the window's part grows by `by`: whether one did.
+    /// `place` is this node's.
+    fn move_split(
+        &mut self,
+        window: &T,
+        side: Along,
+        end: bool,
+        by: i32,
+        place: Rectangle<i32, Logical>,
+    ) -> bool {
+        let Self::Split {
+            along,
+            share,
+            first,
+            second,
+        } = self
+        else {
+            return false;
+        };
+        let (one, other) = divided(place, *along, *share);
+        let in_first = first.holds(window);
+        let nearer = if in_first {
+            first.move_split(window, side, end, by, one)
+        } else {
+            second.move_split(window, side, end, by, other)
+        };
+        if nearer || *along != side || in_first != end {
+            return nearer;
+        }
+        let (part, room) = match along {
+            Along::Width => (one.size.w, place.size.w.max(2)),
+            Along::Height => (one.size.h, place.size.h.max(2)),
+        };
+        let part = if in_first { part + by } else { part - by };
+        *share = (f64::from(part) / f64::from(room)).clamp(0.0, 1.0);
+        true
+    }
+
+    fn swap(&mut self, one: &T, other: &T)
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Tile(tile) if tile == one => *tile = other.clone(),
+            Self::Tile(tile) if tile == other => *tile = one.clone(),
+            Self::Tile(_) => {}
+            Self::Split { first, second, .. } => {
+                first.swap(one, other);
+                second.swap(one, other);
+            }
+        }
+    }
+
     fn holds(&self, window: &T) -> bool {
         match self {
             Self::Tile(tile) => tile == window,
@@ -243,6 +297,50 @@ impl<T: PartialEq + Clone> Tree<T> {
     pub fn remove(&mut self, window: &T) {
         self.root = self.root.take().and_then(|root| root.without(window));
         self.focused.retain(|kept| kept != window);
+    }
+
+    /// Gives `one` the tile of `other` and `other` that of `one` (D11); unless it holds both,
+    /// nothing changes.
+    pub fn swap(&mut self, one: &T, other: &T) {
+        if one == other || !self.holds(one) || !self.holds(other) {
+            return;
+        }
+        if let Some(root) = &mut self.root {
+            root.swap(one, other);
+        }
+    }
+
+    /// Moves the splits by the tile of `window` in `area` so that its sides go where `to` has
+    /// them (D11): each side that moved moves the split nearest it, and a side at the edge of
+    /// the area has none.
+    pub fn resize(
+        &mut self,
+        window: &T,
+        to: Rectangle<i32, Logical>,
+        area: Rectangle<i32, Logical>,
+    ) {
+        let tiles = self.layout(area);
+        let Some(tile) = tiles
+            .into_iter()
+            .find(|(kept, _)| *kept == window)
+            .map(|(_, tile)| tile)
+        else {
+            return;
+        };
+        let Some(root) = &mut self.root else {
+            return;
+        };
+        let sides = [
+            (Along::Width, false, tile.loc.x - to.loc.x),
+            (Along::Width, true, to.loc.x + to.size.w - tile.loc.x - tile.size.w),
+            (Along::Height, false, tile.loc.y - to.loc.y),
+            (Along::Height, true, to.loc.y + to.size.h - tile.loc.y - tile.size.h),
+        ];
+        for (side, end, by) in sides {
+            if by != 0 {
+                root.move_split(window, side, end, by, area);
+            }
+        }
     }
 
     /// Notes that the focus went to `window`, which the next tile will split.
