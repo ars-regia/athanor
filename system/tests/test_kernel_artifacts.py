@@ -1015,19 +1015,41 @@ class CheckPlan(Repo):
             **self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP),
             "system/nvidia/locks/open.lock": "l\n",
             "system/nvidia/lock.py": "p\n",
+            "system/nvidia/azoth-nvidia-kmod.spec": "s\n",
+            "system/nvidia/build-rpms.sh": "b\n",
+            "system/nvidia/gate.sh": "g\n",
             "system/nvidia/tests/test_lock.py": "t\n",
             "docs/architecture/doc_system_image.md": "d\n",
         })
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
 
-    def test_nvidia_pin_bump_with_a_key_or_other_files_fails(self):
+    def pin_bump_with(self, path):
         self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
-        for path in ("system/nvidia/keys/RPM-GPG-KEY-x", "system/Containerfile"):
-            with self.subTest(path=path):
-                r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), path: f"{path}\n"})
-                self.assertEqual(r.returncode, 1)
-                self.assertIn("own pull request", r.stderr)
+        return self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), path: f"{path}\n"})
+
+    def test_nvidia_pin_bump_with_a_key_fails(self):
+        r = self.pin_bump_with("system/nvidia/keys/RPM-GPG-KEY-x")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_another_file_of_the_image_fails(self):
+        r = self.pin_bump_with("system/Containerfile")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_other_nvidia_packaging_fails(self):
+        r = self.pin_bump_with("system/nvidia/mirror.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_that_moves_a_key_into_the_documents_fails(self):
+        self.commit({"system/nvidia/keys/RPM-GPG-KEY-x": "k\n"})
+        (self.work / "docs").mkdir(exist_ok=True)
+        self.git("mv", "system/nvidia/keys/RPM-GPG-KEY-x", "docs/RPM-GPG-KEY-x")
+        r = self.pin_bump_with("system/nvidia/locks/open.lock")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
 
     def test_nvidia_pin_bump_without_the_signed_vmlinuz_fails(self):
         # Even the default image copies the signed vmlinuz in: without it nothing can be built.
