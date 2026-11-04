@@ -124,15 +124,24 @@ jobs:
           name: bump-pins
 
       - name: Toolchain lock for the new pins
+        id: lock
         # Each lock resolved again only when its inputs moved: base, package list, pinned SRPM (lock.sh).
-        run: bash forge/specs/azoth/lock.sh generate
+        # A failure is prep's FAIL: a pair from the next Fedora release fails here until a
+        # person sets its key, and the PR is where that person is told.
+        run: |
+          set -euo pipefail
+          locked=true
+          bash forge/specs/azoth/lock.sh generate 2>&1 | tee prep.log || locked=false
+          echo "locked=${locked}" >> "$GITHUB_OUTPUT"
 
       - name: Build the kernel builder image
+        if: ${{ steps.lock.outputs.locked == 'true' }}
         env:
           BUILDAH_ISOLATION: chroot
         run: bash scripts/ci/build-builder.sh
 
       - name: Manifests for the new pins
+        if: ${{ steps.lock.outputs.locked == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.cache/azoth"
@@ -151,11 +160,16 @@ jobs:
       - name: Prep (signatures, patches, config gate)
         # Green or red, the outcome and the derived options end up in the PR body: the PR
         # opens anyway and `gate` keeps it red until a human decides.
+        env:
+          LOCKED: ${{ steps.lock.outputs.locked }}
         run: |
           set -euo pipefail
           mkdir -p out
           outcome=ok
-          if ! podman run --rm \
+          if [[ $LOCKED != true ]]; then
+            outcome=FAIL
+            echo "::error::lock.sh generate failed: the pull request carries the end of its log"
+          elif ! podman run --rm \
                  -v "$GITHUB_WORKSPACE:/forge" \
                  -v "$HOME/.cache/azoth:/var/cache/azoth" \
                  -w /forge localhost/azoth-builder \

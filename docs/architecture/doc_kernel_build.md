@@ -525,6 +525,12 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    verde o rosso. Prima del builder, `lock.sh generate` riscrive i lock degli
    ambienti i cui input si sono spostati (la base per tutti, il SRPM pinnato per il
    builder): una PR di soli pin NVIDIA o CachyOS li lascia come sono. Se prep si ferma con `refresh needed`, l'esito è `REFRESH`.
+   A failed `lock.sh generate` is a `FAIL` too: the builder and manifest steps are skipped
+   and the pull request opens with the end of the lock's log.
+   A pair from the next Fedora release fails there, because only a person moves
+   `FEDORA_KEY_FPR`: on the branch of the red pull request they set the key and run the
+   steps of this job again by hand. `lock.sh` reads that release's key file from the base
+   image, so the base must ship it: `fedora:43` has the keys of Fedora 44 and 45, not 46.
 3. **pr** (runner GitHub-hosted, con un token della GitHub App dei bot: le PR aperte
    con il `GITHUB_TOKEN` non fanno partire i check): branch `bump/kernel-<data>`,
    un commit con `pins.env`, i manifesti, i Containerfile, i lock degli ambienti

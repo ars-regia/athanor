@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import yaml
+
 AZOTH = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AZOTH))
 import bump  # noqa: E402
@@ -152,10 +154,25 @@ class BumpGroups(unittest.TestCase):
         with mock.patch.object(bump, "kernel_pair", lambda pins, notes: pair):
             notes = bump.compute("kernel")["notes"]
         self.assertIn(
-            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key; "
-            "set it to the Fedora 44 key before merging, or build.sh's SRPM signature check fails",
+            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key, "
+            "so prep fails; on this branch set it to the Fedora 44 key, make sure the base image ships that "
+            "key's file, and run the steps of the prep job again by hand (doc_kernel_build.md, section 8)",
             notes,
         )
+
+    def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
+        jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]
+        steps = {step.get("name"): step for step in jobs["prep"]["steps"]}
+        lock = steps["Toolchain lock for the new pins"]
+        self.assertEqual(lock["id"], "lock")
+        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", lock["run"])
+        self.assertIn('echo "locked=${locked}" >> "$GITHUB_OUTPUT"', lock["run"])
+        for name in ("Build the kernel builder image", "Manifests for the new pins"):
+            self.assertEqual(steps[name]["if"], "${{ steps.lock.outputs.locked == 'true' }}", name)
+        prep = steps["Prep (signatures, patches, config gate)"]
+        self.assertEqual(prep["env"]["LOCKED"], "${{ steps.lock.outputs.locked }}")
+        self.assertRegex(prep["run"], r"if \[\[ \$LOCKED != true \]\]; then\s+outcome=FAIL")
+        self.assertEqual(jobs["pr"]["needs"], ["kernel", "prep"])
 
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")
