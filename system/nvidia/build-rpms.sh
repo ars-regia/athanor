@@ -35,14 +35,16 @@ rpmkeys --import "$NV/keys/RPM-GPG-KEY-negativo17" "$NV/keys/RPM-GPG-KEY-rpmfusi
 
 for branch in open legacy; do
   case $branch in
-    open) expected=$(pin NVIDIA_OPEN_VERSION) ;;
-    legacy) expected=$(pin NVIDIA_LEGACY_VERSION) ;;
+    open) expected=$(pin NVIDIA_OPEN_VERSION) driver=nvidia ;;
+    # RPM Fusion's Fedora 45 packages of the 580 branch require nvidia-580xx-kmod.
+    legacy) expected=$(pin NVIDIA_LEGACY_VERSION) driver=nvidia-${expected%%.*}xx ;;
   esac
   dest=$OUT/$branch
   locked=$(python3 -B "$NV/lock.py" fetch "$branch" --out "$dest")
   [[ $locked == "$expected" ]] || die "$branch: locks/$branch.lock is at $locked, pins.env at $expected: regenerate the lock"
   checksig "$dest"
-  rpmbuild -bb "${epoch[@]}" --define "_topdir $OUT/rpmbuild-$branch" --define "nvidia_version $expected" "$NV/azoth-nvidia-kmod.spec"
+  rpmbuild -bb "${epoch[@]}" --define "_topdir $OUT/rpmbuild-$branch" --define "nvidia_version $expected" --define "driver $driver" \
+    "$NV/azoth-nvidia-kmod.spec"
   rpmbuild -bb "${epoch[@]}" --define "_topdir $OUT/rpmbuild-$branch" --define "_sourcedir $NV/athanor-nvidia-config/SOURCES" \
     "$NV/athanor-nvidia-config/athanor-nvidia-config.spec"
   cp "$OUT/rpmbuild-$branch"/RPMS/noarch/*.rpm "$dest/"
