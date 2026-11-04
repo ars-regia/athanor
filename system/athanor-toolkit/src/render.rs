@@ -151,6 +151,9 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 
 /// How much of its text colour a hovered control's fill takes.
 const HOVER: f32 = 0.05;
+/// How much of its text colour a disabled item's label keeps, over the background: half, as
+/// Adwaita's insensitive widgets.
+const DISABLED: f32 = 0.5;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
@@ -353,7 +356,8 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer.
+            // A flat row with its label at the start edge, filled only under the pointer, and
+            // faint when the item is disabled.
             Kind::MenuItem(_) => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
@@ -366,7 +370,12 @@ pub fn paint<C: Canvas>(
                         r.x + t.padding
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
-                    draw_text(ctx, resources, layout, at, t.text)?;
+                    let ink = if widget.disabled {
+                        mix(t.background, t.text, DISABLED)
+                    } else {
+                        t.text
+                    };
+                    draw_text(ctx, resources, layout, at, ink)?;
                 }
             }
             Kind::TitleBar => {

@@ -266,6 +266,9 @@ pub struct Widget {
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,
     pub(crate) description: Option<String>,
+    /// Takes neither the focus nor the pointer, as GTK's insensitive widgets: see
+    /// [`Ui::set_disabled`].
+    pub(crate) disabled: bool,
 }
 
 impl Widget {
@@ -280,25 +283,27 @@ impl Widget {
             expanded: None,
             tooltip: None,
             description: None,
+            disabled: false,
         }
     }
 
-    /// Whether the keyboard can focus the widget.
+    /// Whether the keyboard can focus the widget: not when it is disabled.
     pub fn is_focusable(&self) -> bool {
-        matches!(
-            self.kind,
-            Kind::Button(_)
-                | Kind::Toggle { .. }
-                | Kind::Check { .. }
-                | Kind::Switch { .. }
-                | Kind::Slider(_)
-                | Kind::Field(_)
-                | Kind::TextArea(_)
-                | Kind::WindowButton(_)
-                | Kind::MenuItem(_)
-                | Kind::IconButton { .. }
-                | Kind::ListRow(_)
-        )
+        !self.disabled
+            && matches!(
+                self.kind,
+                Kind::Button(_)
+                    | Kind::Toggle { .. }
+                    | Kind::Check { .. }
+                    | Kind::Switch { .. }
+                    | Kind::Slider(_)
+                    | Kind::Field(_)
+                    | Kind::TextArea(_)
+                    | Kind::WindowButton(_)
+                    | Kind::MenuItem(_)
+                    | Kind::IconButton { .. }
+                    | Kind::ListRow(_)
+            )
     }
 }
 
@@ -319,7 +324,8 @@ pub enum Event {
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
     /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
-    /// widget focused: the application may open its context menu.
+    /// widget focused: the application may open its context menu. A field or a text area opens
+    /// its own, the edit menu, and the driver hands the application no such event for it.
     ContextMenu(WidgetId),
     /// The pointer, pressed on the widget, moved past [`Ui::DRAG_THRESHOLD`]. A drag never
     /// activates the widget.
@@ -809,6 +815,16 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
+    /// Disables widget `id`, or enables it again. A disabled widget takes neither the focus,
+    /// which it loses, nor the pointer, nor an activation, an assistive technology reads it as
+    /// unavailable, and a menu's item draws its label faint, as GTK's insensitive widgets.
+    pub(crate) fn set_disabled(&mut self, id: WidgetId, disabled: bool) {
+        self.widgets[id].disabled = disabled;
+        if disabled && self.focus == Some(id) {
+            self.set_focus(None);
+        }
+    }
+
     /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
     /// collapsed, as when GTK's popover closes.
     pub(crate) fn popup_closed(&mut self, id: WidgetId) {
@@ -1218,7 +1234,7 @@ impl Ui {
     /// its group, a check button or a switch turns over, a list's row becomes its selected one.
     /// Each takes the focus.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
-        if !self.is_visible(id) {
+        if !self.is_visible(id) || self.widgets[id].disabled {
             return None;
         }
         self.set_focus(Some(id));
@@ -1404,6 +1420,71 @@ impl Ui {
         Some(Event::Edited(id))
     }
 
+    /// The items of a field's context menu, in order, with the key each one does: GTK 4's text
+    /// menu, but Insert Emoji, as the toolkit has no emoji chooser. A separator comes before
+    /// Select All.
+    const FIELD_MENU: [(&'static str, Key); 5] = [
+        ("Cut", Key::Cut),
+        ("Copy", Key::Copy),
+        ("Paste", Key::Paste),
+        ("Delete", Key::Delete),
+        ("Select All", Key::SelectAll),
+    ];
+
+    /// The context menu of field `id`, in this window's theme and direction, and the key each
+    /// of its items does in the field with [`Ui::field_edit`]; `None` if `id` is not a field.
+    /// An item that does not apply is disabled, as in GTK's: Cut, Copy and Delete without a
+    /// selection, Paste without text on the clipboard (`can_paste`), Select All in an empty
+    /// field, and every item while the input method composes, as the field then takes no edit
+    /// but the composition's.
+    pub(crate) fn field_menu(
+        &self,
+        id: WidgetId,
+        can_paste: bool,
+    ) -> Option<(Ui, Vec<(WidgetId, Key)>)> {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind else {
+            return None;
+        };
+        let composing = field.is_composing();
+        let selected = field.selected_text().is_some();
+        let empty = field.text().is_empty();
+        let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        let mut items = Vec::new();
+        for (label, key) in Self::FIELD_MENU {
+            let applies = !composing
+                && match key {
+                    Key::Paste => can_paste,
+                    Key::SelectAll => !empty,
+                    _ => selected,
+                };
+            if key == Key::SelectAll {
+                menu.add(list, Kind::Separator);
+            }
+            let item = menu.add(list, Kind::MenuItem(label.into()));
+            menu.set_disabled(item, !applies);
+            items.push((item, key));
+        }
+        Some((menu, items))
+    }
+
+    /// Does `key`, an item of field `id`'s context menu, in the field, which takes the focus
+    /// back from the menu. The menu's Delete deletes the selection only, never the character
+    /// after the caret.
+    pub(crate) fn field_edit(&mut self, id: WidgetId, key: Key) -> Option<Event> {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind else {
+            return None;
+        };
+        if key == Key::Delete && field.selected_text().is_none() {
+            return None;
+        }
+        self.set_focus(Some(id));
+        if self.focus != Some(id) {
+            return None;
+        }
+        self.key(key)
+    }
+
     /// Whether a press in a field is selecting its text, which follows the pointer until the
     /// release.
     pub(crate) fn selecting(&self) -> bool {
@@ -1535,6 +1616,7 @@ impl Ui {
                         self.clips.push(Clip::Paste(id));
                         false
                     }
+                    Key::Menu => return Some(Event::ContextMenu(id)),
                     _ => return self.navigate(key),
                 };
                 // A new selection is the primary selection, as in GTK's entries.
@@ -3202,6 +3284,143 @@ mod tests {
         };
         assert!(field.is_composing());
         assert_eq!(field.shown(), "xab");
+    }
+
+    /// The items of field `id`'s context menu: its label, whether it applies, and its key.
+    fn menu_items(ui: &Ui, id: WidgetId, can_paste: bool) -> Vec<(String, bool, Key)> {
+        let (menu, items) = ui
+            .field_menu(id, can_paste)
+            .expect("a field has a context menu");
+        let item = |(item, key): (WidgetId, Key)| match &menu.widget(item).kind {
+            Kind::MenuItem(label) => (label.clone(), menu.widget(item).is_focusable(), key),
+            _ => panic!("widget {item} is no menu item"),
+        };
+        items.into_iter().map(item).collect()
+    }
+
+    #[test]
+    fn a_fields_context_menu_holds_gtks_items_and_disables_those_that_do_not_apply() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        ui.layout();
+        assert!(
+            ui.field_menu(other, true).is_none(),
+            "a button has no edit menu"
+        );
+        let applies = |ui: &Ui, can_paste| -> Vec<bool> {
+            let items = menu_items(ui, name, can_paste).into_iter();
+            items.map(|(_, applies, _)| applies).collect()
+        };
+        let labels: Vec<(String, Key)> = menu_items(&ui, name, true)
+            .into_iter()
+            .map(|(label, _, key)| (label, key))
+            .collect();
+        let gtk = [
+            ("Cut", Key::Cut),
+            ("Copy", Key::Copy),
+            ("Paste", Key::Paste),
+            ("Delete", Key::Delete),
+            ("Select All", Key::SelectAll),
+        ];
+        assert_eq!(labels, gtk.map(|(label, key)| (label.to_owned(), key)));
+        // An empty field: Paste only, and only with text on the clipboard.
+        assert_eq!(applies(&ui, false), [false; 5]);
+        assert_eq!(applies(&ui, true), [false, false, true, false, false]);
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        assert_eq!(applies(&ui, false), [false, false, false, false, true]);
+        ui.key(Key::SelectLeft);
+        assert_eq!(applies(&ui, true), [true; 5]);
+        assert_eq!(applies(&ui, false), [true, true, false, true, true]);
+        // While the input method composes, the field takes no edit but the composition's.
+        ui.compose("x", None);
+        assert_eq!(applies(&ui, true), [false; 5]);
+        // A separator comes before Select All, as in GTK's menu.
+        let (menu, items) = ui
+            .field_menu(name, true)
+            .expect("a field has a context menu");
+        let list = menu
+            .widget(items[0].0)
+            .parent
+            .expect("the items are in a menu");
+        let kinds: Vec<bool> = menu
+            .widget(list)
+            .children
+            .iter()
+            .map(|&c| matches!(menu.widget(c).kind, Kind::Separator))
+            .collect();
+        assert_eq!(kinds, [false, false, false, false, true, false]);
+    }
+
+    #[test]
+    fn a_field_asks_for_its_context_menu_with_the_menu_key_and_the_secondary_button() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        ui.layout();
+        ui.set_focus(Some(name));
+        assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        let r = ui.widget(name).rect;
+        let press = ui.pointer_press(r.x + 1.0, r.y + 1.0, PointerButton::Secondary);
+        assert_eq!(press, Some(Event::ContextMenu(name)));
+    }
+
+    #[test]
+    fn the_items_of_a_fields_context_menu_edit_it_as_their_keys_do() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        ui.take_clips();
+        // The focus was the menu's: an item gives it back to the field.
+        ui.set_focus(Some(other));
+        assert_eq!(ui.field_edit(name, Key::Copy), None);
+        assert_eq!(ui.focus(), Some(name));
+        assert_eq!(ui.take_clips(), [Clip::Copy("bc".into())]);
+        assert_eq!(ui.field_edit(name, Key::Cut), None);
+        assert_eq!(ui.take_clips(), [Clip::Cut(name, "bc".into())]);
+        assert_eq!(ui.field_edit(name, Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(name)]);
+        // Delete deletes the selection, and without one never the character after the caret.
+        assert_eq!(ui.field_edit(name, Key::Delete), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("a"));
+        ui.key(Key::Left);
+        assert_eq!(ui.field_edit(name, Key::Delete), None);
+        assert_eq!(ui.field_text(name).as_deref(), Some("a"));
+        assert_eq!(ui.field_edit(name, Key::SelectAll), None);
+        assert_eq!(selected(&ui, name).as_deref(), Some("a"));
+        assert_eq!(
+            ui.field_edit(other, Key::SelectAll),
+            None,
+            "a button is no field"
+        );
+        assert_eq!(ui.field_edit(usize::MAX, Key::SelectAll), None);
+    }
+
+    #[test]
+    fn a_disabled_widget_takes_neither_the_focus_nor_the_pointer_nor_an_activation() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let list = ui.add(Ui::ROOT, Kind::Menu);
+        let cut = ui.add(list, Kind::MenuItem("Cut".into()));
+        let paste = ui.add(list, Kind::MenuItem("Paste".into()));
+        ui.layout();
+        ui.set_focus(Some(cut));
+        ui.set_disabled(cut, true);
+        assert_eq!(ui.focus(), None, "a widget disabled loses the focus");
+        assert!(!ui.widget(cut).is_focusable());
+        ui.set_focus(Some(cut));
+        assert_eq!(ui.focus(), None);
+        let r = ui.widget(cut).rect;
+        assert_eq!(ui.hit(r.x + 1.0, r.y + 1.0), None);
+        assert_eq!(ui.activate(cut), None);
+        assert_eq!(ui.activate(paste), Some(Event::Clicked(paste)));
+        ui.set_disabled(cut, false);
+        assert_eq!(ui.activate(cut), Some(Event::Clicked(cut)));
     }
 
     #[test]
