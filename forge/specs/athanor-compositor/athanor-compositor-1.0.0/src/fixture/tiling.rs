@@ -1600,7 +1600,13 @@ fn a_tiled_workspace_keeps_its_layers() {
 
     assert!(run.state.minimise(&below));
     assert!(run.state.unminimise(&below));
-    layered(&run, "unminimised", &full);
+    // The tile unminimised takes the keyboard: the full-screen tile and its dialog go down with
+    // the tiles, under it, and the float stays above every tile.
+    let under = [(&above, 0), (&dialog, 0), (&below, 0), (&float, 1)];
+    layered(&run, "unminimised", &under);
+    assert!(level(&run, &below) > level(&run, &dialog), "the tile with the keyboard above");
+    run.state.focus(&above);
+    layered(&run, "the full-screen tile focused again", &full);
 
     let output = output_at(&run, 0);
     let next = run.state.workspaces(&output)[1];
@@ -1728,14 +1734,14 @@ fn a_float_stays_on_top_while_a_layer_surface_holds_the_keyboard() {
     run.stop();
 }
 
-/// A maximised tile that goes full screen and leaves it is maximised again, back under the
-/// windows D5 floats, whichever tile has the keyboard (D6).
+/// A maximised tile with the keyboard that goes full screen and leaves it is maximised again,
+/// back under the windows D5 floats (D6).
 #[test]
 fn a_maximised_tile_leaving_full_screen_goes_under_a_float() {
     let mut run = Running::start(None);
     let pair = tiled_pair(&mut run);
     let (_new, float) = one_size(&mut run);
-    run.state.focus(&pair.below);
+    run.state.focus(&pair.above);
     run.state.maximise(&pair.above);
     run.state.full_screen(&pair.above, None);
     assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
@@ -1749,5 +1755,21 @@ fn a_maximised_tile_leaving_full_screen_goes_under_a_float() {
     });
     assert!(maximised, "maximised again");
     assert!(level(&run, &float) > level(&run, &pair.above), "the float above it again");
+    run.stop();
+}
+
+/// A tile activated while another is full screen stands above it, with the keyboard.
+#[test]
+fn a_tile_activated_under_a_full_screen_tile_comes_above_it() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    run.state.focus(&pair.below);
+
+    assert!(level(&run, &pair.below) > level(&run, &pair.above), "above the full-screen tile");
     run.stop();
 }

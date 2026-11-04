@@ -630,7 +630,9 @@ impl State {
     /// its place among those of its layer: the tiles; the windows D5 floats, and any other that
     /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, or
     /// whose popup does, and while a layer surface or nothing holds it the float that held it
-    /// last (`lifted`). A window's dialogs stand
+    /// last (`lifted`). While a tile holds the keyboard, the full-screen windows go down with the
+    /// tiles, so that the tile, raised last, stands above them under the floats (D5). A window's
+    /// dialogs stand
     /// just above it, in its layer, but those of a tile float above the tiles as windows of their
     /// own. The windows of the other workspaces keep their places. Every change of state that
     /// moves a window between layers ends here, so that the order is one rule, not a raise on
@@ -678,10 +680,13 @@ impl State {
             .lifted
             .as_ref()
             .and_then(|lifted| here.iter().position(|kept| kept == lifted));
+        // A tile with the keyboard stands above the full-screen windows: they go down with the
+        // tiles, where it is the last raised.
+        let tile_holds = focused.is_some_and(|f| tile[roots[f]]);
         let layer = |at: usize| {
-            if full[at] {
+            if full[at] && !tile_holds {
                 2
-            } else if tile[at] {
+            } else if tile[at] || full[at] {
                 0
             } else if focused.is_some_and(|f| roots[f] == at) {
                 3
