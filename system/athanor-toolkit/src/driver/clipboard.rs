@@ -24,7 +24,9 @@ use smithay_client_toolkit::reexports::protocols::wp::primary_selection::zv1::cl
     zwp_primary_selection_device_v1::ZwpPrimarySelectionDeviceV1,
     zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1,
 };
+use std::cell::Cell;
 use std::io::{self, Read, Write};
+use std::rc::Rc;
 use std::time::Duration;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{
@@ -46,6 +48,9 @@ const PIPE_BUF: usize = 4096;
 
 /// How long a clipboard's owner has to send the whole text of a paste.
 const PASTE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How long a reader has to take the whole text of an offer.
+const OFFER_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The seat's clipboards, as far as the compositor has them.
 #[derive(Default)]
@@ -177,6 +182,55 @@ impl Incoming {
             }
             Err(e) if retry(&e) => None,
             Err(e) => Some(Err(e.to_string())),
+        }
+    }
+}
+
+/// Writes `text` to a reader's `pipe` as the event loop of `handle` finds it writable, then
+/// closes it. A reader that has not taken the whole text in `timeout` loses the rest, and the
+/// pipe closes, so that a reader that never reads holds no descriptor of the application.
+fn write_offer<D: 'static>(
+    handle: &LoopHandle<'static, D>,
+    text: String,
+    pipe: WritePipe,
+    timeout: Duration,
+) -> Result<(), String> {
+    let mut outgoing = Outgoing {
+        text: text.into_bytes(),
+        written: 0,
+    };
+    let deadline = Rc::new(Cell::new(None));
+    let written = Rc::clone(&deadline);
+    let loop_handle = handle.clone();
+    let write = handle.insert_source(pipe, move |(), pipe, _| {
+        let Some(result) = outgoing.write(&**pipe) else {
+            return PostAction::Continue;
+        };
+        if let Some(deadline) = written.take() {
+            loop_handle.remove(deadline);
+        }
+        if let Err(error) = result {
+            eprintln!("athanor-toolkit: the clipboard's reader took no text: {error}");
+        }
+        PostAction::Remove
+    });
+    let write = write.map_err(|e| e.to_string())?;
+    let loop_handle = handle.clone();
+    let late = handle.insert_source(Timer::from_duration(timeout), move |_, _, _| {
+        loop_handle.remove(write);
+        eprintln!(
+            "athanor-toolkit: the clipboard's reader took no whole text in {timeout:?}, and its pipe is closed"
+        );
+        TimeoutAction::Drop
+    });
+    match late {
+        Ok(late) => {
+            deadline.set(Some(late));
+            Ok(())
+        }
+        Err(error) => {
+            handle.remove(write);
+            Err(error.to_string())
         }
     }
 }
@@ -343,27 +397,13 @@ impl App {
         }
     }
 
-    /// Writes `text` to a reader's pipe as the event loop finds it writable, then closes it; a
-    /// source no longer offered writes nothing, and the pipe closes at once.
+    /// Writes `text` to a reader's pipe through the event loop; a source no longer offered
+    /// writes nothing, and the pipe closes at once.
     fn offer(&mut self, text: Option<String>, pipe: WritePipe) {
         let Some(text) = text else {
             return;
         };
-        let mut outgoing = Outgoing {
-            text: text.into_bytes(),
-            written: 0,
-        };
-        let written = self.loop_handle.insert_source(pipe, move |(), pipe, _| {
-            match outgoing.write(&**pipe) {
-                None => PostAction::Continue,
-                Some(Ok(())) => PostAction::Remove,
-                Some(Err(error)) => {
-                    eprintln!("athanor-toolkit: the clipboard's reader took no text: {error}");
-                    PostAction::Remove
-                }
-            }
-        });
-        if let Err(error) = written {
+        if let Err(error) = write_offer(&self.loop_handle, text, pipe, OFFER_TIMEOUT) {
             eprintln!("athanor-toolkit: the clipboard's reader took no text: {error}");
         }
     }
@@ -589,6 +629,9 @@ mod tests {
     use smithay_client_toolkit::reexports::calloop::EventLoop;
     use std::error::Error;
     use std::os::fd::OwnedFd;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Instant;
 
     /// The loop's data of the pastes below: the paste pending, and the texts pasted.
     #[derive(Default)]
@@ -671,6 +714,80 @@ mod tests {
         let mut third = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
         event_loop.dispatch(Some(Duration::from_millis(50)), &mut pastes)?;
         assert!(pastes.pending.is_some() && !closed(&mut third));
+        Ok(())
+    }
+
+    /// A text four times the size of a pipe's buffer, which a reader must read for the writer to
+    /// finish.
+    fn long_text() -> String {
+        "x".repeat(4 * 64 * 1024)
+    }
+
+    /// Offers `text` through a new pipe, as a reader would ask for it; returns the reader's end.
+    fn offer(
+        event_loop: &EventLoop<'static, ()>,
+        text: String,
+        timeout: Duration,
+    ) -> Result<io::PipeReader, Box<dyn Error>> {
+        let (reader, writer) = io::pipe()?;
+        let pipe = WritePipe::from(OwnedFd::from(writer));
+        write_offer(&event_loop.handle(), text, pipe, timeout)?;
+        Ok(reader)
+    }
+
+    /// Runs the loop for `time`.
+    fn run(event_loop: &mut EventLoop<'static, ()>, time: Duration) -> Result<(), Box<dyn Error>> {
+        let start = Instant::now();
+        while start.elapsed() < time {
+            event_loop.dispatch(Some(Duration::from_millis(10)), &mut ())?;
+        }
+        Ok(())
+    }
+
+    /// Reads `reader` to its end in a thread while the loop runs, for at most a second: the
+    /// bytes read, or `None` while the writer keeps its end open.
+    fn drain(
+        event_loop: &mut EventLoop<'static, ()>,
+        mut reader: io::PipeReader,
+    ) -> Result<Option<usize>, Box<dyn Error>> {
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            let mut text = Vec::new();
+            // The test may have stopped waiting, and dropped the receiver.
+            let _ = sender.send(reader.read_to_end(&mut text).map(|_| text.len()));
+        });
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(1) {
+            if let Ok(read) = receiver.try_recv() {
+                return Ok(Some(read?));
+            }
+            event_loop.dispatch(Some(Duration::from_millis(10)), &mut ())?;
+        }
+        Ok(None)
+    }
+
+    #[test]
+    fn an_offer_whose_reader_takes_nothing_is_dropped_at_its_deadline() -> Result<(), Box<dyn Error>>
+    {
+        let mut event_loop = EventLoop::try_new()?;
+        let text = long_text();
+        let reader = offer(&event_loop, text.clone(), Duration::from_millis(100))?;
+        // The pipe fills, and its reader takes nothing past the deadline.
+        run(&mut event_loop, Duration::from_millis(300))?;
+        let read = drain(&mut event_loop, reader)?;
+        assert!(
+            read.is_some_and(|read| read < text.len()),
+            "the pipe closes with the text unwritten, read {read:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_reader_that_takes_the_text_gets_all_of_it() -> Result<(), Box<dyn Error>> {
+        let mut event_loop = EventLoop::try_new()?;
+        let text = long_text();
+        let reader = offer(&event_loop, text.clone(), Duration::from_secs(10))?;
+        assert_eq!(drain(&mut event_loop, reader)?, Some(text.len()));
         Ok(())
     }
 }
