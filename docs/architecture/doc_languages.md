@@ -1,11 +1,11 @@
 # Athanor languages and input
 
-Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095). Revision 1 (draft, 2026-10-05) applied the maintainer's decisions of that day.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call. LN6 and LN7 were qualified on 2026-11-01 for #825: a user manager that outlives the session can hold an older value back (`doc_session.md` SN2).
+Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095). Revision 1 (draft, 2026-10-05) applied the maintainer's decisions of that day.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call. LN6 and LN7 were qualified on 2026-11-01 for #825: a user manager that outlives the session can hold an older value back (`doc_session.md` SN2). Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor's client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths). Only identifiers are renamed; the specified behaviour does not change.
 
 ## 1. Context
 
 - **What binds this document.**
-  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-compositor-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:177-184`). "All strings go through gettext from the first commit" (`doc_shell.md:184`).
+  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-sulphur-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:177-184`). "All strings go through gettext from the first commit" (`doc_shell.md:184`).
   - `doc_shell_standard.md`: no text is truncated in German, and the layout mirrors under a right-to-left locale (ST7).
   - `doc_bar.md`: the input-source module shows the active layout and switches between the configured ones through the compositor client (`doc_bar.md:64`). The clock follows the locale and COSMIC's `military_time` (`doc_bar.md:65`). Right-to-left mirroring is designed in `doc_bar.md:136`. Behind `wp_security_context_v1` a client loses, among other globals, the input-method and virtual-keyboard globals (`doc_bar.md:9`).
   - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:92`).
@@ -52,7 +52,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - `doc_shell.md` (row 8 of the replacement table, `doc_shell.md:69`) has cosmic-settings-daemon leave in stage 8, so all three behaviours must have a replacement by then.
   - **The live configuration on this machine.** The user's `xkb_config` is `layout:"us", variant:"intl"`. `/etc/vconsole.conf` holds `KEYMAP=us-intl`, `XKBLAYOUT=us` and `XKBVARIANT=intl`. `/etc/locale.conf` holds `LANG=it_IT.utf8`.
   - **What the shell does with layouts today.**
-    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-compositor-client`, `connection.rs:214-283`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
+    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:214-283`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
     - The greeter shows a read-only label (`athanor-greeter-ui`, `ui.rs:88-122`).
     - `athanor-greeter-session` exports only `LANG`, `LANGUAGE`, `LC_MESSAGES` and `LC_TIME` from `/etc/locale.conf` and no XKB variable. The greeter cosmic-comp's own `~/.config/cosmic/com.system76.CosmicComp/v1/` under `/var/lib/greetd` is empty. So the greeter's layout follows neither `/etc/vconsole.conf` nor localed (inferred, spike S4).
     - The greeter's client binds the compositor's main socket (`/usr/libexec/athanor-greeter-client`), so it sees the keyboard-layout global.
@@ -218,14 +218,14 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - **Date and time patterns** stay translatable msgids in the bar's domain, as `ui/clock.rs` has them today. The bar looks them up in the catalog of the `LC_TIME` locale (LN2, `Category::Time`), as GNOME's wall clock does. A user with English messages and an Italian region then reads the day before the month. When no catalog exists for the region's language, the patterns come from the messages catalog. Day and month names always come from `LC_TIME` through GLib.
 - **12 or 24 hours.** The setting is GSettings `org.gnome.desktop.interface clock-format` (`'24h'` or `'12h'`). It replaces COSMIC's `military_time`, which leaves with cosmic-settings.
   - When the user has never set the key (no user value in dconf), the bar follows the region: a 24-hour clock when the `LC_TIME` locale's `%p` is empty, as `clock.rs` decides today.
-  - `athanor_compositor_client::clock` is removed once the bar reads the new key.
+  - `athanor_sulphur_client::clock` is removed once the bar reads the new key.
 - **The first day of the week.** The calendar in the bar's popover and in the notification panel takes the first day of the week from `LC_TIME` through `GtkCalendar`. No setting of our own overrides it.
 - **Week numbers** follow `org.gnome.desktop.calendar show-weekdate`.
 
 **LN9. Keyboard layouts: the store, the writer, the switch.**
 
 - **The store** is cosmic-comp's own `xkb_config`, which cosmic-comp reloads live. It holds the user's layouts, variants, model, options and repeat settings. No synchronisation daemon mirrors it. `org.gnome.desktop.input-sources` is not used and stays empty; input-method engines stay in IBus's own settings (LN11). If cosmic-comp is ever replaced, the store moves with the compositor client.
-- **The only writer** is `athanor-compositor-client`. It gains a `keyboard` module:
+- **The only writer** is `athanor-sulphur-client`. It gains a `keyboard` module:
   - **Reading.** `read() -> XkbLayouts` returns the ordered layouts with their variants, the model, the options and the repeat settings.
   - **Writing.** `write(&XkbLayouts)` validates every layout and variant against `/usr/share/X11/xkb/rules/evdev.xml` and writes atomically, with the same `athanor_layout::atomic::write_atomically` used by `theme.rs` and `shortcuts.rs`.
   - **Names.** `available()` lists the layouts and variants from `evdev.xml`, each with its translated description from xkeyboard-config's `xkeyboard-config` text domain.
@@ -265,7 +265,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - With no `xkb_config` in the greeter user's configuration, cosmic-comp then builds the system layout (spike S4).
   - No Athanor program writes `xkb_config` for the `greetd` user.
   - **When the system and the session layouts differ.** The greeter follows the system layout; the lock, the authentication dialog and the keyring prompt follow the session's (`doc_lock_and_prompts.md` LP14). A user who set a different layout in Settings therefore types the same password with different keys at the login and at the unlock. This is documented rather than prevented: the greeter always shows the layout in use, and the account step of first run warns that the password is typed on the layout of the system (`doc_first_run.md` FR14). The greeter does not read an unauthenticated user's `xkb_config` to propose that user's layout, because that would add a surface to the trusted path (ADR-0041).
-- **Switching.** When the system has two or more layouts, the greeter's layout label becomes a switcher. It is a menu button that lists the layouts and calls `set_keyboard_group` through `athanor-compositor-client`, which the greeter client can use because it binds the main socket.
+- **Switching.** When the system has two or more layouts, the greeter's layout label becomes a switcher. It is a menu button that lists the layouts and calls `set_keyboard_group` through `athanor-sulphur-client`, which the greeter client can use because it binds the main socket.
   - The current read-only label (`ui.rs:88-122`) is replaced.
   - The password field keeps its focus after a switch.
 - **No input method in the greeter.** Passwords are typed with XKB layouts only. The greeter's compositor runs no input-method client, so cosmic-comp#2702 cannot occur there.
@@ -290,7 +290,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - Chromium-based browsers from Flatpak receive `--enable-wayland-ime --wayland-text-input-version=3` through their Flatpak override. Software applies it when the input method is enabled.
   - Electron applications that support only text-input-v1 get no input method on cosmic-comp, and are listed as a known limit.
 - **The bar.** With the input method active, the bar's input-source module shows the active engine's short label, and its popover lists the engines next to the layouts. Super+Space (LN9) cycles through the layouts, then the engines, in one list that `athanor-shelld` composes from the two stores. IBus's own trigger key is set to empty, so that the key is not bound twice (spike S6).
-  - The bar and `athanor-shelld` talk to IBus over its D-Bus address through a new crate, `athanor-ibus`, with no GTK type. `athanor-compositor-client` stays the only crate that knows COSMIC.
+  - The bar and `athanor-shelld` talk to IBus over its D-Bus address through a new crate, `athanor-ibus`, with no GTK type. `athanor-sulphur-client` stays the only crate that knows COSMIC.
 - **The emoji picker** (F-launcher-15) is not IBus's `ibus-ui-emojier`. `doc_launcher.md` owns it.
 
 **LN12. Input methods: confinement and the lock screen.**
@@ -334,7 +334,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 | Region                            | GSettings `org.gnome.system.locale region`               | GSettings                                                | next login (LN7)                                                         |
 | Clock format                      | GSettings `org.gnome.desktop.interface clock-format`     | GSettings                                                | immediately                                                              |
 | Week numbers                      | GSettings `org.gnome.desktop.calendar show-weekdate`     | GSettings                                                | immediately                                                              |
-| Keyboard layouts, options, repeat | cosmic-comp `xkb_config`                                 | `athanor_compositor_client::keyboard::write`             | immediately                                                              |
+| Keyboard layouts, options, repeat | cosmic-comp `xkb_config`                                 | `athanor_sulphur_client::keyboard::write`             | immediately                                                              |
 | Input-method engines              | GSettings `org.freedesktop.ibus.general preload-engines` | GSettings, then `athanor-ime.service` started or stopped | immediately                                                              |
 | Spelling dictionaries             | packages (Flatpak or image)                              | Software                                                 | after install                                                            |
 
@@ -349,7 +349,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - The list of languages and the list of layouts come from functions first run and Settings share:
   - `athanor_i18n::shipped_languages()` reads the `LINGUAS` list installed at `/usr/share/athanor/i18n/LINGUAS`;
   - `athanor_i18n::offered_languages()` returns the list of LN4: each UTF-8 locale of `locale -a` with its "complete" or "partial" mark from `shipped_languages()`, complete ones first;
-  - `athanor_compositor_client::keyboard::available()` (LN9).
+  - `athanor_sulphur_client::keyboard::available()` (LN9).
 - The suggested layout for a chosen language is the layout of the language's main country in `evdev.xml` ("it" for `it_IT`), and the user confirms it.
 
 **LN17. Tests.**
@@ -394,7 +394,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
    - `athanor-session` exports `LANG`, `LANGUAGE` and `LC_*` from AccountsService and the region key.
    - `athanor-desktop` imports them into the user manager.
    - The bar's clock reads its patterns through `LC_TIME` and its 12- or 24-hour choice from `clock-format`.
-   - `athanor_compositor_client::clock` is removed.
+   - `athanor_sulphur_client::clock` is removed.
 3. **The locale1 polkit rule, on its own.** A polkit change, built and judged by itself.
    - `40-athanor-locale1.rules` in `athanor-base-config` (LN5).
    - Judged on the reference laptop as a member of `wheel`: `pkcheck --action-id org.freedesktop.locale1.set-keyboard --process $$` reports that authentication is required, and the same for `set-locale`; a layout change in cosmic-settings leaves `localectl status` unchanged, and cosmic-settings-daemon's journal shows the refused push.
@@ -521,7 +521,7 @@ Taken by the maintainer on 2026-10-05. Each followed the recommendation of revis
 1. **How our libadwaita applications read translations.** Choice: `gettext-rs` (glibc's gettext) in the applications, `athanor-i18n` kept for the shell and the greeter (LN1). Reason: the format stays one, the reader follows the toolkit where GtkBuilder forces it, and the greeter keeps its reasons for its own reader.
 2. **How translators contribute.** Choice: pull requests on the `.po` files for release 1 (LN3, LN18). Reason: only two languages ship, and the format allows a hosted service later without change.
 3. **Which languages the language list offers.** Choice: every language with a glibc locale, each marked "complete" or "partial", complete ones first (LN4, LN16). Reason: it serves everyone (the rule of 2026-09-14) and says honestly what each user gets.
-4. **Where a user's keyboard layouts are stored.** Choice: cosmic-comp's `xkb_config`, written only through `athanor-compositor-client` (LN9). Reason: it is the store cosmic-comp reads live, its only writer is the crate already allowed to know COSMIC, and nothing has to be kept in sync.
+4. **Where a user's keyboard layouts are stored.** Choice: cosmic-comp's `xkb_config`, written only through `athanor-sulphur-client` (LN9). Reason: it is the store cosmic-comp reads live, its only writer is the crate already allowed to know COSMIC, and nothing has to be kept in sync.
 5. **Which input-method framework.** Choice: IBus, confirmed or reversed by spike S1 (LN11). Reason: it is already in the base image with six engines and is what GNOME applications and Fedora expect.
 6. **cosmic-settings-daemon's keyboard behaviour until it leaves.** Choice: `40-athanor-locale1.rules` returns `AUTH_ADMIN_KEEP` for localed's two actions, built as its own construction step (LN5, LN9, LN19 step 3). Reason: it ends a silent system-wide write from a user setting without waiting for stage 8, and the system keyboard stays changeable with an administrator's authorisation.
 7. **Decision 7 (review batch 2, Q1): S4 is the first spike,** run before step 1 of LN19 on the development VM; if it fails the rule of LN10 returns to the maintainer.

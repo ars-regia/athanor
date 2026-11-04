@@ -58,7 +58,7 @@ class ClassifyTest(unittest.TestCase):
 
     def test_shell_inputs_select_the_visual_tests(self):
         for path in (
-            "system/athanor-compositor-client/src/lib.rs",
+            "system/athanor-sulphur-client/src/lib.rs",
             "system/athanor-style/calmo/generate.py",
             "forge/test/shell/rig.sh",
             "Cargo.lock",

@@ -6,8 +6,44 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField};
 use crate::theme::Theme;
 use parley::Layout;
 
-/// A widget's index in its [`Ui`]; the root column is 0.
-pub type WidgetId = usize;
+/// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
+/// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
+/// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WidgetId(pub(crate) u32);
+
+impl WidgetId {
+    /// The widget's place in its `Ui`'s arena.
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// The widgets of a [`Ui`], in the order they were added, indexed by their ids. A type of the
+/// crate's own, so that indexing by [`WidgetId`] stays out of the public API.
+pub(crate) struct Widgets(Vec<Widget>);
+
+impl std::ops::Deref for Widgets {
+    type Target = [Widget];
+
+    fn deref(&self) -> &[Widget] {
+        &self.0
+    }
+}
+
+impl std::ops::Index<WidgetId> for Widgets {
+    type Output = Widget;
+
+    fn index(&self, id: WidgetId) -> &Widget {
+        &self.0[id.index()]
+    }
+}
+
+impl std::ops::IndexMut<WidgetId> for Widgets {
+    fn index_mut(&mut self, id: WidgetId) -> &mut Widget {
+        &mut self.0[id.index()]
+    }
+}
 
 /// A rectangle in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -63,7 +99,8 @@ pub enum Kind {
     /// A button with a label; activating it raises [`Event::Clicked`].
     Button(String),
     /// A toggle button. The toggles that share a parent form a radio group: activating one
-    /// releases the others.
+    /// releases the others. Add it with [`Ui::toggle`].
+    #[non_exhaustive]
     Toggle {
         /// The text of the toggle.
         label: String,
@@ -71,7 +108,9 @@ pub enum Kind {
         active: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
-    /// that share a parent are independent; activating one raises [`Event::Toggled`].
+    /// that share a parent are independent; activating one raises [`Event::Toggled`]. Add it
+    /// with [`Ui::check`].
+    #[non_exhaustive]
     Check {
         /// The text beside the box.
         label: String,
@@ -81,6 +120,8 @@ pub enum Kind {
     /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
     /// on its own. It fills the width of its column or group, or its cell in a row, where every
     /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
+    /// Add it with [`Ui::switch`].
+    #[non_exhaustive]
     Switch {
         /// The text of the switch, which names it for assistive technologies.
         label: String,
@@ -104,6 +145,7 @@ pub enum Kind {
     /// `ScrolledWindow`. What lies outside the viewport is not drawn and takes no pointer input;
     /// a thin indicator at the end edge shows the position while the child is taller. Add it
     /// with [`Ui::scroll`].
+    #[non_exhaustive]
     Scroll {
         /// The height of the viewport, in logical pixels.
         height: f32,
@@ -117,6 +159,7 @@ pub enum Kind {
     /// on the last leave the list as Shift+Tab and Tab do. A row chosen by the keyboard, a click
     /// or Enter raises [`Event::Selected`]. It fills the width of its column, group or scroll.
     /// Add it with [`Ui::list`] and its rows with [`Ui::list_row`].
+    #[non_exhaustive]
     List {
         /// The name assistive technologies read for the list.
         name: String,
@@ -142,7 +185,8 @@ pub enum Kind {
     /// The text of a tooltip, which the driver shows in a popup of its own.
     Tooltip(String),
     /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
-    /// with its aspect ratio kept, centred. It takes no input.
+    /// with its aspect ratio kept, centred. It takes no input. Add it with [`Ui::image`].
+    #[non_exhaustive]
     Image {
         /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
         image: crate::icon::Image,
@@ -157,6 +201,8 @@ pub enum Kind {
     /// all centred along it. As the root's child it fills the window, so a surface stretched
     /// along the edge keeps the island in its middle. Only the children and the theme's
     /// `island_padding` around them are filled, with `island` and rounded by `island_radius`.
+    /// Add it with [`Ui::island`].
+    #[non_exhaustive]
     Island {
         /// Whether the children are stacked top to bottom.
         vertical: bool,
@@ -166,7 +212,9 @@ pub enum Kind {
     /// A flat button that shows an image, named by its label for assistive technologies;
     /// activating it raises [`Event::Clicked`]. It is at least the theme's `button_min` on
     /// each side, with the theme's padding added left and right, as GTK's min-width and
-    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme.
+    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme. Add it with
+    /// [`Ui::icon_button`].
+    #[non_exhaustive]
     IconButton {
         /// The name assistive technologies read.
         label: String,
@@ -331,6 +379,7 @@ pub enum Event {
     /// activates the widget.
     DragStarted(WidgetId),
     /// The button that started a drag was released, over the widget `to` if any.
+    #[non_exhaustive]
     DragEnded {
         /// The widget the drag started from.
         from: WidgetId,
@@ -432,7 +481,7 @@ pub enum Key {
 
 /// One window's widgets, theme, reading direction and keyboard focus.
 pub struct Ui {
-    pub(crate) widgets: Vec<Widget>,
+    pub(crate) widgets: Widgets,
     /// The title of the window, which the title bar shows and assistive technologies read.
     pub title: String,
     /// The colours and sizes the widgets draw with.
@@ -460,7 +509,7 @@ impl Ui {
     /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
     pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
         Self {
-            widgets: vec![Widget::new(Kind::Column, None)],
+            widgets: Widgets(vec![Widget::new(Kind::Column, None)]),
             title: title.to_owned(),
             theme,
             rtl,
@@ -478,7 +527,7 @@ impl Ui {
     }
 
     /// The root column every widget descends from.
-    pub const ROOT: WidgetId = 0;
+    pub const ROOT: WidgetId = WidgetId(0);
     /// The most steps a slider may have between its minimum and its maximum.
     pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
     /// The longest text a field takes from outside the keyboard, in characters.
@@ -488,14 +537,26 @@ impl Ui {
     pub const DRAG_THRESHOLD: f32 = 8.0;
 
     /// Adds `kind` as the last child of `parent`.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`, or when the `Ui` already holds 2³² widgets,
+    /// as many as a `WidgetId` can name.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
-        let id = self.widgets.len();
-        self.widgets.push(Widget::new(kind, Some(parent)));
+        let next = self.widgets.len();
+        assert!(next <= u32::MAX as usize, "a Ui holds at most 2^32 widgets");
+        let id = WidgetId(next as u32);
+        // The parent first: an id that names no widget panics before the arena changes.
         self.widgets[parent].children.push(id);
+        self.widgets.0.push(Widget::new(kind, Some(parent)));
         id
     }
 
     /// Adds a text field named `name` for assistive technologies.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
     pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
         let field = TextField::new(name, text, self.theme.font_size, self.rtl);
         self.add(parent, Kind::Field(Box::new(field)))
@@ -504,6 +565,10 @@ impl Ui {
     /// Adds a text area named `name` for assistive technologies, holding `text`: `lines` lines
     /// tall and as wide as the theme's field, its text wrapped at that width. See
     /// [`Kind::TextArea`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
     pub fn text_area(&mut self, parent: WidgetId, name: &str, text: &str, lines: usize) -> WidgetId {
         let t = &self.theme;
         let width = t.field_width - 2.0 * t.padding;
@@ -511,6 +576,96 @@ impl Ui {
         // The caret follows the text, as gtk_text_buffer_set_text leaves a text view's.
         area.move_to_end(&mut self.text);
         self.add(parent, Kind::TextArea(Box::new(area)))
+    }
+
+    /// Adds a toggle showing `label`, the active one of its group when `active`. See
+    /// [`Kind::Toggle`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn toggle(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Toggle { label, active })
+    }
+
+    /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn check(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Check { label, active })
+    }
+
+    /// Adds a switch named `label`, on when `active`. See [`Kind::Switch`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn switch(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Switch { label, active })
+    }
+
+    /// Adds an island, its children stacked top to bottom when `vertical`, with `margin` kept
+    /// free around its fill: top, right, bottom and left. Add its children to the id it
+    /// returns. See [`Kind::Island`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn island(&mut self, parent: WidgetId, vertical: bool, margin: [f32; 4]) -> WidgetId {
+        self.add(parent, Kind::Island { vertical, margin })
+    }
+
+    /// Adds a flat button named `label` for assistive technologies, showing `image` in a
+    /// square of `size` logical pixels, with the accent line of `indicator` along that side.
+    /// See [`Kind::IconButton`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn icon_button(
+        &mut self,
+        parent: WidgetId,
+        label: &str,
+        image: crate::icon::Image,
+        size: f32,
+        indicator: Option<crate::driver::Side>,
+    ) -> WidgetId {
+        let label = label.to_owned();
+        let kind = Kind::IconButton {
+            label,
+            image,
+            size,
+            indicator,
+        };
+        self.add(parent, kind)
+    }
+
+    /// Adds `image` in a square of `size` logical pixels, named by `description` for assistive
+    /// technologies; an empty description marks an image that only decorates. See
+    /// [`Kind::Image`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn image(
+        &mut self,
+        parent: WidgetId,
+        image: crate::icon::Image,
+        size: f32,
+        description: &str,
+    ) -> WidgetId {
+        let description = description.to_owned();
+        let kind = Kind::Image {
+            image,
+            size,
+            description,
+        };
+        self.add(parent, kind)
     }
 
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
@@ -536,9 +691,19 @@ impl Ui {
             .is_some_and(|bar| self.widgets[bar].rect.contains(x, y))
     }
 
-    /// The widget `id`. Panics if `id` is not from this tree.
+    /// The widget `id`.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn widget(&self, id: WidgetId) -> &Widget {
         &self.widgets[id]
+    }
+
+    /// Every widget of the tree, in the order they were added: the root first.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = WidgetId> {
+        // `add` keeps every index within a u32.
+        (0..self.widgets.len()).map(|i| WidgetId(i as u32))
     }
 
     /// The number of widgets in the tree, the root included.
@@ -553,6 +718,10 @@ impl Ui {
 
     /// Whether `id` is a toggle that is the active one of its group, or a check button that is
     /// checked, or a switch that is on.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn is_active(&self, id: WidgetId) -> bool {
         matches!(
             self.widgets[id].kind,
@@ -567,6 +736,10 @@ impl Ui {
     /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
     /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
     /// at most [`Ui::SLIDER_MAX_STEPS`] steps.
+    ///
+    /// # Panics
+    ///
+    /// When the numbers are taken and `parent` names no widget of this `Ui`.
     pub fn slider(
         &mut self,
         parent: WidgetId,
@@ -598,6 +771,10 @@ impl Ui {
     }
 
     /// The value of the slider `id`, or `None` if it is not a slider.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn value(&self, id: WidgetId) -> Option<f64> {
         match &self.widgets[id].kind {
             Kind::Slider(slider) => Some(slider.value),
@@ -608,6 +785,10 @@ impl Ui {
     /// Sets the slider `id` to the step nearest to `value`, inside its range, as an assistive
     /// technology's SetValue does. `None`, and nothing changes, for a widget that is not a
     /// slider, for NaN and for a value that lands where the slider already is.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_value(&mut self, id: WidgetId, value: f64) -> Option<Event> {
         let Kind::Slider(slider) = &mut self.widgets[id].kind else {
             return None;
@@ -640,23 +821,39 @@ impl Ui {
 
     /// Adds a scroll whose viewport is `height` logical pixels high; add its child to the id it
     /// returns. A height that is negative or not finite counts as 0.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
     pub fn scroll(&mut self, parent: WidgetId, height: f32) -> WidgetId {
         let height = if height.is_finite() { height.max(0.0) } else { 0.0 };
         self.add(parent, Kind::Scroll { height, offset: 0.0 })
     }
 
     /// Adds a list named `name` for assistive technologies, with no row selected.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
     pub fn list(&mut self, parent: WidgetId, name: &str) -> WidgetId {
         let name = name.to_owned();
         self.add(parent, Kind::List { name, selected: None })
     }
 
     /// Adds a row showing `text` at the end of the list `list`.
+    ///
+    /// # Panics
+    ///
+    /// When `list` names no widget of this `Ui`.
     pub fn list_row(&mut self, list: WidgetId, text: &str) -> WidgetId {
         self.add(list, Kind::ListRow(text.to_owned()))
     }
 
     /// The selected row of the list `list`, or `None` if no row is or `list` is not a list.
+    ///
+    /// # Panics
+    ///
+    /// When `list` names no widget of this `Ui`.
     pub fn selected(&self, list: WidgetId) -> Option<WidgetId> {
         match self.widgets[list].kind {
             Kind::List { selected, .. } => selected,
@@ -738,7 +935,7 @@ impl Ui {
         if !dy.is_finite() {
             return false;
         }
-        let under = (0..self.widgets.len()).filter(|&id| {
+        let under = self.ids().filter(|&id| {
             matches!(self.widgets[id].kind, Kind::Scroll { .. } | Kind::TextArea(_))
                 && self.widgets[id].rect.contains(x, y)
                 && self.clip(id).is_none_or(|c| c.contains(x, y))
@@ -759,6 +956,10 @@ impl Ui {
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn field_text(&self, id: WidgetId) -> Option<String> {
         match &self.widgets[id].kind {
             Kind::Field(field) | Kind::TextArea(field) => Some(field.text()),
@@ -769,17 +970,29 @@ impl Ui {
     /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
     /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
     /// expands it while its menu is open.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_has_popup(&mut self, id: WidgetId, has: bool) {
         let expanded = &mut self.widgets[id].expanded;
         *expanded = has.then_some(expanded.unwrap_or(false));
     }
 
     /// Whether widget `id` opens a popup.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn has_popup(&self, id: WidgetId) -> bool {
         self.widgets[id].expanded.is_some()
     }
 
     /// Marks the popup of widget `id` open or closed; a widget without one stays as it is.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_expanded(&mut self, id: WidgetId, open: bool) {
         if let Some(expanded) = &mut self.widgets[id].expanded {
             *expanded = open;
@@ -787,6 +1000,10 @@ impl Ui {
     }
 
     /// Whether the popup of widget `id` is open.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn is_expanded(&self, id: WidgetId) -> bool {
         self.widgets[id].expanded == Some(true)
     }
@@ -794,22 +1011,38 @@ impl Ui {
     /// Sets the tooltip of widget `id`, or removes it with `None`. The driver shows it after
     /// GTK's delay while the pointer rests on the widget or the keyboard focuses it, and it is
     /// the widget's accessible description unless [`Ui::set_description`] gives another, as GTK's.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_tooltip(&mut self, id: WidgetId, text: Option<&str>) {
         self.widgets[id].tooltip = text.map(str::to_owned);
     }
 
     /// The tooltip of widget `id`, if any.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn tooltip(&self, id: WidgetId) -> Option<&str> {
         self.widgets[id].tooltip.as_deref()
     }
 
     /// Sets the accessible description of widget `id`, which assistive technologies read after
     /// its name; `None` falls back to its tooltip.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_description(&mut self, id: WidgetId, text: Option<&str>) {
         self.widgets[id].description = text.map(str::to_owned);
     }
 
     /// The accessible description of widget `id`: the one set, else its tooltip.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn description(&self, id: WidgetId) -> Option<&str> {
         let widget = &self.widgets[id];
         widget.description.as_deref().or(widget.tooltip.as_deref())
@@ -839,6 +1072,10 @@ impl Ui {
 
     /// Moves the focus to `id`, or clears it with `None`; a widget that takes no focus leaves
     /// it where it is. A widget newly focused inside a scroll is scrolled into view.
+    ///
+    /// # Panics
+    ///
+    /// When `id` is `Some` id that names no widget of this `Ui`.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
         match id {
             Some(id) if !self.widgets[id].is_focusable() || !self.is_visible(id) => {}
@@ -882,6 +1119,10 @@ impl Ui {
     /// state. Hiding the widget that has the focus moves the focus to the next visible widget that
     /// takes it, or the previous one. The root, the title bar and its children cannot be hidden:
     /// asking for it changes nothing. Call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
         let in_title_bar = std::iter::successors(Some(id), |&w| self.widgets[w].parent)
             .any(|w| Some(w) == self.title_bar);
@@ -903,6 +1144,10 @@ impl Ui {
     }
 
     /// Whether `id` and all its ancestors are visible: what the user can see and reach.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn is_visible(&self, id: WidgetId) -> bool {
         let mut at = Some(id);
         while let Some(w) = at {
@@ -916,6 +1161,10 @@ impl Ui {
 
     /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
     /// the buttons a menu holds, which then read as its rows.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn is_flat(&self, id: WidgetId) -> bool {
         let widget = &self.widgets[id];
         match widget.kind {
@@ -929,6 +1178,10 @@ impl Ui {
 
     /// What island `id` fills after [`Ui::layout`]: its visible children and the theme's
     /// `island_padding` around them; `None` for an island with no child shown, or another kind.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn island_fill(&self, id: WidgetId) -> Option<Rect> {
         if !matches!(self.widgets[id].kind, Kind::Island { .. }) {
             return None;
@@ -1233,6 +1486,10 @@ impl Ui {
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
     /// its group, a check button or a switch turns over, a list's row becomes its selected one.
     /// Each takes the focus.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
         if !self.is_visible(id) || self.widgets[id].disabled {
             return None;
@@ -1271,7 +1528,7 @@ impl Ui {
     /// The focusable widget under the point, in logical pixels; a widget scrolled out of its
     /// scroll's viewport is not under any.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
-        (0..self.widgets.len()).find(|&id| {
+        self.ids().find(|&id| {
             self.widgets[id].is_focusable()
                 && self.widgets[id].rect.contains(x, y)
                 && self.clip(id).is_none_or(|c| c.contains(x, y))
@@ -1364,7 +1621,7 @@ impl Ui {
     /// entry gives up the primary selection it owns when its selection ends.
     pub(crate) fn take_clips(&mut self) -> Vec<Clip> {
         if let Some((id, text)) = &self.offered {
-            let kept = match self.widgets.get(*id).map(|w| &w.kind) {
+            let kept = match self.widgets.get(id.index()).map(|w| &w.kind) {
                 Some(Kind::Field(field) | Kind::TextArea(field)) => {
                     field.selected_text().as_ref() == Some(text)
                 }
@@ -1384,7 +1641,7 @@ impl Ui {
     /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none, and a paste with no
     /// text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
-        let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
+        let multiline = matches!(self.widgets.get(id.index())?.kind, Kind::TextArea(_));
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
@@ -1408,7 +1665,8 @@ impl Ui {
     /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
     /// field that composes, or whose selection is no longer `text`, keeps it.
     pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
-        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets.get_mut(id)?.kind
+        let (Kind::Field(field) | Kind::TextArea(field)) =
+            &mut self.widgets.0.get_mut(id.index())?.kind
         else {
             return None;
         };
@@ -1442,7 +1700,8 @@ impl Ui {
         id: WidgetId,
         can_paste: bool,
     ) -> Option<(Ui, Vec<(WidgetId, Key)>)> {
-        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind else {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id.index())?.kind
+        else {
             return None;
         };
         let composing = field.is_composing();
@@ -1472,7 +1731,8 @@ impl Ui {
     /// back from the menu. The menu's Delete deletes the selection only, never the character
     /// after the caret.
     pub(crate) fn field_edit(&mut self, id: WidgetId, key: Key) -> Option<Event> {
-        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind else {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id.index())?.kind
+        else {
             return None;
         };
         if key == Key::Delete && field.selected_text().is_none() {
@@ -1709,7 +1969,8 @@ impl Ui {
             Some(id) => self.widgets[id]
                 .parent
                 .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu)),
-            None => (0..self.widgets.len())
+            None => self
+                .ids()
                 .find(|&id| matches!(self.widgets[id].kind, Kind::Menu) && self.is_visible(id)),
         }
     }
@@ -1756,6 +2017,10 @@ impl Ui {
     /// Replaces a field's text, as an assistive technology's SetValue does: without the control
     /// characters but a text area's newlines, and without the bidirectional formats, which
     /// would change how the text reads without being seen.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
     pub fn set_field_text(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
@@ -1865,6 +2130,50 @@ fn is_invisible_format(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_constructors_add_each_kind_with_its_fields() {
+        use crate::driver::Side;
+
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let image = crate::icon::Image {
+            pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(1, 1)),
+        };
+        let toggle = ui.toggle(Ui::ROOT, "A", true);
+        let check = ui.check(Ui::ROOT, "B", false);
+        let switch = ui.switch(Ui::ROOT, "C", true);
+        let island = ui.island(Ui::ROOT, true, [1.0, 2.0, 3.0, 4.0]);
+        let button = ui.icon_button(island, "D", image.clone(), 24.0, Some(Side::Bottom));
+        let picture = ui.image(Ui::ROOT, image, 16.0, "E");
+
+        assert_eq!(
+            ui.widget(Ui::ROOT).children,
+            [toggle, check, switch, island, picture]
+        );
+        assert_eq!(ui.widget(island).children, [button]);
+        assert_eq!(
+            [toggle, check, switch].map(|id| ui.is_active(id)),
+            [true, false, true]
+        );
+        let kinds = [toggle, check, switch, island, button, picture].map(|id| &ui.widget(id).kind);
+        let [toggle, check, switch, island, button, picture] = kinds;
+        assert!(matches!(toggle, Kind::Toggle { label, .. } if label == "A"));
+        assert!(matches!(check, Kind::Check { label, .. } if label == "B"));
+        assert!(matches!(switch, Kind::Switch { label, .. } if label == "C"));
+        assert!(matches!(
+            island,
+            Kind::Island { vertical: true, margin } if *margin == [1.0, 2.0, 3.0, 4.0]
+        ));
+        assert!(matches!(
+            button,
+            Kind::IconButton { label, size, indicator: Some(Side::Bottom), .. }
+                if label == "D" && *size == 24.0
+        ));
+        assert!(matches!(
+            picture,
+            Kind::Image { size, description, .. } if *size == 16.0 && description == "E"
+        ));
+    }
 
     #[test]
     fn a_toggle_group_is_exclusive() {
@@ -3174,7 +3483,7 @@ mod tests {
         ui.compose("x", None);
         assert_eq!(ui.paste(name, "y"), None);
         assert_eq!(ui.paste(Ui::ROOT, "y"), None);
-        assert_eq!(ui.paste(usize::MAX, "y"), None);
+        assert_eq!(ui.paste(WidgetId(u32::MAX), "y"), None);
     }
 
     #[test]
@@ -3293,7 +3602,7 @@ mod tests {
             .expect("a field has a context menu");
         let item = |(item, key): (WidgetId, Key)| match &menu.widget(item).kind {
             Kind::MenuItem(label) => (label.clone(), menu.widget(item).is_focusable(), key),
-            _ => panic!("widget {item} is no menu item"),
+            _ => panic!("widget {item:?} is no menu item"),
         };
         items.into_iter().map(item).collect()
     }
@@ -3399,7 +3708,7 @@ mod tests {
             None,
             "a button is no field"
         );
-        assert_eq!(ui.field_edit(usize::MAX, Key::SelectAll), None);
+        assert_eq!(ui.field_edit(WidgetId(u32::MAX), Key::SelectAll), None);
     }
 
     #[test]

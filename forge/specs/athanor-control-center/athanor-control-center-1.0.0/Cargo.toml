@@ -7,7 +7,7 @@ description = "The Athanor control center: one resident layer-shell panel opened
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
-athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }
 athanor-controls = { path = "../../../../system/athanor-controls" }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }

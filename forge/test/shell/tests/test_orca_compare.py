@@ -1,7 +1,10 @@
 """Unit tests of forge/test/shell/orca_compare.py
 (python3 -B -m unittest discover -s forge/test/shell/tests -v)."""
 
+import contextlib
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -180,31 +183,25 @@ class HiddenTest(unittest.TestCase):
                 self.assertEqual(failures, [], (surface, lang))
                 self.assertEqual(sum(" hidden; decision 28 hides " in line for line in lines), 2)
 
-    def test_the_bar_walk_exempts_the_tiling_button_it_lacks(self):
+    def test_the_bar_walk_under_the_own_compositor_speaks_the_tiling_button(self):
+        # athanor-sulphur serves athanor_workspace_tiling_v1, so the bar shows its tiling
+        # button there as under cosmic-comp: only the buttons decision 28 hides are exempt.
         for lang, golden in (("en", "orca-bar.txt"), ("it", "orca-bar-it.txt")):
             with self.subTest(lang=lang):
                 reference = (GOLDEN / golden).read_text().splitlines()
-                exempt = compare.own_exemptions("float", "-", lang)
-                absent = {f"{name} button." for name in exempt}
-                self.assertEqual(len(absent), 3)
-                spoken = [u for u in reference if u not in absent]
-                lines, failures = compare.compare(reference, spoken, exempt)
-                self.assertEqual(failures, [])
-                self.assertIn(
-                    f"'{compare.TILING[lang]} button.': hidden; "
-                    "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)",
-                    lines,
-                )
-                self.assertEqual(
-                    compare.compare(reference, reference, exempt)[1][2:],
-                    [
-                        f"'{compare.TILING[lang]} button.': spoken, but exempt: "
-                        "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)"
-                    ],
-                )
-
-    def test_a_walk_with_no_bar_exempts_no_tiling_button(self):
-        self.assertNotIn("Tiling collapsed", compare.own_exemptions(None, "visible", "en"))
+                hidden = {f"{name} button." for name in gr.exemptions("float", "-", lang)}
+                tiling = {"en": "Tiling collapsed button.", "it": "Affiancamento contratto button."}[lang]
+                self.assertIn(tiling, reference)
+                spoken = [u for u in reference if u not in hidden]
+                with tempfile.TemporaryDirectory() as tmp:
+                    ref, said = Path(tmp) / "reference.txt", Path(tmp) / "transcript.txt"
+                    ref.write_text("\n".join(reference) + "\n")
+                    own = ["--own-compositor", "float", "-", lang]
+                    for transcript, code in ((spoken, 0), ([u for u in spoken if u != tiling], 1)):
+                        said.write_text("\n".join(transcript) + "\n")
+                        with contextlib.redirect_stdout(io.StringIO()), \
+                                contextlib.redirect_stderr(io.StringIO()):
+                            self.assertEqual(compare.main([str(ref), str(said), *own]), code)
 
     def test_an_exemption_for_a_spoken_or_absent_button_fails(self):
         reference = (GOLDEN / "orca-dock.txt").read_text().splitlines()

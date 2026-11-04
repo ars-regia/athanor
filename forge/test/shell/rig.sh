@@ -18,11 +18,11 @@
 #   rig.sh build-compositor-client  clippy, tests and release build of cc-probe, and of cc-launch without gtk, into <out>/bin
 #   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
-#   rig.sh build-compositor clippy, tests and release build of athanor-compositor into <out>/bin
+#   rig.sh build-compositor clippy, tests and release build of athanor-sulphur into <out>/bin
 #   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field, test input method, layer surfaces, popups, test pointer and gallery into <out>/bin,
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
-#   rig.sh compositor-globals   the globals athanor-compositor offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
-#   rig.sh compositor-soak  athanor-compositor headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
+#   rig.sh compositor-globals   the globals athanor-sulphur offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
+#   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
@@ -42,7 +42,7 @@
 #   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
-#                           RIG_COMPOSITOR=athanor runs it against athanor-compositor, the probe as its unit (run build-compositor first)
+#                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
@@ -51,17 +51,17 @@
 #   rig.sh atspi <bar|bar-modules|dock|launcher> --matrix   AX17: the walk in light, dark and both high-contrast
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
-#                           bar: RIG_COMPOSITOR=athanor runs it under athanor-compositor, as its unit (run build-compositor first)
+#                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-compositor)
+#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
-#                           RIG_COMPOSITOR=athanor runs it under athanor-compositor, the input method as its rig unit (run build-compositor first)
-#   rig.sh toolkit-clipboard   athanor-toolkit's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-compositor (run build-toolkit first; needs a rig image with wl-clipboard)
+#                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the input method as its rig unit (run build-compositor first)
+#   rig.sh toolkit-clipboard   athanor-toolkit's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
 #   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-toolkit's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
@@ -70,11 +70,11 @@
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|toolkit-chooser (run build-compositor and build-toolkit first)|toolkit-gallery (the same)|gtk-gallery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
 #   rig.sh golden-report [surface...]   RIG_COMPOSITOR=athanor only: every case of the surfaces (all but the toolkit's, and the layout cases) under
-#                           athanor-compositor against cosmic-comp's goldens, into <out>/golden-report.md with each difference's cause and issue;
+#                           athanor-sulphur against cosmic-comp's goldens, into <out>/golden-report.md with each difference's cause and issue;
 #                           fails on a difference without an explanation in golden/athanor-differences.toml, and on an explanation without a difference
 #                           (run build-greeter, build-layout, build-bar, build-dock, build-launcher, build-shelld and build-compositor first)
 #
-# RIG_COMPOSITOR=athanor runs a scene under athanor-compositor on its headless backend, with
+# RIG_COMPOSITOR=athanor runs a scene under athanor-sulphur on its headless backend, with
 # RIG_HEADLESS_OUTPUTS (default 1) outputs side by side in each capture; `surface layout` sets
 # it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors. Under it every capture
 # client runs as its unit (bar_session.py --unit, in-unit.sh), for the compositor's allow-list.
@@ -140,7 +140,7 @@ fi
 # loaders die, and GTK draws every SVG icon blank without reporting anything.
 # RIG_OUTPUTS=2 runs only in the throwaway guest of kvm/guest.sh, as root: scene.sh drives
 # the vkms card on cosmic-comp's KMS backend, which needs the DRM devices and the udev database.
-# RIG_COMPOSITOR=athanor reaches scene.sh, which runs athanor-compositor headless in place of
+# RIG_COMPOSITOR=athanor reaches scene.sh, which runs athanor-sulphur headless in place of
 # cosmic-comp (session.sh) on RIG_HEADLESS_OUTPUTS outputs, and runs the container in systemd
 # mode, whose cgroup tree is writable: bar_session.py --unit and in-unit.sh put a client in its
 # unit's cgroup there, for the compositor's allow-list (OS4).
@@ -186,7 +186,7 @@ stage_greeter_icons() {
 # container's /etc/passwd, so the default card is Rig's.
 with_account=(bash -c 'echo "rig:x:1000:1000:Rig:/home/rig:/bin/bash" >> /etc/passwd && exec "$@"' with-account)
 
-# Under athanor-compositor a client runs as its unit (OS4): the flag of bar_session.py, and
+# Under athanor-sulphur a client runs as its unit (OS4): the flag of bar_session.py, and
 # unit_words <binary> [args...], which sets UNIT_CMD to the command that runs a binary the scene
 # starts itself.
 session_unit=()
@@ -285,13 +285,13 @@ seed_bar() { # seed_bar <dir> <preset> <panel> <dock or -> <light|dark>
 }
 
 # The layout cases: the bar and the dock as the session runs them, drawing the seeded preset.
-# Under athanor-compositor the case's outputs are its headless outputs, captured until stable.
+# Under athanor-sulphur the case's outputs are its headless outputs, captured until stable.
 capture_layout() {
     local compositor=()
     require athanor-bar build-bar
     require athanor-dock build-dock
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
         compositor=(RIG_HEADLESS_OUTPUTS="${RIG_LAYOUT_OUTPUTS:-1}" RIG_STABLE=5)
     fi
     stage_greeter_icons
@@ -338,10 +338,10 @@ capture_chooser() {
 }
 
 # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
-# athanor-compositor, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
+# athanor-sulphur, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
 # the toolkit draws at 1.5 itself, through wp_fractional_scale_v1 and wp_viewporter.
 capture_toolkit_chooser() {
-    require athanor-compositor build-compositor
+    require athanor-sulphur build-compositor
     require athanor-toolkit-chooser build-toolkit
     stage_chooser_catalogs
     while IFS=$'\t' read -r tag _ scale locale catalog; do
@@ -357,13 +357,13 @@ capture_toolkit_chooser() {
 }
 
 # The gallery's pages in English, left to right and right to left, at both scales: the toolkit's
-# under athanor-compositor, and its GTK twin (forge/test/shell/gallery_gtk.py) under cosmic-comp,
+# under athanor-sulphur, and its GTK twin (forge/test/shell/gallery_gtk.py) under cosmic-comp,
 # whose captures are the references to match. Each case passes its page and direction to the
 # binary as arguments.
 capture_gallery() { # capture_gallery <toolkit-gallery|gtk-gallery>
     local surface=$1 compositor=() bin=/repo/forge/test/shell/gallery_gtk.py
     if [ "$surface" = toolkit-gallery ]; then
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
         require athanor-toolkit-gallery build-toolkit
         compositor=(RIG_COMPOSITOR=athanor)
         bin=/out/bin/athanor-toolkit-gallery
@@ -519,7 +519,7 @@ capture_surface() { # capture_surface <surface>: every case of it, its tags appe
 # GTK keeps exporting the tree of a surface the compositor closed, so an atspi walk alone passes
 # a client that is not on screen; the compositor's log says when it closed a surface (src/layer.rs).
 # A missing or empty log fails too: grep would find nothing in it.
-surface_not_closed() { # surface_not_closed <recipe> <surface> <scene tag>: only under athanor-compositor
+surface_not_closed() { # surface_not_closed <recipe> <surface> <scene tag>: only under athanor-sulphur
     local log="$out/$3-compositor.log"
     if [ "${RIG_COMPOSITOR:-}" != athanor ]; then
         return 0
@@ -529,7 +529,7 @@ surface_not_closed() { # surface_not_closed <recipe> <surface> <scene tag>: only
         exit 1
     fi
     if grep -q "not granted them was closed" "$log"; then
-        echo "$1 $2: athanor-compositor closed the surface of $2; see $log" >&2
+        echo "$1 $2: athanor-sulphur closed the surface of $2; see $log" >&2
         exit 1
     fi
 }
@@ -673,12 +673,12 @@ build-compositor-client)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-compositor-client --all-targets -- -D warnings \
-                 && cargo clippy --locked -p athanor-compositor-client --no-default-features --features calloop --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-compositor-client --features calloop \
-                 && cargo build --release --locked -p athanor-compositor-client --example cc-probe \
+        bash -c 'cargo clippy --locked -p athanor-sulphur-client --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-sulphur-client --no-default-features --features calloop --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-sulphur-client --features calloop \
+                 && cargo build --release --locked -p athanor-sulphur-client --example cc-probe \
                  && install -m 0755 /out/target/release/examples/cc-probe /out/bin/ \
-                 && cargo build --release --locked -p athanor-compositor-client --no-default-features --features calloop --example cc-launch \
+                 && cargo build --release --locked -p athanor-sulphur-client --no-default-features --features calloop --example cc-launch \
                  && install -m 0755 /out/target/release/examples/cc-launch /out/bin/'
     ;;
 no-gtk)
@@ -702,10 +702,10 @@ build-compositor)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-compositor --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-compositor \
-                 && cargo build --release --locked -p athanor-compositor \
-                 && install -m 0755 /out/target/release/athanor-compositor /out/bin/'
+        bash -c 'cargo clippy --locked -p athanor-sulphur --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-sulphur \
+                 && cargo build --release --locked -p athanor-sulphur \
+                 && install -m 0755 /out/target/release/athanor-sulphur /out/bin/'
     ;;
 build-toolkit)
     mkdir -p "$out/bin" "$out/target"
@@ -729,13 +729,13 @@ build-toolkit)
                  && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
     ;;
 compositor-globals)
-    # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1, 2 and 6: what a client of athanor-compositor binds.
+    # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1, 2 and 6: what a client of athanor-sulphur binds.
     # session.sh installs the shipped allow-list and the rig's lines, but wayland-info is listed
     # in neither and runs in no unit, so it is granted none of the privileged globals of task 5;
     # the fixture checks the grant. The compositor runs headless: linux-dmabuf is offered with a
     # render node and never without one, when Pixman draws and clients draw into wl_shm
     # (headless.rs); its log says which.
-    require athanor-compositor build-compositor
+    require athanor-sulphur build-compositor
     rm -f "$out/compositor-globals.txt" "$out/compositor-globals-compositor.log"
     in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 compositor-globals -- \
@@ -785,10 +785,10 @@ compositor-soak)
     # the rig has no render node, so the compositor draws on Pixman and the clients on llvmpipe.
     # mesa-demos installs eglgears_wayland under /usr/lib64/mesa, off PATH.
     # compositor_soak.sh rewrites its logs in /out/compositor-soak.
-    require athanor-compositor build-compositor
+    require athanor-sulphur build-compositor
     in_rig "$(rig_image)" dbus-run-session -- /repo/forge/test/shell/compositor_soak.sh \
         /out/compositor-soak "${RIG_SOAK:-600}" \
-        /out/bin/athanor-compositor --headless --output 1280x800 --output 800x600@1.5 -- \
+        /out/bin/athanor-sulphur --headless --output 1280x800 --output 800x600@1.5 -- \
         'GDK_BACKEND=wayland exec python3 /repo/forge/test/shell/gtk_animation.py' 'exec /usr/lib64/mesa/eglgears_wayland'
     ;;
 cargo)
@@ -984,7 +984,7 @@ tray-e2e)
     ;;
 compositor-e2e)
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
     fi
     # cosmic-comp reads the keyboard layouts from its configuration: two, so the switch shows.
     seed=$out/compositor-e2e-seed/cosmic/com.system76.CosmicComp/v1
@@ -1105,7 +1105,7 @@ atspi)
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
     # its reference is recorded under cosmic-comp only.
     if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        echo "rig.sh atspi: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        echo "rig.sh atspi: the greeter runs under cosmic-comp only; it is outside athanor-sulphur's allow-list until it moves (doc_session.md SN12)" >&2
         exit 2
     fi
     # A screen reader announces itself by setting IsEnabled; GTK exports its tree then.
@@ -1182,9 +1182,9 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     toolkit-chooser)
-        # The same 8 choices in athanor-toolkit's chooser, under athanor-compositor, through
+        # The same 8 choices in athanor-toolkit's chooser, under athanor-sulphur, through
         # AccessKit (doc_own_stack.md, C1 task 1).
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
         require athanor-toolkit-chooser build-toolkit
         in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-toolkit-chooser 8" \
@@ -1193,15 +1193,14 @@ atspi)
         ;;
     bar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
-        # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
+        # accessibility, tiling, power, the shield. Under athanor-sulphur the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 5: tiling needs zcosmic_workspace_manager_v2, whose private replacement
-        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies, and
-        # decision 28 of doc_own_stack.md hides workspaces (#835) and applications (#836).
+        # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
+        # hides workspaces (#835) and applications (#836).
         unit='' widgets=8 own=()
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-            require athanor-compositor build-compositor
-            unit=--unit widgets=5 own=(--own-compositor float - "${3:-en}")
+            require athanor-sulphur build-compositor
+            unit=--unit widgets=6 own=(--own-compositor float - "${3:-en}")
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
@@ -1214,17 +1213,16 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-compositor it names each line the bar lacks (Tiling, C1), and the buttons
-        # decision 28 hides are exempt under its float preset (`own`).
+        # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
-        # Under athanor-compositor 9: as in `bar`, tiling, workspaces and applications are missing.
+        # Under athanor-sulphur 10: as in `bar`, workspaces and applications are hidden.
         widgets=12
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=9; fi
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
         atspi_variant "$out/seed-atspi-bar-modules"
@@ -1239,7 +1237,7 @@ atspi)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
         # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-toolkit's
         # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
-        # Under athanor-compositor 2: decision 28 hides workspaces (#835) and applications (#836).
+        # Under athanor-sulphur 2: decision 28 hides workspaces (#835) and applications (#836).
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
         transcript=atspi-dock${3:+-$3}.json widgets=4 own=()
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=2 own=(--own-compositor - visible "${3:-en}"); fi
@@ -1260,7 +1258,7 @@ atspi)
         # name by design; launcher_e2e.py reads the rows' names from the tree instead.
         # To record it again, copy <out>/atspi-launcher[-it].json of a cosmic-comp run into golden/atspi/.
         seed_bar "$out/seed-atspi-launcher" float top visible light
-        # The entry takes the focus on show under athanor-compositor; cosmic-comp leaves it
+        # The entry takes the focus on show under athanor-sulphur; cosmic-comp leaves it
         # unfocused (the recorded reference holds no "focused" on it), so no ring is asked for.
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             atspi_variant "$out/seed-atspi-launcher" ring
@@ -1287,7 +1285,7 @@ orca)
     # The greeter stays outside the compositor's allow-list until it moves (doc_session.md SN12):
     # its reference is recorded under cosmic-comp only.
     if [ "${2:-}" = greeter ] && [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        echo "rig.sh orca: the greeter runs under cosmic-comp only; it is outside athanor-compositor's allow-list until it moves (doc_session.md SN12)" >&2
+        echo "rig.sh orca: the greeter runs under cosmic-comp only; it is outside athanor-sulphur's allow-list until it moves (doc_session.md SN12)" >&2
         exit 2
     fi
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
@@ -1297,7 +1295,7 @@ orca)
     # of the Containerfile's rig stage.
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
     # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
-    # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-compositor, the clients
+    # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-sulphur, the clients
     # with a grant as their units and orca_walk.py's wtype as rig-wtype.service, and
     # orca_compare.py names each poorer line. The chooser and the gallery are windows, which need
     # no grant, so they run as they are.
@@ -1312,7 +1310,7 @@ orca)
     esac
     unit=
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
         unit=--unit
     fi
     lang=(RIG_LOCALE=en_US.UTF-8)
@@ -1380,7 +1378,7 @@ orca)
         # Applications); three more reach the test window, whose menu Shift+F10 opens, the
         # arrows walk, and Escape closes, back on the button (AX7). cosmic-comp then hands the
         # keyboard to the window (#614); orca_dock.py drops that line.
-        # Under athanor-compositor a layer surface takes the keyboard on a click or on
+        # Under athanor-sulphur a layer surface takes the keyboard on a click or on
         # Ctrl+Alt+Tab (AX7), not when it maps, so the walk starts with that key. The dock shows
         # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
         # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
@@ -1399,12 +1397,11 @@ orca)
         ;;
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
-        # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
-        # through `own`). Under cosmic-comp Tab skips Input source (#751), so the
-        # seventh Tab comes back round to the first; the eighth once Tab reaches it. Under
-        # athanor-compositor Ctrl+Alt+Tab reaches the Clock and the seven Tabs go round the five
-        # buttons left, Input source among them.
+        # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-sulphur
+        # decision 28 hides Workspaces and Applications, exempt through `own`). Under cosmic-comp
+        # Tab skips Input source (#751), so the seventh Tab comes back round to the first; the
+        # eighth once Tab reaches it. Under athanor-sulphur Ctrl+Alt+Tab reaches the Clock and
+        # the seven Tabs go round the six buttons left, Input source among them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
@@ -1426,7 +1423,7 @@ orca)
         # the walk is the arrows): "cc window" lists two results under a header, CC Window and
         # the web search; Down goes down them, Up back to the first. Orca presents no result yet,
         # and cosmic-comp in the rig never activates the launcher, so its reference is
-        # athanor-compositor's transcript (#751).
+        # athanor-sulphur's transcript (#751).
         seed_bar "$out/seed-orca-launcher" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" \
@@ -1482,7 +1479,7 @@ input-method)
     require athanor-toolkit-field build-toolkit
     require athanor-toolkit-input-method build-toolkit
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        require athanor-compositor build-compositor
+        require athanor-sulphur build-compositor
     fi
     in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=4 \
         RIG_HOLD="python3 /repo/forge/test/shell/input_method_check.py" \
@@ -1494,10 +1491,10 @@ input-method)
 toolkit-clipboard)
     # #719: Ctrl+C, Ctrl+X and Ctrl+V of athanor-toolkit's field, its context menu's items and
     # its primary selection, read and set with wl-paste and wl-copy (toolkit_clipboard_check.py).
-    # wl-clipboard reaches the selection through wlr-data-control, which athanor-compositor does
+    # wl-clipboard reaches the selection through wlr-data-control, which athanor-sulphur does
     # not offer: there it hangs, so the scene runs under cosmic-comp only.
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-        echo "rig.sh: toolkit-clipboard runs under cosmic-comp: wl-clipboard hangs under athanor-compositor" >&2
+        echo "rig.sh: toolkit-clipboard runs under cosmic-comp: wl-clipboard hangs under athanor-sulphur" >&2
         exit 2
     fi
     require athanor-toolkit-field build-toolkit
@@ -1508,7 +1505,7 @@ toolkit-clipboard)
     ;;
 toolkit-layer)
     # The dock plan, task 3: the driver keeps one layer surface per output. sway's headless
-    # backend adds and removes outputs, which athanor-compositor's fixture cannot yet (C1 task 8).
+    # backend adds and removes outputs, which athanor-sulphur's fixture cannot yet (C1 task 8).
     require athanor-toolkit-layer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_layer_check.py
     ;;
@@ -1577,7 +1574,7 @@ golden-report)
     else
         surfaces=("${known[@]}")
     fi
-    require athanor-compositor build-compositor
+    require athanor-sulphur build-compositor
     started=$SECONDS
     since=$(date +%s)
     tags=()

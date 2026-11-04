@@ -10,9 +10,8 @@ Prints a verdict per utterance and exits 1 when one is missing.
 
 --own-compositor names the scene's bar preset and dock setting, as rig.sh seeds them: the line
 of each button decision 28 of doc_own_stack.md hides there is exempt, naming the decision and
-the control's issue (golden_report.exemptions), and so is the bar's tiling button, which waits
-on a protocol rather than a decision (own_exemptions). An exempt line the transcript speaks
-fails, and so does an exemption that names no utterance of the reference.
+the control's issue (golden_report.exemptions). An exempt line the transcript speaks fails, and
+so does an exemption that names no utterance of the reference.
 
 --walks checks the gallery's transcript, one walk per page, on its own (walk_problems).
 """
@@ -86,20 +85,6 @@ def heard_as(utterance):
         for gtk, said in SWITCH_SPEECH.items():
             if utterance == f"{label} {gtk}":
                 yield f"{label} {said}"
-
-
-# The bar's tiling button under athanor-compositor: not a choice of decision 28 but a protocol to
-# come, so atspi_compare.py, which reads the whole tree, still reports it. Orca says it collapsed.
-TILING = {"en": "Tiling collapsed", "it": "Affiancamento contratto"}
-NO_TILING = ("the bar lacks the tiling button, which needs athanor_workspace_tiling_v1", 739)
-
-
-def own_exemptions(preset, dock, lang):
-    """golden_report.exemptions, and the tiling button a bar running `preset` lacks."""
-    exempt = exemptions(preset, dock, lang)
-    if preset is not None:
-        exempt[TILING[lang]] = NO_TILING
-    return exempt
 
 
 def compare(reference, transcript, exempt=None):
@@ -188,7 +173,7 @@ def main(argv):
     exempt = {}
     if own:
         preset, dock, lang = (None if v == "-" else v for v in own[1:])
-        exempt = own_exemptions(preset, dock, lang)
+        exempt = exemptions(preset, dock, lang)
     lines, failures = compare(reference, transcript, exempt)
     print("\n".join(lines))
     for failure in failures:

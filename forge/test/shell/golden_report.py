@@ -193,7 +193,7 @@ def report(results, explanations):
         f"{case}: explains a case this report does not run" for case in by_case if case not in known
     ]
     lines = [
-        "# Golden report: athanor-compositor against cosmic-comp's goldens",
+        "# Golden report: athanor-sulphur against cosmic-comp's goldens",
         "",
         f"{len(results)} cases, {differing} differing, {explained} explained, {len(problems)} problem(s).",
         f"Left out: {', '.join(EXCLUDED)}, which runs on cosmic-comp until it moves (doc_session.md SN12).",

@@ -45,7 +45,7 @@ class ShownTest(unittest.TestCase):
 
 
 class RefusalTest(unittest.TestCase):
-    def test_athanor_compositor_is_refused(self):
+    def test_athanor_sulphur_is_refused(self):
         why = check.refusal({"RIG_COMPOSITOR": "athanor"}, which=lambda tool: tool)
         self.assertIn("cosmic-comp", why)
 

@@ -122,7 +122,7 @@ stage_unit() {
 }
 
 # Proves that %t/athanor is writable from inside athanor-dock.service's own confinement,
-# where launch() (athanor-compositor-client) creates a started application's Wayland
+# where launch() (athanor-sulphur-client) creates a started application's Wayland
 # security context: nsenter --mount joins the unit's mount namespace, and --setuid/--setgid
 # drop to the session user, who owns the directory (RuntimeDirectoryMode=0700).
 runtime_athanor_writable() {

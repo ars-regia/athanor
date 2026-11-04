@@ -6,7 +6,7 @@
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 
-use athanor_compositor_client::outputs;
+use athanor_sulphur_client::outputs;
 use athanor_layout::first_session::{self, Outcome};
 use athanor_layout::loader::{self, Paths};
 use athanor_layout::placement::Output;

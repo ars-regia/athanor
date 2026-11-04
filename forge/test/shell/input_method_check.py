@@ -9,7 +9,7 @@ Under cosmic-comp every client of the scene binds zwp_input_method_v2, and the i
 grim run directly. Under RIG_COMPOSITOR=athanor the protocol and the capture are privileged
 (doc_own_stack.md OS4): the input method runs as rig-input-method.service and grim as
 rig-grim.service, through in-unit.sh, as rig-privileged-clients grants them. The capture reads
-RIG_CAPTURE_OUTPUT, which scene.sh sets to athanor-compositor's first headless output.
+RIG_CAPTURE_OUTPUT, which scene.sh sets to athanor-sulphur's first headless output.
 """
 
 import os

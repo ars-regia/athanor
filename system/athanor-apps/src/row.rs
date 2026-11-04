@@ -9,7 +9,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_compositor_client::WindowId;
+use athanor_sulphur_client::WindowId;
 use athanor_layout::favorites;
 use gio_unix::DesktopAppInfo;
 use gtk4::accessible::Property;

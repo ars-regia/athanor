@@ -14,7 +14,7 @@ members = [
   "forge/specs/athanor-xdg-desktop-portal-athanor/xdg-desktop-portal-athanor-1.0.0",
   "system/athanor-bus-api",
   "system/athanor-fuzz-entries",
-  "system/athanor-compositor-client",
+  "system/athanor-sulphur-client",
   "system/athanor-apps",
   "system/athanor-i18n",
   "system/athanor-layout",
@@ -26,7 +26,7 @@ members = [
   "system/athanor-unit",
   "system/athanor-trust-state",
   "system/athanor-toolkit",
-  "forge/specs/athanor-compositor/athanor-compositor-1.0.0",
+  "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0",
 ]
 
 # The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery
@@ -72,7 +72,7 @@ poppler-rs = "0.26"
 cairo-rs = "0.22"
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
-# wlr-layer-shell's client side, for athanor-compositor's fixture only (a dev-dependency); the
+# wlr-layer-shell's client side, for athanor-sulphur's fixture only (a dev-dependency); the
 # 0.3 series is generated against wayland-protocols 0.32.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-scanner = "0.31"
@@ -89,7 +89,7 @@ anyhow = "1.0.99"
 # Logging & Telemetry
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
-# Cursor themes, for athanor-compositor's pointer.
+# Cursor themes, for athanor-sulphur's pointer.
 xcursor = "0.3.11"
 
 # Hashing & Utilities

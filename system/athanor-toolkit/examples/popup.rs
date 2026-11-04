@@ -8,11 +8,11 @@ use athanor_toolkit::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell, Side,
     SurfaceId,
 };
-use athanor_toolkit::{Event, Kind, Rect, Theme, Ui};
+use athanor_toolkit::{Event, Kind, Rect, Theme, Ui, WidgetId};
 use std::process::ExitCode;
 
 /// The menu's widgets, laid out, and its first item.
-fn menu() -> (Ui, usize) {
+fn menu() -> (Ui, WidgetId) {
     let mut ui = Ui::new("Files", Theme::default(), false);
     let list = ui.add(Ui::ROOT, Kind::Menu);
     let first = ui.add(list, Kind::MenuItem("New Window".into()));
@@ -54,15 +54,11 @@ impl Application for Dock {
         print("button", ui.widget(button).rect);
         let (menu, first) = menu();
         print("item", menu.widget(first).rect);
-        let options = LayerOptions {
-            layer: Layer::Top,
-            namespace: "athanor-toolkit-popup".into(),
-            anchor: Anchor::BOTTOM,
-            margin: [0; 4],
-            exclusive_zone: 0,
-            keyboard: KeyboardInteractivity::OnDemand,
-            input_region: None,
-        };
+        let mut options = LayerOptions::default();
+        options.layer = Layer::Top;
+        options.namespace = "athanor-toolkit-popup".into();
+        options.anchor = Anchor::BOTTOM;
+        options.keyboard = KeyboardInteractivity::OnDemand;
         Some((ui, options))
     }
 

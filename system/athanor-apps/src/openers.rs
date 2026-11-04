@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use athanor_compositor_client::Opener;
+use athanor_sulphur_client::Opener;
 use gtk4::accessible::Property;
 use gtk4::glib;
 use gtk4::prelude::*;

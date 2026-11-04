@@ -17,8 +17,8 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use athanor_compositor_client::shortcuts::{self, Binding};
-use athanor_compositor_client::theme;
+use athanor_sulphur_client::shortcuts::{self, Binding};
+use athanor_sulphur_client::theme;
 use athanor_services::battery::BACKLIGHT_ROOT;
 use athanor_services::Runtime;
 use athanor_control_center::{grants, launch_dir, parse_mode, Mode, RFKILL};

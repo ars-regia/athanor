@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use athanor_compositor_client::{outputs, Client, WindowId};
+use athanor_sulphur_client::{outputs, Client, WindowId};
 use athanor_launcher::keys::{self, Command, Key};
 use athanor_launcher::list::{self, Line};
 use athanor_launcher::place;
@@ -133,7 +133,7 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
                 launcher.fill(&list::lines(rows));
             }
         });
-        engine.set_catalog(Catalog::read(athanor_compositor_client::SETTINGS_PAGE_PREFIX));
+        engine.set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
         Launcher {
             app: app.clone(),
             display: display.clone(),
@@ -252,7 +252,7 @@ impl Launcher {
         let weak = Rc::downgrade(self);
         self.apps_monitor.connect_changed(move |_| {
             if let Some(launcher) = weak.upgrade() {
-                launcher.engine.set_catalog(Catalog::read(athanor_compositor_client::SETTINGS_PAGE_PREFIX));
+                launcher.engine.set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
             }
         });
         let weak = Rc::downgrade(self);

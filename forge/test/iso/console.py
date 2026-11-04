@@ -409,7 +409,7 @@ SESSION_DIAGNOSTICS = (
 # ALIVE only if the unit is still active and its journal holds no Rust panic and no
 # abort or core dump. The screenshot taken on the answer is what shows the window.
 # The launcher's name for an application's unit: cosmic-settings blocks on cosmic-randr, which
-# athanor-compositor serves only in the units of Settings (data/privileged-clients).
+# athanor-sulphur serves only in the units of Settings (data/privileged-clients).
 SETTINGS_UNIT = b"app-athanor-com.system76.CosmicSettings@probe"
 SETTINGS_APP = b"com.system76.CosmicSettings"
 SETTINGS_WATCH = b"20"

@@ -8,15 +8,15 @@ use accesskit::{
 };
 use std::ops::Range;
 
-/// The AccessKit node id of a widget, for an application that adds nodes of its own to the tree.
+/// The AccessKit node id of a widget.
 pub fn node_id(id: WidgetId) -> NodeId {
-    NodeId(id as u64)
+    NodeId(u64::from(id.0))
 }
 
 /// The node of line `line` of a field's text, beside the widgets' ids: a single-line field has
 /// one line, a text area one per line as it is seen.
 pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
-    NodeId(id as u64 | (line as u64 + 1) << 32)
+    NodeId(u64::from(id.0) | (line as u64 + 1) << 32)
 }
 
 /// The node of widget `id`, with its bounds in physical pixels at `scale`. The match is
@@ -250,7 +250,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
     tree.toolkit_name = Some("athanor-toolkit".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
-    let shown = || (0..ui.len()).filter(|&id| ui.is_visible(id));
+    let shown = || ui.ids().filter(|&id| ui.is_visible(id));
     TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
@@ -264,8 +264,9 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
 
 /// The visible widgets that `update` leaves without a usable node: missing, of an unknown role,
 /// or focusable without a name or with a blank one.
+#[cfg(test)]
 pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
-    (0..ui.len())
+    ui.ids()
         .filter(|&id| ui.is_visible(id))
         .filter(|&id| {
             let Some((_, node)) = update.nodes.iter().find(|(n, _)| *n == node_id(id)) else {
@@ -280,10 +281,11 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 
 impl Ui {
     /// Carries out an assistive technology's request on the widget it names.
-    pub fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
-        let id = usize::try_from(request.target_node.0)
+    pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
+        let id = u32::try_from(request.target_node.0)
             .ok()
-            .filter(|&id| id < self.len() && self.is_visible(id))?;
+            .map(WidgetId)
+            .filter(|&id| id.index() < self.len() && self.is_visible(id))?;
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             (Action::Focus, _) => {
@@ -328,7 +330,7 @@ mod tests {
         ui.layout();
         let mut update = tree_update(&ui, 1.0);
         // Every visible widget, and the field's text run.
-        let visible = (0..ui.len()).filter(|&id| ui.is_visible(id)).count();
+        let visible = ui.ids().filter(|&id| ui.is_visible(id)).count();
         assert_eq!(update.nodes.len(), visible + 1);
         assert!(update.nodes.iter().all(|(n, _)| *n != node_id(hidden)));
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
@@ -351,7 +353,7 @@ mod tests {
         assert_eq!(chooser.choices.len(), 8);
         let ui = &chooser.ui;
         let update = tree_update(ui, 1.0);
-        let node = |id: WidgetId| &update.nodes[id].1;
+        let node = |id: WidgetId| &update.nodes[id.index()].1;
         let named = |role: Role| {
             update
                 .nodes
@@ -418,7 +420,7 @@ mod tests {
         ui.layout();
         let update = tree_update(&ui, 1.0);
         let read = |id: WidgetId| {
-            let n = &update.nodes[id].1;
+            let n = &update.nodes[id.index()].1;
             (
                 n.role(),
                 n.label().map(str::to_owned),
@@ -458,7 +460,10 @@ mod tests {
         ui.set_focus(Some(button));
         assert_eq!(ui.do_action(&request(label, Action::Click, None)), None);
         assert_eq!(ui.do_action(&request(label, Action::Focus, None)), None);
-        assert_eq!(ui.do_action(&request(ui.len(), Action::Click, None)), None);
+        assert_eq!(
+            ui.do_action(&request(WidgetId(ui.len() as u32), Action::Click, None)),
+            None
+        );
         assert_eq!(ui.focus(), Some(button));
 
         // A value set from outside loses its control characters and its excess length.
@@ -486,7 +491,7 @@ mod tests {
             .widget(bar)
             .children
             .iter()
-            .map(|&id| &update.nodes[id].1)
+            .map(|&id| &update.nodes[id.index()].1)
             .collect();
         let read: Vec<_> = parts
             .iter()
@@ -585,7 +590,7 @@ mod tests {
             .unwrap_or(Ui::ROOT);
         ui.layout();
         let update = tree_update(&ui, 1.0);
-        let n = &update.nodes[id].1;
+        let n = &update.nodes[id.index()].1;
         assert_eq!((n.role(), n.label()), (Role::Slider, Some("Level")));
         assert_eq!(n.orientation(), Some(Orientation::Horizontal));
         assert_eq!(
@@ -643,11 +648,11 @@ mod tests {
             .collect();
         ui.layout();
         let unselected = tree_update(&ui, 1.0);
-        assert_eq!(unselected.nodes[rows[0]].1.is_selected(), None);
+        assert_eq!(unselected.nodes[rows[0].index()].1.is_selected(), None);
         assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
         ui.key(crate::Key::End);
         let update = tree_update(&ui, 1.0);
-        let n = |id: WidgetId| &update.nodes[id].1;
+        let n = |id: WidgetId| &update.nodes[id.index()].1;
         assert_eq!(
             (n(list).role(), n(list).label()),
             (Role::ListBox, Some("Fruit"))
@@ -746,10 +751,10 @@ mod tests {
         assert!(runs.iter().all(|r| r.role() == Role::TextRun));
         let children: Vec<NodeId> = (0..runs.len()).map(|n| text_run_id(area, n)).collect();
         assert_eq!(node.map(|n| n.children().to_vec()), Some(children));
-        assert_eq!(text_run_id(area, 2), NodeId(area as u64 | 3 << 32));
+        assert_eq!(text_run_id(area, 2), NodeId(u64::from(area.0) | 3 << 32));
 
         // A single-line field keeps its one run at `id | 1 << 32`.
-        assert_eq!(text_run_id(field, 0), NodeId(field as u64 | 1 << 32));
+        assert_eq!(text_run_id(field, 0), NodeId(u64::from(field.0) | 1 << 32));
         assert_eq!(find(text_run_id(field, 0)).and_then(Node::value), Some("one"));
         assert!(find(text_run_id(field, 1)).is_none());
     }

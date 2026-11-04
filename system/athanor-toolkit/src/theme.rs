@@ -12,8 +12,10 @@ impl Rgba {
     }
 }
 
-/// The colours and sizes every widget draws with, in logical pixels.
+/// The colours and sizes every widget draws with, in logical pixels. New fields are added over
+/// time: start from [`Theme::default`] and set the fields that differ.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Theme {
     /// The window's background.
     pub background: Rgba,

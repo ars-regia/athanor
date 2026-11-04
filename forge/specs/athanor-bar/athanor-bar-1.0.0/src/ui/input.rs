@@ -84,7 +84,7 @@ impl ModuleUi for InputUi {
 }
 
 pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
-    // Under athanor-compositor the group comes from a manager bound only by who watches it.
+    // Under athanor-sulphur the group comes from a manager bound only by who watches it.
     if let Err(err) = bar.client()?.watch_keyboard_group() {
         tracing::warn!("the keyboard group is not followed: {err}");
     }

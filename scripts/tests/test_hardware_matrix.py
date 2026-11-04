@@ -225,7 +225,7 @@ class Checks(unittest.TestCase):
 
     def test_compositor_passes_only_for_the_own_compositor(self):
         for path, result in (
-            ("/usr/bin/athanor-compositor", "pass"),
+            ("/usr/bin/athanor-sulphur", "pass"),
             ("/usr/bin/cosmic-comp", "fail"),
         ):
             got = self.compositor(self.SESSION, lambda s: 42, lambda p: path)

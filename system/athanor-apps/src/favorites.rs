@@ -29,7 +29,7 @@ impl Store {
     pub fn load(file: Option<PathBuf>) -> Store {
         Store::load_with(
             file,
-            athanor_compositor_client::favorites::cosmic_favorites,
+            athanor_sulphur_client::favorites::cosmic_favorites,
             Path::new(favorites::VENDOR_FILE),
             |id| DesktopAppInfo::new(id).is_some(),
         )
