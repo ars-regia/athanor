@@ -46,6 +46,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,6 +65,13 @@ MOVED = 6
 MIRROR = "athanor-nvidia-rpms"
 # The repository metadata checksums a lock can be generated from, with their names in messages.
 CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
+# http_get's attempts and first delay, those of forge/scripts/retry.sh: the delay doubles from
+# 15 s, so the five attempts span about four minutes, long enough to outlast a restart.
+ATTEMPTS = 5
+DELAY = 15
+# The HTTP answers that pass: a server error and rate limiting. Any other status, a 404 or a 401
+# among them, is the server's real answer, and no attempt changes it.
+TRANSIENT = frozenset(range(500, 600)) | {429}
 BRANCHES = {
     "open": {
         "primary": "nvidia-driver",
@@ -129,8 +137,26 @@ class Moved(LockError):
 
 
 def http_get(url):
-    with urllib.request.urlopen(url, timeout=120) as response:
-        return response.read()
+    """The body at `url`. A transient failure (a network error, a timeout, HTTP 5xx or 429) is
+    retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
+    delay = DELAY
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code not in TRANSIENT or attempt == ATTEMPTS:
+                raise
+            reason = f"HTTP {error.code}"
+        # After HTTPError, its subclass. A timeout or a reset during the read is not wrapped.
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            if attempt == ATTEMPTS:
+                raise
+            reason = str(error)
+        print(f"lock.py: {url}: {reason}, attempt {attempt} of {ATTEMPTS}: retrying in {delay} s", file=sys.stderr)
+        time.sleep(delay)
+        delay *= 2
+    raise AssertionError("unreachable")
 
 
 def mirror_repository():
