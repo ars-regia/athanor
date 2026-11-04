@@ -488,6 +488,8 @@ def main():
         "Screen reader shows",
         wait_for(lambda: labelled(app, Atspi, "check box", "Screen reader"), 5),
     )
+    # The loop switches on, then off: it starts from the key's default.
+    check("the screen reader key starts off", screen_reader_key() == "false")
     for value in ("true", "false"):
         switches = labelled(app, Atspi, "check box", "Screen reader")
         if switches:
