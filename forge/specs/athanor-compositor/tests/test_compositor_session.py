@@ -42,6 +42,14 @@ OWN = [
     "XKB_DEFAULT_VARIANT",
     "XKB_DEFAULT_OPTIONS",
 ]
+# What the session's end runs: the gate's own ExecStop= (SN2, SN15 step 3 (d)), then OWN.
+GATE = (
+    SPECS
+    / "athanor-system-services/SOURCES/usr/lib/systemd/user/athanor-desktop.service"
+).read_text()
+UNSET = " ".join(
+    [GATE.split("ExecStop=/usr/bin/", 1)[1].splitlines()[0], *OWN]
+)
 
 # systemctl: `start --wait` creates the marker as the unit's ExecStartPost= does when $START
 # is "ok", fails at once when it is "fail", and when it is "hold" returns only once the
@@ -152,14 +160,8 @@ class CompositorSession(unittest.TestCase):
         self.assertFalse(any("start --wait" in c for c in self.calls()))
 
     def assert_cleaned_up(self):
-        # SN15 step 3 (d): the import list less XDG_CURRENT_DESKTOP, then this session's own.
-        self.assertIn("XDG_CURRENT_DESKTOP", NAMES)
-        removed = [n for n in NAMES if n != "XDG_CURRENT_DESKTOP"]
-        self.assertIn("WAYLAND_DISPLAY", removed)
-        self.assertIn(
-            " ".join(["systemctl --user unset-environment", *removed, *OWN]),
-            self.calls(),
-        )
+        # SN15 step 3 (d): the names of the display (SN2), then this session's own.
+        self.assertIn(UNSET, self.calls())
 
     def test_a_session_that_started_ends_with_the_compositor_and_cleans_up(self):
         status, stderr = self.run_session()
@@ -208,10 +210,7 @@ class CompositorSession(unittest.TestCase):
         self.assertIn(
             "systemctl --user import-environment LANG XDG_CURRENT_DESKTOP", calls
         )
-        self.assertIn(
-            " ".join(["systemctl --user unset-environment WAYLAND_DISPLAY LANG", *OWN]),
-            calls,
-        )
+        self.assertIn(UNSET, calls)
 
     def test_a_list_of_the_displays_alone_imports_nothing(self):
         listing = self.work / "session-import"

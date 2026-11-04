@@ -53,8 +53,8 @@ impl Rect {
 pub enum Kind {
     /// Children stacked top to bottom, aligned to the start edge.
     Column,
-    /// Children side by side in reading order, left to right or right to left, all as wide as
-    /// the widest, as a homogeneous GTK box. In a column or a group it fills the width.
+    /// Children side by side in reading order, left to right or right to left, with equal
+    /// shares of the row, as a homogeneous GTK box. In a column or a group it fills the width.
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
@@ -823,10 +823,12 @@ impl Ui {
     /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
     /// drawn, takes no focus or input and has no node for assistive technologies; it keeps its
     /// state. Hiding the widget that has the focus moves the focus to the next visible widget that
-    /// takes it, or the previous one. The root and the title bar cannot be hidden: asking for it
-    /// changes nothing. Call [`Ui::layout`] afterwards.
+    /// takes it, or the previous one. The root, the title bar and its children cannot be hidden:
+    /// asking for it changes nothing. Call [`Ui::layout`] afterwards.
     pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
-        if id == Self::ROOT || Some(id) == self.title_bar || self.widgets[id].visible == visible {
+        let in_title_bar = std::iter::successors(Some(id), |&w| self.widgets[w].parent)
+            .any(|w| Some(w) == self.title_bar);
+        if id == Self::ROOT || in_title_bar || self.widgets[id].visible == visible {
             return;
         }
         let before = focus::chain(self);
@@ -1763,6 +1765,12 @@ mod tests {
             let parts = ui.widget(bar).children.clone();
             assert_eq!(parts.len(), 3, "rtl {rtl}: the title and two buttons");
             let (title, minimize, close) = (parts[0], parts[1], parts[2]);
+            ui.set_visible(title, false);
+            ui.set_visible(close, false);
+            assert!(
+                ui.is_visible(title) && ui.is_visible(close),
+                "rtl {rtl}: the bar's children cannot be hidden"
+            );
             let (m, c) = (ui.widget(minimize).rect, ui.widget(close).rect);
             let pad = ui.theme.padding;
             if rtl {

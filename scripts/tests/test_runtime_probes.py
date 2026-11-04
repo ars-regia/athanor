@@ -49,7 +49,12 @@ def good():
             "faillock": {k: str(v) for k, v in EXPECT["pam"]["faillock"].items()},
         },
         "sysctl": "",
-        "trust": {"reason": "signature"},
+        "trust": {
+            "reason": "signature",
+            "schema": 2,
+            "automatic_security_updates": True,
+            "postpone_published": True,
+        },
         "backup": ["20261018T100000Z"],
     }
 
@@ -154,7 +159,22 @@ class Expectations(unittest.TestCase):
 
     def test_an_unverified_image_fails(self):
         f = good()
-        f["trust"] = {"reason": "media"}
+        f["trust"] = {**f["trust"], "reason": "media"}
+        self.assertEqual(failed(f), {"trust"})
+
+    def test_a_state_at_schema_1_fails(self):
+        f = good()
+        f["trust"] = {**f["trust"], "schema": 1}
+        self.assertEqual(failed(f), {"trust"})
+
+    def test_a_state_without_the_postpone_field_fails(self):
+        f = good()
+        f["trust"] = {**f["trust"], "postpone_published": False}
+        self.assertEqual(failed(f), {"trust"})
+
+    def test_the_opt_out_left_on_fails(self):
+        f = good()
+        f["trust"] = {**f["trust"], "automatic_security_updates": False}
         self.assertEqual(failed(f), {"trust"})
 
     def test_no_snapshot_after_the_hourly_unit_fails(self):

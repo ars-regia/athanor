@@ -8,7 +8,8 @@ name: Kernel Bump
 # changed it stops here. prep: on the self-hosted runner, inside the builder, regenerates the
 # hash manifests for the new pins and runs `build.sh --stage prep` (signatures, patches,
 # config gate): the outcome goes into the PR, green or red. pr: opens the PR (label
-# kernel-bump) and, only when prep is green and no NVIDIA lock moved, enables its
+# kernel-bump) and, only when prep is green, no NVIDIA lock moved and the kernel closes no
+# Fedora security advisory (the `## Release class` section of bump.py's body), enables its
 # auto-merge, which waits for the checks the branch protection requires: `gate` of pr.yml (the
 # kernel check and the spec builds run there once, doc_ci.md CP4).
 # system: `bump.py apply --group system` moves the FROM lines of system/Containerfile (the
@@ -123,15 +124,24 @@ jobs:
           name: bump-pins
 
       - name: Toolchain lock for the new pins
+        id: lock
         # Each lock resolved again only when its inputs moved: base, package list, pinned SRPM (lock.sh).
-        run: bash forge/specs/azoth/lock.sh generate
+        # A failure is prep's FAIL: a pair from the next Fedora release fails here until a
+        # person sets its key, and the PR is where that person is told.
+        run: |
+          set -euo pipefail
+          locked=true
+          bash forge/specs/azoth/lock.sh generate 2>&1 | tee prep.log || locked=false
+          echo "locked=${locked}" >> "$GITHUB_OUTPUT"
 
       - name: Build the kernel builder image
+        if: ${{ steps.lock.outputs.locked == 'true' }}
         env:
           BUILDAH_ISOLATION: chroot
         run: bash scripts/ci/build-builder.sh
 
       - name: Manifests for the new pins
+        if: ${{ steps.lock.outputs.locked == 'true' }}
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.cache/azoth"
@@ -150,11 +160,16 @@ jobs:
       - name: Prep (signatures, patches, config gate)
         # Green or red, the outcome and the derived options end up in the PR body: the PR
         # opens anyway and `gate` keeps it red until a human decides.
+        env:
+          LOCKED: ${{ steps.lock.outputs.locked }}
         run: |
           set -euo pipefail
           mkdir -p out
           outcome=ok
-          if ! podman run --rm \
+          if [[ $LOCKED != true ]]; then
+            outcome=FAIL
+            echo "::error::lock.sh generate failed: the pull request carries the end of its log"
+          elif ! podman run --rm \
                  -v "$GITHUB_WORKSPACE:/forge" \
                  -v "$HOME/.cache/azoth:/var/cache/azoth" \
                  -w /forge localhost/azoth-builder \
@@ -226,7 +241,7 @@ jobs:
           pattern: bump-*
           merge-multiple: true
 
-      - name: Branch, commit, PR (auto-merge only on a green prep that moves no NVIDIA lock)
+      - name: Branch, commit, PR (auto-merge only on a green prep that a person need not check)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
@@ -238,8 +253,10 @@ jobs:
           git diff --cached --quiet -- system/nvidia/locks || keys+=${keys:+$'\n'}"NVIDIA locks"
           # A new NVIDIA lock changes the packages of the image: a person merges
           # (doc_system_image.md, section 4).
-          reviewed=false
-          git diff --cached --quiet -- system/nvidia/locks || reviewed=true
+          reviewed=
+          git diff --cached --quiet -- system/nvidia/locks || reviewed="moves an NVIDIA pin and its lock"
+          # A release/class file states a security fix, and only a person writes it (PL55).
+          if grep -q '^## Release class$' body.md; then reviewed+="${reviewed:+ and }closes a Fedora security advisory"; fi
           title="chore(kernel): bump $(paste -sd, - <<< "$keys" | sed 's/,/, /g')"
           outcome=$(cat prep-outcome)
           [[ $outcome != REFRESH ]] || title+=" (patch refresh needed)"
@@ -250,12 +267,12 @@ jobs:
           git commit -q -m "$title" -m "Opened by the bump bot (kernel-bump.yml, spec section 8)."
           git push -u origin "$branch"
           cat body.md prep.md > pr.md
-          if [[ $reviewed == true ]]; then
-            printf '\n## Merge\n\nThis bump moves an NVIDIA pin and its lock. The kernel check of the gate job and a human review decide the merge. No auto-merge.\n' >> pr.md
+          if [[ -n $reviewed ]]; then
+            printf '\n## Merge\n\nThis bump %s. The kernel check of the gate job and a human review decide the merge. No auto-merge.\n' "$reviewed" >> pr.md
           fi
           url=$(gh pr create --base "$GITHUB_REF_NAME" --head "$branch" --label kernel-bump --title "$title" --body-file pr.md)
-          if [[ $reviewed == true ]]; then
-            echo "PR: ${url} (NVIDIA lock moved: no auto-merge, a human review decides)" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ -n $reviewed ]]; then
+            echo "PR: ${url} (${reviewed}: no auto-merge, a human review decides)" | tee -a "$GITHUB_STEP_SUMMARY"
           elif [[ $outcome == ok ]]; then
             gh pr merge --auto --squash "$url"
             echo "PR: ${url} (auto-merge once the required checks are green)" | tee -a "$GITHUB_STEP_SUMMARY"

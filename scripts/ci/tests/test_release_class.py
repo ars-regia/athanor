@@ -23,10 +23,11 @@ GIT_ENV = {
 }  # fmt: skip
 
 
-def updateinfo(*updates):
+def updateinfo(*updates, package=("openssl", "3.5.1")):
+    name, version = package
     body = "".join(
         f'<update type="{kind}"><id>{id}</id><issued date="2026-10-01 00:00:00"/>'
-        f'<pkglist><collection><package name="openssl" epoch="0" version="3.5.1" release="{rel}" arch="x86_64"/>'
+        f'<pkglist><collection><package name="{name}" epoch="0" version="{version}" release="{rel}" arch="x86_64"/>'
         "</collection></pkglist></update>"
         for id, kind, rel in updates
     )
@@ -34,13 +35,14 @@ def updateinfo(*updates):
 
 
 class Fake(rc.Sources):
-    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45"):
+    def __init__(self, root, old="3.5.1-1.fc45", new="3.5.1-3.fc45", info=None, fail=False, was="45", now="45", kernels=("0:7.2.5-300.azoth.fc45",) * 2):
         self.repo_root = root
         self.ids = {f"{REPO}@{OLD}": was, f"{REPO}@{NEW}": now}
         self.pkgs = {
             f"{REPO}@{OLD}": {"openssl": f"0:{old}"},
             f"{REPO}@{NEW}": {"openssl": f"0:{new}"},
         }
+        self.pkgs[f"{REPO}@{OLD}"]["kernel"], self.pkgs[f"{REPO}@{NEW}"]["kernel"] = kernels
         self.info, self.fail = info if info is not None else updateinfo(), fail
 
     def packages(self, ref):
@@ -182,6 +184,68 @@ class Derive(unittest.TestCase):
         got = self.derive(base, head, info=updateinfo(("FEDORA-2026-aaaa", "security", "2.fc45")))
         self.assertEqual(got["advisories"], ["CVE-2026-0001", "FEDORA-2026-aaaa"])
 
+    def kernel_change(self, base, head, fixed, kind="security", package="kernel", kernels=("7.2.5", "7.2.11")):
+        return self.derive(
+            base,
+            head,
+            kernels=tuple(f"0:{v}-300.azoth.fc45" for v in kernels),
+            info=updateinfo(("FEDORA-2026-kkkk", kind, "300.fc45"), package=(package, fixed)),
+        )
+
+    def test_a_kernel_change_that_closes_an_advisory_needs_a_class_file(self):
+        head = self.commit()
+        # The same version as the candidate, with a release that compares later than Azoth's.
+        for fixed in ("7.2.6", "7.2.9", "7.2.11"):
+            with self.subTest(fixed=fixed), self.assertRaisesRegex(rc.ClassError, "FEDORA-2026-kkkk"):
+                self.kernel_change(head, head, fixed)
+
+    def test_a_class_file_answers_for_the_kernel_and_only_its_ids_count(self):
+        base = self.commit()
+        head = self.commit("2026-10-21-kernel", SECURITY)
+        got = self.kernel_change(base, head, "7.2.9")
+        self.assertEqual((got["class"], got["advisories"]), ("security", ["CVE-2026-0001"]))
+
+    def test_a_class_file_of_another_repository_does_not_answer_for_the_kernel(self):
+        base = self.commit()
+        head = self.commit("2026-10-21-kernel", SECURITY + 'repositories = ["other"]\n')
+        with self.assertRaisesRegex(rc.ClassError, "FEDORA-2026-kkkk"):
+            self.kernel_change(base, head, "7.2.9")
+
+    def test_a_kernel_advisory_outside_the_change_asks_for_nothing(self):
+        head = self.commit()
+        # 7.2.5 is the version of the baseline: only the Fedora release looks newer than Azoth's.
+        for fixed in ("7.2.4", "7.2.5", "7.2.12"):
+            with self.subTest(fixed=fixed):
+                self.assertEqual(self.kernel_change(head, head, fixed)["class"], "feature")
+
+    def test_a_kernel_advisory_that_is_no_security_fix_asks_for_nothing(self):
+        got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kind="bugfix")
+        self.assertEqual(got["class"], "feature")
+
+    def test_a_kernel_downgrade_closes_nothing(self):
+        got = self.kernel_change(*[self.commit()] * 2, "7.2.9", kernels=("7.2.11", "7.2.5"))
+        self.assertEqual(got["class"], "feature")
+
+    def test_a_kernel_subpackage_neither_asks_nor_claims(self):
+        head = self.commit()
+        got = self.derive(
+            head,
+            head,
+            kernels=("0:7.2.5-300.azoth.fc45", "0:7.2.11-300.azoth.fc45"),
+            info=updateinfo(("FEDORA-2026-kkkk", "security", "300.fc45"), package=("kernel-core", "7.2.9")),
+        )
+        self.assertEqual((got["class"], got["advisories"]), ("feature", []))
+        old, new = {"kernel-core": "0:1-1"}, {"kernel-core": "0:3-1"}
+        self.assertEqual(rc.fedora_half(old, new, [rc.Advisory("A", "security", {"kernel-core": "0:2-1"})]), [])
+        self.assertEqual(rc.fedora_half({"kernelshark": "0:1-1"}, {"kernelshark": "0:3-1"}, [rc.Advisory("A", "security", {"kernelshark": "0:2-1"})]), ["A"])
+
+    def test_a_kernel_advisory_never_sets_the_class(self):
+        self.assertEqual(rc.fedora_half({"kernel": "0:1-1"}, {"kernel": "0:3-1"}, [rc.Advisory("A", "security", {"kernel": "0:2-1"})]), [])
+
+    def test_an_unlabelled_baseline_has_no_file_to_ask_for(self):
+        got = self.kernel_change("", self.commit(), "7.2.9")
+        self.assertEqual((got["class"], got["class_reason"]), ("feature", "unlabelled-baseline"))
+
     def test_malformed_release_class_toml_fails(self):
         base = self.commit()
         for text in ('class = "urgent"\nadvisories = ["CVE-2026-0001"]\n', 'class = "security"\nadvisories = "CVE-2026-0001"\n'):
@@ -216,7 +280,7 @@ class GitHalf(Derive):
 
 
 class Podman(unittest.TestCase):
-    listing = "filesystem 0:3-1\nglibc 0:2-1\nopenssl 0:3-1\n"
+    listing = "filesystem 0:3-1\nglibc 0:2-1\nkernel 0:7-1\nopenssl 0:3-1\n"
 
     def setUp(self):
         self.calls, self.fail = [], {}
@@ -256,8 +320,8 @@ class Podman(unittest.TestCase):
             self.sources().packages("img")
 
     def test_a_missing_sanity_package_fails(self):
-        self.listing = "openssl 0:3-1\nglibc 0:2-1\n"
-        with self.assertRaisesRegex(rc.ClassError, "filesystem"):
+        self.listing = "openssl 0:3-1\nglibc 0:2-1\nfilesystem 0:3-1\n"
+        with self.assertRaisesRegex(rc.ClassError, "kernel"):
             self.sources().packages("img")
 
     def test_a_missing_sqlite_file_fails_before_rpm_runs(self):

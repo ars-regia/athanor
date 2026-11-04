@@ -20,7 +20,6 @@ class ToolkitBoundary(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         self.dir = self.root / verify.TOOLKIT
         self.dir.mkdir(parents=True)
-        (self.root / "Cargo.toml").write_text("[workspace.dependencies]\nlocal = { path = \"x\" }\n")
         for name in ("LICENSE-MIT", "LICENSE-APACHE"):
             (self.dir / name).write_text("text\n")
 
@@ -42,10 +41,10 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertEqual(len(out), 2)
         self.assertIn("Athanor crate", out[0])
 
-    def test_a_path_dependency_through_the_workspace_fails(self):
+    def test_a_workspace_dependency_fails(self):
         out = self.problems("[dependencies]\nlocal = { workspace = true }\n")
         self.assertEqual(len(out), 1)
-        self.assertIn("path dependency", out[0])
+        self.assertIn("inherited from the workspace", out[0])
 
     def test_an_athanor_build_dependency_fails(self):
         out = self.problems('[build-dependencies]\nathanor-i18n = { path = "../athanor-i18n" }\n')

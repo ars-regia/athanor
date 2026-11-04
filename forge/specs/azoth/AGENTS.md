@@ -13,7 +13,9 @@ local commands.
   `apply` rewrites `pins.env`, the `FROM` lines of the kernel Containerfiles and the pin
   table in `KERNEL.md`. The `system` group (base image, NVIDIA locks) goes in a separate
   pull request. Fedora and CachyOS sources move together, at the same patch level: the
-  CachyOS base diff does not apply to a Fedora tree at a newer one.
+  CachyOS base diff does not apply to a Fedora tree at a newer one. A bump that closes a
+  Fedora kernel advisory needs a `security` file in `release/class/`, or `candidate` refuses
+  the release (`doc_pipeline.md`, PL55).
 - **`cmdline` is generated** from `forge/specs/athanor-kernel-profile/profile.toml` by
   `kernel_profile.py generate`: edit the manifest, never the file.
 - **Patches apply without fuzz.** When `build.sh --stage prep` stops with

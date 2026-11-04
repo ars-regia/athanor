@@ -26,7 +26,7 @@ from typing import NamedTuple
 CLASS_DIR = "release/class/"
 CLASS_NAME = re.compile(r"release/class/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.toml")
 ADVISORY_ID = re.compile(r"[A-Za-z0-9._-]+")
-SANITY = ("filesystem", "glibc")  # every Fedora image has them: an empty list is a failed read
+SANITY = ("filesystem", "glibc", "kernel")  # every image has them: an empty list is a failed read
 TIMEOUT = 900  # seconds for one external command; a pull of an image is the longest
 MAX_FILESIZE = 256 * 1024 * 1024  # bytes of one download from a Fedora mirror
 METALINK = "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f{}&arch=x86_64"
@@ -242,14 +242,16 @@ def parse_updateinfo(xml):
 
 def fedora_half(old, new, advisories):
     """Ids of the security advisories whose fixed version lies after the old one and at or
-    before the new one, for a package that differs between the two."""
+    before the new one, for a package that differs between the two. The Azoth kernel takes no
+    part: its package has Fedora's name and an NEVRA of its own (kernel_half)."""
     out = set()
     for a in advisories:
         if a.type != "security":
             continue
         for name, fixed in a.fixed.items():
             if (
-                name in old
+                not is_kernel(name)
+                and name in old
                 and name in new
                 and old[name] != new[name]
                 and evrcmp(fixed, old[name]) > 0
@@ -257,6 +259,25 @@ def fedora_half(old, new, advisories):
             ):
                 out.add(a.id)
     return sorted(out)
+
+
+def is_kernel(name):
+    return name == "kernel" or name.startswith("kernel-")
+
+
+def kernel_half(old, new, advisories):
+    """Ids of the security advisories of Fedora's kernel that the change of the Azoth kernel
+    closes, by upstream version alone. They never set the class: a release that closes one
+    states it in a release-class.toml file (PL55, #655)."""
+    before, after = evr(old["kernel"])[1], evr(new["kernel"])[1]
+    return sorted(
+        a.id
+        for a in advisories
+        if a.type == "security"
+        and "kernel" in a.fixed
+        and vercmp(evr(a.fixed["kernel"])[1], before) > 0
+        and vercmp(evr(a.fixed["kernel"])[1], after) <= 0
+    )
 
 
 def run(*args, text=True, timeout=TIMEOUT, input=None):
@@ -349,11 +370,14 @@ class PodmanSources(Sources):
         )  # fmt: skip
 
     def updateinfo(self, ref):
-        """(timestamp, updateinfo.xml) of the updates repository of ref's VERSION_ID, through
-        the Fedora metalink, with the repomd.xml and the updateinfo checked against their
+        return self.updateinfo_of(self._read(ref)[1])
+
+    def updateinfo_of(self, version):
+        """(timestamp, updateinfo.xml) of the updates repository of a VERSION_ID, through the
+        Fedora metalink, with the repomd.xml and the updateinfo checked against their
         checksums; the timestamp is the one repomd.xml gives the updateinfo entry."""
         try:
-            metalink = ET.fromstring(self._fetch(METALINK.format(self._read(ref)[1])))
+            metalink = ET.fromstring(self._fetch(METALINK.format(version)))
         except ET.ParseError as error:
             raise ClassError(f"the Fedora metalink is not XML: {error}") from None
         want = next(
@@ -430,8 +454,10 @@ def derive(repository, baseline, candidate, commit, sources):
         return record
     try:
         ids, record["class_reason"] = set(), ""
+        stated = None
         if baseline.revision:
-            ids.update(git_half(baseline.revision, commit, sources.repo_root, repository) or [])
+            stated = git_half(baseline.revision, commit, sources.repo_root, repository)
+            ids.update(stated or [])
         else:
             record["class_reason"] = "unlabelled-baseline"
         stamp = None
@@ -442,11 +468,11 @@ def derive(repository, baseline, candidate, commit, sources):
             record["class_reason"] = ",".join(filter(None, [record["class_reason"], f"base-change:{before}->{after}"]))
         else:
             stamp, xml = sources.updateinfo(candidate.ref)
-            ids.update(
-                fedora_half(
-                    sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
-                )
-            )
+            old, new, advisories = sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
+            ids.update(fedora_half(old, new, advisories))
+            closed = kernel_half(old, new, advisories)
+            if closed and baseline.revision and stated is None:
+                raise ClassError(f"the kernel change closes {closed}: a {CLASS_DIR} file must say so (PL55)")
         bad = sorted(i for i in ids if not ADVISORY_ID.fullmatch(i))
         if bad:
             raise ClassError(f"advisory ids {bad} are not of the form [A-Za-z0-9._-]+")

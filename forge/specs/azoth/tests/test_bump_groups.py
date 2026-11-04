@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import yaml
+
 AZOTH = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AZOTH))
 import bump  # noqa: E402
@@ -23,6 +25,35 @@ NVIDIA_OPEN_VERSION=615.71.09
 NVIDIA_OPEN_COMMIT={o}
 NVIDIA_LEGACY_VERSION=580.178.04
 """.format(c="c" * 40, p="1" * 40, o="0" * 40)
+
+
+class ClosedAdvisories(unittest.TestCase):
+    """Upstream versions decide, in the repository of the image's Fedora release, as in the
+    release's `candidate`."""
+
+    INFO = (
+        b'<updates><update type="security"><id>FEDORA-2026-aaaa</id><pkglist><package name="kernel"'
+        b' version="7.2.8" release="100.fc43"/></pkglist></update></updates>'
+    )
+
+    def closes(self, old, new):
+        pins, moved = {"FEDORA_KERNEL_NVR": old}, {"FEDORA_KERNEL_NVR": new} if new else {}
+        with (
+            mock.patch.object(bump, "fedora_version", lambda: 43),
+            mock.patch.object(bump.release_class.PodmanSources, "updateinfo_of", lambda s, v: (None, self.INFO)),
+        ):
+            return bump.closed_advisories(pins, moved)
+
+    def test_only_a_move_past_the_fixed_version_closes_it(self):
+        self.assertEqual(self.closes("7.2.5-100.fc43", "7.2.8-100.fc43"), ["FEDORA-2026-aaaa"])
+        self.assertEqual(self.closes("7.2.5-100.fc43", "7.2.7-100.fc43"), [])
+        self.assertEqual(self.closes("7.2.8-100.fc43", "7.2.9-100.fc43"), [])
+        self.assertEqual(self.closes("7.2.5-100.fc43", None), [])
+
+    def test_an_unreadable_repository_fails_the_bump(self):
+        self.INFO = b"not xml"
+        with self.assertRaises(SystemExit):
+            self.closes("7.2.5-100.fc43", "7.2.8-100.fc43")
 
 
 class BumpGroups(unittest.TestCase):
@@ -69,6 +100,7 @@ class BumpGroups(unittest.TestCase):
             "nvidia_open": lambda current: (current, "0" * 40),
             "toolkit_version": lambda: "1.20.1",
             "image_digest": lambda image, tag: NEW,
+            "closed_advisories": lambda pins, new: [],
         }
         for name, value in patches.items():
             patcher = mock.patch.object(bump, name, value)
@@ -105,16 +137,42 @@ class BumpGroups(unittest.TestCase):
         self.assertEqual(result["locks"], {"legacy": "580.190.01"})
         self.assertEqual(self.generated, [("legacy", "580.190.01")])
 
+    def test_a_closed_advisory_names_the_class_file_and_no_other_bump_does(self):
+        result = bump.compute("kernel")
+        self.assertNotIn("## Release class", bump.body(result))
+        body = bump.body({**result, "closes": ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]})
+        self.assertIn(f"\n{bump.RELEASE_CLASS}\n", body)
+        self.assertIn('advisories = ["FEDORA-2026-aaaa", "FEDORA-2026-bbbb"]\n', body)
+
+    def test_the_workflow_stops_the_auto_merge_on_the_same_heading(self):
+        workflow = AZOTH.parents[2] / ".github/workflows/kernel-bump.yml"
+        self.assertIn(f"grep -q '^{bump.RELEASE_CLASS}$' body.md", workflow.read_text())
+
     def test_a_pair_from_another_fedora_release_says_the_key_must_move(self):
         self.assertFalse([n for n in bump.compute("kernel")["notes"] if "FEDORA_KEY_FPR" in n])
         pair = ("7.2.8", "7.2.8-100.fc44", "cachyos-7.2.8-1", "2026-09-30T00:00:00Z")
         with mock.patch.object(bump, "kernel_pair", lambda pins, notes: pair):
             notes = bump.compute("kernel")["notes"]
         self.assertIn(
-            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key; "
-            "set it to the Fedora 44 key before merging, or build.sh's SRPM signature check fails",
+            "kernel: 7.2.8-100.fc44 is a Fedora 44 build and FEDORA_KEY_FPR still names the Fedora 43 key, "
+            "so prep fails; on this branch set it to the Fedora 44 key, make sure the base image ships that "
+            "key's file, and run the steps of the prep job again by hand (doc_kernel_build.md, section 8)",
             notes,
         )
+
+    def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
+        jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]
+        steps = {step.get("name"): step for step in jobs["prep"]["steps"]}
+        lock = steps["Toolchain lock for the new pins"]
+        self.assertEqual(lock["id"], "lock")
+        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", lock["run"])
+        self.assertIn('echo "locked=${locked}" >> "$GITHUB_OUTPUT"', lock["run"])
+        for name in ("Build the kernel builder image", "Manifests for the new pins"):
+            self.assertEqual(steps[name]["if"], "${{ steps.lock.outputs.locked == 'true' }}", name)
+        prep = steps["Prep (signatures, patches, config gate)"]
+        self.assertEqual(prep["env"]["LOCKED"], "${{ steps.lock.outputs.locked }}")
+        self.assertRegex(prep["run"], r"if \[\[ \$LOCKED != true \]\]; then\s+outcome=FAIL")
+        self.assertEqual(jobs["pr"]["needs"], ["kernel", "prep"])
 
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")

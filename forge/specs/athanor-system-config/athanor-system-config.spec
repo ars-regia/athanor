@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:75.fc45}
+Release:        %{?autorelease}%{!?autorelease:76.fc45}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -89,9 +89,13 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
-* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-75
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-76
 - Fedora 45 base: the release takes the fc45 dist tag, and the cosmic-comp requirement names
   Athanor's fc45 build, which Fedora's own 1.11.0-2.fc45 does not satisfy.
+
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-75
+- The comments of the import list and of athanor-desktop say that the end of the session
+  unsets only the names of the display (doc_session.md, SN2, #825).
 
 * Thu Oct 29 2026 Athanor Forge <forge@athanor.os> - 1.0.0-74
 - The supervisor of the screen locker and the idle daemon moves out of athanor-desktop into
