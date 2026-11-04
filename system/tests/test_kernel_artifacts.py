@@ -1007,6 +1007,28 @@ class CheckPlan(Repo):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
 
+    def test_nvidia_pin_bump_with_its_packaging_and_documents_builds_the_default_image(self):
+        # A move of the legacy branch to another repository tree changes the lock and the code
+        # that reads it together (#669): only the NVIDIA variants use either.
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
+        r = self.plan({
+            **self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP),
+            "system/nvidia/locks/open.lock": "l\n",
+            "system/nvidia/lock.py": "p\n",
+            "system/nvidia/tests/test_lock.py": "t\n",
+            "docs/architecture/doc_system_image.md": "d\n",
+        })
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
+
+    def test_nvidia_pin_bump_with_a_key_or_other_files_fails(self):
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
+        for path in ("system/nvidia/keys/RPM-GPG-KEY-x", "system/Containerfile"):
+            with self.subTest(path=path):
+                r = self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), path: f"{path}\n"})
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("own pull request", r.stderr)
+
     def test_nvidia_pin_bump_without_the_signed_vmlinuz_fails(self):
         # Even the default image copies the signed vmlinuz in: without it nothing can be built.
         self.state("modules-missing", kernel_digest=KERNEL)
