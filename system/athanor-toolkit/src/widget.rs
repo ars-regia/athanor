@@ -1339,7 +1339,8 @@ impl Ui {
     }
 
     /// Pastes `text` into field `id` at its caret, replacing its selection, as typing it would:
-    /// without the control characters but a text area's newlines, and at most
+    /// without the control characters but a text area's newlines, without the bidirectional
+    /// formats, as [`Ui::set_field_text`] takes text from outside, and at most
     /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
@@ -1349,8 +1350,11 @@ impl Ui {
         if field.is_composing() {
             return None;
         }
-        let text = printable(text, multiline);
-        let text: String = text.chars().take(Self::FIELD_MAX_CHARS).collect();
+        let text: String = text
+            .chars()
+            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
+            .take(Self::FIELD_MAX_CHARS)
+            .collect();
         field.insert(&mut self.text, &text);
         field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
@@ -3038,6 +3042,17 @@ mod tests {
         assert_eq!(ui.paste(name, "y"), None);
         assert_eq!(ui.paste(Ui::ROOT, "y"), None);
         assert_eq!(ui.paste(usize::MAX, "y"), None);
+    }
+
+    #[test]
+    fn a_paste_drops_the_bidirectional_formats() {
+        // As text set from outside: "invoice<RLO>gpj.exe" would read "invoiceexe.jpg".
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        let pasted = ui.paste(name, "invoice\u{202E}gpj.exe\u{2066}\u{200F}");
+        assert_eq!(pasted, Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("invoicegpj.exe"));
     }
 
     #[test]
