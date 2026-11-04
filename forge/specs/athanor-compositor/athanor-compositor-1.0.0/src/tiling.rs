@@ -207,9 +207,11 @@ impl<T: PartialEq + Clone> Tree<T> {
         let tile = tiles.iter().find(|(tile, _)| Some(*tile) == near);
         let beside = tile.map(|(tile, at)| ((*tile).clone(), Along::longer(*at)));
         self.focused.push(window.clone());
-        self.root = Some(match self.root.take().zip(beside) {
-            Some((root, (near, along))) => root.split_tile(&near, window, along),
-            None => Node::Tile(window),
+        self.root = Some(match (self.root.take(), beside) {
+            (Some(root), Some((near, along))) => root.split_tile(&near, window, along),
+            // A last focus that names no tile of the tree: the window splits the whole.
+            (Some(root), None) => Node::split(root, Node::Tile(window), Along::longer(area)),
+            (None, _) => Node::Tile(window),
         });
     }
 
@@ -477,6 +479,20 @@ mod tests {
         assert_eq!(tiles(&tree, whole), before);
         assert!(tree.holds(&2));
         assert!(!tree.holds(&7));
+    }
+
+    /// Should the last focus name no tile of the tree, the new window splits the whole and no
+    /// tile is lost.
+    #[test]
+    fn a_focus_out_of_the_tree_loses_no_tile() {
+        let whole = area(1016, 616);
+        let mut tree = Tree::default();
+        tree.insert(1, whole);
+        tree.insert(2, whole);
+        tree.focused.push(7);
+        tree.insert(3, whole);
+        assert!(tree.holds(&1) && tree.holds(&2) && tree.holds(&3));
+        assert_eq!(tiles(&tree, whole).len(), 3);
     }
 
     #[test]
