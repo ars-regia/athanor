@@ -80,8 +80,8 @@ pub struct HeldCommit {
 struct Placed;
 
 /// Marks a window the user has moved, resized, maximised, minimised or made full screen since it
-/// was placed, or that went to another workspace: the cascade no longer follows it. A destroyed
-/// window ends the cascade too, at the next window `spawn` places.
+/// was placed, or that went to another workspace or took a tile: the cascade no longer follows
+/// it. A destroyed window ends the cascade too, at the next window `spawn` places.
 struct Moved;
 
 /// Takes `window` out of the cascade, as cosmic-comp does when the window leaves its place.
@@ -348,8 +348,9 @@ impl State {
     /// cascaded from the windows placed there before it (`cascaded`), or as the first
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
-    /// and is left out of it, and so is one maximised or full screen before its first commit.
-    /// A window too tall for where it lands is sent the height that fits.
+    /// and is left out of it, and so is one maximised or full screen before its first commit,
+    /// and one on a tiled workspace, which takes a tile (`tile_placed`) and is sent nothing
+    /// here. A window too tall for where it lands is sent the height that fits.
     fn spawn(
         &mut self,
         window: &Window,
@@ -364,6 +365,9 @@ impl State {
             return first;
         }
         let workspace = self.active_workspace(&output);
+        if workspace.is_some_and(|id| self.is_tiled(id)) {
+            return first;
+        }
         let here: Vec<Window> = self
             .spawned
             .iter()

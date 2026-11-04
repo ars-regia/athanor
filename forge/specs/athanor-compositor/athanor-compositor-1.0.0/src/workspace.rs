@@ -809,8 +809,8 @@ impl State {
     }
 
     /// Takes every window of `id` the user can see into a new tree, the topmost first, each
-    /// beside the one before (D2). A maximised or full-screen window stays so, its tile what it
-    /// returns to, and is sent nothing.
+    /// beside the one before (D2), and out of the cascade (`handlers::moved`). A maximised or
+    /// full-screen window stays so, its tile what it returns to, and is sent nothing.
     fn tile(&mut self, id: WorkspaceId) {
         let Some(area) = self
             .output_of_workspace(id)
@@ -831,6 +831,7 @@ impl State {
             let floating = kept_before(window).unwrap_or_else(|| self.settled_geometry(window));
             let kept = window.user_data().get_or_insert(Floating::default);
             kept.0.set(Some(floating));
+            crate::handlers::moved(window);
             tree.insert(window.clone(), area);
         }
         // The order of focus, which the walk left the stack's reversed: the topmost last, then
@@ -969,7 +970,8 @@ impl State {
 
     /// D2 for `window`, on a tiled workspace, shown and in no tile yet: it splits the tile focused
     /// last, and with `behind` the next tile still splits that one. Where it stood is kept for
-    /// the end of the tiling, unless it is kept already. The workspace, to lay out.
+    /// the end of the tiling, unless it is kept already, and it leaves the cascade
+    /// (`handlers::moved`). The workspace, to lay out.
     fn enter_tile(&mut self, window: &Window, behind: bool) -> Option<WorkspaceId> {
         let id = on(window).filter(|id| self.is_tiled(*id))?;
         if !shown(window) || self.is_tile(window) {
@@ -984,6 +986,7 @@ impl State {
             kept.0.set(Some(floating));
         }
         let (_, tree) = self.tilings.iter_mut().find(|(kept, _)| *kept == id)?;
+        crate::handlers::moved(window);
         if behind {
             tree.insert_behind(window.clone(), area);
         } else {

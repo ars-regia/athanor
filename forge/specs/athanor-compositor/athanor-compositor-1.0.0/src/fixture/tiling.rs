@@ -606,28 +606,68 @@ fn a_client_slow_to_answer_keeps_its_place() {
 }
 
 /// A new window on a tiled workspace is sent its tile's size in its initial configure and maps
-/// at its tile; the window it splits takes the other half.
+/// at its tile, with no second configure; the window it splits takes the other half. The
+/// output is wide enough that the tile it splits is narrow and its halves side by side, so a
+/// cascade from that tile would send the new window a lower height (`spawn`); a whole tile is
+/// too wide to cascade from.
 #[test]
 fn a_new_window_first_shows_at_its_tile() {
+    // The halves of the first output 2560 wide, and those of its left half, the inner one
+    // wider by the half gap its edge keeps (`gapped`).
+    const LEFT: (i32, i32, i32, i32) = (8, 8, 1268, 784);
+    const RIGHT: (i32, i32, i32, i32) = (1284, 8, 1268, 784);
+    const LEFT_LEFT: (i32, i32, i32, i32) = (8, 8, 628, 784);
+    const LEFT_RIGHT: (i32, i32, i32, i32) = (644, 8, 632, 784);
     let mut run = Running::start(None);
     without_the_fixture(&mut run);
+    resize_first(&mut run, 2560, 800);
+    // `placement_area` reads the zones the layer map leaves, laid out again for the new size.
+    smithay::desktop::layer_map_for_output(run.state.space.outputs().next().expect("an output"))
+        .arrange();
+    let (mut lower, _, below) = window(&mut run);
     let (mut upper, _, above) = window(&mut run);
     let id = first_workspace(&run);
-    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    answer_all(&mut run, &mut [&mut upper, &mut lower], |run| {
+        run.state.set_tiling(id, true)
+    });
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
     let mut new = Local::connect(&mut run, None);
     let (surface, _) = new.unborn();
     surface.commit();
 
     let (width, height, _) = new.redraw(&mut run);
 
-    assert_eq!((width, height), (RIGHT.2, RIGHT.3), "the initial configure");
+    assert_eq!((width, height), (LEFT_RIGHT.2, LEFT_RIGHT.3), "the initial configure");
     let window = new.server_window(&run, &surface);
     assert_eq!(tiled_states(&window), 4);
-    assert_eq!(geometry(&run, &window), rect(RIGHT), "at its first commit");
+    assert_eq!(geometry(&run, &window), rect(LEFT_RIGHT), "at its first commit");
     assert!(!configured(&mut run, &mut new), "no second configure");
     let (width, _, _) = upper.redraw(&mut run);
-    assert_eq!(width, LEFT.2);
-    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(width, LEFT_LEFT.2);
+    assert_eq!(geometry(&run, &above), rect(LEFT_LEFT));
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
+    run.stop();
+}
+
+/// A window taken into a tile leaves the cascade, as one the user moved does: once the
+/// workspace floats again, the next new window is placed as the first, not cascaded from a
+/// window that held a tile (`spawn`).
+#[test]
+fn a_tiling_ends_the_cascade() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        id,
+        ..
+    } = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut upper, &mut lower], |run| {
+        run.state.set_tiling(id, false)
+    });
+
+    let (_, _, window) = window(&mut run);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
     run.stop();
 }
 
