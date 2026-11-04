@@ -1,6 +1,6 @@
 # Athanor control center
 
-Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the specification that `doc_shell_standard.md`, section 4, step 5 requires: one panel of quick controls opened from the bar, built on the services the bar already holds. It designs the programs and crates, the panel's contents, the detail pages it shares with the bar, the do-not-disturb state, the privileges of each control, the clipboard history and third-party tiles in their confined forms, the tests and the order of construction.
+Status: **revision 2, approved by the maintainer on 2026-10-04.** It is the specification that `doc_shell_standard.md`, section 4, step 5 requires: one panel of quick controls opened from the bar, built on the services the bar already holds. It designs the programs and crates, the panel's contents, the detail pages it shares with the bar, the do-not-disturb state, the privileges of each control, the clipboard history and third-party tiles in their confined forms, the tests and the order of construction. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with the pull request of the compositor's rename to Sulphur, which renames the compositor's client crate to `athanor-sulphur-client`. Only identifiers are renamed; the specified behaviour does not change.
 
 ## 1. Context
 

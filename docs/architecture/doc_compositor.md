@@ -1,6 +1,6 @@
 # Athanor compositor
 
-Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase.
+Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with the pull request of the compositor's rename to Sulphur, which renames the compositor's client crate to `athanor-sulphur-client`. Only identifiers are renamed; the specified behaviour does not change.
 
 This document answers one question the maintainer raised on 2026-10-04: should Athanor have a
 compositor of its own, one that takes in what niri, Hyprland, MangoWC and the others offer? The
