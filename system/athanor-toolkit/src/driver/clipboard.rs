@@ -9,19 +9,23 @@ use smithay_client_toolkit::data_device_manager::{
     data_device::{DataDevice, DataDeviceHandler},
     data_offer::{DataOfferHandler, DragOffer},
     data_source::{CopyPasteSource, DataSourceHandler},
-    DataDeviceManagerState, WritePipe,
+    DataDeviceManagerState, ReadPipe, WritePipe,
 };
 use smithay_client_toolkit::primary_selection::{
     device::{PrimarySelectionDevice, PrimarySelectionDeviceHandler},
     selection::{PrimarySelectionSource, PrimarySelectionSourceHandler},
     PrimarySelectionManagerState,
 };
-use smithay_client_toolkit::reexports::calloop::PostAction;
+use smithay_client_toolkit::reexports::calloop::{
+    timer::{TimeoutAction, Timer},
+    LoopHandle, PostAction, RegistrationToken,
+};
 use smithay_client_toolkit::reexports::protocols::wp::primary_selection::zv1::client::{
     zwp_primary_selection_device_v1::ZwpPrimarySelectionDeviceV1,
     zwp_primary_selection_source_v1::ZwpPrimarySelectionSourceV1,
 };
 use std::io::{self, Read, Write};
+use std::time::Duration;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{
     wl_data_device::WlDataDevice, wl_data_device_manager::DndAction, wl_data_source::WlDataSource,
@@ -40,6 +44,9 @@ const READ_MAX: usize = 64 * 1024;
 /// Linux's `PIPE_BUF`: a pipe that polls writable takes a write this long without blocking.
 const PIPE_BUF: usize = 4096;
 
+/// How long a clipboard's owner has to send the whole text of a paste.
+const PASTE_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// The seat's clipboards, as far as the compositor has them.
 #[derive(Default)]
 pub(super) struct Clipboards {
@@ -51,6 +58,72 @@ pub(super) struct Clipboards {
     copied: Option<(CopyPasteSource, String)>,
     /// The text selected last, and the source that offers it until another one replaces it.
     selected: Option<(PrimarySelectionSource, String)>,
+    /// The paste being read, at most one: a new one replaces it.
+    pending: Option<Pending>,
+}
+
+/// A paste being read: its pipe and its deadline, both sources of the event loop.
+pub(super) struct Pending {
+    pipe: RegistrationToken,
+    deadline: RegistrationToken,
+}
+
+/// Reads a paste from `pipe` through the event loop of `handle`, and hands its text to `done`.
+/// One paste at a time: the one still in `slot`, which `pending` finds in the loop's data, is
+/// dropped with its pipe, and a paste whose owner has not sent the whole text in `timeout` is
+/// dropped too, so that an owner that never closes its pipe holds no descriptor.
+fn read_paste<D: 'static>(
+    handle: &LoopHandle<'static, D>,
+    slot: &mut Option<Pending>,
+    pending: fn(&mut D) -> &mut Option<Pending>,
+    pipe: ReadPipe,
+    timeout: Duration,
+    mut done: impl FnMut(&mut D, String) + 'static,
+) -> Result<(), String> {
+    if let Some(old) = slot.take() {
+        eprintln!("athanor-toolkit: the paste not yet read gives way to the next");
+        handle.remove(old.pipe);
+        handle.remove(old.deadline);
+    }
+    let mut incoming = Incoming::default();
+    let loop_handle = handle.clone();
+    let read = handle.insert_source(pipe, move |(), pipe, data| {
+        let Some(result) = incoming.read(&**pipe) else {
+            return PostAction::Continue;
+        };
+        if let Some(read) = pending(data).take() {
+            loop_handle.remove(read.deadline);
+        }
+        match result {
+            Ok(text) => done(data, text),
+            Err(error) => eprintln!("athanor-toolkit: nothing pasted: {error}"),
+        }
+        PostAction::Remove
+    });
+    let read = read.map_err(|e| e.to_string())?;
+    let loop_handle = handle.clone();
+    let deadline = handle.insert_source(Timer::from_duration(timeout), move |_, _, data| {
+        if let Some(late) = pending(data).take() {
+            loop_handle.remove(late.pipe);
+        }
+        eprintln!(
+            "athanor-toolkit: nothing pasted: the clipboard's owner sent no whole text in {timeout:?}"
+        );
+        TimeoutAction::Drop
+    });
+    match deadline {
+        Ok(deadline) => {
+            *slot = Some(Pending {
+                pipe: read,
+                deadline,
+            });
+            Ok(())
+        }
+        Err(error) => {
+            handle.remove(read);
+            Err(error.to_string())
+        }
+    }
 }
 
 impl Clipboards {
@@ -236,20 +309,14 @@ impl App {
             }
             None => return,
         };
-        let mut incoming = Incoming::default();
-        let read = self.loop_handle.insert_source(pipe, move |(), pipe, app| {
-            match incoming.read(&**pipe) {
-                None => PostAction::Continue,
-                Some(Ok(text)) => {
-                    app.pasted(id, widget, &text);
-                    PostAction::Remove
-                }
-                Some(Err(error)) => {
-                    eprintln!("athanor-toolkit: nothing pasted: {error}");
-                    PostAction::Remove
-                }
-            }
-        });
+        let read = read_paste(
+            &self.loop_handle,
+            &mut self.clipboards.pending,
+            |app| &mut app.clipboards.pending,
+            pipe,
+            PASTE_TIMEOUT,
+            move |app, text| app.pasted(id, widget, &text),
+        );
         if let Err(error) = read {
             eprintln!("athanor-toolkit: nothing pasted: {error}");
         }
@@ -505,6 +572,94 @@ mod tests {
         };
         let done = outgoing.write(&writer).map(|r| r.map_err(|e| e.kind()));
         assert_eq!(done, Some(Err(io::ErrorKind::BrokenPipe)));
+        Ok(())
+    }
+
+    use smithay_client_toolkit::reexports::calloop::EventLoop;
+    use std::error::Error;
+    use std::os::fd::OwnedFd;
+
+    /// The loop's data of the pastes below: the paste pending, and the texts pasted.
+    #[derive(Default)]
+    struct Pastes {
+        pending: Option<Pending>,
+        pasted: Vec<String>,
+    }
+
+    /// Starts a paste from a new pipe, as the clipboard's owner would get it; returns the
+    /// owner's end.
+    fn paste(
+        event_loop: &EventLoop<'static, Pastes>,
+        pastes: &mut Pastes,
+        timeout: Duration,
+    ) -> Result<io::PipeWriter, Box<dyn Error>> {
+        let (reader, writer) = io::pipe()?;
+        let pipe = ReadPipe::from(OwnedFd::from(reader));
+        read_paste(
+            &event_loop.handle(),
+            &mut pastes.pending,
+            |pastes| &mut pastes.pending,
+            pipe,
+            timeout,
+            |pastes, text| pastes.pasted.push(text),
+        )?;
+        Ok(writer)
+    }
+
+    /// Runs the loop until no paste is pending, for at most a second.
+    fn settle(
+        event_loop: &mut EventLoop<'static, Pastes>,
+        pastes: &mut Pastes,
+    ) -> Result<(), Box<dyn Error>> {
+        for _ in 0..20 {
+            if pastes.pending.is_none() {
+                break;
+            }
+            event_loop.dispatch(Some(Duration::from_millis(50)), pastes)?;
+        }
+        Ok(())
+    }
+
+    /// Whether the paste's end of `owner` is closed: a write to it fails with `EPIPE`.
+    fn closed(owner: &mut io::PipeWriter) -> bool {
+        owner
+            .write(b"late")
+            .is_err_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+    }
+
+    #[test]
+    fn a_paste_whose_owner_never_closes_its_pipe_is_dropped_at_its_deadline(
+    ) -> Result<(), Box<dyn Error>> {
+        let mut event_loop = EventLoop::try_new()?;
+        let mut pastes = Pastes::default();
+        let mut owner = paste(&event_loop, &mut pastes, Duration::from_millis(100))?;
+        owner.write_all(b"never ends")?;
+        settle(&mut event_loop, &mut pastes)?;
+        assert!(pastes.pending.is_none());
+        assert!(pastes.pasted.is_empty());
+        assert!(closed(&mut owner), "the pipe is closed");
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_paste_replaces_the_one_not_yet_read() -> Result<(), Box<dyn Error>> {
+        let mut event_loop = EventLoop::try_new()?;
+        let mut pastes = Pastes::default();
+        let mut first = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
+        let mut second = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
+        assert!(closed(&mut first), "the first pipe is closed");
+        second.write_all(b"second")?;
+        drop(second);
+        settle(&mut event_loop, &mut pastes)?;
+        assert!(
+            pastes.pending.is_none(),
+            "the paste and its deadline are gone"
+        );
+        assert_eq!(pastes.pasted, ["second"]);
+        // A later paste stays pending while its owner sends nothing, before its deadline.
+        let mut third = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
+        event_loop.dispatch(Some(Duration::from_millis(50)), &mut pastes)?;
+        assert!(pastes.pending.is_some() && !closed(&mut third));
         Ok(())
     }
 }
