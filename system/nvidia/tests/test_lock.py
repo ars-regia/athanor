@@ -420,6 +420,34 @@ class LegacyFedora45(unittest.TestCase):
         # under the unsuffixed name must not answer for the 580 branch.
         self.assertEqual(run(["latest", "legacy", "--major", "580"], legacy_repo(*published))[:2], (0, "580.196.07\n"))
 
+    def companions_at(self, epoch, version, release="1.fc45"):
+        """The legacy set at 580.196.07 with its companions at epoch:version-release."""
+        return legacy_repo(
+            *[package(n, 3, "580.196.07", "1.fc45", "x86_64", f"x/{n}.rpm", "a" * 64) for n in lock.BRANCHES["legacy"]["packages"]],
+            *[package(n, epoch, version, release, "x86_64", f"{n[0]}/{n}.rpm", "b" * 64) for n in lock.BRANCHES["legacy"]["companions"]],
+        )
+
+    def test_a_companion_below_the_driver_is_refused(self):
+        # The 580xx packages require nvidia-modprobe and nvidia-persistenced >= 3:<their version>.
+        for epoch, version in ((3, "580.142"), (3, "580.196.06"), (2, "615.78.08")):
+            with self.subTest(epoch=epoch, version=version):
+                with self.assertRaisesRegex(lock.LockError, rf"older than 3:580.196.07, which the set requires: nvidia-modprobe {epoch}:{version}-1.fc45, nvidia-persistenced {epoch}:{version}-1.fc45"):
+                    lock.resolve("legacy", "580.196.07", self.companions_at(epoch, version))
+                code, _, err = run(["check", "legacy", "--version", "580.196.07"], self.companions_at(epoch, version))
+                self.assertEqual(code, 1)
+                self.assertIn("nvidia-persistenced", err)
+
+    def test_a_companion_at_or_above_the_driver_is_accepted(self):
+        for epoch, version in ((3, "580.196.07"), (3, "615.78.08"), (4, "1.0")):
+            with self.subTest(epoch=epoch, version=version):
+                got = {e["name"] for e in lock.resolve("legacy", "580.196.07", self.companions_at(epoch, version))}
+                self.assertIn("nvidia-persistenced", got)
+
+    def test_only_the_legacy_set_floors_its_companions(self):
+        # nvidia-driver-selinux follows its own versions, far below the open driver's.
+        self.assertEqual({b: s["floor"] for b, s in lock.BRANCHES.items()},
+                         {"open": False, "legacy": True, "container-toolkit": False})
+
     def test_the_fedora_45_releases_tree(self):
         self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
                          "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/")
