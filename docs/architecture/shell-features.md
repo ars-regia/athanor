@@ -438,7 +438,7 @@ Statuses in the Athanor column:
 
 ## Window management
 
-This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entries are the automatic tiling of the default session and what that departs from in cosmic-comp, whose tiling at tag `epoch-1.11.0`, the release cosmic-comp comes from, is the reference (`doc_own_stack.md` OS12). `doc_shell_standard.md` ST3 lets only the maintainer exclude an entry: the maintainer accepted each exclusion of this table on 2026-11-01 (#902). Scrolling layouts, window rules and gestures enter here as CO2 says, one entry at a time, and no row of this version researches them. F-overview-15 stays in the overview's table until that research moves it. The bar's button for this entry is F-bar-34. The shape of the tree is no entry: a new window splits a tile in two in both, cosmic-comp's wider groups come from the moves of F-windows-08, the drops of F-windows-04 and the return of F-windows-02, and here every window has its turn in the order of focus, so the split of the root cosmic-comp falls back on has no place.
+This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entries are the automatic tiling of the default session and what that departs from in cosmic-comp, whose tiling at tag `epoch-1.11.0`, the release cosmic-comp comes from, is the reference (`doc_own_stack.md` OS12). `doc_shell_standard.md` ST3 lets only the maintainer exclude an entry: the maintainer accepted F-windows-02 to F-windows-07 and F-windows-09 on 2026-11-01 (#902), and a row `excluded (proposed)` is a proposal until the maintainer decides it. Scrolling layouts, window rules and gestures enter here as CO2 says, one entry at a time, and no row of this version researches them. F-overview-15 stays in the overview's table until that research moves it. The bar's button for this entry is F-bar-34. The shape of the tree is no entry: a new window splits a tile in two in both, cosmic-comp's wider groups come from the moves of F-windows-08, the drops of F-windows-04 and the return of F-windows-02, and here every window has its turn in the order of focus, so the split of the root cosmic-comp falls back on has no place.
 
 | Id | Feature | Sources | Athanor | Note |
 |---|---|---|---|---|
@@ -451,6 +451,7 @@ This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entrie
 | F-windows-07 | Resizing from a press in the gap between tiles | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L3359) | excluded | decided 2026-11-01 (#902): the gap belongs to no client, so a press there needs pointer handling of the compositor's own; here a client's resize moves the split nearest that edge |
 | F-windows-08 | Tiling keys: focus by direction, moving a tile among the others, changing a split's orientation, resizing a tile | [COSMIC focus](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L1835), [COSMIC move](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L1507), [COSMIC orientation](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2089), [COSMIC resize](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L2514) | missing | `doc_own_stack.md` decision 29 leaves unbound every key of COSMIC that no approved document names; each of these needs its key decided, and without them the order of focus alone shapes the tree |
 | F-windows-09 | Gaps between tiles taken from the theme | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/layout/tiling/mod.rs#L4324) | excluded | decided 2026-11-01 (#902): the gaps are a constant, the 8 logical pixels of the Calmo theme: following the theme needs a COSMIC setting read, which `doc_shell.md` SH2 allows outside the client crate only as an exception it names |
+| F-windows-10 | A new window takes the keyboard, so the next new window splits its tile | [COSMIC](https://github.com/pop-os/cosmic-comp/blob/epoch-1.11.0/src/shell/mod.rs#L3177) | excluded (proposed) | mapping a window is not the person's input: a window of another application takes the keyboard only with an activation token, or when nothing holds it (`handlers::place`, #937); it is placed behind the focused tile, and the next window splits the tile still in use (D2, `Tree::insert_behind`) |
 
 ## Counts
 
@@ -571,6 +572,6 @@ This surface opens in version 2, as `doc_compositor.md` CO2 proposes. Its entrie
 | have | 1 |
 | partial | 0 |
 | missing | 1 |
-| excluded (proposed) | 0 |
+| excluded (proposed) | 1 |
 | excluded | 7 |
-| total | 9 |
+| total | 10 |
