@@ -2,8 +2,15 @@
 //! stacked with its window, under whatever stands above it, so `stack` builds what Smithay's
 //! `space_render_elements` does with the marks between the windows, for `draw_view` and for the
 //! DRM path alike. Corners are small bitmaps, not a shader, because the renderers include Pixman.
+//!
+//! An unconfined window's outline and every window's divider follow cosmic-comp's (#918): a
+//! ring along a rounded rectangle whose coverage `Indicator` computes for each pixel of the
+//! output. They match the goldens at scale 1, and at scale 1.5 on every side where cosmic-comp
+//! places the window as this compositor does, at whole logical coordinates; where it places the
+//! window at a fractional offset, they land a pixel apart (#918). The divider lies inside the
+//! window's geometry, where decision 31 places no mark, as the maintainer chose on 2026-11-04.
 
-use crate::focus_theme::Outline;
+use crate::focus_theme::{Edge, Outline};
 use crate::state::{full_screen_area, inset, laid_out, unconfined};
 use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
@@ -12,7 +19,7 @@ use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
     render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{AsRenderElements, Id, Kind};
+use smithay::backend::renderer::element::{AsRenderElements, Element, Id, Kind, RenderElement};
 use smithay::backend::renderer::utils::CommitCounter;
 use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::utils::bbox_from_surface_tree;
@@ -21,7 +28,8 @@ use smithay::output::Output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
-use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::utils::user_data::UserDataMap;
+use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::Layer;
 use std::cell::RefCell;
@@ -41,14 +49,70 @@ const BORDER: [[f32; 4]; 3] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 const BORDER_WIDTH: i32 = BORDER.len() as i32;
-/// The ring of the focus outline, after the border's in a surface's `Rings`.
+/// The ring of a confined window's focus outline, after the border's in a surface's `Rings`.
 const OUTLINE_RING: usize = BORDER.len();
+/// An unconfined window's outline and every window's divider, in a surface's `Indicators`.
+const OUTLINE: usize = 0;
+const DIVIDER: usize = 1;
 
 smithay::backend::renderer::element::render_elements! {
     pub Stacked<R> where R: ImportAll + ImportMem;
     Surface=WaylandSurfaceRenderElement<R>,
     Line=SolidColorRenderElement,
     Corner=MemoryRenderBufferRenderElement<R>,
+    Pixels=Pixels<R>,
+}
+
+/// A bitmap drawn pixel for pixel on the output's pixels at `geometry`. Smithay's own element
+/// is sized in logical pixels, which a bitmap of any size cannot be at a fractional scale.
+pub struct Pixels<R: Renderer> {
+    inner: MemoryRenderBufferRenderElement<R>,
+    geometry: Rectangle<i32, Physical>,
+}
+
+impl<R: Renderer> Element for Pixels<R> {
+    fn id(&self) -> &Id {
+        self.inner.id()
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.inner.current_commit()
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        self.inner.src()
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.geometry
+    }
+
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+
+    fn kind(&self) -> Kind {
+        self.inner.kind()
+    }
+}
+
+impl<R> RenderElement<R> for Pixels<R>
+where
+    R: Renderer + ImportMem,
+    R::TextureId: 'static,
+{
+    fn draw(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
+    ) -> Result<(), R::Error> {
+        self.inner
+            .draw(frame, src, dst, damage, opaque_regions, cache)
+    }
 }
 
 /// The black behind a full-screen window, whose element is `surface`'s for its whole life.
@@ -59,6 +123,7 @@ pub struct Marks {
     pub focused: Option<Window>,
     /// `None` when the setting is off.
     pub outline: Option<Outline>,
+    pub edge: Edge,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -249,6 +314,333 @@ fn ring<R>(
     }
 }
 
+/// A ring `thickness` logical pixels wide just inside a rectangle of `size` logical pixels,
+/// drawn on `pixels` of the output at `scale`, with outer corners of `radius`, top left, top
+/// right, bottom right and bottom left: the ring cosmic-comp draws as the outline and as the divider.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Indicator {
+    size: Size<i32, Logical>,
+    pixels: Size<i32, Physical>,
+    thickness: i32,
+    radius: [i32; 4],
+    scale: f64,
+}
+
+/// A rectangle with rounded corners, in physical pixels: its left, top, right and bottom sides,
+/// and the radius of each corner in the order of `Indicator::radius`.
+#[derive(Clone, Copy)]
+struct Rounded {
+    sides: [f64; 4],
+    radius: [f64; 4],
+}
+
+impl Rounded {
+    /// The radius of `corner`, no more than half the shorter side holds.
+    fn radius(&self, corner: usize) -> f64 {
+        let [left, top, right, bottom] = self.sides;
+        let half = ((right - left).min(bottom - top) / 2.0).max(0.0);
+        self.radius[corner].clamp(0.0, half)
+    }
+
+    /// The signed distance from (`x`, `y`) to the boundary, negative inside. A point lies
+    /// `past_x` beyond the nearer of the left and right sides and `past_y` beyond the nearer of
+    /// the top and bottom, both negative within them. Within the radius of both sides it is in a
+    /// corner's square, where the boundary is the corner's circle, centred `radius` in from both
+    /// sides; anywhere else the boundary nearest to it is the nearer side.
+    fn distance(&self, x: f64, y: f64) -> f64 {
+        let [left, top, right, bottom] = self.sides;
+        let corner = match (x < (left + right) / 2.0, y < (top + bottom) / 2.0) {
+            (true, true) => 0,
+            (false, true) => 1,
+            (false, false) => 2,
+            (true, false) => 3,
+        };
+        let radius = self.radius(corner);
+        let past_x = (left - x).max(x - right);
+        let past_y = (top - y).max(y - bottom);
+        let (from_x, from_y) = (past_x + radius, past_y + radius);
+        if from_x > 0.0 && from_y > 0.0 {
+            from_x.hypot(from_y) - radius
+        } else {
+            past_x.max(past_y)
+        }
+    }
+
+    /// How much of the pixel centred at (`x`, `y`) the shape covers: the share of the pixel a
+    /// straight boundary at that distance leaves inside, so the band between covered and not is
+    /// one pixel wide and centred on the boundary.
+    fn covers(&self, x: f64, y: f64) -> f64 {
+        (0.5 - self.distance(x, y)).clamp(0.0, 1.0)
+    }
+}
+
+/// A rectangle of an indicator's pixels, from its top left pixel.
+type Cell = Rectangle<i32, Physical>;
+
+/// The runs of `range` where `covered` holds, each as its first and one past its last.
+fn runs(range: std::ops::Range<i32>, covered: impl Fn(i32) -> bool) -> Vec<(i32, i32)> {
+    let mut runs: Vec<(i32, i32)> = Vec::new();
+    for at in range.filter(|&at| covered(at)) {
+        match runs.last_mut() {
+            Some((_, end)) if *end == at => *end = at + 1,
+            _ => runs.push((at, at + 1)),
+        }
+    }
+    runs
+}
+
+impl Indicator {
+    /// The ring's outer and inner boundaries, in the output's pixels from its top left pixel.
+    /// The outer one is the pixels the ring is drawn on. The inner one is inset by the thickness
+    /// at the scale, with each corner's radius smaller by as much, and each of its sides on the
+    /// nearer line between two pixels; half way, the line above or to the left, as a rasteriser's
+    /// top-left rule takes a pixel whose centre falls on an edge. A straight side then covers
+    /// whole pixels: a thickness of 4.5 pixels is 4 on the left and the top and 5 on the right and
+    /// the bottom. The chooser's golden at scale 1.5 shows the left, the right and the bottom so;
+    /// its top is 5 and its divider a row lower, since cosmic-comp places that window at a
+    /// fractional logical offset.
+    fn boundaries(&self) -> [Rounded; 2] {
+        let (w, h) = (f64::from(self.pixels.w), f64::from(self.pixels.h));
+        let thickness = f64::from(self.thickness) * self.scale;
+        let radius = self.radius.map(|corner| f64::from(corner) * self.scale);
+        let line = |at: f64| (at - 0.5).ceil();
+        let outer = Rounded {
+            sides: [0.0, 0.0, w, h],
+            radius,
+        };
+        let inner = Rounded {
+            sides: [
+                line(thickness),
+                line(thickness),
+                line(w - thickness),
+                line(h - thickness),
+            ],
+            radius: radius.map(|corner| (corner - thickness).max(0.0)),
+        };
+        [outer, inner]
+    }
+
+    /// How much of pixel (`x`, `y`) the ring covers: what its outer boundary covers less what its
+    /// inner one does.
+    fn coverage(&self, x: i32, y: i32) -> f64 {
+        let (x, y) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+        let [outer, inner] = self.boundaries();
+        (outer.covers(x, y) - inner.covers(x, y)).max(0.0)
+    }
+
+    /// How far in from the left, the top, the right and the bottom the ring's corners and its
+    /// inner sides reach, in pixels: past them a pixel is covered as its row says, or its column.
+    fn reach(&self) -> [f64; 4] {
+        let [outer, inner] = self.boundaries();
+        let [left, top, right, bottom] = inner.sides;
+        let insets = [
+            left,
+            top,
+            f64::from(self.pixels.w) - right,
+            f64::from(self.pixels.h) - bottom,
+        ];
+        let corners = [[0, 3], [0, 1], [1, 2], [2, 3]];
+        std::array::from_fn(|side| {
+            corners[side].iter().fold(insets[side], |reach, &corner| {
+                reach
+                    .max(outer.radius(corner))
+                    .max(insets[side] + inner.radius(corner))
+            })
+        })
+    }
+
+    /// The ring's pieces in `colour`: its corners' bitmaps and its lines' ids.
+    fn made(&self, colour: [f32; 4]) -> Pieces {
+        let (cells, lines) = self.pieces();
+        Pieces {
+            made_for: (*self, colour),
+            bitmaps: cells
+                .into_iter()
+                .map(|cell| (self.bitmap(cell, colour), cell))
+                .collect(),
+            lines: lines.into_iter().map(|line| (Id::new(), line)).collect(),
+        }
+    }
+
+    /// The ring in pieces, from its top left pixel: bitmaps at the corners, where a pixel can
+    /// be partly covered, and lines along the sides, where a pixel is covered or not. Past the
+    /// corners' reach a pixel is covered as its row says, between the left and right corners,
+    /// or as its column says, between the top and bottom ones; inside both, not at all.
+    fn pieces(&self) -> (Vec<Cell>, Vec<Cell>) {
+        let (w, h) = (self.pixels.w, self.pixels.h);
+        if w <= 0 || h <= 0 {
+            return (Vec::new(), Vec::new());
+        }
+        let [left, top, right, bottom] = self.reach();
+        let centre = |at: i32| f64::from(at) + 0.5;
+        let (width, height) = (f64::from(w), f64::from(h));
+        let left = (0..w).take_while(|&x| centre(x) < left).count() as i32;
+        let right = (0..w)
+            .rev()
+            .take_while(|&x| centre(x) > width - right)
+            .count() as i32;
+        let top = (0..h).take_while(|&y| centre(y) < top).count() as i32;
+        let bottom = (0..h)
+            .rev()
+            .take_while(|&y| centre(y) > height - bottom)
+            .count() as i32;
+        // On a ring too small for its corners, they meet and take every pixel between them.
+        let (right, bottom) = (right.min(w - left), bottom.min(h - top));
+        let (middle_w, middle_h) = (w - left - right, h - top - bottom);
+        let cells = [
+            ((0, 0), (left, top)),
+            ((w - right, 0), (right, top)),
+            ((0, h - bottom), (left, bottom)),
+            ((w - right, h - bottom), (right, bottom)),
+        ];
+        let bitmaps = cells
+            .into_iter()
+            .filter(|(_, (cell_w, cell_h))| *cell_w > 0 && *cell_h > 0)
+            .map(|(at, size)| Rectangle::new(at.into(), size.into()))
+            .collect();
+        let mut lines = Vec::new();
+        if middle_w > 0 {
+            for rows in [0..top, h - bottom..h] {
+                for (from, to) in runs(rows, |y| self.coverage(left, y) >= 1.0) {
+                    lines.push(Rectangle::new((left, from).into(), (middle_w, to - from).into()));
+                }
+            }
+        }
+        if middle_h > 0 {
+            for columns in [0..left, w - right..w] {
+                for (from, to) in runs(columns, |x| self.coverage(x, top) >= 1.0) {
+                    lines.push(Rectangle::new((from, top).into(), (to - from, middle_h).into()));
+                }
+            }
+        }
+        (bitmaps, lines)
+    }
+
+    /// `cell` of the ring in `colour`, straight, as a premultiplied bitmap.
+    fn bitmap(&self, cell: Rectangle<i32, Physical>, colour: [f32; 4]) -> MemoryRenderBuffer {
+        let [red, green, blue, alpha] = colour;
+        let mut bytes = Vec::with_capacity((cell.size.w * cell.size.h * 4) as usize);
+        for y in cell.loc.y..cell.loc.y + cell.size.h {
+            for x in cell.loc.x..cell.loc.x + cell.size.w {
+                let cover = self.coverage(x, y) as f32 * alpha;
+                let byte = |channel: f32| (channel * cover * 255.0).round() as u8;
+                bytes.extend([byte(blue), byte(green), byte(red), byte(1.0)]);
+            }
+        }
+        MemoryRenderBuffer::from_slice(
+            &bytes,
+            smithay::backend::allocator::Fourcc::Argb8888,
+            (cell.size.w, cell.size.h),
+            1,
+            Transform::Normal,
+            None,
+        )
+    }
+}
+
+/// An indicator's pieces as last made, from its top left pixel. A window keeps its own, since
+/// the damage tracker tells elements apart by id; `made_for` says what they were made for.
+#[derive(Clone)]
+struct Pieces {
+    made_for: (Indicator, [f32; 4]),
+    bitmaps: Vec<(MemoryRenderBuffer, Rectangle<i32, Physical>)>,
+    lines: Vec<(Id, Rectangle<i32, Physical>)>,
+}
+
+/// The pieces of a surface's outline and divider, one of each for every scale it is drawn at, so
+/// that a window across outputs of two scales does not make them anew at every frame. Past
+/// `SCALES` scales the oldest is dropped.
+#[derive(Default)]
+struct Indicators(RefCell<Vec<(usize, Pieces)>>);
+
+/// The scales a surface keeps its indicators at: more than the outputs it spans at once.
+const SCALES: usize = 4;
+
+impl Indicators {
+    /// The indicator `slot` in `shape` and `colour`, made anew when what it draws at that scale
+    /// changed.
+    fn pieces(&self, slot: usize, shape: Indicator, colour: [f32; 4]) -> Pieces {
+        let made_for = (shape, colour);
+        let mut kept = self.0.borrow_mut();
+        let at_scale = |(kind, pieces): &&mut (usize, Pieces)| {
+            *kind == slot && pieces.made_for.0.scale == shape.scale
+        };
+        let found = kept.iter_mut().find(at_scale);
+        match found {
+            Some((_, pieces)) if pieces.made_for == made_for => pieces.clone(),
+            Some((_, pieces)) => {
+                *pieces = shape.made(colour);
+                pieces.clone()
+            }
+            None => {
+                let full = kept.iter().filter(|(kind, _)| *kind == slot).count() >= SCALES;
+                let oldest = kept.iter().position(|(kind, _)| *kind == slot);
+                if let Some(oldest) = oldest.filter(|_| full) {
+                    kept.remove(oldest);
+                }
+                let pieces = shape.made(colour);
+                kept.push((slot, pieces.clone()));
+                pieces
+            }
+        }
+    }
+}
+
+/// The indicator `slot` of `surface`, made anew when what it draws changed.
+fn kept_pieces(surface: &WlSurface, slot: usize, shape: Indicator, colour: [f32; 4]) -> Pieces {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get_or_insert(Indicators::default)
+            .pieces(slot, shape, colour)
+    })
+}
+
+/// The indicator `shape` with its top left pixel at `at`, in `colour`, straight.
+fn indicator<R>(
+    renderer: &mut R,
+    elements: &mut Vec<Stacked<R>>,
+    surface: &WlSurface,
+    slot: usize,
+    (shape, at): (Indicator, Point<i32, Physical>),
+    colour: [f32; 4],
+) where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
+{
+    let pieces = kept_pieces(surface, slot, shape, colour);
+    let [red, green, blue, alpha] = colour;
+    let solid = Color32F::new(red * alpha, green * alpha, blue * alpha, alpha);
+    for (id, line) in pieces.lines {
+        elements.push(Stacked::Line(SolidColorRenderElement::new(
+            id,
+            Rectangle::new(at + line.loc, line.size),
+            CommitCounter::default(),
+            solid,
+            Kind::Unspecified,
+        )));
+    }
+    for (buffer, cell) in &pieces.bitmaps {
+        let loc = at + cell.loc;
+        let drawn = MemoryRenderBufferRenderElement::from_buffer(
+            renderer,
+            Point::<f64, Physical>::from((f64::from(loc.x), f64::from(loc.y))),
+            buffer,
+            None,
+            None,
+            None,
+            Kind::Unspecified,
+        );
+        match drawn {
+            Ok(inner) => elements.push(Stacked::Pixels(Pixels {
+                inner,
+                geometry: Rectangle::new(loc, cell.size),
+            })),
+            Err(error) => tracing::warn!(?error, "a mark's corner could not be imported"),
+        }
+    }
+}
+
 /// Where one output draws: its place in the space, and what a border is cut to.
 struct Place {
     origin: Point<i32, Logical>,
@@ -269,6 +661,24 @@ impl Place {
 
     fn pixels(&self, logical: i32) -> i32 {
         ((f64::from(logical) * self.scale).round() as i32).max(1)
+    }
+
+    /// The ring cosmic-comp draws over `rectangle`, and the output's pixel of its top left corner.
+    fn indicator(
+        &self,
+        rectangle: Rectangle<i32, Logical>,
+        thickness: i32,
+        radius: [i32; 4],
+    ) -> (Indicator, Point<i32, Physical>) {
+        let shown = self.physical(rectangle);
+        let shape = Indicator {
+            size: rectangle.size,
+            pixels: shown.size,
+            thickness,
+            radius,
+            scale: self.scale,
+        };
+        (shape, shown.loc)
     }
 }
 
@@ -402,25 +812,40 @@ fn window_elements<R>(
         border(renderer, elements, surface, frame, cut, place);
     }
     let focused = marks.focused.as_ref() == Some(window);
-    if let Some(outline) = marks
-        .outline
-        .filter(|_| focused && !full_screen && !maximised)
-    {
-        let inside = if is_confined { BORDER_WIDTH } else { 0 };
-        ring(
-            renderer,
-            elements,
-            surface,
-            OUTLINE_RING,
-            grown(
-                place.physical(frame),
-                inside * place.pixels(1) + place.pixels(outline.width),
-            ),
-            place.pixels(outline.width),
-            (WINDOW_RADIUS + inside + outline.width, [true; 4]),
-            place.scale,
-            outline.colour,
-        );
+    let marked = !full_screen && !maximised;
+    if let Some(outline) = marks.outline.filter(|_| focused && marked) {
+        if is_confined {
+            // Outside the border, in whole pixels (decision 31).
+            ring(
+                renderer,
+                elements,
+                surface,
+                OUTLINE_RING,
+                grown(
+                    place.physical(frame),
+                    BORDER_WIDTH * place.pixels(1) + place.pixels(outline.width),
+                ),
+                place.pixels(outline.width),
+                (WINDOW_RADIUS + BORDER_WIDTH + outline.width, [true; 4]),
+                place.scale,
+                outline.colour,
+            );
+        } else {
+            // cosmic-comp 1.11.0 draws a focused window's outline over the geometry grown by the
+            // width, with corners concentric with the window's, in the hint's colour without its
+            // alpha.
+            let width = outline.width;
+            let radius = marks.edge.radius.map(|corner| corner + width);
+            let shape = place.indicator(grown(located, width), width, radius);
+            let [red, green, blue, _] = outline.colour;
+            indicator(renderer, elements, surface, OUTLINE, shape, [red, green, blue, 1.0]);
+        }
+    }
+    if marked {
+        // cosmic-comp 1.11.0 draws its divider as 1 px of `bg_divider` just inside the geometry
+        // of every window neither maximised nor full-screen.
+        let shape = place.indicator(located, 1, marks.edge.radius);
+        indicator(renderer, elements, surface, DIVIDER, shape, marks.edge.divider);
     }
     elements.extend(surface_tree(renderer, surface, drawn_at, place));
     if full_screen && full_screen_area(window) == Some(place.output) {
@@ -567,6 +992,173 @@ mod tests {
         let far = place.physical(rectangle(i32::MAX - 400, i32::MIN, i32::MAX, i32::MAX));
         assert!(far.loc.x.checked_add(far.size.w).is_some());
         assert!(far.loc.y.checked_add(far.size.h).is_some());
+    }
+
+    /// The goldens' chooser at scale 1.5 (`chooser-dark-1.5-en`): a window of 420 by 297 at
+    /// (216, 66), with Calmo's radius of 12, grown by `grow`.
+    fn chooser(thickness: i32, grow: i32) -> (Indicator, Point<i32, Physical>) {
+        let output = Rectangle::<i32, Logical>::from_size((853, 533).into());
+        let place = Place {
+            origin: (0, 0).into(),
+            scale: 1.5,
+            output,
+            area: output,
+        };
+        let window = grown(rectangle(216, 66, 420, 297), grow);
+        place.indicator(window, thickness, [12 + grow; 4])
+    }
+
+    /// How many pixels of row `y` the ring covers whole from the left, and from the right.
+    fn sides(shape: &Indicator, y: i32) -> (i32, i32) {
+        let covered = |x| shape.coverage(x, y) >= 1.0;
+        let left = (0..shape.pixels.w).take_while(|&x| covered(x)).count() as i32;
+        let right = (0..shape.pixels.w).rev().take_while(|&x| covered(x)).count() as i32;
+        (left, right)
+    }
+
+    /// At scale 1.5 cosmic-comp's outline of 3 is 4 px on the left and 5 on the right, and its
+    /// divider 1 and 2, as the golden shows them: columns 320 to 323 and 954 to 958, and 324 and
+    /// 952 to 953.
+    #[test]
+    fn the_indicators_match_the_golden_at_scale_one_and_a_half() {
+        let (outline, at) = chooser(3, 3);
+        assert_eq!((at.x, outline.pixels.w), (320, 639));
+        assert_eq!(sides(&outline, outline.pixels.h / 2), (4, 5));
+        let (divider, at) = chooser(1, 0);
+        assert_eq!((at.x, divider.pixels.w), (324, 630));
+        assert_eq!(sides(&divider, divider.pixels.h / 2), (1, 2));
+    }
+
+    /// How many pixels of column `x` the ring covers whole from the top, and from the bottom.
+    fn rows(shape: &Indicator, x: i32) -> (i32, i32) {
+        let covered = |y| shape.coverage(x, y) >= 1.0;
+        let top = (0..shape.pixels.h).take_while(|&y| covered(y)).count() as i32;
+        let bottom = (0..shape.pixels.h).rev().take_while(|&y| covered(y)).count() as i32;
+        (top, bottom)
+    }
+
+    /// The top and the bottom follow the rule of the left and the right: at scale 1.5 the
+    /// outline of 3 is 4 px at the top and 5 at the bottom, and the divider 1 and 2, on the rows
+    /// of a window at a whole logical offset.
+    #[test]
+    fn the_indicators_rows_follow_their_columns() {
+        let (outline, at) = chooser(3, 3);
+        assert_eq!((at.y, outline.pixels.h), (95, 455));
+        assert_eq!(rows(&outline, outline.pixels.w / 2), (4, 5));
+        let (divider, at) = chooser(1, 0);
+        assert_eq!((at.y, divider.pixels.h), (99, 446));
+        assert_eq!(rows(&divider, divider.pixels.w / 2), (1, 2));
+    }
+
+    /// A window across outputs of two scales keeps the pieces of both: drawn at one scale and
+    /// then at the other, frame after frame, it makes nothing anew.
+    #[test]
+    fn the_pieces_are_kept_for_each_scale() {
+        let kept = Indicators::default();
+        let colour = [1.0, 0.0, 0.0, 1.0];
+        let shape = |scale: f64| Indicator {
+            size: (420, 297).into(),
+            pixels: Size::<i32, Logical>::from((420, 297))
+                .to_f64()
+                .to_physical(scale)
+                .to_i32_round(),
+            thickness: 1,
+            radius: [12; 4],
+            scale,
+        };
+        let ids = |pieces: Pieces| pieces.lines.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let one = ids(kept.pieces(DIVIDER, shape(1.0), colour));
+        let other = ids(kept.pieces(DIVIDER, shape(1.5), colour));
+        assert_ne!(one, other);
+        for _ in 0..2 {
+            assert_eq!(ids(kept.pieces(DIVIDER, shape(1.0), colour)), one);
+            assert_eq!(ids(kept.pieces(DIVIDER, shape(1.5), colour)), other);
+        }
+        let outline = ids(kept.pieces(OUTLINE, shape(1.0), colour));
+        assert_eq!(ids(kept.pieces(OUTLINE, shape(1.0), colour)), outline);
+        assert_eq!(ids(kept.pieces(DIVIDER, shape(1.0), colour)), one);
+        for scale in [1.25, 1.75, 2.0] {
+            kept.pieces(DIVIDER, shape(scale), colour);
+        }
+        let again = ids(kept.pieces(DIVIDER, shape(1.0), colour));
+        assert_ne!(again, one, "past four scales the oldest is dropped");
+        assert_eq!(ids(kept.pieces(OUTLINE, shape(1.0), colour)), outline);
+    }
+
+    /// At scale 1 the outline is as wide as its width on every side, and its corner is round:
+    /// the corner pixel is empty, the arc's middle covered, and the inside empty.
+    #[test]
+    fn an_indicator_is_a_rounded_ring() {
+        let shape = Indicator {
+            size: (426, 303).into(),
+            pixels: (426, 303).into(),
+            thickness: 3,
+            radius: [15; 4],
+            scale: 1.0,
+        };
+        assert_eq!(sides(&shape, 150), (3, 3));
+        let column = |x| (0..303).filter(|&y| shape.coverage(x, y) >= 1.0).count();
+        assert_eq!(column(200), 6, "3 at the top and 3 at the bottom");
+        assert_eq!(shape.coverage(0, 0), 0.0, "outside the corner");
+        // The arc's middle, 13.5 from the corner's centre along the diagonal.
+        let on = (15.0 - 13.5 / std::f64::consts::SQRT_2) as i32;
+        assert!(shape.coverage(on, on) > 0.5, "on the arc");
+        assert_eq!(shape.coverage(20, 20), 0.0, "inside the ring");
+        assert_eq!(shape.coverage(200, 150), 0.0, "inside the window");
+    }
+
+    /// The pieces draw every pixel of the ring once: a line's pixels are covered whole, and a
+    /// pixel outside every piece is not covered at all. A ring smaller than its corners is all
+    /// corners.
+    #[test]
+    fn the_pieces_cover_the_ring_once() {
+        let sizes = [((426, 303), 1.0), ((420, 297), 1.5), ((10, 300), 1.5), ((6, 6), 1.0)];
+        for (size, scale) in sizes {
+            let pixels = Size::<i32, Logical>::from(size)
+                .to_f64()
+                .to_physical(scale)
+                .to_i32_round();
+            let shape = Indicator {
+                size: size.into(),
+                pixels,
+                thickness: 3,
+                radius: [15, 15, 0, 15],
+                scale,
+            };
+            let (cells, lines) = shape.pieces();
+            let mut seen = vec![0u8; (pixels.w * pixels.h) as usize];
+            for piece in cells.iter().chain(&lines) {
+                for y in piece.loc.y..piece.loc.y + piece.size.h {
+                    for x in piece.loc.x..piece.loc.x + piece.size.w {
+                        seen[(y * pixels.w + x) as usize] += 1;
+                    }
+                }
+            }
+            for line in &lines {
+                for y in line.loc.y..line.loc.y + line.size.h {
+                    for x in line.loc.x..line.loc.x + line.size.w {
+                        assert!(shape.coverage(x, y) >= 1.0, "{size:?}: line at {x}, {y}");
+                    }
+                }
+            }
+            for y in 0..pixels.h {
+                for x in 0..pixels.w {
+                    let times = seen[(y * pixels.w + x) as usize];
+                    assert!(times <= 1, "{size:?}: {x}, {y} drawn twice");
+                    if times == 0 {
+                        assert_eq!(shape.coverage(x, y), 0.0, "{size:?}: {x}, {y} left out");
+                    }
+                }
+            }
+        }
+        let tiny = Indicator {
+            size: (6, 6).into(),
+            pixels: (6, 6).into(),
+            thickness: 3,
+            radius: [15; 4],
+            scale: 1.0,
+        };
+        assert!(tiny.pieces().1.is_empty(), "no line between corners that meet");
     }
 
     /// The bitmap's outer corner is empty, its arc is drawn, and its inner corner is empty.

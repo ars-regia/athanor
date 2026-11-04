@@ -1607,6 +1607,7 @@ impl State {
         Marks {
             focused: self.focused_window(),
             outline: self.focus_theme.outline(),
+            edge: self.focus_theme.edge(),
         }
     }
 }

@@ -6,7 +6,7 @@
 #
 #   #736: athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
-#   #918: cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not; the outline's corners differ, and at scale 1.5 its width by up to 1 px
+#   #918: at scale 1.5 cosmic-comp places a window at a fractional logical offset and athanor-compositor at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides
 #   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
@@ -30,11 +30,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "chooser-light-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "chooser-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -45,11 +40,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "chooser-light-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "chooser-light-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -58,11 +48,6 @@ issue = 736
 case = "chooser-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "chooser-light-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "chooser-light-1.5-en"
@@ -76,7 +61,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -91,7 +76,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -106,7 +91,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -120,11 +105,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "chooser-dark-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "chooser-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -135,11 +115,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "chooser-dark-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "chooser-dark-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -148,11 +123,6 @@ issue = 736
 case = "chooser-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "chooser-dark-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "chooser-dark-1.5-en"
@@ -166,7 +136,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -181,7 +151,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -196,7 +166,7 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -210,11 +180,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "bar-light-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "bar-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -225,11 +190,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "bar-light-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "bar-light-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -238,11 +198,6 @@ issue = 736
 case = "bar-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "bar-light-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "bar-light-1.5-en"
@@ -256,7 +211,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -271,7 +226,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -286,7 +241,7 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -300,11 +255,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "bar-dark-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "bar-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -315,11 +265,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "bar-dark-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "bar-dark-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -328,11 +273,6 @@ issue = 736
 case = "bar-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "bar-dark-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "bar-dark-1.5-en"
@@ -346,7 +286,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -361,7 +301,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -376,7 +316,7 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -1950,11 +1890,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "dock-light-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "dock-light-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1965,11 +1900,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "dock-light-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "dock-light-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -1978,11 +1908,6 @@ issue = 736
 case = "dock-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "dock-light-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "dock-light-1.5-en"
@@ -1996,7 +1921,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -2011,7 +1936,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -2026,7 +1951,7 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -2040,11 +1965,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "dock-dark-1.0-en"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "dock-dark-1.0-de"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2055,11 +1975,6 @@ cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor
 issue = 737
 
 [[difference]]
-case = "dock-dark-1.0-de"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
-
-[[difference]]
 case = "dock-dark-1.0-rtl"
 cause = "athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
 issue = 736
@@ -2068,11 +1983,6 @@ issue = 736
 case = "dock-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "dock-dark-1.0-rtl"
-cause = "cosmic-comp draws a 1 px divider inside the outline of a window it decorates or clips, which athanor-compositor does not, and the outline's corners differ"
-issue = 918
 
 [[difference]]
 case = "dock-dark-1.5-en"
@@ -2086,7 +1996,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-en"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -2101,7 +2011,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-de"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
@@ -2116,7 +2026,7 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-rtl"
-cause = "cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not, its outline's width differs by up to 1 px at scale 1.5, and the corners differ"
+cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-compositor places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
 issue = 918
 
 [[difference]]
