@@ -234,6 +234,10 @@ pub struct State {
     pub parked: Vec<(Window, Point<i32, Logical>)>,
     /// The tree of each tiled workspace (OS12); a workspace without one floats.
     pub tilings: Vec<(WorkspaceId, crate::tiling::Tree<Window>)>,
+    /// The window that held the keyboard last, a popup's window for the popup, or that `focus`
+    /// gave it to while a layer surface holds it: `restack` keeps it on top while a layer
+    /// surface, or nothing, holds the keyboard.
+    pub lifted: Option<Window>,
     /// The live objects of athanor-workspace-tiling-v1, those of a workspace gone excepted.
     pub workspace_tilings: Vec<AthanorWorkspaceTilingV1>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
@@ -436,6 +440,7 @@ impl State {
             next_workspace: 0,
             parked: Vec::new(),
             tilings: Vec::new(),
+            lifted: None,
             workspace_tilings: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),

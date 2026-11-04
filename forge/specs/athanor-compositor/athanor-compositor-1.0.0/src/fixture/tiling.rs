@@ -1645,3 +1645,85 @@ fn a_full_screen_apps_own_float_with_the_keyboard_is_on_top() {
     assert!(level(&run, &pair.above) > level(&run, &pair.below), "over the other tile");
     run.stop();
 }
+
+/// A full-screen application's float with the keyboard, its own on its workspace.
+fn float_of_full_screen_app(run: &mut Running) -> (Pair, Window) {
+    let mut pair = tiled_pair(run);
+    answer_all(run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    pair.upper.redraw(run);
+    let float = pair.upper.server_window(&*run, &surface);
+    assert_eq!(stack(run).last(), Some(&float), "the float with the keyboard is on top");
+    (pair, float)
+}
+
+/// A popup of the float with the keyboard that grabs it keeps the float on top through the
+/// layout a layer commit asks for (`fit_tiles`): the popup's window holds the keyboard.
+#[test]
+fn a_float_whose_popup_holds_the_keyboard_stays_on_top() {
+    let mut run = Running::start(None);
+    let (mut pair, float) = float_of_full_screen_app(&mut run);
+    let (_, xdg) = pair.upper.window.clone().expect("the float");
+    let (_popup, _menu) = grabbing_popup(&mut pair.upper, &mut run, &xdg);
+    let focus = keyboard_focus(&run).expect("a keyboard focus");
+    assert!(run.state.popups.find_popup(&focus).is_some(), "the popup holds the keyboard");
+
+    run.state.fit_tiles();
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float stays on top");
+    run.stop();
+}
+
+/// An exclusive layer surface that takes the keyboard from the float on top and gives it back
+/// leaves the float on top, with the keyboard.
+#[test]
+fn a_float_stays_on_top_while_a_layer_surface_holds_the_keyboard() {
+    let mut run = Running::start(None);
+    let (_pair, float) = float_of_full_screen_app(&mut run);
+
+    let mut shell = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = shell.bind(4);
+    let shm: wl_shm::WlShm = shell.bind(1);
+    let layer_shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = shell.bind(4);
+    let qh = shell.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = layer_shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Top,
+        "launcher".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    assert!(shell.answer(&mut run, &surface), "the surface is configured");
+    let (serial, width, height) = shell.client.layer_configure.expect("a configure");
+    layer.ack_configure(serial);
+    let (buffer, _) = shell.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    shell.roundtrip(&mut run);
+    assert!(run.state.exclusive_layer().is_some(), "the layer is mapped");
+    assert_eq!(keyboard_focus(&run), run.state.exclusive_layer(), "and holds the keyboard");
+    assert_eq!(stack(&run).last(), Some(&float), "the float stays on top");
+
+    surface.attach(None, 0, 0);
+    surface.commit();
+    shell.roundtrip(&mut run);
+
+    assert!(run.state.exclusive_layer().is_none(), "the layer is unmapped");
+    assert_eq!(stack(&run).last(), Some(&float), "the float is still on top");
+    assert_eq!(
+        keyboard_focus(&run),
+        float.toplevel().map(|toplevel| toplevel.wl_surface().clone()),
+        "with the keyboard"
+    );
+    run.stop();
+}

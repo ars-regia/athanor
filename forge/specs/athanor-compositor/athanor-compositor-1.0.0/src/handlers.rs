@@ -628,8 +628,9 @@ impl State {
 
     /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
     /// its place among those of its layer: the tiles; the windows D5 floats, and any other that
-    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, which
-    /// the user or the full-screen application gave it. A window's dialogs stand
+    /// holds no tile; the full-screen windows (D6); and the float that holds the keyboard, or
+    /// whose popup does, and while a layer surface or nothing holds it the float that held it
+    /// last (`lifted`). A window's dialogs stand
     /// just above it, in its layer, but those of a tile float above the tiles as windows of their
     /// own. The windows of the other workspaces keep their places. Every change of state that
     /// moves a window between layers ends here, so that the order is one rule, not a raise on
@@ -638,6 +639,9 @@ impl State {
         let Some(id) = id.filter(|id| self.is_tiled(*id)) else {
             return;
         };
+        if let Some(window) = self.focused_window() {
+            self.lifted = Some(window);
+        }
         let order: Vec<Window> = self.space.elements().cloned().collect();
         let here: Vec<Window> = order
             .iter()
@@ -671,10 +675,9 @@ impl State {
         };
         let roots: Vec<usize> = (0..here.len()).map(root).collect();
         let focused = self
-            .seat
-            .get_keyboard()
-            .and_then(|keyboard| keyboard.current_focus())
-            .and_then(|surface| index(&surface));
+            .lifted
+            .as_ref()
+            .and_then(|lifted| here.iter().position(|kept| kept == lifted));
         let layer = |at: usize| {
             if full[at] {
                 2
@@ -728,6 +731,7 @@ impl State {
     /// the keyboard exclusively; the others are deactivated. Its workspace's tree, if it is
     /// tiled, splits it next (D2).
     pub fn focus(&mut self, window: &Window) {
+        self.lifted = Some(window.clone());
         self.space.raise_element(window, true);
         self.focus_tile(window);
         // The window's own dialogs stay above it.
