@@ -49,7 +49,7 @@ def main(name, args):
             return 2
         return 0
     if name == "rpm":
-        print("openssl 0:3.5.1-1.fc45\nfilesystem 0:3.18-1.fc45\nglibc 0:2.42-1.fc45")
+        print("openssl 0:3.5.1-1.fc45\nfilesystem 0:3.18-1.fc45\nglibc 0:2.42-1.fc45\nkernel 0:7.2.5-300.azoth.fc45")
         return 0
     if name == "curl":
         url = args[-1]

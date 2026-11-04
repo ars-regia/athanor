@@ -1,6 +1,6 @@
 # Athanor languages and input
 
-Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095). Revision 1 (draft, 2026-10-05) applied the maintainer's decisions of that day.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call.
+Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommendations of review batch 2 (ADR-0095). Revision 1 (draft, 2026-10-05) applied the maintainer's decisions of that day.** It specifies how the Athanor session handles languages, regions, keyboard layouts and input methods: how our crates and applications are translated, which languages and locale data the image ships, where the system and user settings are stored, how the shell's clock and calendar follow the region, how keyboard layouts are configured and switched on cosmic-comp, which input method framework the session runs and how it is confined, what the greeter shows before login, and which fonts cover non-Latin scripts. The Settings application's pages and the first-run screens are not designed here. This document defines the preferences, where they are stored, and the interface those two programs call. LN6 and LN7 were qualified on 2026-11-01 for #825: a user manager that outlives the session can hold an older value back (`doc_session.md` SN2).
 
 ## 1. Context
 
@@ -199,7 +199,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - Values are checked against `[A-Za-z0-9_.@-]`, as `athanor-greeter-session` already checks them. A value that fails is logged and ignored.
 - The greeter passes no language in `StartSession`, and `auth.rs` does not change. The session reads its own user's setting itself, so nothing the greeter process holds decides the session's environment.
 - `athanor-desktop` adds `LANG`, `LANGUAGE` and the `LC_*` variables of LN7 to its `import-environment` call, so the user units (the bar, the dock, `athanor-shelld`, the launcher) run in the user's locale.
-- A change of language takes effect at the next login. The Settings page says so, and offers to log out.
+- A change of language takes effect at the next login, and a user manager that outlives the session can hold an older value back (`doc_session.md` SN2, amended 2026-11-01, #825). The Settings page says so, and offers to log out.
 
 **LN7. Region formats.**
 
@@ -210,7 +210,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - otherwise it exports none of them.
 - It reads the key with `gsettings get`.
 - The region list offers every locale in the archive (887 on 2026-10-05), shown with its formatted example date and number.
-- A change of region takes effect at the next login, as for the language.
+- A change of region takes effect at the next login, as for the language, and a user manager that outlives the session can hold an older value back (`doc_session.md` SN2, amended 2026-11-01, #825).
 - The time zone is not a region setting: it belongs to `org.freedesktop.timedate1` and to the Settings and first-run specifications.
 
 **LN8. The shell's clock and calendar follow the region.**
@@ -330,8 +330,8 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 | --------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------ |
 | System language                   | `/etc/locale.conf` via localed                           | `org.freedesktop.locale1.SetLocale`                      | next boot of the greeter; users without their own language at next login |
 | System keyboard                   | `/etc/vconsole.conf` via localed                         | `org.freedesktop.locale1.SetX11Keyboard` (convert true)  | greeter at next start, console                                           |
-| User languages                    | AccountsService `Languages`, `Language`                  | `org.freedesktop.Accounts.User.SetLanguages`             | next login                                                               |
-| Region                            | GSettings `org.gnome.system.locale region`               | GSettings                                                | next login                                                               |
+| User languages                    | AccountsService `Languages`, `Language`                  | `org.freedesktop.Accounts.User.SetLanguages`             | next login (LN6)                                                         |
+| Region                            | GSettings `org.gnome.system.locale region`               | GSettings                                                | next login (LN7)                                                         |
 | Clock format                      | GSettings `org.gnome.desktop.interface clock-format`     | GSettings                                                | immediately                                                              |
 | Week numbers                      | GSettings `org.gnome.desktop.calendar show-weekdate`     | GSettings                                                | immediately                                                              |
 | Keyboard layouts, options, repeat | cosmic-comp `xkb_config`                                 | `athanor_compositor_client::keyboard::write`             | immediately                                                              |

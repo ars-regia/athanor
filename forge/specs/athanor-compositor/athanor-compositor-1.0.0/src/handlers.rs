@@ -2,7 +2,7 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{ClientState, State};
+use crate::state::{is_full_screen, ClientState, State};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
@@ -119,12 +119,28 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
+                // Only a null buffer takes a placed window back to before its initial configure,
+                // and the end of this function sends a new one.
+                let unmapped = window.user_data().get::<Placed>().is_some()
+                    && window
+                        .toplevel()
+                        .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
+                if unmapped {
+                    self.forget_requests(&window);
+                }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).
                 if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
-                    self.relocated(&window);
+                    let landed = self.relocated(&window);
                     self.anchor_resized(&window);
+                    // Also what a full-screen window's answer lifts (`marks::lifted`), which an
+                    // answer to an earlier configure does as well.
+                    if landed {
+                        self.repoint_moved(&window);
+                    } else if unmapped || is_full_screen(&window) {
+                        self.repoint();
+                    }
                 }
             }
         }
@@ -262,10 +278,14 @@ impl State {
 
     /// Places a window, at its first commit with a size, in what the layer surfaces' exclusive
     /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
-    /// windows after it are not cascaded as cosmic-comp's are yet (#738). It takes the keyboard
-    /// only when no live surface holds it or its own client does: mapping a window is not the
-    /// user's input, so a client cannot take the focus from another by opening one; a window
-    /// with a parent follows it (`follow_parent`).
+    /// windows after it are not cascaded as cosmic-comp's are yet (#918). It takes the keyboard
+    /// only when no live surface holds it or its own application does, through the same client
+    /// or another of the same security context's instance (`same_instance`): mapping a window
+    /// is not the user's input, so a client cannot take the focus from another application by
+    /// opening one. A command run in a terminal is the terminal's own, so wl-copy's window,
+    /// which waits for the keyboard to set the selection, gets it from the terminal; so does
+    /// any other process sharing the terminal's socket, which stays inside that one
+    /// application. A window with a parent follows it (`follow_parent`).
     fn place(&mut self, window: &Window) {
         let geometry = window.geometry();
         if geometry.size.w <= 0 || geometry.size.h <= 0 {
@@ -285,14 +305,20 @@ impl State {
             window.user_data().insert_if_missing(|| handle);
         }
         let (x, y) = crate::state::placed(area, geometry).into();
-        let owner = |surface: &WlSurface| surface.client().map(|client| client.id());
         let holder = self
             .seat
             .get_keyboard()
             .and_then(|keyboard| keyboard.current_focus())
-            .and_then(|surface| owner(&surface));
-        let own = window.toplevel().and_then(|t| owner(t.wl_surface()));
-        if holder.is_none() || holder == own {
+            .and_then(|surface| surface.client());
+        let own = window.toplevel().and_then(|t| t.wl_surface().client());
+        let takes = match (&holder, &own) {
+            (None, _) => true,
+            (Some(holder), Some(own)) => {
+                holder.id() == own.id() || crate::state::same_instance(holder, own)
+            }
+            (Some(_), None) => false,
+        };
+        if takes {
             self.space.map_element(window.clone(), (x, y), true);
             self.focus(window);
         } else {
@@ -457,7 +483,10 @@ impl State {
             return None;
         }
         let start = pointer.grab_start_data()?;
-        let window = self.window_for(surface.wl_surface())?;
+        // A full-screen window has no place to be dragged from.
+        let window = self
+            .window_for(surface.wl_surface())
+            .filter(|window| !is_full_screen(window))?;
         Some((pointer, start, window))
     }
 
@@ -606,8 +635,9 @@ impl XdgShellHandler for State {
             self.workspaces_changed();
         }
         self.foreign_toplevel_destroyed(surface.wl_surface());
-        // The keyboard does not leave a destroyed window by itself.
+        // The keyboard does not leave a destroyed window by itself, nor does the pointer.
         self.refocus(surface.wl_surface());
+        self.repoint();
     }
 
     /// The window follows the pointer until every button is up. A maximised window is
@@ -661,8 +691,15 @@ impl XdgShellHandler for State {
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 
+    /// A full-screen window keeps its output, and is told what it has.
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
             self.end_window_grab(&window);
             self.maximise(&window);
         }
@@ -670,7 +707,35 @@ impl XdgShellHandler for State {
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(window) = self.window_for(surface.wl_surface()) {
+            if is_full_screen(&window) {
+                self.forget_maximised(&window);
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
             self.restore(&window);
+        }
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            self.end_window_grab(&window);
+            self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+            self.repoint();
+        }
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
+            if !is_full_screen(&window) {
+                if surface.is_initial_configure_sent() {
+                    surface.send_configure();
+                }
+                return;
+            }
+            self.leave_full_screen(&window);
+            self.repoint();
         }
     }
 
@@ -773,7 +838,10 @@ impl XdgShellHandler for State {
         };
         if let Some(keyboard) = keyboard.filter(|_| takes_keyboard) {
             let previous = grab.previous_serial().unwrap_or(serial);
-            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(previous))
+            if keyboard.is_grabbed()
+                && !(keyboard.has_grab(serial)
+                    || keyboard.has_grab(previous)
+                    || self.input_method_grabbed())
             {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
@@ -842,6 +910,10 @@ impl SeatHandler for State {
         // the first and the last read, and Smithay calls this holding the keyboard, which the
         // aids read.
         self.loop_handle.insert_idle(|state| {
+            // The focus is one of what decides what stands above the top layer (`marks::lifted`).
+            if state.space.elements().any(is_full_screen) {
+                state.repoint();
+            }
             state.refresh_constraint();
             state.aids_quiet_changed();
         });

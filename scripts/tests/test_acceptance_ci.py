@@ -16,6 +16,7 @@ import tempfile
 import unittest
 
 RUN = pathlib.Path(__file__).resolve().parents[1] / "devvm" / "acceptance" / "run.sh"
+LIB = RUN.with_name("lib.sh")
 CHECK_RS = (
     pathlib.Path(__file__).resolve().parents[2]
     / "forge/specs/athanor-update/athanor-update-1.0.0/src/check.rs"
@@ -89,12 +90,32 @@ class CiMode(unittest.TestCase):
     def run_sh(self, *args, env=None, timeout=60):
         return subprocess.run(
             ["bash", str(RUN), *args],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             env={**self.env, **(env or {})},
             timeout=timeout,
             check=False,
         )
+
+    def pull_base(self, **env):
+        asked = self.dir / "podman-asked"
+        self.stub("podman", f'echo "$*" >> {asked}')
+        subprocess.run(
+            ["bash", "-c", f"source {LIB}; pull_base"],
+            env={**self.env, **self.ci, "ACC_CI": "1", **env},
+            check=True,
+        )
+        return asked.read_text() if asked.exists() else ""
+
+    def test_the_default_base_is_pulled(self):
+        self.assertEqual(
+            self.pull_base(ACC_BASE=""),
+            "pull --quiet ghcr.io/owner/athanor-system:latest\n",
+        )
+
+    def test_a_base_the_caller_set_is_used_as_given(self):
+        self.assertEqual(self.pull_base(ACC_BASE="localhost:5000/acc/a:1"), "")
 
     def test_ci_mode_refuses_outside_ci(self):
         result = self.run_sh(
@@ -132,7 +153,7 @@ class CiMode(unittest.TestCase):
         self.assertIn("== seed", result.stdout, result.stderr)
         self.assertNotEqual(result.returncode, 0)
 
-    def guest(self, update, journal, serial_session=True, reader=0):
+    def guest(self, update, journal, serial_session=True, reader=0, reason="signature"):
         """A guest whose check settled on UPDATE with the candidate downloaded and logged
         JOURNAL. With SERIAL_SESSION a login on ttyS0 stops the stage before Apply(). READER is
         the exit status of the grep for the attestation reader: 1 for a client that predates
@@ -143,7 +164,7 @@ class CiMode(unittest.TestCase):
             "update": update,
             "downloaded": {"digest": DIGEST},
             "last_error": "none",
-            "verified": {"reason": "signature"},
+            "verified": {"reason": reason},
         }
         (g / "state.json").write_text(json.dumps(state))
         (g / "journal").write_text(journal + "\n")
@@ -154,6 +175,23 @@ class CiMode(unittest.TestCase):
         (g / "sessions").write_text(json.dumps(sessions))
         (g / "reader").write_text(f"{reader}\n")
         self.stub("ssh", GUEST.replace("@GUEST@", str(g)))
+
+    def test_seed_reads_the_verdict_of_a_machine_installed_from_the_iso(self):
+        for reason in ("no-signature", "media", "signature"):
+            with self.subTest(reason=reason):
+                # The stages go on to upgrade, which the login on ttyS0 stops.
+                self.guest("downloaded", FEATURE_LINE, reason=reason)
+                result = self.run_sh("--ci", "seed", env=self.ci)
+                self.assertIn(f"reads {reason} before any update", result.stdout, result.stderr)
+
+    def test_seed_refuses_any_other_verdict(self):
+        for reason in ("policy-not-in-force", "reference-out-of-scope", "key-not-in-policy", ""):
+            with self.subTest(reason=reason):
+                self.guest("none", "", reason=reason)
+                result = self.run_sh("--ci", "seed", env=self.ci)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("before any update", result.stderr)
+                self.assertNotIn("seeded in /home", result.stdout)
 
     def test_upgrade_reads_the_class_the_runner_verified(self):
         self.guest("downloaded", FEATURE_LINE)

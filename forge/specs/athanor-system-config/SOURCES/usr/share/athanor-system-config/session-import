@@ -1,6 +1,6 @@
 # The variables athanor-desktop imports into the user manager, one name per line
-# (doc_session.md, SN2). The readiness gate, athanor-desktop.service, unsets the same names
-# at the end of the session, all but XDG_CURRENT_DESKTOP.
+# (doc_session.md, SN2). The end of the session unsets only the four that describe its
+# display: WAYLAND_DISPLAY, DISPLAY, XDG_SESSION_TYPE and XDG_SESSION_CLASS.
 WAYLAND_DISPLAY
 DISPLAY
 XDG_CURRENT_DESKTOP

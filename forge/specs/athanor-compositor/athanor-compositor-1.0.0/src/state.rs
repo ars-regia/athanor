@@ -473,12 +473,17 @@ impl State {
                 }
             },
         };
+        let instance = context.as_ref().and_then(|context| {
+            let id = context.instance_id.clone()?;
+            Some((context.creator_client_id.clone(), id))
+        });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
             identity,
+            instance,
         })
     }
 
@@ -491,6 +496,7 @@ impl State {
             confined: true,
             grants: Vec::new(),
             identity: None,
+            instance: None,
         })
     }
 
@@ -504,6 +510,10 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        if let Some(shown) = self.space.output_geometry(output) {
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            known.0.set(shown);
+        }
         self.output_heads_changed();
         self.workspaces_changed();
     }
@@ -519,43 +529,141 @@ impl State {
     }
 
     /// After the outputs changed (one went, or took another size): the windows their home output
-    /// (`State::home_output`) no longer shows are centred on it and the maximised ones fitted to
-    /// it again, the pointer is brought back onto the outputs and the lock surfaces take the size
-    /// of their output.
+    /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
+    /// home output follows that output and stays whole (`stays_whole`), the maximised ones are
+    /// fitted to it again, the pointer is brought back onto the outputs and the lock surfaces take
+    /// the size of their output.
     pub fn fit_to_outputs(&mut self) {
         let outputs: Vec<Rectangle<i32, Logical>> = self
             .space
             .outputs()
             .filter_map(|output| self.space.output_geometry(output))
             .collect();
-        let stranded: Vec<Window> = self
-            .space
-            .elements()
-            .filter(|window| {
-                self.space
-                    .element_geometry(window)
-                    .is_some_and(|area| !self.shown_at_home(window, area))
-            })
-            .cloned()
-            .collect();
-        for window in stranded {
-            if let Some(area) = self.home_area(&window) {
-                let at = centred(area, window.geometry().size);
-                self.space.relocate_element(&window, at);
-            }
+        let changed = self.changed_outputs();
+        let mut moved = !changed.is_empty();
+        let windows: Vec<Window> = self.space.elements().cloned().collect();
+        for window in windows {
+            let (Some(area), Some(shown)) = (
+                self.home_area(&window),
+                self.space.element_geometry(&window),
+            ) else {
+                continue;
+            };
+            let place = Rectangle::new(self.stays_whole(&window, shown, &changed), shown.size);
+            let at = if self.shown_at_home(&window, place) {
+                place.loc
+            } else {
+                centred(area, shown.size)
+            };
+            moved |= at != shown.loc;
+            self.space.relocate_element(&window, at);
         }
+        self.fit_kept_places(&changed);
         self.fit_maximised();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
-            if let Some(to) = crate::input::confine(&outputs, at, at).filter(|to| *to != at) {
+            let carried = changed.iter().find_map(|(output, was)| {
+                let shown = self.space.output_geometry(output)?;
+                let wanted = at + (shown.loc - was.loc).to_f64();
+                let on = was.to_f64().contains(at);
+                on.then(|| crate::input::confine(&[shown], at, wanted)).flatten()
+            });
+            let to = carried.or_else(|| crate::input::confine(&outputs, at, at));
+            if let Some(to) = to.filter(|to| *to != at) {
                 self.pointer_to(to, InputTime::now());
+            } else if moved {
+                self.refresh_pointer();
             }
         }
         if let Some(lock) = &self.lock {
             lock.resize(&self.space);
         }
         self.output_heads_changed();
+    }
+
+    /// The outputs that took another size or place since this was last asked, each with where
+    /// it was before.
+    fn changed_outputs(&self) -> Vec<(Output, Rectangle<i32, Logical>)> {
+        let changed = self.space.outputs().filter_map(|output| {
+            let shown = self.space.output_geometry(output)?;
+            let known = output.user_data().get_or_insert(KnownArea::default);
+            let was = known.0.replace(shown);
+            (was != shown).then(|| (output.clone(), was))
+        });
+        changed.collect()
+    }
+
+    /// Where the place `kept` of `window` goes after `changed`: if it lay on its home output it
+    /// follows that output. If it lay whole there it stays whole: along a side the output's new
+    /// edges cut, it goes inside what the output leaves, and along the other it stays where the
+    /// user left it. Otherwise it stays over the edge, where a user may leave a window
+    /// (`grabs::kept_reachable`).
+    fn stays_whole(
+        &self,
+        window: &Window,
+        kept: Rectangle<i32, Logical>,
+        changed: &[(Output, Rectangle<i32, Logical>)],
+    ) -> Point<i32, Logical> {
+        let moved = self.home_output(window).and_then(|home| {
+            let (_, was) = changed.iter().find(|(output, _)| *output == home)?;
+            let shown = self.space.output_geometry(&home)?;
+            let moved = Rectangle::new(kept.loc + (shown.loc - was.loc), kept.size);
+            was.overlaps(kept).then_some((shown, moved, was.contains_rect(kept)))
+        });
+        match (moved, self.home_area(window)) {
+            (Some((shown, moved, true)), Some(area)) if !shown.contains_rect(moved) => {
+                let fits = |at: i32, size: i32, from: i32, room: i32| {
+                    at >= from && at + size <= from + room
+                };
+                let kept = inside(area, moved);
+                let x = fits(moved.loc.x, moved.size.w, shown.loc.x, shown.size.w);
+                let y = fits(moved.loc.y, moved.size.h, shown.loc.y, shown.size.h);
+                let x = if x { moved.loc.x } else { kept.x };
+                let y = if y { moved.loc.y } else { kept.y };
+                (x, y).into()
+            }
+            (Some((_, moved, _)), _) => moved.loc,
+            _ => kept.loc,
+        }
+    }
+
+    /// `stays_whole` for the places a window comes back to, or is on its way to.
+    fn fit_kept_places(&mut self, changed: &[(Output, Rectangle<i32, Logical>)]) {
+        let away = self.parked.iter().chain(&self.minimised).map(|(window, _)| window);
+        let windows: Vec<Window> = self.space.elements().chain(away).cloned().collect();
+        for window in windows {
+            let data = window.user_data();
+            let maximised = data.get::<Maximised>().map(|maximised| &maximised.0);
+            let full = data.get::<FullScreen>().map(|full| &full.0);
+            for slot in [maximised, full].into_iter().flatten() {
+                if let Some(mut kept) = slot.get() {
+                    kept.before.loc = self.stays_whole(&window, kept.before, changed);
+                    slot.set(Some(kept));
+                }
+            }
+            if let Some(relocate) = data.get::<Relocate>() {
+                if let Some(mut moving @ Destination { to: Some(to), .. }) = relocate.0.get() {
+                    let asked = window
+                        .toplevel()
+                        .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+                    let size = asked.unwrap_or_else(|| window.geometry().size);
+                    let place = Rectangle::new(to, size);
+                    moving.to = Some(self.stays_whole(&window, place, changed));
+                    relocate.0.set(Some(moving));
+                }
+            }
+        }
+        for index in 0..self.parked.len() {
+            let (window, at) = self.parked[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.parked[index].1 = self.stays_whole(&window, kept, changed);
+        }
+        for index in 0..self.minimised.len() {
+            let (window, at) = self.minimised[index].clone();
+            let kept = Rectangle::new(at, window.geometry().size);
+            self.minimised[index].1 = self.stays_whole(&window, kept, changed);
+        }
     }
 
     /// Whether a mapped surface still waits for a frame callback: one shown on no output, whose
@@ -586,14 +694,6 @@ impl State {
             }
         }
         waiting
-    }
-
-    /// The area of the first output: where the pointer moves.
-    pub fn output_area(&self) -> Option<Rectangle<i32, Logical>> {
-        self.space
-            .outputs()
-            .next()
-            .and_then(|output| self.space.output_geometry(output))
     }
 
     /// What the layer surfaces' exclusive zones leave of the first output (`window_area_on`):
@@ -659,7 +759,7 @@ impl State {
         let maximised = window.user_data().get_or_insert(Maximised::default);
         let before = match maximised.0.get() {
             Some(kept) => kept.before,
-            None => self.space.element_geometry(window).unwrap_or_default(),
+            None => self.settled_geometry(window),
         };
         maximised.0.set(Some(Kept { before, area }));
         toplevel.with_pending_state(|state| {
@@ -677,28 +777,169 @@ impl State {
     /// size it had, and the window moves back at the commit that answers it, centred in its
     /// `home_area` when its home output no longer shows that place. The geometry it had, or
     /// `None` when it is not maximised. A window maximised before it had a size picks its own
-    /// and stays where it is.
+    /// and is placed as a new window is.
     pub fn restore(&mut self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         let toplevel = window.toplevel()?;
         let kept = window.user_data().get::<Maximised>()?.0.take()?.before;
         toplevel.with_pending_state(|state| {
             state.states.unset(xdg_toplevel::State::Maximized);
+        });
+        self.back_to(window, kept);
+        Some(kept)
+    }
+
+    /// A full-screen window no longer maximised leaves full-screen for the place it had before
+    /// it was.
+    pub fn forget_maximised(&self, window: &Window) {
+        let data = window.user_data();
+        let kept = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        if let (Some(Kept { before, .. }), Some(full)) = (kept, data.get::<FullScreen>()) {
+            full.0.set(full.0.get().map(|kept| Kept { before, ..kept }));
+        }
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Maximized);
+            });
+        }
+    }
+
+    /// A configure with the size `kept` had, and the window moves back at the commit that
+    /// answers it, centred in its `home_area` when its home output no longer shows that place.
+    /// A window drawn with no earlier place is placed at that commit, as a new window is.
+    fn back_to(&mut self, window: &Window, kept: Rectangle<i32, Logical>) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
             state.size = (!kept.is_empty()).then_some(kept.size);
         });
         let serial = toplevel
             .is_initial_configure_sent()
             .then(|| toplevel.send_configure());
         if !kept.is_empty() {
-            let to = match self
-                .home_area(window)
-                .filter(|_| !self.shown_at_home(window, kept))
-            {
-                Some(area) => centred(area, kept.size),
-                None => kept.loc,
-            };
-            relocate(window, to, serial);
+            relocate(window, self.kept_place(window, kept), serial);
+        } else if crate::handlers::shown(window) {
+            place_again(window, serial);
+        } else if let Some(moving) = window.user_data().get::<Relocate>() {
+            // Asked before the window was placed: nothing to go back to, and `place` places it.
+            moving.0.set(None);
         }
-        Some(kept)
+    }
+
+    /// Where a window goes back to `kept`: there, or the middle of its `home_area` when its home
+    /// output no longer shows that place.
+    fn kept_place(&self, window: &Window, kept: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+        match self
+            .home_area(window)
+            .filter(|_| !self.shown_at_home(window, kept))
+        {
+            Some(area) => centred(area, kept.size),
+            None => kept.loc,
+        }
+    }
+
+    /// A window that unmapped has asked for nothing (`xdg_toplevel`): it is neither full-screen
+    /// nor maximised any more, and it draws again at the place it had.
+    pub fn forget_requests(&self, window: &Window) {
+        let data = window.user_data();
+        let maximised = data.get::<Maximised>().and_then(|kept| kept.0.take());
+        let full = data.get::<FullScreen>().and_then(|kept| kept.0.take());
+        match maximised.or(full) {
+            Some(Kept { before, .. }) if before.is_empty() => place_again(window, None),
+            Some(Kept { before, .. }) => relocate(window, self.kept_place(window, before), None),
+            None => {}
+        }
+    }
+
+    /// Gives `window` the `output` the client named, or its home output, whole: a configure
+    /// with the `fullscreen` state and the output's size, and the window moves there at the
+    /// commit that answers it. The geometry it had before is kept for `leave_full_screen`. A
+    /// maximised window stays so, and returns to that. A window on an inactive workspace or
+    /// minimised stays there, whichever output it names: only the user brings it to the one they
+    /// see.
+    pub fn full_screen(&mut self, window: &Window, output: Option<Output>) {
+        let visible = self.on_active_workspace(window) && !self.is_minimised(window);
+        let named = output.filter(|_| visible);
+        if let Some(id) = named.and_then(|output| self.active_workspace(&output)) {
+            // Before its first commit a window has no workspace yet.
+            self.place_on_workspace(window);
+            self.move_window_to(window, id);
+        }
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(area) = self.home_output_area(window) else {
+            if toplevel.is_initial_configure_sent() {
+                toplevel.send_configure();
+            }
+            return;
+        };
+        let before = self.settled_geometry(window);
+        let full = window.user_data().get_or_insert(FullScreen::default);
+        let before = full.0.get().map_or(before, |kept| kept.before);
+        full.0.set(Some(Kept { before, area }));
+        toplevel.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Fullscreen);
+            state.size = Some(area.size);
+        });
+        // Before its first commit the initial configure carries the state.
+        let serial = toplevel
+            .is_initial_configure_sent()
+            .then(|| toplevel.send_configure());
+        relocate(window, area.loc, serial);
+    }
+
+    /// Where `window` stands, or will once a move on its way lands, at the size that move
+    /// asked; out of the space, where it comes back; empty on its way to where `placed` puts it.
+    fn settled_geometry(&self, window: &Window) -> Rectangle<i32, Logical> {
+        let size = window.geometry().size;
+        let moving = window
+            .user_data()
+            .get::<Relocate>()
+            .and_then(|relocate| relocate.0.get());
+        if let Some(Destination { to: None, .. }) = moving {
+            return Rectangle::default();
+        }
+        if let Some(Destination { to: Some(to), .. }) = moving {
+            let asked = window
+                .toplevel()
+                .and_then(|toplevel| toplevel.with_pending_state(|state| state.size));
+            return Rectangle::new(to, asked.unwrap_or(size));
+        }
+        self.space.element_geometry(window).unwrap_or_else(|| {
+            self.minimised
+                .iter()
+                .chain(self.parked.iter())
+                .find(|(kept, _)| kept == window)
+                .map(|(_, at)| Rectangle::new(*at, size))
+                .unwrap_or_default()
+        })
+    }
+
+    /// Ends `full_screen`: the window returns to where it was, or to its maximised size.
+    pub fn leave_full_screen(&mut self, window: &Window) {
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        let Some(kept) = window
+            .user_data()
+            .get::<FullScreen>()
+            .and_then(|full| full.0.take())
+        else {
+            return;
+        };
+        toplevel.with_pending_state(|state| {
+            state.states.unset(xdg_toplevel::State::Fullscreen);
+        });
+        let maximised = window
+            .user_data()
+            .get::<Maximised>()
+            .is_some_and(|maximised| maximised.0.get().is_some());
+        if maximised {
+            self.maximise(window);
+        } else {
+            self.back_to(window, kept.before);
+        }
     }
 
     /// Minimises `window`: it leaves the space, keeping its location, its popups are dismissed,
@@ -757,13 +998,17 @@ impl State {
         true
     }
 
-    /// Fits the maximised windows to their `home_area` again, after the layer surfaces'
-    /// exclusive zones or the outputs changed it.
+    /// Fits the maximised windows to their `home_area` again, and the full-screen ones to their
+    /// output, after the layer surfaces' exclusive zones or the outputs changed it.
     pub fn fit_maximised(&mut self) {
         let stale: Vec<Window> = self
             .space
             .elements()
             .filter(|window| {
+                let full = window.user_data().get::<FullScreen>();
+                if let Some(kept) = full.and_then(|full| full.0.get()) {
+                    return self.home_output_area(window) != Some(kept.area);
+                }
                 window
                     .user_data()
                     .get::<Maximised>()
@@ -774,7 +1019,11 @@ impl State {
             .cloned()
             .collect();
         for window in &stale {
-            self.maximise(window);
+            if is_full_screen(window) {
+                self.full_screen(window, None);
+            } else {
+                self.maximise(window);
+            }
         }
     }
 
@@ -791,21 +1040,35 @@ impl State {
     }
 
     /// Moves `window` where its `Relocate` asks, at a commit that answers the configure it
-    /// waits for, so that the window moves with its new size, not before.
-    pub fn relocated(&mut self, window: &Window) {
-        let Some(relocate) = window.user_data().get::<Relocate>() else {
-            return;
-        };
-        let Some(Destination { to, serial }) = relocate.0.get() else {
-            return;
-        };
-        if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
-            if !answered(toplevel, serial) {
-                return;
+    /// waits for, so that the window moves with its new size, not before, and says whether it
+    /// did. A full-screen window then keeps to the middle of its output, at every call.
+    pub fn relocated(&mut self, window: &Window) -> bool {
+        let mut landed = false;
+        let relocate = window.user_data().get::<Relocate>();
+        if let Some(Destination { to, serial }) = relocate.and_then(|relocate| relocate.0.get()) {
+            if let (Some(serial), Some(toplevel)) = (serial, window.toplevel()) {
+                if !answered(toplevel, serial) {
+                    return false;
+                }
+            }
+            let to = to.or_else(|| {
+                let area = self.home_area(window)?;
+                crate::handlers::shown(window).then(|| placed(area, window.geometry()))
+            });
+            if let (Some(relocate), Some(to)) = (relocate, to) {
+                relocate.0.set(None);
+                self.space.relocate_element(window, to);
+                landed = true;
             }
         }
-        relocate.0.set(None);
-        self.space.relocate_element(window, to);
+        // A client smaller than its output stands in the middle of it, as
+        // `xdg_toplevel.set_fullscreen` says.
+        if let Some(area) = full_screen_area(window) {
+            let to = centred(area, window.geometry().size);
+            landed |= self.space.element_location(window) != Some(to);
+            self.space.relocate_element(window, to);
+        }
+        landed
     }
 
     /// Imports a client's dmabuf into the renderer, which refuses one it cannot sample.
@@ -957,8 +1220,16 @@ impl State {
             return None;
         }
         let output = self.space.output_under(pos).next()?;
-        let origin = self.space.output_geometry(output)?.loc;
+        let shown = self.space.output_geometry(output)?;
+        let origin = shown.loc;
         let map = layer_map_for_output(output);
+        let focused = self.focused_window();
+        let lifted = crate::marks::lifted(focused.as_ref(), &self.space, output);
+        let above_top = lifted.and_then(|window| {
+            let location = self.space.element_location(window)? - window.geometry().loc;
+            window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+            Some((Under::Window(window.clone()), location))
+        });
         // The top surface of `layer` with input at `pos`: one whose input region leaves `pos`
         // out lets the click through to what is below.
         let on = |layer| {
@@ -968,16 +1239,29 @@ impl State {
                 Some((Under::Layer(surface.clone()), location))
             })
         };
-        let found = on(Layer::Overlay)
-            .or_else(|| on(Layer::Top))
-            .or_else(|| {
-                self.space
-                    .element_under(pos)
-                    .map(|(window, location)| (Under::Window(window.clone()), location))
-            })
+        let front = on(Layer::Overlay).or(above_top);
+        // The black around a smaller client hides what is below as well.
+        if lifted.is_some() {
+            return front;
+        }
+        let above = front.or_else(|| on(Layer::Top));
+        if above.is_some() {
+            return above;
+        }
+        let window = self.space.element_under(pos);
+        let black = self
+            .space
+            .elements()
+            .rev()
+            .take_while(|above| window.as_ref().is_none_or(|(window, _)| above != window))
+            .any(|above| crate::marks::whole_on(above, shown));
+        if black {
+            return None;
+        }
+        window
+            .map(|(window, location)| (Under::Window(window.clone()), location))
             .or_else(|| on(Layer::Bottom))
-            .or_else(|| on(Layer::Background));
-        found
+            .or_else(|| on(Layer::Background))
     }
 
     /// The surface under `pos`, with its origin in the space.
@@ -1246,6 +1530,10 @@ pub struct ClientState {
     grants: Vec<Privilege>,
     /// What the grants were decided on, when the process could be read.
     identity: Option<Identity>,
+    /// The application instance its security context names: the context's creator and its
+    /// instance id. The clients that share it are one application, as a terminal and the
+    /// commands it runs are (`same_instance`).
+    instance: Option<(ClientId, String)>,
 }
 
 /// The identity `client` connected with, when it could be read.
@@ -1253,6 +1541,19 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `a` and `b` connected through security contexts that name one application instance:
+/// the same creator, which is the launcher, and the same instance id. A context without an
+/// instance id names none, and neither does xwayland-satellite's socket.
+pub fn same_instance(a: &Client, b: &Client) -> bool {
+    let instance = |client: &Client| {
+        client
+            .get_data::<ClientState>()
+            .and_then(|data| data.instance.clone())
+    };
+    let first = instance(a);
+    first.is_some() && first == instance(b)
 }
 
 /// Whether `client` was granted `privilege` when it connected.
@@ -1302,7 +1603,8 @@ pub struct Relocate(Cell<Option<Destination>>);
 
 #[derive(Clone, Copy)]
 struct Destination {
-    to: Point<i32, Logical>,
+    /// `None` is where `placed` puts the window at the size it then has.
+    to: Option<Point<i32, Logical>>,
     serial: Option<Serial>,
 }
 
@@ -1319,17 +1621,58 @@ pub fn relocate(window: &Window, to: Point<i32, Logical>, serial: Option<Serial>
         .user_data()
         .get_or_insert(Relocate::default)
         .0
-        .set(Some(Destination { to, serial }));
+        .set(Some(Destination {
+            to: Some(to),
+            serial,
+        }));
+}
+
+/// `relocate` to where `placed` puts the window at the size it then has.
+fn place_again(window: &Window, serial: Option<Serial>) {
+    window
+        .user_data()
+        .get_or_insert(Relocate::default)
+        .0
+        .set(Some(Destination { to: None, serial }));
 }
 
 /// A maximised window's geometry before it was maximised, and the area it was maximised to.
 #[derive(Default)]
 struct Maximised(Cell<Option<Kept>>);
 
+/// As `Maximised`, for a full-screen window and its output.
+#[derive(Default)]
+struct FullScreen(Cell<Option<Kept>>);
+
+/// The output `window` has whole, from the request to the request that ends it
+/// (`State::full_screen`).
+pub fn full_screen_area(window: &Window) -> Option<Rectangle<i32, Logical>> {
+    let full = window.user_data().get::<FullScreen>()?;
+    Some(full.0.get()?.area)
+}
+
+pub fn is_full_screen(window: &Window) -> bool {
+    full_screen_area(window).is_some()
+}
+
+/// Where an output was when `map_output` or `changed_outputs` last saw it.
+#[derive(Default)]
+struct KnownArea(Cell<Rectangle<i32, Logical>>);
+
 #[derive(Clone, Copy)]
 struct Kept {
     before: Rectangle<i32, Logical>,
     area: Rectangle<i32, Logical>,
+}
+
+/// Where `window` lies inside `area`, moved no further than that takes; its top left stays in
+/// `area` when it does not fit.
+fn inside(area: Rectangle<i32, Logical>, window: Rectangle<i32, Logical>) -> Point<i32, Logical> {
+    let right = area.loc.x + area.size.w - window.size.w;
+    let bottom = area.loc.y + area.size.h - window.size.h;
+    let x = window.loc.x.min(right).max(area.loc.x);
+    let y = window.loc.y.min(bottom).max(area.loc.y);
+    (x, y).into()
 }
 
 /// Where the geometry's top left goes for a window of `size` to be centred in `area`: a space

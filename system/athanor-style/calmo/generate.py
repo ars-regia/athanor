@@ -65,6 +65,7 @@ def template_values(tokens, variant):
         # High contrast doubles the hairline borders into visible boundaries.
         "field_border_width": "2" if high_contrast else "1.5",
         "border_width": "2" if high_contrast else "1",
+        "ring_width": "3" if high_contrast else "2",
     }
     values.update({f"radius_{k}": _num(v) for k, v in tokens["radius"].items()})
     values.update({f"size_{k}": _num(v) for k, v in tokens["size"].items()})

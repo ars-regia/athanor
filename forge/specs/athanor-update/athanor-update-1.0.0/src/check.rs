@@ -125,12 +125,15 @@ pub(crate) fn stored_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, rep
 /// check fetches again. A fetched copy replaces a stored attestation that verifies as the
 /// security class only when it verifies as that class too: the attachments policy accepts
 /// anything, so a registry could otherwise turn a waiting security digest into a feature one.
-/// Only the attestations of the booted, the staged and the candidate digest are kept.
+/// Only the stored objects of the booted, the staged, the rollback and the candidate digest
+/// are kept: after GoBack the rollback digest is the booted one, whose signature object says
+/// whether the policy in force covers what runs.
 fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &Status, digest: &str) -> Class {
     let repository = sigobj::repository_of(&status.booted.image);
-    let keep: Vec<&str> = [Some(status.booted.digest.as_str()), status.staged.as_ref().map(|staged| staged.digest.as_str()), Some(digest)].into_iter().flatten().collect();
-    if let Err(err) = ctx.store.retain_attestations(&keep) {
-        tracing::error!(%err, "cannot remove the release attestations of earlier digests");
+    let deployed = |deployment: &Option<Deployed>| deployment.as_ref().map(|deployed| deployed.digest.clone());
+    let keep: Vec<String> = [Some(status.booted.digest.clone()), deployed(&status.staged), deployed(&status.rollback), Some(digest.to_owned())].into_iter().flatten().collect();
+    if let Err(err) = ctx.store.retain_objects(&keep.iter().map(String::as_str).collect::<Vec<_>>()) {
+        tracing::error!(%err, "cannot remove the stored objects of earlier digests");
     }
     let Some(dir) = ctx.store.attestation_dir(digest) else {
         return Class::Feature;
@@ -1651,19 +1654,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_check_keeps_only_the_attestations_of_the_booted_staged_and_candidate_digests() {
+    fn a_check_keeps_only_the_objects_of_the_booted_staged_rollback_and_candidate_digests() {
         let (machine, tools) = offered_attested("prune", Some(Class::Feature));
-        let (staged, stale) = (digest(4), digest(5));
-        for digest in [digest(1), staged.clone(), stale] {
+        let (staged, rollback, stale) = (digest(4), digest(6), digest(5));
+        for digest in [digest(1), staged.clone(), rollback.clone(), stale] {
             std::fs::create_dir_all(machine.store.attestation_dir(&digest).expect("dir").join("leftover")).expect("mkdir");
+            std::fs::create_dir_all(machine.store.signature_dir(&digest).expect("dir").join("leftover")).expect("mkdir");
         }
         tools.status.borrow_mut().staged = Some(in_att_repo(Deployed { download_only: true, ..deployed(&staged, 1500) }));
+        tools.status.borrow_mut().rollback = Some(in_att_repo(deployed(&rollback, 500)));
         run(&machine.ctx(&tools, NOW), false).expect("check");
-        let mut kept: Vec<_> = std::fs::read_dir(machine.store.var.join("attestations")).expect("list").map(|entry| entry.expect("entry").file_name().into_string().expect("utf-8")).collect();
-        kept.sort();
-        let mut expected: Vec<_> = [digest(1), staged, attested()].iter().map(|digest| digest["sha256:".len()..].to_owned()).collect();
+        let stored = |kind: &str| {
+            let mut names: Vec<_> = std::fs::read_dir(machine.store.var.join(kind)).expect("list").map(|entry| entry.expect("entry").file_name().into_string().expect("utf-8")).collect();
+            names.sort();
+            names
+        };
+        let mut expected: Vec<_> = [digest(1), staged, rollback, attested()].iter().map(|digest| digest["sha256:".len()..].to_owned()).collect();
         expected.sort();
-        assert_eq!(kept, expected);
+        assert_eq!(stored("attestations"), expected);
+        assert_eq!(stored("signatures"), expected);
     }
 
     #[test]

@@ -1154,7 +1154,6 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
     let bottom = Box::builder()
         .orientation(Orientation::Horizontal)
         .spacing(6)
-        .halign(Align::End)
         .margin_bottom(14)
         .margin_end(16)
         .build();
@@ -1186,7 +1185,11 @@ pub fn build_ui(app: &Application, accounts: &[Account]) {
         .build();
     root.append(&top);
     root.append(&centre);
-    root.append(&bottom);
+    // Tab in a vertical box skips a child with no column in common with the focused one, so the
+    // row spans the window, or Tab would never leave the card for these buttons (AX7, #751).
+    let footer = gtk4::CenterBox::new();
+    footer.set_end_widget(Some(&bottom));
+    root.append(&footer);
     window.set_child(Some(&root));
 
     // The default card is the first: the first key pressed is the first character of its

@@ -16,7 +16,7 @@ vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "te
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"], optional = true }
 wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], optional = true }
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
-wayland-client = { workspace = true }
+wayland-client = "0.31"
 
 [features]
 # ATHANOR_TOOLKIT_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
