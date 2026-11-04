@@ -49,10 +49,10 @@ pub mod protocol {
 /// The user data of the manager's global and of every manager.
 pub struct WorkspaceTilings;
 
-/// The user data of a tiling object: the workspace it was made for. A live object is in
-/// `State::workspace_tilings`; one whose workspace is gone is not.
+/// The user data of a tiling object: the workspace it was made for, none for a handle of no
+/// workspace. A live object is in `State::workspace_tilings`; one whose workspace is gone is not.
 pub struct TilingObject {
-    workspace: WorkspaceId,
+    workspace: Option<WorkspaceId>,
 }
 
 /// Offers the manager to the clients the allow-list grants it.
@@ -90,17 +90,16 @@ impl Dispatch2<AthanorWorkspaceTilingManagerV1, State> for WorkspaceTilings {
         use athanor_workspace_tiling_manager_v1::Request;
         match request {
             Request::GetTiling { id, workspace } => {
-                let Some(workspace) = workspace_of(&workspace) else {
-                    // A handle the compositor did not make cannot be: its user data is its own.
-                    tracing::warn!("a tiling object asked for a handle of no workspace");
-                    return;
-                };
+                // A handle the compositor did not make cannot be: its user data is its own. The
+                // object is made all the same, as every new_id must be, and ends at once.
+                let workspace = workspace_of(&workspace);
                 let object = data_init.init(id, TilingObject { workspace });
-                if state.output_of_workspace(workspace).is_some() {
-                    object.state(shown_as(state.is_tiled(workspace)));
-                    state.workspace_tilings.push(object);
-                } else {
-                    object.removed();
+                match workspace.filter(|id| state.output_of_workspace(*id).is_some()) {
+                    Some(workspace) => {
+                        object.state(shown_as(state.is_tiled(workspace)));
+                        state.workspace_tilings.push(object);
+                    }
+                    None => object.removed(),
                 }
             }
             Request::Destroy => {}
@@ -124,7 +123,9 @@ impl Dispatch2<AthanorWorkspaceTilingV1, State> for TilingObject {
             Request::SetState {
                 state: WEnum::Value(asked),
             } if state.workspace_tilings.contains(object) => {
-                state.set_tiling(self.workspace, asked == Tiling::Tiled);
+                if let Some(workspace) = self.workspace {
+                    state.set_tiling(workspace, asked == Tiling::Tiled);
+                }
             }
             Request::SetState { .. } | Request::Destroy => {}
         }
@@ -157,7 +158,7 @@ impl State {
         for object in &self.workspace_tilings {
             if object
                 .data::<TilingObject>()
-                .is_some_and(|data| data.workspace == id)
+                .is_some_and(|data| data.workspace == Some(id))
             {
                 object.state(tiled);
             }
@@ -174,7 +175,8 @@ impl State {
         self.workspace_tilings.retain(|object| {
             let kept = object
                 .data::<TilingObject>()
-                .is_some_and(|data| workspaces.contains(&data.workspace));
+                .and_then(|data| data.workspace)
+                .is_some_and(|id| workspaces.contains(&id));
             if !kept {
                 object.removed();
             }
