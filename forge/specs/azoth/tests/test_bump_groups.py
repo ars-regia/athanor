@@ -163,7 +163,10 @@ class BumpGroups(unittest.TestCase):
     def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
         jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]
         steps = {step.get("name"): step for step in jobs["prep"]["steps"]}
-        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", steps["Toolchain lock for the new pins"]["run"])
+        lock = steps["Toolchain lock for the new pins"]
+        self.assertEqual(lock["id"], "lock")
+        self.assertIn("lock.sh generate 2>&1 | tee prep.log || locked=false", lock["run"])
+        self.assertIn('echo "locked=${locked}" >> "$GITHUB_OUTPUT"', lock["run"])
         for name in ("Build the kernel builder image", "Manifests for the new pins"):
             self.assertEqual(steps[name]["if"], "${{ steps.lock.outputs.locked == 'true' }}", name)
         prep = steps["Prep (signatures, patches, config gate)"]
