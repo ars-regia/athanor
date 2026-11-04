@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        16%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -53,6 +53,11 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- On a tiled workspace a dialog, or a window of one size, floats above the tiles instead
+  of taking one, and a tile dropped on another swaps places with it; a client's resize of
+  a tile moves the split beside the edge it moved, no further than the area (#894).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - Tile the windows of a workspace while its tiling is on, each new window beside the one
   focused last, with gaps of 8, and return each to its floating place when it is turned

@@ -1386,3 +1386,35 @@ fn resizing_a_tile_moves_its_split() {
     run.stop();
 }
 
+/// A tile whose client takes a minimum size of `i32::MAX` and is resized moves its split no
+/// further than the area: every tile stays inside it, and the compositor goes on.
+#[test]
+fn a_resize_to_any_size_keeps_the_tiles_in_the_area() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, _) = pair.upper.window.clone().expect("a window");
+    pair.upper_toplevel.set_min_size(i32::MAX, i32::MAX);
+    surface.commit();
+    pair.upper.roundtrip(&mut run);
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.roundtrip(&mut run);
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+    pair.lower.roundtrip(&mut run);
+
+    let area = run
+        .state
+        .output_of_workspace(pair.id)
+        .and_then(|output| run.state.window_area_on(&output))
+        .expect("an area");
+    for window in [&pair.above, &pair.below] {
+        let tile = tile_of(&run, pair.id, window);
+        assert!(area.contains_rect(tile), "{tile:?} inside {area:?}");
+    }
+    assert_eq!(tiles(&run, pair.id), 2);
+    run.stop();
+}

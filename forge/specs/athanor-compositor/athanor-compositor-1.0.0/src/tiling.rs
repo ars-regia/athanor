@@ -139,8 +139,15 @@ impl<T: PartialEq> Node<T> {
             Along::Width => (one.size.w, place.size.w.max(2)),
             Along::Height => (one.size.h, place.size.h.max(2)),
         };
-        let part = if in_first { part + by } else { part - by };
-        *share = (f64::from(part) / f64::from(room)).clamp(0.0, 1.0);
+        let part = if in_first {
+            part.saturating_add(by)
+        } else {
+            part.saturating_sub(by)
+        };
+        // Each part keeps room for a tile and its gaps, so that no tile leaves its place.
+        let least = (2 * GAP + 1).min(room / 2);
+        let part = part.clamp(least, room - least);
+        *share = f64::from(part) / f64::from(room);
         true
     }
 
@@ -312,7 +319,7 @@ impl<T: PartialEq + Clone> Tree<T> {
 
     /// Moves the splits by the tile of `window` in `area` so that its sides go where `to` has
     /// them (D11): each side that moved moves the split nearest it, and a side at the edge of
-    /// the area has none.
+    /// the area has none. `to` is the client's, and counts only as far as the area.
     pub fn resize(
         &mut self,
         window: &T,
@@ -330,11 +337,20 @@ impl<T: PartialEq + Clone> Tree<T> {
         let Some(root) = &mut self.root else {
             return;
         };
+        let within = |start: i32, size: i32, from: i32, room: i32| {
+            let end = from.saturating_add(room.max(0));
+            (
+                start.clamp(from, end),
+                start.saturating_add(size).clamp(from, end),
+            )
+        };
+        let (left, right) = within(to.loc.x, to.size.w, area.loc.x, area.size.w);
+        let (top, bottom) = within(to.loc.y, to.size.h, area.loc.y, area.size.h);
         let sides = [
-            (Along::Width, false, tile.loc.x - to.loc.x),
-            (Along::Width, true, to.loc.x + to.size.w - tile.loc.x - tile.size.w),
-            (Along::Height, false, tile.loc.y - to.loc.y),
-            (Along::Height, true, to.loc.y + to.size.h - tile.loc.y - tile.size.h),
+            (Along::Width, false, tile.loc.x - left),
+            (Along::Width, true, right - (tile.loc.x + tile.size.w)),
+            (Along::Height, false, tile.loc.y - top),
+            (Along::Height, true, bottom - (tile.loc.y + tile.size.h)),
         ];
         for (side, end, by) in sides {
             if by != 0 {
