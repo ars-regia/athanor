@@ -1,5 +1,6 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
+use crate::widget::Rect;
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, GenericFamily, Layout, LayoutContext,
     PlainEditor, StyleProperty,
@@ -338,6 +339,68 @@ impl TextField {
         let mut driver = self.driver(cx);
         driver.clear_compose();
         driver.insert_or_replace_selection(text);
+    }
+
+    /// The selected text, if the selection is not the caret; none while the input method
+    /// composes.
+    pub(crate) fn selected_text(&self) -> Option<String> {
+        self.editor.selected_text().map(str::to_owned)
+    }
+
+    /// Moves the selection's focus one cluster to the left on screen, as Shift+Left does.
+    pub(crate) fn select_left(&mut self, cx: &mut TextContext) {
+        self.driver(cx).select_left();
+    }
+
+    /// Moves the selection's focus one cluster to the right on screen, as Shift+Right does.
+    pub(crate) fn select_right(&mut self, cx: &mut TextContext) {
+        self.driver(cx).select_right();
+    }
+
+    /// Selects the whole text.
+    pub(crate) fn select_all(&mut self, cx: &mut TextContext) {
+        self.driver(cx).select_all();
+    }
+
+    /// Puts the caret at the point of the layout nearest `(x, y)`, as a press does.
+    pub(crate) fn press_at(&mut self, cx: &mut TextContext, x: f32, y: f32) {
+        self.driver(cx).move_to_point(x, y);
+    }
+
+    /// Moves the selection's focus to the point of the layout nearest `(x, y)`, as a drag does.
+    pub(crate) fn drag_to(&mut self, cx: &mut TextContext, x: f32, y: f32) {
+        self.driver(cx).extend_selection_to_point(x, y);
+    }
+
+    /// The rectangles of the selected text in the layout; none for a caret.
+    pub(crate) fn selection_boxes(&self) -> Vec<parley::BoundingBox> {
+        let boxes = self.editor.selection_geometry();
+        boxes.into_iter().map(|(b, _)| b).collect()
+    }
+
+    /// Where the layout's origin is in `r`, the field's rectangle, with `padding` inside its
+    /// edges: a text area's lines from its scroll offset down, a single line centred and at the
+    /// end edge in right-to-left text.
+    pub(crate) fn origin(
+        &mut self,
+        cx: &mut TextContext,
+        r: Rect,
+        padding: f32,
+        rtl: bool,
+    ) -> (f32, f32) {
+        let (offset, multiline) = (self.offset, self.multiline);
+        let layout = self.layout(cx);
+        let x = if rtl && !multiline {
+            r.x + r.w - padding - layout.width()
+        } else {
+            r.x + padding
+        };
+        let y = if multiline {
+            r.y + padding / 2.0 - offset
+        } else {
+            r.y + (r.h - layout.height()) / 2.0
+        };
+        (x, y)
     }
 
     /// Parley's editing driver, for a change of the caret or the text; one but a move up or down

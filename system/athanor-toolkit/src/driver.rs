@@ -1,7 +1,10 @@
 //! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows, wlr-layer-shell surfaces
 //! and their xdg-popups (a menu, or a tooltip), several in one process, each drawn in shared memory by vello_cpu or through wgpu by
 //! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
-//! through text-input-v3, and one AccessKit adapter on AT-SPI per surface.
+//! through text-input-v3, the clipboard and the primary selection, and one AccessKit adapter on
+//! AT-SPI per surface.
+
+mod clipboard;
 
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
@@ -48,7 +51,7 @@ use smithay_client_toolkit::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
             cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_RIGHT,
+            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -302,6 +305,10 @@ fn run_on(
         ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
+        // Optional: without them, a field copies and pastes nothing.
+        clipboards: clipboard::Clipboards::bind(&globals, &qh),
+        field_menu: None,
+        pressed_at: None,
         tooltip: Tooltip::default(),
         error: None,
     };
@@ -514,7 +521,7 @@ impl Shell {
         ui: Ui,
         side: Side,
     ) -> Result<SurfaceId, Error> {
-        self.show_popup(parent, anchor, ui, side, true)
+        self.show_popup(parent, anchor, None, ui, side, true)
     }
 
     /// Ends the run with `error`, which [`run`] returns once the turn is over.
@@ -531,11 +538,13 @@ impl Shell {
     }
 
     /// Opens a menu, or a tooltip, which takes neither the input nor the focus and keeps
-    /// [`TOOLTIP_PADDING`] away from its widget.
+    /// [`TOOLTIP_PADDING`] away from its widget. A menu opened `at` a point of the parent is
+    /// placed against that point, not its widget's bounds.
     fn show_popup(
         &mut self,
         parent: SurfaceId,
         anchor: WidgetId,
+        at: Option<(f32, f32)>,
         mut ui: Ui,
         side: Side,
         menu: bool,
@@ -554,7 +563,12 @@ impl Shell {
         if anchor >= from.ui.len() {
             return Err(format!("no widget {anchor} on {parent:?}").into());
         }
-        let r = from.ui.widget(anchor).rect;
+        let r = at.map_or(from.ui.widget(anchor).rect, |(x, y)| Rect {
+            x,
+            y,
+            w: 0.0,
+            h: 0.0,
+        });
         layout(&mut ui, 1.0)?;
         let (w, h) = logical_size(&ui);
         let positioner = XdgPositioner::new(xdg_shell)?;
@@ -1233,6 +1247,12 @@ struct App {
     /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
+    clipboards: clipboard::Clipboards,
+    /// The context menu open on a field: its popup, and the key each of its items does.
+    field_menu: Option<(SurfaceId, Vec<(WidgetId, Key)>)>,
+    /// Where a button is being pressed, while its press is handled: a field's context menu
+    /// opens there.
+    pressed_at: Option<(f32, f32)>,
     /// When the tooltip of the widget under the pointer, or focused, shows.
     tooltip: Tooltip<(SurfaceId, WidgetId)>,
     /// An error raised inside a callback, returned by [`run`].
@@ -1246,11 +1266,12 @@ impl App {
     }
 
     /// Hands an event of `id`'s widgets to the application, then redraws and updates the
-    /// accessibility trees and the input method.
+    /// accessibility trees, the input method and the clipboards.
     fn changed(&mut self, id: SurfaceId, event: Option<Event>) {
         self.update(id, event);
         if !self.shell.exit {
             self.sync_text_input();
+            self.clips(id);
         }
     }
 
@@ -1272,12 +1293,65 @@ impl App {
                 self.shell.exit = true;
                 return;
             }
+            // A field opens its own context menu, whose items the driver does.
+            Some(Event::ContextMenu(widget)) if surface.ui.field_text(widget).is_some() => {
+                self.open_field_menu(id, widget);
+            }
+            Some(Event::Clicked(item)) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {
+                self.field_edit(item);
+            }
+            // The field's menu is the driver's: the application never opened it, and gets none
+            // of its events, such as a context-menu event of an item at a press of the Menu key.
+            Some(_) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {}
             Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
         if let Err(error) = self.shell.draw_dirty() {
             self.fail(error);
         }
+    }
+
+    /// Opens the edit menu of field `widget` of `id`, as GTK's entry does: under the pointer for
+    /// a press, under the field for a key.
+    fn open_field_menu(&mut self, id: SurfaceId, widget: WidgetId) {
+        let can_paste = self.can_paste();
+        let Some((menu, items)) = self
+            .shell
+            .ui(id)
+            .and_then(|ui| ui.field_menu(widget, can_paste))
+        else {
+            return;
+        };
+        // ponytail: a key opens the menu under the whole field, not under its caret; place it
+        // at the caret's rectangle if a tall text area needs it.
+        match self
+            .shell
+            .show_popup(id, widget, self.pressed_at, menu, Side::Bottom, true)
+        {
+            Ok(surface) => self.field_menu = Some((surface, items)),
+            Err(error) => eprintln!("athanor-toolkit: no context menu for the field: {error}"),
+        }
+    }
+
+    /// Does what `item` of the open field menu says in its field, once the menu has closed and
+    /// the focus returned to the field, with the serial of the click or the key that chose it.
+    fn field_edit(&mut self, item: WidgetId) {
+        let (Some((surface, items)), Some(open)) = (self.field_menu.take(), self.shell.popup)
+        else {
+            return;
+        };
+        let Some((_, key)) = items.into_iter().find(|&(i, _)| i == item) else {
+            return;
+        };
+        if open.surface != surface {
+            return;
+        }
+        self.close_popup();
+        let event = self
+            .shell
+            .get_mut(open.parent)
+            .and_then(|parent| parent.ui.field_edit(open.anchor, key));
+        self.changed(open.parent, event);
     }
 
     /// An output announced or changed: one opens for the application if it has none, and the
@@ -1349,9 +1423,11 @@ impl App {
     }
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
-    /// send for a surface that is gone: the next `enter` then sends `enable` again.
+    /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
+    /// selection its fields offered ends with it.
     fn close(&mut self, id: SurfaceId) {
         self.shell.close(id);
+        self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
         }
@@ -1438,22 +1514,25 @@ impl App {
         };
         let tip = tooltip_ui(ui, text);
         // A tooltip that cannot be shown leaves the application running, and says why.
-        if let Err(error) = self.shell.show_popup(id, widget, tip, Side::Bottom, false) {
+        if let Err(error) = self
+            .shell
+            .show_popup(id, widget, None, tip, Side::Bottom, false)
+        {
             eprintln!("athanor-toolkit: no tooltip: {error}");
         }
     }
 
-    /// The pointer moved on `id`: the hovered widget follows it, a drag may start, and the
-    /// tooltip follows the hovered widget.
+    /// The pointer moved on `id`: the hovered widget follows it, a drag may start or a field's
+    /// selection follow it, and the tooltip follows the hovered widget.
     fn pointer_moved(&mut self, id: SurfaceId, x: f32, y: f32) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        let before = surface.ui.hovered();
+        let (before, selecting) = (surface.ui.hovered(), surface.ui.selecting());
         let event = surface.ui.pointer_motion(x, y);
         let hovered = surface.ui.hovered();
         let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
-        if event.is_some() || hovered != before {
+        if event.is_some() || hovered != before || selecting {
             self.changed(id, event);
         }
         self.point_tooltip(target.map(|w| (id, w)));
@@ -1475,6 +1554,7 @@ impl App {
         let button = match button {
             BTN_LEFT => PointerButton::Primary,
             BTN_RIGHT => PointerButton::Secondary,
+            BTN_MIDDLE => PointerButton::Middle,
             _ => return,
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -1489,7 +1569,9 @@ impl App {
             }
         }
         let event = surface.ui.pointer_press(x, y, button);
+        self.pressed_at = Some((x, y));
         self.changed(id, event);
+        self.pressed_at = None;
     }
 
     /// Applies what the input method sent since the last `done`, in the protocol's order: the
@@ -1526,8 +1608,8 @@ impl App {
         }
     }
 
-    /// A key held down: as pressed again, except Enter outside a text area, and Space outside
-    /// a field, which activate once.
+    /// A key held down: as pressed again, with the serial of its press, which the repeat does
+    /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
         let focused = self
             .keyboard_focus
@@ -1536,13 +1618,10 @@ impl App {
         let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
         let in_area =
             focused.is_some_and(|(ui, id)| matches!(ui.widget(id).kind, Kind::TextArea(_)));
-        let activates = match event.keysym {
-            Keysym::Return | Keysym::KP_Enter => !in_area,
-            Keysym::space => !in_field,
-            _ => false,
-        };
-        if !activates {
+        if !once_per_press(event.keysym, self.modifiers.ctrl, in_field, in_area) {
+            self.shell.grab.repeat();
             self.key(event);
+            self.shell.grab.key(None);
         }
     }
 
@@ -1551,8 +1630,14 @@ impl App {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
+            Keysym::Left if self.modifiers.shift => Key::SelectLeft,
+            Keysym::Right if self.modifiers.shift => Key::SelectRight,
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
+            Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
+            Keysym::c | Keysym::C if self.modifiers.ctrl => Key::Copy,
+            Keysym::x | Keysym::X if self.modifiers.ctrl => Key::Cut,
+            Keysym::v | Keysym::V if self.modifiers.ctrl => Key::Paste,
             Keysym::Up => Key::Up,
             Keysym::Down => Key::Down,
             Keysym::Home => Key::Home,
@@ -1803,6 +1888,7 @@ impl SeatHandler for App {
         capability: Capability,
     ) {
         self.shell.seat = Some(seat.clone());
+        self.clipboards.seat(qh, &seat);
         let result: Result<(), Error> = match capability {
             Capability::Keyboard if self.keyboard.is_none() => {
                 if let (Some(manager), None) = (&self.text_input_manager, &self.text_input) {
@@ -2031,9 +2117,45 @@ impl ProvidesRegistryState for App {
 
 smithay_client_toolkit::delegate_dispatch2!(App);
 
+/// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
+/// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut
+/// and paste once per press, and the Menu key and F10, which open a context menu.
+fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> bool {
+    match keysym {
+        Keysym::Return | Keysym::KP_Enter => !in_area,
+        Keysym::space => !in_field,
+        Keysym::c | Keysym::C | Keysym::x | Keysym::X | Keysym::v | Keysym::V => ctrl,
+        // The field's menu takes the keys once open: a repeat would reach it as a context-menu
+        // event of the item in focus.
+        Keysym::Menu | Keysym::F10 => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_held_key_acts_again_but_the_clipboard_keys_and_the_activating_ones() {
+        let once = |keysym, ctrl| once_per_press(keysym, ctrl, true, false);
+        assert!(!once(Keysym::Right, false), "an arrow repeats");
+        assert!(!once(Keysym::Right, true));
+        assert!(!once(Keysym::c, false), "a letter repeats");
+        assert!(!once(Keysym::a, true), "Ctrl+A selecting all again changes nothing");
+        for keysym in [Keysym::c, Keysym::C, Keysym::x, Keysym::X, Keysym::v, Keysym::V] {
+            assert!(once(keysym, true), "{keysym:?}");
+        }
+        // Enter breaks lines in a text area and activates once elsewhere; Space activates once
+        // outside a field.
+        assert!(once_per_press(Keysym::Return, false, true, false));
+        assert!(!once_per_press(Keysym::Return, false, true, true));
+        assert!(once_per_press(Keysym::space, false, false, false));
+        assert!(!once_per_press(Keysym::space, false, true, false));
+        // A held Menu key or Shift+F10 opens the field's menu once, and does not repeat into it.
+        assert!(once(Keysym::Menu, false));
+        assert!(once(Keysym::F10, false));
+    }
 
     #[test]
     fn the_renderer_variable_takes_cpu_or_gpu_only() {

@@ -134,6 +134,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(field.name.as_str());
             node.set_value(field.text());
             node.add_action(Action::SetValue);
+            // Its edit menu, as GTK 4.24's entry says; AccessKit's AT-SPI bridge does not yet
+            // pass it on (#638).
+            node.set_has_popup(HasPopup::Menu);
             node
         }
         // How far the content is scrolled, in logical pixels, as GTK's ScrolledWindow.
@@ -164,6 +167,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     };
     if widget.is_focusable() {
         node.add_action(Action::Focus);
+    }
+    if widget.disabled {
+        node.set_disabled();
     }
     if let Some(expanded) = widget.expanded {
         node.set_has_popup(HasPopup::Menu);
@@ -791,5 +797,60 @@ mod tests {
         let selection = find(node_id(area)).and_then(|n| n.text_selection()).copied();
         assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
         assert_eq!(find(text_run_id(area, 1)).and_then(Node::value), Some(""));
+    }
+
+    #[test]
+    fn a_field_opens_a_menu_whose_disabled_items_read_as_unavailable() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        for id in [field, area] {
+            let n = node(&ui, id, 1.0);
+            assert_eq!(n.has_popup(), Some(HasPopup::Menu));
+            // GTK's entry reads as neither collapsed nor expanded.
+            assert_eq!(n.is_expanded(), None);
+        }
+        let (mut menu, items) = ui
+            .field_menu(field, true)
+            .expect("a field has a context menu");
+        menu.layout();
+        let (cut, paste) = (node(&menu, items[0].0, 1.0), node(&menu, items[2].0, 1.0));
+        assert_eq!((cut.role(), cut.label()), (Role::MenuItem, Some("Cut")));
+        assert!(cut.is_disabled());
+        assert!(!cut.supports_action(Action::Focus));
+        assert!(!paste.is_disabled());
+        assert!(paste.supports_action(Action::Focus));
+        // An assistive technology's click on a disabled item does nothing.
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: node_id(items[0].0),
+            data: None,
+        };
+        assert_eq!(menu.do_action(&click), None);
+    }
+
+    #[test]
+    fn a_selection_made_with_shift_and_an_arrow_is_the_fields_text_selection() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        ui.commit("abc");
+        let selection = |ui: &mut Ui| {
+            ui.layout();
+            let s = node(ui, field, 1.0).text_selection().copied()?;
+            let at = |p: TextPosition| (p.node, p.character_index);
+            Some((at(s.anchor), at(s.focus)))
+        };
+        let run = text_run_id(field, 0);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 3))));
+        ui.key(crate::Key::SelectLeft);
+        ui.key(crate::Key::SelectLeft);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 1))));
+        ui.key(crate::Key::SelectRight);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
     }
 }

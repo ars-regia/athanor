@@ -151,6 +151,9 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 
 /// How much of its text colour a hovered control's fill takes.
 const HOVER: f32 = 0.05;
+/// How much of its text colour a disabled item's label keeps, over the background: half, as
+/// Adwaita's insensitive widgets.
+const DISABLED: f32 = 0.5;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
@@ -266,7 +269,6 @@ pub fn paint<C: Canvas>(
         let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
-        let multiline = matches!(widget.kind, Kind::TextArea(_));
         match &mut widget.kind {
             Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
             Kind::Island { .. } => {
@@ -354,7 +356,8 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer.
+            // A flat row with its label at the start edge, filled only under the pointer, and
+            // faint when the item is disabled.
             Kind::MenuItem(_) => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
@@ -367,7 +370,12 @@ pub fn paint<C: Canvas>(
                         r.x + t.padding
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
-                    draw_text(ctx, resources, layout, at, t.text)?;
+                    let ink = if widget.disabled {
+                        mix(t.background, t.text, DISABLED)
+                    } else {
+                        t.text
+                    };
+                    draw_text(ctx, resources, layout, at, ink)?;
                 }
             }
             Kind::TitleBar => {
@@ -545,23 +553,17 @@ pub fn paint<C: Canvas>(
                 ctx.set_paint(color(t.border));
                 ctx.set_stroke(Stroke::new(1.0));
                 ctx.stroke_path(&rounded(r, -0.5, t.radius));
-                let offset = field.offset;
-                let layout = field.layout(&mut ui.text);
                 // A text area's lines are laid out at its width, which aligns them to the start
                 // edge; it shows them from its scroll offset down.
-                let x = if ui.rtl && !multiline {
-                    r.x + r.w - t.padding - layout.width()
-                } else {
-                    r.x + t.padding
-                };
-                let y = if multiline {
-                    r.y + t.padding / 2.0 - offset
-                } else {
-                    r.y + (r.h - layout.height()) / 2.0
-                };
-                let layout = layout.clone();
-                // Text longer than the field stays inside it.
+                let (x, y) = field.origin(&mut ui.text, r, t.padding, ui.rtl);
+                let layout = field.layout(&mut ui.text).clone();
+                // Text longer than the field stays inside it; the selection is filled under it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
+                ctx.set_paint(color(mix(t.on_accent, t.accent, SELECTED_TEXT)));
+                for b in field.selection_boxes() {
+                    let (x, y) = (f64::from(x), f64::from(y));
+                    ctx.fill_rect(&Rect::new(b.x0 + x, b.y0 + y, b.x1 + x, b.y1 + y));
+                }
                 draw_text(ctx, resources, &layout, (x, y), t.text)?;
                 if focus == Some(id) {
                     if let Some(c) = field.caret(&mut ui.text, 1.5) {
@@ -600,6 +602,9 @@ pub fn paint<C: Canvas>(
 
 /// How much of the accent a selected list row's fill takes.
 const SELECTED: f32 = 0.15;
+
+/// How much of the accent the fill behind a field's selected text takes.
+const SELECTED_TEXT: f32 = 0.3;
 
 /// Whether two rectangles share any area.
 fn overlaps(a: crate::widget::Rect, b: crate::widget::Rect) -> bool {
@@ -648,6 +653,24 @@ mod tests {
             ui.commit("abc");
         }
         render(&mut ui, 1.0)
+    }
+
+    #[test]
+    fn a_fields_selection_is_filled_under_its_text() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
+        let field = ui.field(crate::Ui::ROOT, "Name", "abc");
+        let t = &ui.theme;
+        let fill = mix(t.on_accent, t.accent, SELECTED_TEXT).0;
+        let filled = |p: &Pixmap| {
+            let pixels = p.data_as_u8_slice().as_chunks::<4>().0;
+            pixels.iter().filter(|&&px| px == fill).count()
+        };
+        ui.set_focus(Some(field));
+        assert_eq!(filled(&render(&mut ui, 1.0)?), 0, "a caret fills nothing");
+        ui.key(crate::widget::Key::SelectAll);
+        let selected = filled(&render(&mut ui, 1.0)?);
+        assert!(selected >= 50, "{selected} pixels of the selection's fill");
+        Ok(())
     }
 
     #[test]
