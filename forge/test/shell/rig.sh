@@ -1179,13 +1179,12 @@ atspi)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-compositor the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 5: tiling needs zcosmic_workspace_manager_v2, whose private replacement
-        # docs/spikes/c1-protocols.md (section 3) proposes and revision 2 specifies, and
-        # decision 28 of doc_own_stack.md hides workspaces (#835) and applications (#836).
+        # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
+        # hides workspaces (#835) and applications (#836).
         unit='' widgets=8 own=()
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-compositor build-compositor
-            unit=--unit widgets=5 own=(--own-compositor float - "${3:-en}")
+            unit=--unit widgets=6 own=(--own-compositor float - "${3:-en}")
         fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar" float top visible light
@@ -1198,17 +1197,16 @@ atspi)
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
         surface_not_closed atspi bar atspi-bar
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-compositor it names each line the bar lacks (Tiling, C1), and the buttons
-        # decision 28 hides are exempt under its float preset (`own`).
+        # athanor-compositor the buttons decision 28 hides are exempt under its float preset (`own`).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
             "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
-        # Under athanor-compositor 9: as in `bar`, tiling, workspaces and applications are missing.
+        # Under athanor-compositor 10: as in `bar`, workspaces and applications are hidden.
         widgets=12
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=9; fi
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then widgets=10; fi
         stage_greeter_icons
         seed_bar "$out/seed-atspi-bar-modules" float top visible light
         atspi_variant "$out/seed-atspi-bar-modules"
@@ -1384,11 +1382,10 @@ orca)
     bar)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-compositor
-        # the bar lacks Tiling, C1, and decision 28 hides Workspaces and Applications, exempt
-        # through `own`). Under cosmic-comp Tab skips Input source (#751), so the
-        # seventh Tab comes back round to the first; the eighth once Tab reaches it. Under
-        # athanor-compositor Ctrl+Alt+Tab reaches the Clock and the seven Tabs go round the five
-        # buttons left, Input source among them.
+        # decision 28 hides Workspaces and Applications, exempt through `own`). Under cosmic-comp
+        # Tab skips Input source (#751), so the seventh Tab comes back round to the first; the
+        # eighth once Tab reaches it. Under athanor-compositor Ctrl+Alt+Tab reaches the Clock and
+        # the seven Tabs go round the six buttons left, Input source among them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
