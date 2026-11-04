@@ -1333,16 +1333,29 @@ orca)
         # galleries: Space selects the page, then one Tab for each page toggle after it and for
         # each control of the page (cases.py gallery-pages). The walks follow one another in
         # the transcript, in the order of the pages. ATHANOR_GALLERY_BIN runs the GTK twin.
+        # The toolkit's walks make one Tab more, which leaves the page for its title bar's
+        # Minimize, where every walk must end (orca_compare.py --walks): a control added to a
+        # page without its count, or a count without its control, ends a walk elsewhere. The
+        # GTK twin's cannot: Tab steps through its list's rows, and wraps to the first page
+        # toggle, whose state is read with it.
         bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-toolkit-gallery}
-        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-toolkit-gallery build-toolkit; fi
+        extra=0
+        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then
+            require athanor-toolkit-gallery build-toolkit
+            extra=1
+        fi
         rm -f "$out/$transcript"
         while IFS=$'\t' read -r page tabs; do
+            tabs=$((tabs + extra))
             in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
                 RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/orca-gallery-$page.txt space Tab*$tabs" \
                 dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 orca-gallery -- \
                 bash -c "$enable && exec $bin --page $page --lang ${3:-en}"
             cat "$out/orca-gallery-$page.txt" >> "$out/$transcript"
         done < <(python3 -B "$rig/cases.py" gallery-pages)
+        if [ "$extra" = 1 ]; then
+            in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py --walks "/out/$transcript"
+        fi
         ;;
     dock)
         # orca_dock.py runs the test window and a minimised second app, then starts the dock
