@@ -254,7 +254,7 @@ pub fn paint<C: Canvas>(
     ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
 
     let (focus, hover) = (ui.focus, ui.hovered());
-    for id in 0..ui.widgets.len() {
+    for id in ui.ids() {
         if !ui.is_visible(id) {
             continue;
         }
@@ -591,7 +591,7 @@ pub fn paint<C: Canvas>(
             ctx.pop_clip();
         }
     }
-    for id in 0..ui.widgets.len() {
+    for id in ui.ids() {
         if let Some(bar) = scroll_indicator(ui, id) {
             ctx.set_paint(color(t.border));
             ctx.fill_path(&rounded(bar, 0.0, bar.w / 2.0));

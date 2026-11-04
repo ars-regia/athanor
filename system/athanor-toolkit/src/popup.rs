@@ -254,7 +254,7 @@ mod tests {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: 5,
+            anchor: WidgetId(5),
             menu: true,
         };
         assert!(menu.dismissed_by(Dismiss::Escape));
@@ -317,7 +317,7 @@ mod tests {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: 5,
+            anchor: WidgetId(5),
             menu: true,
         };
         let tooltip = OpenPopup {

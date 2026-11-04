@@ -560,8 +560,8 @@ impl Shell {
         if matches!(from.shown, Shown::Popup(_)) {
             return Err(format!("no popup of the popup {parent:?}: one is open at a time").into());
         }
-        if anchor >= from.ui.len() {
-            return Err(format!("no widget {anchor} on {parent:?}").into());
+        if anchor.index() >= from.ui.len() {
+            return Err(format!("no widget {anchor:?} on {parent:?}").into());
         }
         let r = at.map_or(from.ui.widget(anchor).rect, |(x, y)| Rect {
             x,
@@ -1506,7 +1506,7 @@ impl App {
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
-        let text = (widget < ui.len() && ui.is_visible(widget))
+        let text = (widget.index() < ui.len() && ui.is_visible(widget))
             .then(|| ui.tooltip(widget))
             .flatten();
         let Some(text) = text else {
@@ -2334,12 +2334,12 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert!(ime.change(Some((a, 1, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
         assert!(ime.change(None));
         ime.entered = Some(b);
-        let field = Some((b, 1, ContentHint::None));
+        let field = Some((b, WidgetId(1), ContentHint::None));
         assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
         assert!(!ime.change(field));
@@ -2349,10 +2349,10 @@ mod tests {
     fn every_change_of_the_focused_field_enables_the_text_input_again() {
         let a = SurfaceId(1);
         let mut ime = Ime::default();
-        assert!(ime.change(Some((a, 1, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
         // Another field of the same hint, on the same surface.
-        assert!(ime.change(Some((a, 2, ContentHint::None))));
-        assert!(!ime.change(Some((a, 2, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(2), ContentHint::None))));
+        assert!(!ime.change(Some((a, WidgetId(2), ContentHint::None))));
     }
 
     #[test]
