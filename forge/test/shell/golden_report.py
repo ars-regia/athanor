@@ -11,11 +11,22 @@ difference never passes as tolerated noise. A case may have several explanations
 A differing case that draws a control decision 28 hides under the own compositor names it with
 that control's cause and issue (HIDDEN), and no case names a control it does not draw.
 
+An explanation says what it covers, either `regions`, rectangles [x, y, width, height] in capture
+pixels, or `recolour = { capture = "#RRGGBB", golden = "#RRGGBB" }`, a colour the capture
+substitutes over the whole frame (#736, the clear colour). The report replaces each recolour's
+capture colour with its golden colour, within compare.py's fuzz, before it builds the mask of
+differing pixels, and checks coverage per pixel: it fails on a case with more pixels than its
+tolerance differing outside every region of its entries, and on an entry whose regions hold no
+differing pixel or whose recolour changes no pixel. A cause that is fixed, or one removed while
+its difference remains, is caught even in a case that has other causes.
+
 `surfaces` prints the surfaces the report runs: every one of cases.SURFACES except the
 toolkit's and the greeter's, and the layout cases.
 """
 
 import argparse
+import re
+import subprocess
 import sys
 import tomllib
 from collections import namedtuple
@@ -57,8 +68,101 @@ NAMES = {
 BAR_PRESET_SURFACES = ("bar", "bar-shield")
 LAYOUTS = {case.tag: case for case in cases.layout_cases()}
 
-# differing is None when there is no capture to compare.
-Result = namedtuple("Result", "surface case differing allowed closed")
+COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")
+
+# differing is None when there is no capture to compare. mask is the difference mask (white where
+# the capture differs from the golden once the recolours are applied), None when a unit test
+# judges the counts alone; idle lists the recolours of the case that changed no pixel.
+Result = namedtuple("Result", "surface case differing allowed closed mask idle", defaults=(None, ()))
+
+
+def magick(*args):
+    run = subprocess.run(["magick", *map(str, args)], capture_output=True, text=True, check=False)
+    if run.returncode != 0:
+        raise RuntimeError(run.stderr.strip())
+    return run.stdout
+
+
+def count_white(mask, *ops):
+    """The white pixels of `mask` after the ImageMagick operations `ops`."""
+    # -draw adds an alpha channel, which fx:mean would average in.
+    return compare.parse_count(magick(mask, *ops, "-alpha", "off", "-format", "%[fx:round(mean*w*h)]", "info:"))
+
+
+def valid_rect(rect):
+    return (
+        isinstance(rect, list)
+        and len(rect) == 4
+        and all(isinstance(v, int) and not isinstance(v, bool) for v in rect)
+        and rect[0] >= 0
+        and rect[1] >= 0
+        and rect[2] >= 1
+        and rect[3] >= 1
+    )
+
+
+def valid_recolour(rule):
+    return isinstance(rule, dict) and all(
+        isinstance(rule.get(k), str) and COLOUR.fullmatch(rule[k]) for k in ("capture", "golden")
+    )
+
+
+def recoloured(actual, rules, scratch):
+    """(path of `actual` with each rule's capture colour replaced by its golden colour within
+    compare.py's fuzz, the rules that changed no pixel). `scratch` names the intermediate files."""
+    current, idle = actual, []
+    for n, rule in enumerate(rules):
+        step = scratch.with_name(f"{scratch.name}-recolour{n}.png")
+        magick(current, "-fuzz", "2%", "-fill", rule["golden"], "-opaque", rule["capture"], step)
+        if compare.differing_pixels(current, step, scratch.with_name(f"{scratch.name}-recolour.png")) == 0:
+            idle.append((rule["capture"], rule["golden"]))
+        current = step
+    return current, tuple(idle)
+
+
+def coverage(mask, entries):
+    """(pixels of `mask` outside every region of `entries`, their bounding box as WxH+X+Y,
+    the pixels inside the regions of each entry)."""
+    rects = [r for e in entries for r in (e.get("regions") or []) if valid_rect(r)]
+    blank = ["-fill", "black"]
+    for x, y, w, h in rects:
+        blank += ["-draw", f"rectangle {x},{y} {x + w - 1},{y + h - 1}"]
+    outside = count_white(mask, *blank)
+    box = ""
+    if outside:
+        # A border keeps a difference on the frame's edge from being taken for background.
+        found = magick(mask, *blank, "-alpha", "off", "-bordercolor", "black", "-border", "1", "-format", "%@", "info:")
+        w, h, x, y = map(int, re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", found.strip()).groups())
+        box = f"{w}x{h}+{x - 1}+{y - 1}"
+    hits = [
+        sum(
+            count_white(mask, "-crop", f"{w}x{h}+{x}+{y}", "+repage")
+            for x, y, w, h in (e.get("regions") or [])
+            if valid_rect([x, y, w, h])
+        )
+        for e in entries
+    ]
+    return outside, box, hits
+
+
+def check_coverage(r, entries):
+    """What is wrong with the way the entries of a differing case cover its mask."""
+    outside, box, hits = coverage(r.mask, entries)
+    found = []
+    if outside > r.allowed:
+        found.append(
+            f"{r.case}: {outside} pixel(s) differ outside every explained region (tolerance {r.allowed}), within {box}"
+        )
+    found += [
+        f'{r.case}: explained, but nothing differs in the regions of "{e.get("cause")}" (#{e.get("issue")}); remove the entry'
+        for e, n in zip(entries, hits)
+        if e.get("regions") is not None and n == 0
+    ]
+    found += [
+        f"{r.case}: explained, but the recolour of {capture} to {golden} changes no pixel; remove the entry"
+        for capture, golden in r.idle
+    ]
+    return found
 
 
 def surfaces():
@@ -135,6 +239,19 @@ def check_hidden(results, by_case):
     return problems
 
 
+def check_covers(case, entry):
+    """What is wrong with the way an explanation says what it covers."""
+    regions, recolour = entry.get("regions"), entry.get("recolour")
+    if regions is None and recolour is None:
+        return [f"{case}: the explanation covers nothing; give it `regions` or a `recolour`"]
+    found = []
+    if regions is not None and not (isinstance(regions, list) and regions and all(map(valid_rect, regions))):
+        found.append(f"{case}: `regions` is a list of [x, y, width, height] rectangles in capture pixels")
+    if recolour is not None and not valid_recolour(recolour):
+        found.append(f'{case}: `recolour` is {{ capture = "#RRGGBB", golden = "#RRGGBB" }}')
+    return found
+
+
 def check_explanations(explanations):
     """The explanations by case, and what is wrong with their form."""
     by_case, problems = {}, []
@@ -152,6 +269,7 @@ def check_explanations(explanations):
             problems.append(f"{case}: the explanation has no cause")
         if not isinstance(issue, int) or isinstance(issue, bool) or issue < 1:
             problems.append(f"{case}: the explanation names no issue (a number from 1)")
+        problems += check_covers(case, entry)
     return by_case, problems
 
 
@@ -170,6 +288,8 @@ def report(results, explanations):
                 differing += 1
                 if r.case in by_case:
                     explained += 1
+                    if r.mask is not None:
+                        problems += check_coverage(r, by_case[r.case])
                     note = "; ".join(
                         f"{e.get('cause', '')} (#{e.get('issue', '?')})" for e in by_case[r.case]
                     )
@@ -210,7 +330,11 @@ def report(results, explanations):
     return "\n".join(lines) + "\n", problems
 
 
-def measure(out, wanted, since):
+def measure(out, wanted, since, explanations=()):
+    rules = {}
+    for e in explanations:
+        if valid_recolour(e.get("recolour")):
+            rules.setdefault(e.get("case"), []).append(e["recolour"])
     results = []
     for surface, tag in expected(wanted):
         golden = GOLDEN / surface / f"{tag}.png"
@@ -218,12 +342,18 @@ def measure(out, wanted, since):
             sys.exit(f"golden_report.py: no golden image {golden}")
         actual = out / f"{tag}.png"
         allowed = compare.tolerance(golden.parent, tag)
-        count = None
+        count, mask, idle = None, None, ()
         # An image older than the run is a capture of an earlier one.
         if actual.exists() and actual.stat().st_mtime >= since:
             try:
-                count = compare.differing_pixels(golden, actual, out / f"{tag}-diff.png")
+                mask = out / f"{tag}-diff.png"
+                count = compare.differing_pixels(golden, actual, mask)
+                if tag in rules:
+                    fixed, idle = recoloured(actual, rules[tag], out / f"{tag}-explained")
+                    mask = out / f"{tag}-explained-diff.png"
+                    compare.differing_pixels(golden, fixed, mask)
             except RuntimeError as error:
+                mask = None
                 print(f"golden_report.py: {tag}: {error}", file=sys.stderr)
         log = out / f"{tag}-compositor.log"
         # A log older than the run is the log of an earlier one.
@@ -232,7 +362,7 @@ def measure(out, wanted, since):
             and log.stat().st_mtime >= since
             and CLOSED in log.read_text(encoding="utf-8", errors="replace")
         )
-        results.append(Result(surface, tag, count, allowed, closed))
+        results.append(Result(surface, tag, count, allowed, closed, mask, idle))
     return results
 
 
@@ -256,7 +386,7 @@ def main(argv):
         print(f"golden_report.py: not a surface of the report: {' '.join(unknown)}", file=sys.stderr)
         return 2
     explanations = tomllib.loads(args.explanations.read_text(encoding="utf-8")).get("difference", [])
-    results = measure(args.out, wanted, args.since)
+    results = measure(args.out, wanted, args.since, explanations)
     if args.surface:
         # A run of some surfaces judges only the explanations of its own cases.
         ran = {r.case for r in results}

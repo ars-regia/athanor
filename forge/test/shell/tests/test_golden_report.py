@@ -1,5 +1,7 @@
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -18,12 +20,12 @@ def result(case, differing, allowed=64, closed=False, surface="launcher"):
 
 def hidden_entries(surface, case):
     return [
-        {"case": case, "cause": cause, "issue": issue}
+        {"case": case, "cause": cause, "issue": issue, "regions": [[0, 0, 1, 1]]}
         for cause, issue in (gr.HIDDEN[c] for c in gr.hidden(surface, case))
     ]
 
 
-GOOD = {"case": "a", "cause": "the clear colour", "issue": 591}
+GOOD = {"case": "a", "cause": "the clear colour", "issue": 591, "regions": [[0, 0, 1, 1]]}
 
 
 class GoldenReportTest(unittest.TestCase):
@@ -83,7 +85,7 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(len(problems), 1)
 
     def test_a_case_may_have_several_causes(self):
-        other = {"case": "a", "cause": "shadows", "issue": 592}
+        other = {"case": "a", "cause": "shadows", "issue": 592, "regions": [[0, 0, 1, 1]]}
         text, problems = gr.report([result("a", 100)], [GOOD, other])
         self.assertEqual(problems, [])
         self.assertIn("the clear colour (#591); shadows (#592)", text)
@@ -179,7 +181,8 @@ class GoldenReportTest(unittest.TestCase):
 
     def test_a_decision_28_entry_for_a_control_the_case_does_not_draw_fails(self):
         tag = "bar-light-1.0-en"
-        stray = {"case": tag, "cause": gr.HIDDEN["bar-workspaces"][0], "issue": gr.HIDDEN["bar-workspaces"][1]}
+        stray = {"case": tag, "cause": gr.HIDDEN["bar-workspaces"][0], "issue": gr.HIDDEN["bar-workspaces"][1],
+            "regions": [[0, 0, 1, 1]]}
         _, problems = gr.report([result(tag, 100, surface="bar")], hidden_entries("bar", tag) + [stray])
         self.assertEqual(len(problems), 1)
         self.assertIn("does not draw", problems[0])
@@ -211,6 +214,96 @@ class GoldenReportTest(unittest.TestCase):
             gr.exemptions(None, "visible", "it"), {"Spazi di lavoro": dock_ws, "Applicazioni": dock_lib}
         )
         self.assertEqual(gr.exemptions(None, "-", "en"), {})
+
+
+def entry(cause, *regions):
+    return {"case": "a", "cause": cause, "issue": 737, "regions": [list(r) for r in regions]}
+
+
+@unittest.skipUnless(shutil.which("magick"), "ImageMagick builds the masks")
+class CoverageTest(unittest.TestCase):
+    """The report judges every differing pixel against the regions of the case's entries."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = Path(tmp.name)
+
+    def mask(self, *rects):
+        """A 200x100 mask, black, with white rectangles (x, y, width, height)."""
+        path = self.dir / "mask.png"
+        draw = [a for x, y, w, h in rects for a in ("-draw", f"rectangle {x},{y} {x + w - 1},{y + h - 1}")]
+        subprocess.run(["magick", "-size", "200x100", "xc:black", "-fill", "white", *draw, str(path)], check=True)
+        return path
+
+    def judge(self, mask, entries, idle=()):
+        differing = 200
+        return gr.report([gr.Result("launcher", "a", differing, 64, False, mask, idle)], entries)[1]
+
+    def test_two_adjacent_differences_each_need_their_entry(self):
+        # A shadow's edge and an outline's inner edge touch: the region of one must not hide the other.
+        shadow, outline = (10, 10, 10, 10), (20, 10, 10, 10)
+        mask = self.mask(shadow, outline)
+        both = [entry("shadow", shadow), entry("outline", outline)]
+        self.assertEqual(self.judge(mask, both), [])
+        # The outline's entry is removed while its difference remains.
+        problems = self.judge(mask, both[:1])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("100 pixel(s) differ outside every explained region", problems[0])
+        self.assertIn("10x10+20+10", problems[0])
+
+    def test_a_region_that_overlaps_the_neighbour_hides_it_only_where_it_overlaps(self):
+        mask = self.mask((10, 10, 10, 10), (20, 10, 10, 10))
+        problems = self.judge(mask, [entry("shadow", (10, 10, 11, 10))])
+        self.assertIn("90 pixel(s) differ outside", problems[0])
+        self.assertIn("9x10+21+10", problems[0])
+
+    def test_outside_pixels_within_the_tolerance_pass(self):
+        mask = self.mask((10, 10, 10, 10), (50, 50, 8, 8))
+        self.assertEqual(self.judge(mask, [entry("shadow", (10, 10, 10, 10))]), [])
+
+    def test_an_entry_whose_regions_hold_no_difference_fails(self):
+        mask = self.mask((10, 10, 10, 10))
+        problems = self.judge(mask, [entry("shadow", (10, 10, 10, 10)), entry("gone", (100, 50, 20, 20))])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn('nothing differs in the regions of "gone"', problems[0])
+
+    def test_a_recolour_that_changed_no_pixel_fails(self):
+        mask = self.mask((10, 10, 10, 10))
+        rule = {"capture": "#101323", "golden": "#27292A"}
+        problems = self.judge(
+            mask,
+            [entry("shadow", (10, 10, 10, 10)), dict(entry("clear"), regions=None, recolour=rule)],
+            idle=((rule["capture"], rule["golden"]),),
+        )
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("changes no pixel", problems[0])
+
+    def test_recoloured_replaces_the_colour_within_the_fuzz_and_names_an_idle_rule(self):
+        navy, grey = "#101323", "#27292A"
+        capture = self.dir / "capture.png"
+        subprocess.run(["magick", "-size", "20x20", f"xc:{navy}", str(capture)], check=True)
+        done, idle = gr.recoloured(capture, [{"capture": navy, "golden": grey}], self.dir / "x")
+        self.assertEqual(idle, ())
+        pixel = subprocess.run(
+            ["magick", str(done), "-format", "%[hex:p{3,3}]", "info:"], capture_output=True, text=True, check=True
+        ).stdout
+        self.assertEqual(pixel.upper(), grey[1:])
+        _, idle = gr.recoloured(done, [{"capture": navy, "golden": grey}], self.dir / "y")
+        self.assertEqual(idle, (("#101323", "#27292A"),))
+
+    def test_an_explanation_must_say_what_it_covers(self):
+        for e, text in (
+            ({"case": "a", "cause": "x", "issue": 1}, "covers nothing"),
+            ({"case": "a", "cause": "x", "issue": 1, "regions": [[0, 0, 0, 5]]}, "`regions`"),
+            ({"case": "a", "cause": "x", "issue": 1, "regions": []}, "`regions`"),
+            ({"case": "a", "cause": "x", "issue": 1, "recolour": {"capture": "navy", "golden": "#000000"}}, "`recolour`"),
+        ):
+            _, problems = gr.check_explanations([e])
+            self.assertEqual(len(problems), 1, e)
+            self.assertIn(text, problems[0])
+        ok = {"case": "a", "cause": "x", "issue": 1, "recolour": {"capture": "#101323", "golden": "#27292A"}}
+        self.assertEqual(gr.check_explanations([ok])[1], [])
 
 
 if __name__ == "__main__":
