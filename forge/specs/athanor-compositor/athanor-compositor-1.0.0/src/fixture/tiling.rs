@@ -1555,6 +1555,6 @@ fn a_float_placed_under_a_full_screen_tile_stays_under_it() {
     let (_new, float) = one_size(&mut run);
 
     assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
-    assert!(stack(&run).contains(&float), "the float is placed");
+    assert!(level(&run, &float) > level(&run, &pair.below), "above the other tile");
     run.stop();
 }

@@ -1033,16 +1033,19 @@ impl State {
         }
     }
 
-    /// Raises `window`, which D5 floats, over the tiles of its workspace, unless one of them is
-    /// full screen: that one stays above it (D6).
+    /// Raises `window`, which D5 floats, over the tiles of its workspace; a full-screen tile there
+    /// is raised again over it, with its own dialogs (D6).
     fn raise_float(&mut self, window: &Window) {
         let id = on(window);
-        let full_screen = self
+        let full_screen: Vec<Window> = self
             .space
             .elements()
-            .any(|kept| on(kept) == id && crate::state::is_full_screen(kept));
-        if !full_screen {
-            self.space.raise_element(window, false);
+            .filter(|kept| on(kept) == id && crate::state::is_full_screen(kept))
+            .cloned()
+            .collect();
+        self.space.raise_element(window, false);
+        for tile in full_screen {
+            self.raise_full_screen_tile(&tile);
         }
     }
 
