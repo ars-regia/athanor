@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment proposed for the maintainer's approval with this pull request. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -47,6 +47,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   `doc_shell.md` SH2's exceptions; OS5, the tiling manager, with version 2 of the register;
   decision 32, with OS5, section 3's register rows 3 and 4 and the overview's amendment of the
   same date.
+- Amended on 2026-11-04: decision 31, the divider inside the geometry and the outline's shape,
+  proposed for the maintainer's approval with this pull request.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -965,7 +967,9 @@ compositor and that the own compositor did not yet offer:
     the lines of a mark stay equal at any scale:
     - **The focus outline** marks the window with the keyboard focus, and no other. It is drawn
       outside the window's geometry, as wide as the theme's `active_hint`, with corners concentric
-      with the 15 px window radius of `doc_visual_language.md`, in the theme's `window_hint` when it is set
+      with the window's: the theme's window radius grown by the outline's width, 15 px with
+      Calmo's (amended on 2026-11-04, proposed with this pull request; it read "concentric with
+      the 15 px window radius of `doc_visual_language.md`"), in the theme's `window_hint` when it is set
       and in its accent otherwise (spike VL-S1, section 2.2). It follows the theme live, is not
       drawn when the `active_hint` setting of `doc_settings.md` is off or the theme's width is 0,
       as in cosmic-comp, and is not drawn on a maximised or full-screen window, which leaves it
@@ -1048,11 +1052,7 @@ compositor and that the own compositor did not yet offer:
     fractional scale; that a tree at the far end of the coordinates ends nothing; that its popup
     is bordered and its layer surface refused; that an unconfined window is not bordered; that a
     maximised window has no outline; that the lock covers the marks; that a window above covers a mark of the window below; and that a mark
-    follows a theme change without a new client. The entries of #918 stay in
-    `forge/test/shell/golden/athanor-differences.toml` for what still differs, the divider
-    cosmic-comp draws inside the outline, the outline's corners and, at scale 1.5, its width, and
-    a case that shows a confined window takes an entry of #918 for the
-    border, which cosmic-comp does not draw. Not taken: one grey line of 1 px in `#808080`, which
+    follows a theme change without a new client. Not taken: one grey line of 1 px in `#808080`, which
     a grey backdrop hides and which, with the focus, tells the two apart by one pixel inside the
     outline; two lines, black outside and white inside, which a dark wallpaper and a white edge
     hide together; the border always around the tree, which stands off from nearly every window
@@ -1064,6 +1064,25 @@ compositor and that the own compositor did not yet offer:
     frame a whole wallpaper; for the outline, a fixed Calmo purple, which ignores the user's
     accent and `active_hint`; and the reveal key now, which adds drawing text to the compositor
     to a change that does not need it.
+    *Amended on 2026-11-04, proposed for the maintainer's approval with this pull request:* under
+    the own compositor, as under cosmic-comp, a divider ring of 1 px, in the theme's divider
+    colour and with the theme's window corners, lies just inside the geometry of every window
+    that is neither maximised nor full screen, focused or not, floating or tiled. The focus
+    outline of an unconfined window takes cosmic-comp's shape: its corners are the theme's window
+    radius grown by its width (the first item above, amended), and at a fractional scale each
+    straight side covers whole pixels, the left and the top side the fewer. The fixture tests the
+    divider on a focused, an unfocused, a confined and a maximised window, at scale 1.5, and
+    after a theme change. In `forge/test/shell/golden/athanor-differences.toml` the 18 entries
+    of #918 at scale 1 go, since the divider and the outline match the goldens there. The 18 at
+    scale 1.5 stay: cosmic-comp places those windows at a fractional logical offset and the own
+    compositor at whole logical coordinates, so the divider and the outline's inner edge land
+    one physical pixel apart on one or more sides. A case that shows a confined window takes an
+    entry of #918 for the border, which cosmic-comp does not draw. These sentences replace the
+    approved one that read: "The entries of #918 stay in
+    `forge/test/shell/golden/athanor-differences.toml` for what still differs, the divider
+    cosmic-comp draws inside the outline, the outline's corners and, at scale 1.5, its width, and
+    a case that shows a confined window takes an entry of #918 for the border, which cosmic-comp
+    does not draw."
 32. **The private protocol of the overview, and its gesture** (OS5; `doc_overview.md` OV3 and
     decisions 4 and 5; taken by the maintainer with #903). Decision 19's set gives no window's
     workspaces, no place, no move to a workspace, no pin and no reorder, which the overview needs
