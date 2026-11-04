@@ -519,7 +519,7 @@ pub fn watch(on_change: impl Fn(Appearance) + 'static) {
 
 /// Applies `change` to the appearance the store holds and writes the result, in VL4's
 /// order: the GNOME keys, then `org.athanor.desktop.appearance`, then the compositor's keys
-/// through `cosmic` (athanor-compositor-client's `theme::write_cosmic`, the only code that
+/// through `cosmic` (athanor-sulphur-client's `theme::write_cosmic`, the only code that
 /// knows COSMIC). The change is applied to the store's values read here, so a key another
 /// process changed since the caller last read it is not written back.
 /// A failure of the last step is logged and leaves the result `Ok`: the shell reads the

@@ -10,8 +10,8 @@ mod look;
 
 use std::process::ExitCode;
 
-use athanor_compositor_client::glib_loop::GlibSource;
-use athanor_compositor_client::Client;
+use athanor_sulphur_client::glib_loop::GlibSource;
+use athanor_sulphur_client::Client;
 use athanor_dock::start::{self, Prepared};
 use athanor_toolkit::driver;
 use wayland_client::Connection;

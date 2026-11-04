@@ -28,7 +28,7 @@ SUPERVISOR_SOURCE = (
 )
 COMPOSITOR_SESSION_SOURCE = (
     SOURCES
-    / "athanor-compositor/athanor-compositor-1.0.0/data/athanor-compositor-session"
+    / "athanor-sulphur/athanor-sulphur-1.0.0/data/athanor-sulphur-session"
 )
 LAUNCHER_SOURCE = SOURCES / "athanor-system-config/SOURCES/usr/bin/athanor-desktop"
 USER_UNIT_SOURCES = SOURCES / "athanor-system-services/SOURCES/usr/lib/systemd/user"
@@ -41,7 +41,7 @@ PORTAL_SOURCES = (
 
 LAUNCHER = "usr/bin/athanor-desktop"
 SUPERVISOR = "usr/libexec/athanor/session-components"
-COMPOSITOR_SESSION = "usr/bin/athanor-compositor-session"
+COMPOSITOR_SESSION = "usr/bin/athanor-sulphur-session"
 AGENT_UNIT = "usr/lib/systemd/user/cosmic-osd.service"
 AGENT_LIB_DROPINS = "usr/lib/systemd/user/cosmic-osd.service.d"
 AGENT_ETC_DROPINS = "etc/systemd/user/cosmic-osd.service.d"
@@ -243,9 +243,9 @@ class ImageSession(unittest.TestCase):
         self.assertEqual(mod.problems(self.root), [])
 
     def test_an_image_with_the_compositor_but_no_session_script_fails(self):
-        self.write("usr/bin/athanor-compositor", "")
+        self.write("usr/bin/athanor-sulphur", "")
         (self.root / COMPOSITOR_SESSION).unlink()
-        self.assertProblem("/usr/bin/athanor-compositor-session is missing")
+        self.assertProblem("/usr/bin/athanor-sulphur-session is missing")
 
     def test_a_commented_restart_wrapper_fails(self):
         self.edit(

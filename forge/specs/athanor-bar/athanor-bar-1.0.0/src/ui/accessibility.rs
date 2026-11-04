@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use athanor_bar::magnifier::{self, KEY as MAGNIFIER_KEY, SCHEMA as MAGNIFIER_SCHEMA};
 use athanor_bar::screen_reader;
-use athanor_compositor_client::{theme, ScreenFilter};
+use athanor_sulphur_client::{theme, ScreenFilter};
 use athanor_style::appearance::{self, Appearance};
 use gtk4::prelude::*;
 use gtk4::{gio, glib};
@@ -290,7 +290,7 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
         }
         glib::Propagation::Proceed
     });
-    // athanor-compositor's manager is bound at the first watch, before the key is sent.
+    // athanor-sulphur's manager is bound at the first watch, before the key is sent.
     if let Some(Err(err)) = bar.client().map(|client| client.watch_accessibility()) {
         tracing::warn!(error = %err, "cannot watch the compositor's accessibility state");
     }

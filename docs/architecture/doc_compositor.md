@@ -1,6 +1,6 @@
 # Athanor compositor
 
-Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase.
+Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor's client crate to `athanor-sulphur-client`. Only identifiers are renamed; the specified behaviour does not change.
 
 This document answers one question the maintainer raised on 2026-10-04: should Athanor have a
 compositor of its own, one that takes in what niri, Hyprland, MangoWC and the others offer? The
@@ -39,7 +39,7 @@ scrolling layouts, window rules, gestures and the like are judged like any other
 shell: an entry in `shell-features.md` with its sources, approved or excluded by the maintainer
 (`doc_shell_standard.md`, ST3). Version 1 of the register has no surface for them; version 2
 proposes an eleventh surface, **Window management**. An approved entry is met, in order of
-preference, by cosmic-comp as it is, by its configuration through `athanor-compositor-client`
+preference, by cosmic-comp as it is, by its configuration through `athanor-sulphur-client`
 (SH2), by a patch proposed upstream, or by a patch of our own (CO3).
 
 **CO3. The patch set stays small, and each patch has an exit.**

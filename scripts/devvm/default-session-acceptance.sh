@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # default-session-acceptance.sh [stage...]
 # Items 9 to 15 and 17 to 19 of docs/architecture/doc_session.md section 5 (revision 4, SN13
-# step 6) on the dev VM with athanor-compositor installed: the greeter's default session on
+# step 6) on the dev VM with athanor-sulphur installed: the greeter's default session on
 # the own compositor, cosmic-comp's session as the second entry, the hand-offs of
-# athanor-compositor-session to cosmic-comp's session, the supervisor of the locker and the
+# athanor-sulphur-session to cosmic-comp's session, the supervisor of the locker and the
 # idle daemon in their scopes, and the cleanup at the end of a session. The sessions are a
 # test account's, signed in at the greeter through a throwaway uinput keyboard and read over
 # AT-SPI by greeter_probe.py, as greeter-acceptance.sh does; the account's password is its
@@ -18,7 +18,7 @@
 # /run/systemd/user/<unit>.d/, which outlives the account's sessions; the trap removes them,
 # with every other change a stage made in the guest. "Locked" is cosmic-greeter's marker
 # file, as in lock-acceptance.sh. The end-state checks read REMOVED below: what
-# athanor-compositor-session removes.
+# athanor-sulphur-session removes.
 #
 #   account    pia (1006, "Pia"), password pia, her idle timers off; the greeter restarted
 #   default    items 9 and 10: the menu shows both entries, "Athanor" checked and cosmic-comp's
@@ -31,7 +31,7 @@
 #              session's units inactive, its variables gone, ATHANOR_OWN_COMPOSITOR and
 #              XKB_DEFAULT_* included), no unit failed and no core dump since the sign-in
 #   cosmic     items 9 and 10: with cosmic-comp's entry checked, athanor-session starts,
-#              athanor-compositor.service inactive, ATHANOR_OWN_COMPOSITOR unset, both scopes
+#              athanor-sulphur.service inactive, ATHANOR_OWN_COMPOSITOR unset, both scopes
 #              active, the shortcut unit run with its condition met; the lock and the idle
 #              lock hold as in `lock`
 #   grants     item 10: with the compositor's debug log on, a line granting something to the
@@ -45,7 +45,7 @@
 #              Ctrl+Alt+Tab to the dock then Enter on it, each activate its window from under
 #              another, the dock's journal under WAYLAND_DEBUG=1 holding an `activate` of
 #              athanor_toplevel_actions_v1 for each
-#   kill       item 11: with lingering, SIGKILL of athanor-compositor.service brings the greeter
+#   kill       item 11: with lingering, SIGKILL of athanor-sulphur.service brings the greeter
 #              back within 20 s in the end state, the compositor failed with Result=signal,
 #              no session of the account and no cosmic-comp of hers
 #   exit       item 11: a compositor that exits at once hands the sign-in to cosmic-comp's
@@ -58,7 +58,7 @@
 #   keyboard   item 14: US-International types é from the dead acute and e; US types an
 #              apostrophe at once and leaves XKB_DEFAULT_VARIANT out of the compositor's
 #              environment
-#   linger     item 15: with lingering, SIGKILL of athanor-compositor-session brings the
+#   linger     item 15: with lingering, SIGKILL of athanor-sulphur-session brings the
 #              greeter back, which draws and takes keys while the compositor still runs, both
 #              scopes stopped within 1 s of the kill by the journal's clock; a sign-in to
 #              cosmic-comp's entry stops the compositor in athanor-session's cleanup before
@@ -105,9 +105,9 @@ PROBE_DIR=/run/greeter-acceptance
 DEFAULT_TITLE=Athanor
 COSMIC_TITLE="Athanor on cosmic-comp"
 COSMIC_LINE="Magnifier, colour filters, workspace overview and Alt+Tab"
-SCRIPT=/usr/bin/athanor-compositor-session
-READER=/usr/bin/athanor-compositor
-COMPOSITOR=athanor-compositor.service
+SCRIPT=/usr/bin/athanor-sulphur-session
+READER=/usr/bin/athanor-sulphur
+COMPOSITOR=athanor-sulphur.service
 GATE=athanor-desktop.service
 SHORTCUT=athanor-control-center-shortcut.service
 SCOPES=(cosmic-greeter-locker.scope cosmic-idle.scope)
@@ -362,16 +362,16 @@ own_up() {
 }
 
 # cosmic-comp's session started from a sign-in to the default within LIMIT seconds of the
-# password, the journal naming CAUSE in the hand-off under athanor-compositor-session at
+# password, the journal naming CAUSE in the hand-off under athanor-sulphur-session at
 # warning, the compositor inactive and ATHANOR_OWN_COMPOSITOR unset.
 handed_off() { # handed_off LIMIT CAUSE
     local log
     wait_until "$1" cosmic_running || fail "no cosmic-comp of $USER_NAME $1 s after the password"
     echo "cosmic-comp's session started $((SECONDS - SIGN_IN_AT)) s after the password"
     ((SECONDS - SIGN_IN_AT <= $1)) || fail "cosmic-comp's session started later than $1 s after the password"
-    log=$(journal "$SIGN_IN_SINCE" -o cat -p warning -t athanor-compositor-session)
+    log=$(journal "$SIGN_IN_SINCE" -o cat -p warning -t athanor-sulphur-session)
     grep -F "starting cosmic-comp's session" <<< "$log" | grep -F -- "$2" > /dev/null ||
-        fail "no hand-off naming '$2' under athanor-compositor-session: $log"
+        fail "no hand-off naming '$2' under athanor-sulphur-session: $log"
     ! is_active "$COMPOSITOR" || fail "$COMPOSITOR is active in cosmic-comp's session"
     read_environment
     ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$ENVIRONMENT" ||
@@ -570,7 +570,7 @@ all_connected() {
 
 stage_grants() {
     local name line closed
-    drop_in "$COMPOSITOR" $'[Service]\nEnvironment=RUST_LOG=athanor_compositor=debug'
+    drop_in "$COMPOSITOR" $'[Service]\nEnvironment=RUST_LOG=athanor_sulphur=debug'
     own_up
     type_keys @super
     sleep 3

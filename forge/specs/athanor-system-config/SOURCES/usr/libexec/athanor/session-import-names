@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # session-import-names - the reader of the session's import list (doc_session.md, SN2),
-# sourced by athanor-desktop (cosmic-comp's session) and by athanor-compositor-session (the own
+# sourced by athanor-desktop (cosmic-comp's session) and by athanor-sulphur-session (the own
 # compositor's), so that both read the list the same way. It defines a function and runs
 # nothing.
 

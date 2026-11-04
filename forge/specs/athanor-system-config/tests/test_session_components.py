@@ -234,7 +234,7 @@ class Supervisor(unittest.TestCase):
 class SessionCleanup(unittest.TestCase):
     def run_session(self, compositor_installed):
         s = Scratch(self)
-        unit = s.work / "athanor-compositor.service"
+        unit = s.work / "athanor-sulphur.service"
         if compositor_installed:
             unit.write_text("")
         s.stub("systemctl", 'case "$*" in *is-active*) exit 3 ;; esac')
@@ -246,7 +246,7 @@ class SessionCleanup(unittest.TestCase):
                 "/usr/libexec/athanor/session-environment",
                 str(SOURCES / "usr/libexec/athanor/session-environment"),
             )
-            .replace("/usr/lib/systemd/user/athanor-compositor.service", str(unit))
+            .replace("/usr/lib/systemd/user/athanor-sulphur.service", str(unit))
             .replace(
                 "/usr/bin/athanor-usbguard-hook", str(s.bin / "athanor-usbguard-hook")
             )
@@ -267,7 +267,7 @@ class SessionCleanup(unittest.TestCase):
 
     def test_what_the_own_compositor_left_is_cleared_where_it_is_installed(self):
         calls = self.run_session(compositor_installed=True)
-        self.assertIn("systemctl --user stop athanor-compositor.service", calls)
+        self.assertIn("systemctl --user stop athanor-sulphur.service", calls)
         self.assertIn("systemctl --user is-active --quiet cosmic-idle.scope", calls)
         self.assertIn(
             "systemctl --user unset-environment ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT"
@@ -281,7 +281,7 @@ class SessionCleanup(unittest.TestCase):
 
     def test_the_compositor_unit_is_not_stopped_where_it_is_not_installed(self):
         calls = self.run_session(compositor_installed=False)
-        self.assertNotIn("systemctl --user stop athanor-compositor.service", calls)
+        self.assertNotIn("systemctl --user stop athanor-sulphur.service", calls)
         self.assertIn(
             "systemctl --user is-active --quiet cosmic-greeter-locker.scope", calls
         )

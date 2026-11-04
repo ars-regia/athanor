@@ -50,7 +50,7 @@ layout cases run athanor-dock beside the bar this way, and chooser-e2e the choos
 appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program's to
 /out/$RIG_TAG-<basename>.log, where the checks read the "layout applied" lines.
 
---unit runs the client as its unit would for athanor-compositor's allow-list (doc_own_stack.md
+--unit runs the client as its unit would for athanor-sulphur's allow-list (doc_own_stack.md
 OS4): from /usr/bin/<client>, a copy of /out/bin/<client>, inside the cgroup <client>.service,
 which it joins before it runs, so that the compositor reads that unit when it connects; each
 --beside program does the same as its own unit. It needs

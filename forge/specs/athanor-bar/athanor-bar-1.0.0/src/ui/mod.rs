@@ -34,7 +34,7 @@ use std::time::Duration;
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
 use athanor_bar::order::{self, Module};
-use athanor_compositor_client::{outputs, Client, Event, Opener};
+use athanor_sulphur_client::{outputs, Client, Event, Opener};
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};

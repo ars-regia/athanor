@@ -6,7 +6,7 @@
 //! system defaults from a directory placed first in `XDG_DATA_DIRS`.
 //!
 //! It also writes `<out-dir>/variants.json`, what the appearance apply function of
-//! athanor-compositor-client writes to the user's built themes (doc_visual_language.md,
+//! athanor-sulphur-client writes to the user's built themes (doc_visual_language.md,
 //! VL4, spike VL-S1): for each mode, each contrast and each of libadwaita's nine accent
 //! presets, every key of the built theme. Whole themes, not differences from the default:
 //! cosmic-config falls back to a user's `v1` key for one missing in `v2`, and earlier

@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:75.fc43}
+Release:        %{?autorelease}%{!?autorelease:76.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -89,6 +89,10 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-76
+- Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
+  binaries, user unit, session script and data directory.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-75
 - The comments of the import list and of athanor-desktop say that the end of the session
   unsets only the names of the display (doc_session.md, SN2, #825).

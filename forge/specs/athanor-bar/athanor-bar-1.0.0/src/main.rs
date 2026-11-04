@@ -13,7 +13,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use athanor_compositor_client::theme;
+use athanor_sulphur_client::theme;
 use athanor_layout::favorites;
 use athanor_layout::loader::{self, Paths, Source, VENDOR_DIR};
 use athanor_layout::user::write_target;

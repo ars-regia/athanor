@@ -1,12 +1,12 @@
 #!/usr/bin/python3
-"""compositor_e2e.py - package 2a in the rig: athanor-compositor-client against the
+"""compositor_e2e.py - package 2a in the rig: athanor-sulphur-client against the
 cosmic-comp of a scene, through its cc-probe example. Two windows of our own
 (cc_window.py) are the subjects. The same probe against the parent sway, which offers
 none of the COSMIC globals, must fail each request with an error and never crash. The
 client built without GTK (cc-launch: a plain Wayland connection, GLib's main context in a
 calloop loop) reads the output from wl_output and launches a desktop entry behind a
 security context, through fake_systemd.py. Under RIG_COMPOSITOR=athanor the probe runs
-against athanor-compositor instead, as its rig unit (rig-cc-probe.service, which
+against athanor-sulphur instead, as its rig unit (rig-cc-probe.service, which
 rig-privileged-clients grants the toplevel list, athanor_toplevel_manager_v1,
 athanor_toplevel_actions_v1, the workspaces and athanor_workspace_tiling_manager_v1), and
 outside that unit sees no window; there its Launcher opener calls athanor-launcher's
@@ -358,7 +358,7 @@ def sway():
                code == 1 and len(errors) == 1 and reason in errors[0], lines)
 
 
-# athanor-compositor runs without a parent sway.
+# athanor-sulphur runs without a parent sway.
 if os.environ.get("RIG_COMPOSITOR") == "athanor":
     athanor()
 else:

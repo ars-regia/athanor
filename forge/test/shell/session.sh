@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The scene's compositor. cosmic-comp is started by sway, so that it inherits sway's
 # WAYLAND_DISPLAY and nests in it. With RIG_COMPOSITOR=athanor, scene.sh starts this script
-# itself, and athanor-compositor runs on its headless backend with the arguments given, one
+# itself, and athanor-sulphur runs on its headless backend with the arguments given, one
 # --output per virtual output (doc_own_stack.md, OS6).
 set -euo pipefail
 if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
@@ -10,14 +10,14 @@ if [ "${RIG_COMPOSITOR:-cosmic}" = athanor ]; then
     # rig's own lines (grim) follow the shipped ones, in the rig only, after a newline of their
     # own: a shipped list without a final newline would otherwise join its last line to the
     # rig's first. The compositor skips the blank line this can leave (identity.rs).
-    install -d /usr/share/athanor/compositor
+    install -d /usr/share/athanor/sulphur
     {
-        cat /repo/forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/privileged-clients
+        cat /repo/forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privileged-clients
         echo
         cat /repo/forge/test/shell/rig-privileged-clients
-    } > /usr/share/athanor/compositor/privileged-clients
-    chmod 0644 /usr/share/athanor/compositor/privileged-clients
-    exec /out/bin/athanor-compositor --headless "$@" &> "/out/${RIG_TAG:-scene}-compositor.log"
+    } > /usr/share/athanor/sulphur/privileged-clients
+    chmod 0644 /usr/share/athanor/sulphur/privileged-clients
+    exec /out/bin/athanor-sulphur --headless "$@" &> "/out/${RIG_TAG:-scene}-compositor.log"
 fi
 export COSMIC_BACKEND=winit
 exec cosmic-comp --no-xwayland &> "/out/${RIG_TAG:-scene}-cosmic-comp.log"

@@ -2,7 +2,7 @@
 //! compositor at its start and at each change, until `athanor-a11y watch` takes that over, and
 //! writes an aid's key when the compositor turned the aid off or the user accepts an offer.
 
-use athanor_compositor_client::{KeyboardAid, KeyboardAids, MAX_AID_DELAY};
+use athanor_sulphur_client::{KeyboardAid, KeyboardAids, MAX_AID_DELAY};
 use gtk4::gio;
 use gtk4::gio::prelude::*;
 use gtk4::glib;

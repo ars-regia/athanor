@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A GTK4 window that draws a new frame at every tick of its frame clock.
 
-athanor-compositor's headless soak (doc_own_stack.md, C1 task 2) runs it beside a Vulkan or EGL
+athanor-sulphur's headless soak (doc_own_stack.md, C1 task 2) runs it beside a Vulkan or EGL
 client: each frame is a commit the compositor times. GTK chooses its renderer, so on a GPU the
 frames reach the compositor through dmabuf, and on llvmpipe through wl_shm.
 """

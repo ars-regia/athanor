@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
+  binaries, user unit, session script and data directory.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Tab leaves the card for the high contrast and power buttons (#751).
 - The password field shows the focus ring round the field (AX8, #751).
