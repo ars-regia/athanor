@@ -1015,6 +1015,9 @@ class CheckPlan(Repo):
             **self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP),
             "system/nvidia/locks/open.lock": "l\n",
             "system/nvidia/lock.py": "p\n",
+            "system/nvidia/azoth-nvidia-kmod.spec": "s\n",
+            "system/nvidia/build-rpms.sh": "b\n",
+            "system/nvidia/gate.sh": "g\n",
             "system/nvidia/tests/test_lock.py": "t\n",
             "docs/architecture/doc_system_image.md": "d\n",
         })
