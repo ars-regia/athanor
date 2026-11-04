@@ -260,12 +260,13 @@ impl State {
         }
     }
 
-    /// Moves the pointer to `location` and gives it to the surface under it.
+    /// Moves the pointer to `location` and gives it to the surface under it, or to a
+    /// confinement's surface (`State::pointer_target`).
     pub(crate) fn pointer_to(&mut self, location: Point<f64, Logical>, time: InputTime) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let under = self.surface_under(location);
+        let under = self.pointer_target(location);
         pointer.motion(
             self,
             under,
@@ -818,11 +819,15 @@ fn on_panel(
 }
 
 /// The point of `area` nearest `to`: from its first pixel to its last, never its far edge.
-fn clamp_into(area: Rectangle<i32, Logical>, to: Point<f64, Logical>) -> Point<f64, Logical> {
+pub(crate) fn clamp_into(
+    area: Rectangle<i32, Logical>,
+    to: Point<f64, Logical>,
+) -> Point<f64, Logical> {
     let (min, max) = (area.loc.to_f64(), (area.loc + area.size).to_f64());
     Point::from((
-        to.x.clamp(min.x, max.x - 1.0),
-        to.y.clamp(min.y, max.y - 1.0),
+        // An empty area, which a fractional scale may round to, stops at its corner.
+        to.x.clamp(min.x, (max.x - 1.0).max(min.x)),
+        to.y.clamp(min.y, (max.y - 1.0).max(min.y)),
     ))
 }
 

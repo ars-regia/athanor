@@ -31,16 +31,24 @@
 //! under the pointer is a subsurface of; motion off the outputs, confined or not, is kept on
 //! them by `input::confine`; an absolute motion under a constraint is taken as a relative one;
 //! the hot corner, the grabs' warps and the position hint are left out.
+//! Changed for Athanor on 2026-11-04 (#860): a confinement holds the pointer to its surface's
+//! own input region, its subsurfaces left out, keeps the pointer's focus on that surface, gives
+//! it the focus when it activates, and stops a motion that would leave it at the edge rather
+//! than dropping the motion.
 
 use crate::state::State;
 use smithay::backend::input::InputTime;
+use smithay::backend::renderer::utils::with_renderer_surface_state;
+use smithay::desktop::utils::under_from_surface_tree;
+use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{MotionEvent, PointerHandle, RelativeMotionEvent};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER};
 use smithay::wayland::compositor::{
-    get_parent, with_states, RegionAttributes, SubsurfaceCachedState,
+    get_parent, with_states, RectangleKind, RegionAttributes, SubsurfaceCachedState,
+    SurfaceAttributes,
 };
 use smithay::wayland::keyboard_shortcuts_inhibit::{
     KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
@@ -100,6 +108,84 @@ fn root_of(surface: WlSurface, origin: Point<f64, Logical>) -> (WlSurface, Point
         surface = parent;
     }
     (surface, origin)
+}
+
+/// Whether `at` is in the own input region of `root`, which is at `origin`: its subsurfaces
+/// left out, as pointer-constraints-unstable-v1 takes the region of the surface a constraint is
+/// made for. It locks the surface's state, so never inside `with_pointer_constraint`.
+fn on_surface(root: &WlSurface, origin: Point<f64, Logical>, at: Point<f64, Logical>) -> bool {
+    under_from_surface_tree(root, at - origin, (0, 0), WindowSurfaceType::TOPLEVEL).is_some()
+}
+
+/// Whether `at` is in `region`, in the coordinates of the surface at `origin`, if there is one.
+fn in_region(
+    region: Option<&RegionAttributes>,
+    origin: Point<f64, Logical>,
+    at: Point<f64, Logical>,
+) -> bool {
+    region.is_none_or(|region| region.contains((at - origin).to_i32_round()))
+}
+
+/// At most this many rectangles make up a confinement's area, and past it their bounds stand
+/// for them: the client sets the regions, and a motion looks at every rectangle.
+const AREA_RECTS: usize = 64;
+
+/// The bounds of `rects`, if there are any.
+fn bounds(
+    rects: impl IntoIterator<Item = Rectangle<i32, Logical>>,
+) -> Option<Rectangle<i32, Logical>> {
+    rects.into_iter().reduce(Rectangle::merge)
+}
+
+/// The rectangles of `region`, which may overlap: each subtraction cut out of the additions
+/// before it, as `RegionAttributes::contains` reads them. Past `AREA_RECTS` of them, the
+/// bounds of its additions, holes and all.
+fn rects_of(region: &RegionAttributes) -> Vec<Rectangle<i32, Logical>> {
+    let mut rects = Vec::new();
+    for (kind, rect) in &region.rects {
+        match kind {
+            RectangleKind::Add => rects.push(*rect),
+            RectangleKind::Subtract => rects = Rectangle::subtract_rects_many(rects, [*rect]),
+        }
+        if rects.len() > AREA_RECTS {
+            let adds = region.rects.iter().filter(|(kind, _)| matches!(kind, RectangleKind::Add));
+            return bounds(adds.map(|(_, rect)| *rect)).into_iter().collect();
+        }
+    }
+    rects
+}
+
+/// A confinement's area in its surface's coordinates, as at most `AREA_RECTS` rectangles: the
+/// surface of `size` cut to each of `regions`, or the bounds of the cuts past that many.
+fn area_of<'a>(
+    size: Size<i32, Logical>,
+    regions: impl IntoIterator<Item = &'a RegionAttributes>,
+) -> Vec<Rectangle<i32, Logical>> {
+    regions
+        .into_iter()
+        .fold(vec![Rectangle::from_size(size)], |areas, region| {
+            let rects = rects_of(region);
+            let cut: Vec<_> = areas
+                .iter()
+                .flat_map(|area| rects.iter().filter_map(move |rect| rect.intersection(*area)))
+                .collect();
+            if cut.len() > AREA_RECTS {
+                bounds(cut).into_iter().collect()
+            } else {
+                cut
+            }
+        })
+}
+
+/// Whether a constraint of `root`, which is at `origin`, may hold the pointer at `at`: on the
+/// surface's own input region and in `region`.
+fn confines(
+    root: &WlSurface,
+    origin: Point<f64, Logical>,
+    region: Option<&RegionAttributes>,
+    at: Point<f64, Logical>,
+) -> bool {
+    on_surface(root, origin, at) && in_region(region, origin, at)
 }
 
 impl PointerConstraintsHandler for State {
@@ -181,17 +267,36 @@ impl State {
         })
     }
 
+    /// The surface the pointer at `at` goes to: under an active confinement, the surface it
+    /// was made for wherever the confinement may hold the pointer, over that surface's
+    /// subsurfaces too; else the surface under `at`. Smithay's `PointerTarget::leave` for
+    /// `WlSurface` deactivates the constraint of the surface the pointer leaves, so a focus
+    /// that went to a subsurface would end the confinement, a oneshot one for good (#860).
+    pub(crate) fn pointer_target(
+        &self,
+        at: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let held = self
+            .seat
+            .get_pointer()
+            .and_then(|pointer| self.hold(&pointer, at));
+        match held {
+            Some(Hold::Confined(root, origin, region))
+                if confines(&root, origin, region.as_ref(), at) =>
+            {
+                Some((root, origin))
+            }
+            _ => self.surface_under(at),
+        }
+    }
+
     /// Activates the constraint of the surface the pointer is on, or of the surface that one
-    /// is a subsurface of, when it may apply, inside its region if it has one, and deactivates
-    /// it when it may not.
-    ///
-    /// Known limit: when a confined pointer moves from its surface onto one of its subsurfaces,
-    /// Smithay's `PointerTarget::leave` for `WlSurface` deactivates the surface's constraint
-    /// before this runs: a persistent confinement is sent `unconfined` then `confined` again
-    /// here, and a oneshot one has ended. The pointer focus is the surface under the pointer, as
-    /// wl_pointer requires, so nothing here can keep the leave from happening; the fix belongs
-    /// in Smithay, which would have to keep a constraint across a move between surfaces of one
-    /// tree (`fixture::constraints::a_move_onto_a_subsurface_reconfines`).
+    /// is a subsurface of, when it may apply, inside that surface's own input region and its
+    /// region if it has one, and deactivates it when it may not. A confinement that activates
+    /// over a subsurface gives the pointer's focus to its surface at once (`State::repoint`),
+    /// as "confined" promises, so that a click before the next motion reaches that surface.
+    /// A lock, too, activates only over its surface's own input region, not over a subsurface
+    /// outside it, as the protocol scopes either constraint to the surface it is made for.
     pub(crate) fn refresh_constraint(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -200,41 +305,43 @@ impl State {
             return;
         };
         let at = pointer.current_location();
+        // The focus is the surface under the pointer, or under a confinement its surface
+        // (`pointer_target`): either way a surface of the tree under the pointer.
+        let root = root_of(focus, Point::default()).0;
         let under = self
             .surface_under(at)
-            .filter(|(surface, _)| *surface == focus)
-            .map(|(surface, origin)| root_of(surface, origin));
-        let root = match &under {
-            Some((root, _)) => root.clone(),
-            None => root_of(focus, Point::default()).0,
-        };
+            .map(|(surface, origin)| root_of(surface, origin))
+            .filter(|(under, _)| *under == root);
+        let on = under
+            .as_ref()
+            .is_some_and(|(_, origin)| on_surface(&root, *origin, at));
         let allowed = self.has_keyboard(&root) && !self.is_suspended(&root);
-        with_pointer_constraint(&root, &pointer, |constraint| {
+        let activated = with_pointer_constraint(&root, &pointer, |constraint| {
             let Some(constraint) = constraint else {
-                return;
+                return false;
             };
             if !allowed {
                 constraint.deactivate();
-                return;
+                return false;
             }
             let Some((_, origin)) = under else {
-                return;
+                return false;
             };
-            if constraint.is_active() {
-                return;
-            }
-            if let Some(region) = constraint.region() {
-                if !region.contains((at - origin).to_i32_round()) {
-                    return;
-                }
+            if constraint.is_active() || !on || !in_region(constraint.region(), origin, at) {
+                return false;
             }
             constraint.activate();
+            true
         });
+        if activated {
+            self.repoint();
+        }
     }
 
     /// A relative motion by `delta`: the pointer stays where it is while locked, and on its
-    /// surface, in its region and on the outputs while confined; the surface it is on is sent
-    /// the motion as relative-pointer-unstable-v1 reports it, whether the pointer moved or not.
+    /// surface, in its region and on the outputs while confined, at the edge it would cross;
+    /// the surface it is on is sent the motion as relative-pointer-unstable-v1 reports it,
+    /// whether the pointer moved or not.
     pub(crate) fn pointer_moved_by(
         &mut self,
         delta: Point<f64, Logical>,
@@ -249,20 +356,13 @@ impl State {
         let to = match self.hold(&pointer, from) {
             Some(Hold::Locked) => None,
             Some(Hold::Confined(root, origin, region)) => {
-                crate::input::confine(&outputs, from, from + delta).filter(|to| {
-                    let on_root = self
-                        .surface_under(*to)
-                        .is_some_and(|(under, at)| root_of(under, at).0 == root);
-                    on_root
-                        && region
-                            .as_ref()
-                            .is_none_or(|region| region.contains((*to - origin).to_i32_round()))
-                })
+                crate::input::confine(&outputs, from, from + delta)
+                    .and_then(|to| self.confined_to(&outputs, &root, origin, region.as_ref(), to))
             }
             None => crate::input::confine(&outputs, from, from + delta),
         };
         if let Some(location) = to {
-            let under = self.surface_under(location);
+            let under = self.pointer_target(location);
             pointer.motion(
                 self,
                 under,
@@ -288,6 +388,58 @@ impl State {
         );
         pointer.frame(self);
         self.refresh_constraint();
+    }
+
+    /// Where a pointer confined to `root`, which is at `origin`, and to `region` stops on its
+    /// way to `to`: at `to` when the confinement may hold it there, on `outputs` and not under
+    /// another window; else at the nearest such point of the confinement's area, the surface's
+    /// input region and `region`, the edge it ran into. None when there is no such point.
+    fn confined_to(
+        &self,
+        outputs: &[Rectangle<i32, Logical>],
+        root: &WlSurface,
+        origin: Point<f64, Logical>,
+        region: Option<&RegionAttributes>,
+        to: Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
+        let holds = |at: &Point<f64, Logical>| {
+            outputs.iter().any(|area| area.to_f64().contains(*at))
+                && self
+                    .surface_under(*at)
+                    .is_some_and(|(under, on)| root_of(under, on).0 == *root)
+                && confines(root, origin, region, *at)
+        };
+        if holds(&to) {
+            return Some(to);
+        }
+        // The area in the surface's coordinates, as rectangles: the surface's size, as smithay
+        // hit-tests it, cut to its input region and to `region`. A root's view has no offset,
+        // which is a subsurface's location.
+        let size = with_renderer_surface_state(root, |state| state.view())
+            .flatten()?
+            .dst;
+        let input = with_states(root, |states| {
+            states
+                .cached_state
+                .get::<SurfaceAttributes>()
+                .current()
+                .input_region
+                .clone()
+        });
+        let areas = area_of(size, [input.as_ref(), region].into_iter().flatten());
+        // ponytail: the nearest point of the area, so a motion past the middle of a hole
+        // narrower than its step lands across the hole; clip the motion's segment to the area,
+        // as Weston does, if that matters.
+        let distance = |at: &Point<f64, Logical>| {
+            let off = *at - to;
+            off.x * off.x + off.y * off.y
+        };
+        let mut stops: Vec<_> = areas
+            .into_iter()
+            .map(|area| origin + crate::input::clamp_into(area, to - origin))
+            .collect();
+        stops.sort_by(|a, b| distance(a).total_cmp(&distance(b)));
+        stops.into_iter().find(holds)
     }
 
     /// An absolute motion of `device` to `to`, from a nested backend, an absolute pointer or a
@@ -372,5 +524,61 @@ impl State {
                 self.lift(&client.id());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use RectangleKind::{Add, Subtract};
+
+    fn region(rects: &[(RectangleKind, [i32; 4])]) -> RegionAttributes {
+        RegionAttributes {
+            rects: rects
+                .iter()
+                .map(|&(kind, [x, y, w, h])| (kind, Rectangle::new((x, y).into(), (w, h).into())))
+                .collect(),
+        }
+    }
+
+    /// `rects_of` covers what `RegionAttributes::contains` does, in its order: a subtraction
+    /// cuts the additions before it, an addition after it fills the hole again, and
+    /// overlapping additions cover their union.
+    #[test]
+    fn rects_of_reads_a_region_in_order() {
+        let region = region(&[
+            (Add, [0, 0, 20, 10]),
+            (Add, [10, 5, 20, 10]),
+            (Subtract, [5, 0, 10, 15]),
+            (Add, [8, 2, 4, 4]),
+        ]);
+        let rects = rects_of(&region);
+        for x in -2..32 {
+            for y in -2..17 {
+                let at = Point::from((x, y));
+                let covered = rects.iter().any(|rect| rect.contains(at));
+                assert_eq!(covered, region.contains(at), "at {at:?}");
+            }
+        }
+    }
+
+    /// A region of more rectangles than `AREA_RECTS` stands as the bounds of its additions,
+    /// so a client's region cannot make a motion costly.
+    #[test]
+    fn rects_of_bounds_a_region_of_many_rectangles() {
+        let adds: Vec<_> = (0..1000).map(|x| (Add, [x, 0, 2, 1])).collect();
+        let bounds = Rectangle::new((0, 0).into(), (1001, 1).into());
+        assert_eq!(rects_of(&region(&adds)), vec![bounds]);
+    }
+
+    /// A confinement's area is at most `AREA_RECTS` rectangles, however many the cuts of its
+    /// regions make: stripes across stripes stand as their bounds.
+    #[test]
+    fn area_of_is_bounded() {
+        let columns: Vec<_> = (0..60).map(|x| (Add, [2 * x, 0, 1, 200])).collect();
+        let rows: Vec<_> = (0..60).map(|y| (Add, [0, 2 * y, 200, 1])).collect();
+        let (columns, rows) = (region(&columns), region(&rows));
+        let area = area_of((200, 200).into(), [&columns, &rows]);
+        assert_eq!(area, vec![Rectangle::new((0, 0).into(), (119, 119).into())]);
     }
 }

@@ -1,7 +1,8 @@
 //! The focus outline's width and colour, from the keys of COSMIC's theme that cosmic-comp reads
-//! (doc_own_stack.md decision 31; spike VL-S1, section 2.2). Nothing here writes. A value that
-//! cannot be read leaves the last one, logged, and before any was read the outline takes the
-//! factory accent: the outline is never lost to a bad file.
+//! (doc_own_stack.md decision 31; spike VL-S1, section 2.2), and the windows' corners and
+//! divider (#918). Nothing here writes. A value that cannot be read leaves the last one, logged,
+//! and before any was read the outline takes the factory accent: the outline is never lost to a
+//! bad file.
 
 use crate::state::State;
 use crate::xkb_config::{read, Refused, Watch};
@@ -26,12 +27,32 @@ const FACTORY_ACCENT: [f32; 4] = [
 const FACTORY_WIDTH: i32 = 3;
 /// A wider `active_hint` is refused, so that a bad value does not cover the desktop.
 const MAX_WIDTH: i32 = 32;
+/// Calmo's `radius_s` of 8, as cosmic-comp widens it for a window.
+const FACTORY_RADIUS: [i32; 4] = [12; 4];
+/// A larger `radius_s` is refused, as a bad value.
+const MAX_RADIUS: f32 = 64.0;
+/// Calmo's dark `bg_divider`, `#393b4a`.
+const FACTORY_DIVIDER: [f32; 4] = [
+    0x39 as f32 / 255.0,
+    0x3b as f32 / 255.0,
+    0x4a as f32 / 255.0,
+    1.0,
+];
 
 /// What a frame draws: a width in logical pixels and a straight colour.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Outline {
     pub width: i32,
     pub colour: [f32; 4],
+}
+
+/// What every window neither maximised nor full-screen draws under cosmic-comp 1.11.0: its
+/// corners, top left, top right, bottom right and bottom left, in logical pixels, and the
+/// straight colour of its divider.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edge {
+    pub radius: [i32; 4],
+    pub divider: [f32; 4],
 }
 
 /// The values last read, and the `cosmic` directories they come from.
@@ -41,6 +62,7 @@ pub struct FocusTheme {
     dark: bool,
     pub(crate) enabled: bool,
     outline: Outline,
+    edge: Edge,
 }
 
 impl Default for FocusTheme {
@@ -53,6 +75,10 @@ impl Default for FocusTheme {
             outline: Outline {
                 width: FACTORY_WIDTH,
                 colour: FACTORY_ACCENT,
+            },
+            edge: Edge {
+                radius: FACTORY_RADIUS,
+                divider: FACTORY_DIVIDER,
             },
         }
     }
@@ -125,10 +151,9 @@ fn parse_hint(text: &str) -> Result<Option<[f32; 4]>, Refused> {
     }
 }
 
-/// `accent`, a whole `Component`, of which the outline takes `base`, written first.
+/// `accent`, a whole `Component`, of which the outline takes `base`.
 fn parse_accent(text: &str) -> Result<[f32; 4], Refused> {
-    let (_, base) = text.split_once("base:").ok_or(Refused::Missing("base"))?;
-    parse_colour(base)
+    parse_colour(field(text, "base")?)
 }
 
 fn parse_bool(text: &str) -> Result<bool, Refused> {
@@ -142,10 +167,95 @@ fn parse_width(text: &str) -> Result<i32, Refused> {
     }
 }
 
+/// The value of `name` among the fields of the outermost parentheses of `text`, not of a field
+/// nested in them: what follows `name:`, up to the field's comma or the closing parenthesis. In a
+/// string, a `\` escapes the byte after it.
+fn field<'a>(text: &'a str, name: &str) -> Result<&'a str, Refused> {
+    let mut depth = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (at, byte) in text.bytes().enumerate() {
+        match byte {
+            _ if escaped => escaped = false,
+            b'\\' if quoted => escaped = true,
+            b'"' => quoted = !quoted,
+            b'(' if !quoted => depth += 1,
+            b')' if !quoted => depth -= 1,
+            _ if quoted || depth != 1 => {}
+            _ => {
+                let before = at.checked_sub(1).map(|before| text.as_bytes()[before]);
+                let starts = before.is_none_or(|byte| !byte.is_ascii_alphanumeric() && byte != b'_');
+                let rest = text.get(at..).and_then(|rest| rest.strip_prefix(name));
+                let rest = rest.map(str::trim_start);
+                if let Some(value) = rest.and_then(|rest| rest.strip_prefix(':')).filter(|_| starts)
+                {
+                    return Ok(bounded(value));
+                }
+            }
+        }
+    }
+    Err(Refused::Missing("a field"))
+}
+
+/// `text` up to its first comma or closing parenthesis outside parentheses and strings, in which
+/// a `\` escapes the character after it.
+fn bounded(text: &str) -> &str {
+    let mut depth = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (at, char) in text.char_indices() {
+        match char {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            _ if quoted => {}
+            '(' => depth += 1,
+            ',' | ')' if depth == 0 => return &text[..at],
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    text
+}
+
+/// `corner_radii`, of which a window takes `radius_s`, widened by 4 from 4 up and rounded, as
+/// cosmic-comp 1.11.0 rounds a window's corners.
+fn parse_radius(text: &str) -> Result<[i32; 4], Refused> {
+    let corners = field(text, "radius_s")?
+        .trim()
+        .strip_prefix('(')
+        .and_then(|corners| corners.strip_suffix(')'))
+        .ok_or(Refused::Syntax(0))?;
+    let corners: Vec<f32> = corners
+        .split(',')
+        .map(str::trim)
+        .filter(|corner| !corner.is_empty())
+        .map(|corner| corner.parse::<f32>().map_err(|_| Refused::Syntax(0)))
+        .collect::<Result<_, _>>()?;
+    let corners: [f32; 4] = corners.try_into().map_err(|_| Refused::Syntax(0))?;
+    if !corners.iter().all(|corner| (0.0..=MAX_RADIUS).contains(corner)) {
+        return Err(Refused::Syntax(0));
+    }
+    Ok(corners.map(|corner| {
+        let widened = if corner < 4.0 { corner } else { corner + 4.0 };
+        widened.round() as i32
+    }))
+}
+
+/// `background`, a whole `Container`, of which the divider takes its own `divider`, not its
+/// component's.
+fn parse_divider(text: &str) -> Result<[f32; 4], Refused> {
+    parse_colour(field(text, "divider")?)
+}
+
 impl FocusTheme {
     /// With the setting on and a width, what a frame draws.
     pub fn outline(&self) -> Option<Outline> {
         (self.enabled && self.outline.width > 0).then_some(self.outline)
+    }
+
+    pub fn edge(&self) -> Edge {
+        self.edge
     }
 
     /// The directories COSMIC reads `key` from, first found first (spike VL-S1, section 2.1).
@@ -212,6 +322,16 @@ impl FocusTheme {
                 None => {}
             },
         }
+        match self.theme_key("corner_radii", parse_radius) {
+            Some(Ok(radius)) => self.edge.radius = radius,
+            Some(Err(reason)) => refused("corner_radii", &reason),
+            None => {}
+        }
+        match self.theme_key("background", parse_divider) {
+            Some(Ok(divider)) => self.edge.divider = divider,
+            Some(Err(reason)) => refused("background", &reason),
+            None => {}
+        }
     }
 }
 
@@ -235,7 +355,13 @@ fn watched(user: &Path) -> Vec<PathBuf> {
         user.join(COMP).join("active_hint"),
     ];
     for component in [DARK, LIGHT] {
-        for key in ["active_hint", "window_hint", "accent"] {
+        for key in [
+            "active_hint",
+            "window_hint",
+            "accent",
+            "corner_radii",
+            "background",
+        ] {
             for version in ["v2", "v1"] {
                 paths.push(user.join(component).join(version).join(key));
             }
@@ -323,9 +449,18 @@ mod tests {
         assert_eq!(parse_accent(accent).expect("an accent"), orange);
         let hint = parse_hint("Some(\"#FF8000\")").expect("a hint");
         assert_eq!(hint, Some(orange));
-        assert!(parse_accent("base: \"#FF80\"").is_err());
-        assert!(parse_accent("base: \"#GG8000FF\"").is_err());
-        assert!(parse_accent("base: \"FF8000FF\"").is_err());
+        assert!(parse_accent("(base: \"#FF80\")").is_err());
+        assert!(parse_accent("(base: \"#GG8000FF\")").is_err());
+        assert!(parse_accent("(base: \"FF8000FF\")").is_err());
+    }
+
+    /// `base` ends at its comma: a value that is not a colour is refused, not read past.
+    #[test]
+    fn the_base_ends_at_its_comma() {
+        assert!(parse_accent("(base: None, hover: \"#FF8000FF\")").is_err());
+        assert!(parse_accent("(hover: (red: 0.0, green: 0.0, blue: 0.0), base: None)").is_err());
+        let accent = "(hover: \"#000000FF\", base: \"#FF8000FF\")";
+        assert_eq!(parse_accent(accent).expect("an accent"), [1.0, 128.0 / 255.0, 0.0, 1.0]);
     }
 
     #[test]
@@ -343,6 +478,102 @@ mod tests {
         assert_eq!(parse_width("3\n").expect("a width"), 3);
         assert!(parse_width("-1").is_err());
         assert!(parse_width("33").is_err());
+    }
+
+    /// Calmo's `corner_radii` and `background`, as `v2` holds them.
+    const RADII: &str = "(\n    radius_0: (0.0, 0.0, 0.0, 0.0),\n    radius_xs: (4.0, 4.0, 4.0, \
+        4.0),\n    radius_s: (8.0, 8.0, 8.0, 8.0),\n    radius_m: (16.0, 16.0, 16.0, 16.0),\n)";
+    const BACKGROUND: &str = "(\n    base: \"#101323FF\",\n    component: (\n        base: \
+        \"#222638FF\",\n        divider: \"#F7F8FF33\",\n    ),\n    divider: \"#393B4AFF\",\n    \
+        on: \"#F7F8FFFF\",\n)";
+
+    /// cosmic-comp widens `radius_s` by 4 from 4 up: Calmo's 8 is a window's 12.
+    #[test]
+    fn a_window_takes_radius_s_widened() {
+        assert_eq!(parse_radius(RADII).expect("radii"), [12; 4]);
+        let small = "(radius_xs: (9.0, 9.0, 9.0, 9.0), radius_s: (2.0, 3.6, 4.0, 10.4))";
+        assert_eq!(parse_radius(small).expect("radii"), [2, 4, 8, 14]);
+        assert!(parse_radius("(radius_s: (8.0, 8.0, 8.0))").is_err());
+        assert!(parse_radius("(radius_s: (8.0, 8.0, 8.0, 99.0))").is_err());
+        assert!(parse_radius("(radius_s: (8.0, 8.0, -1.0, 8.0))").is_err());
+        assert!(parse_radius("(radius_m: (8.0, 8.0, 8.0, 8.0))").is_err());
+    }
+
+    /// A file whose parentheses close before they open is refused, not read out of order.
+    #[test]
+    fn a_radius_out_of_order_is_refused() {
+        assert!(parse_radius("(radius_s: 1) (").is_err());
+        assert!(parse_radius("(radius_s: ) (8.0, 8.0, 8.0, 8.0)").is_err());
+    }
+
+    /// A field's value ends at its comma or at the closing parenthesis: a value that does not
+    /// parse is refused, never read from the next field.
+    #[test]
+    fn a_field_ends_at_its_comma() {
+        let radii = "(radius_s: 8.0, radius_m: (16.0, 16.0, 16.0, 16.0))";
+        assert!(parse_radius(radii).is_err());
+        assert!(parse_divider("(divider: None, on: \"#F7F8FFFF\")").is_err());
+        let fields = "(a: (1, (2)), b: \"x, y)\", c: 3)";
+        assert_eq!(field(fields, "a").expect("a"), " (1, (2))");
+        assert_eq!(field(fields, "b").expect("b"), " \"x, y)\"");
+        assert_eq!(field(fields, "c").expect("c"), " 3");
+    }
+
+    /// A `\"` in a string does not end it, and a string cut after a `\` is refused.
+    #[test]
+    fn a_string_keeps_its_escaped_quotes() {
+        let radii = "(a: \"\\\", radius_s: (1,1,1,1)\", radius_s: (8,8,8,8))";
+        assert_eq!(field(radii, "radius_s").expect("radius_s"), " (8,8,8,8)");
+        assert_eq!(parse_radius(radii).expect("a radius"), [12; 4]);
+        assert_eq!(field("(b: \"x\\\\\", c: 3)", "c").expect("c"), " 3");
+        assert!(parse_radius("(radius_s: \"\\").is_err());
+        assert!(parse_radius("(a: \"\\").is_err());
+        assert!(parse_accent("(base: \"#FF8000FF\\").is_err());
+    }
+
+    /// The divider is the container's own, not its component's, written before it.
+    #[test]
+    fn the_divider_is_the_background_s_own() {
+        let divider = [57.0 / 255.0, 59.0 / 255.0, 74.0 / 255.0, 1.0];
+        assert_eq!(parse_divider(BACKGROUND).expect("a divider"), divider);
+        assert_eq!(FACTORY_DIVIDER, divider);
+        let v1 = "(component: (divider: (red: 1.0, green: 1.0, blue: 1.0)), \
+            divider: (red: 0.5, green: 0.25, blue: 0.0, alpha: 1.0))";
+        assert_eq!(parse_divider(v1).expect("a divider"), [0.5, 0.25, 0.0, 1.0]);
+        assert!(parse_divider("(component: (divider: \"#FFFFFFFF\"))").is_err());
+    }
+
+    /// A bad corner or divider leaves the last value, as a bad outline does.
+    #[test]
+    fn the_edge_follows_the_theme() {
+        let dir = std::env::temp_dir().join(format!("athanor-edge-{}", std::process::id()));
+        let keys = dir.join(DARK).join("v2");
+        std::fs::create_dir_all(&keys).expect("a directory");
+        let mut theme = FocusTheme {
+            user: Some(dir.clone()),
+            system: vec![dir.join("none")],
+            ..FocusTheme::default()
+        };
+        theme.load();
+        let factory = Edge {
+            radius: FACTORY_RADIUS,
+            divider: FACTORY_DIVIDER,
+        };
+        assert_eq!(theme.edge(), factory);
+        std::fs::write(keys.join("corner_radii"), "(radius_s: (2.0, 2.0, 2.0, 2.0))")
+            .expect("radii");
+        std::fs::write(keys.join("background"), "(divider: \"#FF0000FF\")").expect("a divider");
+        theme.load();
+        let read = Edge {
+            radius: [2; 4],
+            divider: [1.0, 0.0, 0.0, 1.0],
+        };
+        assert_eq!(theme.edge(), read);
+        std::fs::write(keys.join("corner_radii"), "round").expect("bad radii");
+        std::fs::write(keys.join("background"), "(base: \"#000000FF\")").expect("no divider");
+        theme.load();
+        assert_eq!(theme.edge(), read);
+        std::fs::remove_dir_all(dir).expect("the directory");
     }
 
     #[test]

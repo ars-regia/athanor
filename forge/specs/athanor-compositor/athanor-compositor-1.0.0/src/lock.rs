@@ -170,15 +170,16 @@ impl State {
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
     }
 
-    /// Gives the pointer to what is under it now. Locking and unlocking change that without a
-    /// motion, and a button goes to the pointer's focus: without this, a click on the lock would
-    /// reach the window under it.
+    /// Gives the pointer to what is under it now, or to a confinement's surface
+    /// (`State::pointer_target`). Locking and unlocking change that without a motion, and a
+    /// button goes to the pointer's focus: without this, a click on the lock would reach the
+    /// window under it.
     pub(crate) fn refresh_pointer(&mut self) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
         let location = pointer.current_location();
-        let under = self.surface_under(location);
+        let under = self.pointer_target(location);
         let motion = MotionEvent {
             location,
             serial: SERIAL_COUNTER.next_serial(),
@@ -194,7 +195,7 @@ impl State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        let under = self.surface_under(pointer.current_location());
+        let under = self.pointer_target(pointer.current_location());
         if under.map(|(surface, _)| surface) != pointer.current_focus() {
             self.refresh_pointer();
         }
