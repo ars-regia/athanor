@@ -146,6 +146,9 @@ impl PointerGrab<State> for MoveGrab {
         let Some(area) = data.window_area_at(event.location) else {
             return;
         };
+        self.window
+            .user_data()
+            .insert_if_missing(|| crate::handlers::Moved);
         let delta = (event.location - self.start.location).to_i32_round();
         let at = kept_reachable(area, self.from + delta, self.window.geometry().size);
         data.move_window(&self.window, at);

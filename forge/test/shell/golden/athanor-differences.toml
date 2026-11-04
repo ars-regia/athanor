@@ -7,8 +7,6 @@
 #   #736: athanor-compositor clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-compositor draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: cosmic-comp draws a divider inside the outline of a window it decorates or clips, which athanor-compositor does not; the outline's corners differ, and at scale 1.5 its width by up to 1 px
-#   #918 (no case shows it): cosmic-comp cascades the windows after the first; athanor-compositor places
-#         the first as cosmic-comp does, and cascades none yet
 #   #739: the bar lacks the controls that need cosmic protocols (workspaces, tiling), which athanor-compositor does not serve
 #   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-compositor draws none
