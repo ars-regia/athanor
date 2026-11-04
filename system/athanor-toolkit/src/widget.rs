@@ -1762,10 +1762,13 @@ impl Ui {
     /// Pastes `text` into field `id` at its caret, replacing its selection, as typing it would:
     /// without the control characters but a text area's newlines, without the bidirectional
     /// formats, as [`Ui::set_field_text`] takes text from outside, and at most
-    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none, and a paste with no
-    /// text left changes nothing, its selection included.
+    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes or is insensitive takes none, and a
+    /// paste with no text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets.get(id.index())?.kind, Kind::TextArea(_));
+        if !self.is_sensitive(id) {
+            return None;
+        }
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
@@ -1787,8 +1790,11 @@ impl Ui {
     }
 
     /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
-    /// field that composes, or whose selection is no longer `text`, keeps it.
+    /// field that composes, is insensitive, or whose selection is no longer `text`, keeps it.
     pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        if self.widgets.get(id.index()).is_none() || !self.is_sensitive(id) {
+            return None;
+        }
         let (Kind::Field(field) | Kind::TextArea(field)) =
             &mut self.widgets.0.get_mut(id.index())?.kind
         else {
@@ -1906,9 +1912,13 @@ impl Ui {
         let press = self.press.take()?;
         match &self.widgets[press.widget].kind {
             Kind::Slider(_) => return None,
-            // The text a drag selected is the primary selection.
+            // The text a drag selected is the primary selection, unless the field turned
+            // insensitive during the drag.
             Kind::Field(field) | Kind::TextArea(field) => {
-                if let Some(text) = field.selected_text() {
+                if let Some(text) = field
+                    .selected_text()
+                    .filter(|_| self.is_sensitive(press.widget))
+                {
                     self.offered = Some((press.widget, text.clone()));
                     self.clips.push(Clip::Select(text));
                 }
@@ -3972,6 +3982,25 @@ mod tests {
             set(&mut ui, b, false);
             assert_eq!(ui.focus(), Some(a), "the previous row, hidden: {hide}");
         }
+    }
+
+    #[test]
+    fn an_insensitive_field_takes_no_input_that_arrives_after() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        ui.layout();
+        let r = ui.widget(name).rect;
+        let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+        ui.pointer_press(start, y, PointerButton::Primary);
+        ui.pointer_motion(end, y);
+        ui.set_sensitive(name, false);
+        ui.pointer_release(end, y, PointerButton::Primary);
+        assert!(ui.take_clips().is_empty(), "no selection is offered");
+        assert_eq!(ui.paste(name, "x"), None, "a queued paste");
+        assert_eq!(ui.cut(name, "abc"), None, "a queued cut");
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        ui.set_sensitive(name, true);
+        assert_eq!(ui.cut(name, "abc"), Some(Event::Edited(name)));
     }
 
     #[test]
