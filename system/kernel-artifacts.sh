@@ -121,8 +121,9 @@ NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/s
 # A pull request that moves NVIDIA pins may also change the NVIDIA packaging that reads them and
 # the documents that describe it (a branch moving to another repository tree changes its lock and
 # lock.py together, #669): only the NVIDIA variants use the packaging, and the check builds them
-# after the merge. Never the packaging's keys.
-NVIDIA_PIN_COMPANIONS=('system/nvidia/*' 'docs/*')
+# after the merge. Only the files that read the pins and locks: never the keys, the mirror
+# scripts or athanor-nvidia-config.
+NVIDIA_PIN_COMPANIONS=(system/nvidia/lock.py system/nvidia/azoth-nvidia-kmod.spec system/nvidia/build-rpms.sh system/nvidia/gate.sh 'system/nvidia/tests/*' 'docs/*')
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
 # Kept by hand, not by kernel-bump.yml, but inputs of the kernel build like the pins
 # (build-inputs.py): a builder move changes them with the pins (clang 23 drops kernel-local's
@@ -412,7 +413,8 @@ resolve() {
 
 changed_files() { # changed_files BASE HEAD
   git cat-file -e "$1^{commit}" 2> /dev/null || retry git fetch --no-tags --depth=1 origin "$1"
-  git diff --name-only "$1" "$2"
+  # Both sides of a rename: a file moved out of a checked path still changed it.
+  git diff --name-only --no-renames "$1" "$2"
 }
 
 matches_any() { # matches_any PATH PATTERN...
@@ -551,7 +553,7 @@ check_plan() {
   while IFS= read -r file; do
     [[ -n $file ]] || continue
     matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" || only_kernel_pins=false
-    if [[ $file == system/nvidia/keys/* ]] || ! matches_any "$file" "${NVIDIA_PIN_FILES[@]}" "${NVIDIA_PIN_COMPANIONS[@]}"; then only_nvidia_pins=false; fi
+    matches_any "$file" "${NVIDIA_PIN_FILES[@]}" "${NVIDIA_PIN_COMPANIONS[@]}" || only_nvidia_pins=false
   done <<< "$files"
   keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
   while IFS= read -r key; do
