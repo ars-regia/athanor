@@ -1025,9 +1025,12 @@ impl State {
         }
     }
 
-    /// A tile that committed a null buffer leaves its tree. Its floating size and states go in
-    /// the initial configure the commit sends, and it goes back to where it stood floating, or is
-    /// placed at its next draw when it was born tiled.
+    /// A tile that committed a null buffer leaves its tree, and the rest of its workspace is laid
+    /// out. The workspace being still tiled, the initial configure the commit then sends carries
+    /// the tile `preview_tile` gives the window and the tiled states, in place of the floating
+    /// ones set here; a maximised or full-screen window keeps its size, without the tiled states.
+    /// It goes back to where it stood floating, or is placed at its next draw when it was born
+    /// tiled, and `tile_shown` gives it a tile again at that draw.
     pub(crate) fn hide_tile(&mut self, window: &Window) {
         let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) else {
             return;
