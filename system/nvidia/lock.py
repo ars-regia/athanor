@@ -72,19 +72,19 @@ BRANCHES = {
         # nvidia-kmod-common requires (nvidia-driver-selinux if selinux-policy-targeted).
         "companions": ["nvidia-driver-selinux"],
     },
-    # Still Fedora 43: on 2026-10-21 RPM Fusion's updates/45 has no x86_64 metadata yet, and its
-    # Fedora 45 tree names the 580 branch xorg-x11-drv-nvidia-580xx and nvidia-settings-580xx,
-    # with nvidia-modprobe and nvidia-persistenced only at 615. Moving this set changes the
-    # package names here, in gate.sh and in the image (Fedora 45 rebase plan, task 7, Q5).
+    # RPM Fusion's Fedora 45 tree names the 580 branch -580xx; the unsuffixed names are the 615
+    # branch. It ships nvidia-modprobe and nvidia-persistenced only at 615, which the 580xx
+    # packages accept (>= their version), so those two are companions. The releases tree, not
+    # updates/45: on 2026-11-04 updates/45 publishes no NVIDIA package (#669).
     "legacy": {
-        "primary": "xorg-x11-drv-nvidia",
-        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/",
+        "primary": "xorg-x11-drv-nvidia-580xx",
+        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/",
         "packages": [
-            "nvidia-modprobe", "nvidia-persistenced", "nvidia-settings", "xorg-x11-drv-nvidia",
-            "xorg-x11-drv-nvidia-cuda", "xorg-x11-drv-nvidia-cuda-libs", "xorg-x11-drv-nvidia-libs",
-            "xorg-x11-drv-nvidia-power",
+            "nvidia-settings-580xx", "xorg-x11-drv-nvidia-580xx", "xorg-x11-drv-nvidia-580xx-cuda",
+            "xorg-x11-drv-nvidia-580xx-cuda-libs", "xorg-x11-drv-nvidia-580xx-libs",
+            "xorg-x11-drv-nvidia-580xx-power",
         ],
-        "companions": [],
+        "companions": ["nvidia-modprobe", "nvidia-persistenced"],
     },
     # CDI specs and the OCI hook for GPU containers (S4). NVIDIA's repository, not Fedora's
     # golang-github-nvidia-container-toolkit, which lags the security fixes. Not a kernel input:

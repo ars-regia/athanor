@@ -40,7 +40,7 @@ fi
 
 case $GPU in
   nvidia) expected=$(sed -n 's/^NVIDIA_OPEN_VERSION=//p' "$PINS"); packages=(nvidia-driver nvidia-driver-libs nvidia-kmod-common azoth-nvidia-kmod) ;;
-  nvidia-legacy) expected=$(sed -n 's/^NVIDIA_LEGACY_VERSION=//p' "$PINS"); packages=(xorg-x11-drv-nvidia xorg-x11-drv-nvidia-libs azoth-nvidia-kmod) ;;
+  nvidia-legacy) expected=$(sed -n 's/^NVIDIA_LEGACY_VERSION=//p' "$PINS"); packages=("xorg-x11-drv-nvidia-${expected%%.*}xx" "xorg-x11-drv-nvidia-${expected%%.*}xx-libs" azoth-nvidia-kmod) ;;
   *) echo "gate.sh: unknown GPU $GPU" >&2; exit 2 ;;
 esac
 [[ -n $expected ]] || { echo "gate.sh: no NVIDIA version for $GPU in $PINS" >&2; exit 2; }

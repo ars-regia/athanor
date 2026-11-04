@@ -284,7 +284,7 @@ class Repomd(unittest.TestCase):
         sha = hashlib.sha256(rpm).hexdigest()
         xml = primary(*[
             package(n, 3, "580.178.04", "1.fc43", "x86_64", f"x/{n}.rpm", sha) for n in lock.BRANCHES["legacy"]["packages"]
-        ])
+        ], *legacy_companions(sha))
         base = lock.BRANCHES["legacy"]["baseurl"]
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
@@ -295,7 +295,7 @@ class Repomd(unittest.TestCase):
             self.assertEqual(code, 0)
             _, version, _, entries = lock.read_lock(pathlib.Path(d) / "legacy.lock")
             self.assertEqual(version, "580.178.04")
-            self.assertEqual(len(entries), len(lock.BRANCHES["legacy"]["packages"]))
+            self.assertEqual(len(entries), len(lock.BRANCHES["legacy"]["packages"]) + len(lock.BRANCHES["legacy"]["companions"]))
             self.assertTrue(all(s == sha for s, _ in entries))
 
     def test_checksum_mismatch_in_metadata_fails_and_keeps_nothing(self):
@@ -309,7 +309,7 @@ class Repomd(unittest.TestCase):
             package(lock.BRANCHES["legacy"]["packages"][0], 3, "580.178.04", "1.fc43", "x86_64", f"x/{lock.BRANCHES['legacy']['packages'][0]}.rpm", good_sha),
         ] + [
             package(n, 3, "580.178.04", "1.fc43", "x86_64", f"x/{n}.rpm", good_sha) for n in lock.BRANCHES["legacy"]["packages"][1:]
-        ])
+        ], *legacy_companions(good_sha))
         base = lock.BRANCHES["legacy"]["baseurl"]
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
@@ -318,14 +318,9 @@ class Repomd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             tmp = pathlib.Path(d)
             # Download function returns bad_rpm for the first package, good_rpm for others
-            call_count = [0]
+            first = f"x/{lock.BRANCHES['legacy']['packages'][0]}.rpm"
             def download(url):
-                if lock.BRANCHES["legacy"]["packages"][0] in url and call_count[0] == 2:
-                    # This is the first package download (after metadata)
-                    call_count[0] += 1
-                    return bad_rpm
-                call_count[0] += 1
-                return files.get(url, good_rpm)
+                return bad_rpm if url.endswith(first) else files.get(url, good_rpm)
             err = io.StringIO()
             with redirect_stderr(err):
                 code = lock.main(["generate", "legacy", "--version", "580.178.04", "--locks", str(tmp)], download=download)
@@ -340,7 +335,7 @@ class Repomd(unittest.TestCase):
         sha = hashlib.sha256(rpm).hexdigest()
         xml = primary(*[
             package(n, 3, "580.178.04", "1.fc43", "x86_64", f"x/{n}.rpm", sha) for n in lock.BRANCHES["legacy"]["packages"]
-        ])
+        ], *legacy_companions(sha))
         base = lock.BRANCHES["legacy"]["baseurl"]
         files = {
             base + "repodata/repomd.xml": b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>',
@@ -390,7 +385,44 @@ def legacy_repo(*packages):
 
 
 def legacy_family(version, release, sha):
-    return [package(n, 3, version, f"{release}.fc43", "x86_64", f"x/{n}-{version}-{release}.rpm", sha) for n in lock.BRANCHES["legacy"]["packages"]]
+    """The legacy set at `version`, with its companions at 615 and the same release."""
+    return [package(n, 3, version, f"{release}.fc43", "x86_64", f"x/{n}-{version}-{release}.rpm", sha)
+            for n in lock.BRANCHES["legacy"]["packages"]] + legacy_companions(sha, release=release)
+
+
+def legacy_companions(sha, version="615.78.08", release=1):
+    """The legacy set's companions, at the 615 version RPM Fusion's Fedora 45 tree pairs them with."""
+    return [package(n, 3, version, f"{release}.fc45", "x86_64", f"{n[0]}/{n}-{version}-{release}.fc45.x86_64.rpm", sha)
+            for n in lock.BRANCHES["legacy"]["companions"]]
+
+
+class LegacyFedora45(unittest.TestCase):
+    """RPM Fusion's Fedora 45 tree names the 580 branch -580xx and the unsuffixed packages 615 (#669)."""
+
+    def test_the_580xx_branch_with_the_615_companions_and_not_the_615_driver(self):
+        published = [
+            *[package(n, 3, "580.196.07", "1.fc45", "x86_64", f"x/{n}-580.196.07-1.fc45.x86_64.rpm", "a" * 64)
+              for n in lock.BRANCHES["legacy"]["packages"]],
+            *legacy_companions("b" * 64),
+            package("xorg-x11-drv-nvidia", 3, "615.78.08", "1.fc45", "x86_64", "x/xorg-x11-drv-nvidia-615.rpm", "c" * 64),
+            package("xorg-x11-drv-nvidia-libs", 3, "615.78.08", "1.fc45", "x86_64", "x/xorg-x11-drv-nvidia-libs-615.rpm", "c" * 64),
+            package("nvidia-settings", 3, "615.78.08", "1.fc45", "x86_64", "n/nvidia-settings-615.rpm", "c" * 64),
+        ]
+        got = {e["name"]: e["href"] for e in lock.resolve("legacy", "580.196.07", legacy_repo(*published))}
+        self.assertEqual(sorted(got), [
+            "nvidia-modprobe", "nvidia-persistenced", "nvidia-settings-580xx", "xorg-x11-drv-nvidia-580xx",
+            "xorg-x11-drv-nvidia-580xx-cuda", "xorg-x11-drv-nvidia-580xx-cuda-libs", "xorg-x11-drv-nvidia-580xx-libs",
+            "xorg-x11-drv-nvidia-580xx-power",
+        ])
+        self.assertTrue(got["nvidia-modprobe"].endswith("-615.78.08-1.fc45.x86_64.rpm"))
+        self.assertNotIn("615", "".join(v for k, v in got.items() if "580xx" in k))
+        # The bump reads the branch's newest version from its primary package: the 615 driver
+        # under the unsuffixed name must not answer for the 580 branch.
+        self.assertEqual(run(["latest", "legacy", "--major", "580"], legacy_repo(*published))[:2], (0, "580.196.07\n"))
+
+    def test_the_fedora_45_releases_tree(self):
+        self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
+                         "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/")
 
 
 def run(argv, download):
@@ -405,15 +437,15 @@ class Latest(unittest.TestCase):
     def test_newest_version_of_the_primary_package_in_the_major(self):
         download = legacy_repo(
             *legacy_family("580.178.04", 1, "a" * 64),
-            package("xorg-x11-drv-nvidia", 3, "580.190.01", "1.fc43", "x86_64", "x/new.rpm", "b" * 64),
-            package("xorg-x11-drv-nvidia", 3, "590.44.01", "1.fc43", "x86_64", "x/next.rpm", "c" * 64),
+            package(lock.BRANCHES["legacy"]["primary"], 3, "580.190.01", "1.fc43", "x86_64", "x/new.rpm", "b" * 64),
+            package(lock.BRANCHES["legacy"]["primary"], 3, "590.44.01", "1.fc43", "x86_64", "x/next.rpm", "c" * 64),
             package("nvidia-settings", 3, "580.200.01", "1.fc43", "x86_64", "x/other.rpm", "d" * 64),
         )
         code, out, _ = run(["latest", "legacy", "--major", "580"], download)
         self.assertEqual((code, out), (0, "580.190.01\n"))
 
     def test_no_version_in_the_major_is_not_published(self):
-        download = legacy_repo(package("xorg-x11-drv-nvidia", 3, "590.44.01", "1.fc43", "x86_64", "x/next.rpm", "c" * 64))
+        download = legacy_repo(package(lock.BRANCHES["legacy"]["primary"], 3, "590.44.01", "1.fc43", "x86_64", "x/next.rpm", "c" * 64))
         code, _, err = run(["latest", "legacy", "--major", "580"], download)
         self.assertEqual(code, lock.NOT_PUBLISHED)
         self.assertIn("580", err)
@@ -474,7 +506,7 @@ class Sha512(unittest.TestCase):
 class Verify(unittest.TestCase):
     def verify(self, download, version="580.178.04"):
         with tempfile.TemporaryDirectory() as d:
-            entries = [(e["digest"], LEGACY + e["href"]) for e in lock.select(primary(*legacy_family("580.178.04", 1, "a" * 64)), lock.BRANCHES["legacy"]["packages"], "580.178.04")]
+            entries = [(e["digest"], LEGACY + e["href"]) for e in lock.select(primary(*legacy_family("580.178.04", 1, "a" * 64)), lock.BRANCHES["legacy"]["packages"], "580.178.04", lock.BRANCHES["legacy"]["companions"])]
             lock.write_lock(pathlib.Path(d) / "legacy.lock", "legacy", "580.178.04", LEGACY, entries)
             return run(["verify", "legacy", "--version", version, "--locks", d], download)
 
