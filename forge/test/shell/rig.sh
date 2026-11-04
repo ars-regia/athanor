@@ -60,7 +60,7 @@
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
 #   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #                           RIG_COMPOSITOR=athanor runs it under athanor-compositor, the input method as its rig unit (run build-compositor first)
-#   rig.sh toolkit-clipboard   athanor-toolkit's text field copies, cuts and pastes through wl-clipboard under cosmic-comp, never athanor-compositor (run build-toolkit first; needs a rig image with wl-clipboard)
+#   rig.sh toolkit-clipboard   athanor-toolkit's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-compositor (run build-toolkit first; needs a rig image with wl-clipboard)
 #   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-toolkit's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
@@ -1477,10 +1477,10 @@ input-method)
     echo "look at $out/input-method-preedit.png (the preedit underlined) and $out/input-method-commit.png"
     ;;
 toolkit-clipboard)
-    # #719: Ctrl+C, Ctrl+X and Ctrl+V of athanor-toolkit's field, and its primary selection,
-    # read and set with wl-paste and wl-copy (toolkit_clipboard_check.py). wl-clipboard reaches
-    # the selection through wlr-data-control, which athanor-compositor does not offer: there it
-    # hangs, so the scene runs under cosmic-comp only.
+    # #719: Ctrl+C, Ctrl+X and Ctrl+V of athanor-toolkit's field, its context menu's items and
+    # its primary selection, read and set with wl-paste and wl-copy (toolkit_clipboard_check.py).
+    # wl-clipboard reaches the selection through wlr-data-control, which athanor-compositor does
+    # not offer: there it hangs, so the scene runs under cosmic-comp only.
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
         echo "rig.sh: toolkit-clipboard runs under cosmic-comp: wl-clipboard hangs under athanor-compositor" >&2
         exit 2

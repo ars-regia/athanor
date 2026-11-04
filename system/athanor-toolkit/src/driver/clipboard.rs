@@ -338,6 +338,14 @@ impl App {
         clipboards.selected = Some((source, text, id));
     }
 
+    /// Whether the clipboard holds text a field can paste: what a field's context menu enables
+    /// Paste with.
+    pub(super) fn can_paste(&self) -> bool {
+        let offer = self.clipboards.device.as_ref();
+        let offer = offer.and_then(|d| d.data().selection_offer());
+        offer.is_some_and(|o| o.with_mime_types(choose).is_some())
+    }
+
     /// Ends the primary selection the fields of `id` offered, if it is still theirs: its source
     /// is destroyed, and with it the selection the compositor holds.
     pub(super) fn unselect(&mut self, id: SurfaceId) {

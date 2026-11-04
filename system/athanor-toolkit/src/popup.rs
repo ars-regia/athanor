@@ -193,7 +193,7 @@ impl<T: Copy + PartialEq> Tooltip<T> {
 mod tests {
     use super::*;
     use crate::theme::Theme;
-    use crate::widget::{Kind, Ui};
+    use crate::widget::{Event, Key, Kind, Ui};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -369,6 +369,44 @@ mod tests {
         // The pointer left with the button down: the release goes elsewhere.
         grab.released();
         assert_eq!(grab.serial(), None);
+    }
+
+    #[test]
+    fn a_fields_menu_opens_on_its_first_item_that_applies_and_the_arrows_skip_the_others() {
+        let mut parent = Ui::new("Text", Theme::default(), false);
+        let name = parent.field(Ui::ROOT, "Name", "abc");
+        parent.layout();
+        // No selection: Paste and Select All apply.
+        let (mut menu, items) = parent.field_menu(name, true).expect("a field has a menu");
+        menu.layout();
+        let item = |n: usize| Some(items[n].0);
+        let open = OpenPopup::opened(1, name, 2, &mut parent, &mut menu, true);
+        assert!(
+            !parent.is_expanded(name),
+            "a field reads as neither collapsed nor expanded"
+        );
+        assert_eq!(menu.focus(), item(2), "Paste");
+        menu.key(Key::Down);
+        assert_eq!(menu.focus(), item(4), "Select All, past Delete");
+        menu.key(Key::Down);
+        assert_eq!(menu.focus(), item(2), "round, past Cut and Copy");
+        menu.key(Key::Up);
+        assert_eq!(menu.focus(), item(4));
+        assert_eq!(menu.key(Key::Enter), Some(Event::Clicked(items[4].0)));
+        // Escape closes it, and the focus returns to the field.
+        assert!(open.dismissed_by(Dismiss::Escape));
+        parent.set_focus(None);
+        open.closed(&mut parent);
+        assert_eq!(parent.focus(), Some(name));
+
+        // Nothing applies: no item takes the focus, and Escape still closes the menu.
+        let mut empty = Ui::new("Text", Theme::default(), false);
+        let name = empty.field(Ui::ROOT, "Name", "");
+        let (mut menu, _) = empty.field_menu(name, false).expect("a field has a menu");
+        let open = OpenPopup::opened(1, name, 2, &mut empty, &mut menu, true);
+        assert_eq!(menu.focus(), None);
+        assert_eq!(menu.key(Key::Enter), None);
+        assert!(open.dismissed_by(Dismiss::Escape));
     }
 
     #[test]
