@@ -1443,17 +1443,17 @@ impl App {
         }
     }
 
-    /// The pointer moved on `id`: the hovered widget follows it, a drag may start, and the
-    /// tooltip follows the hovered widget.
+    /// The pointer moved on `id`: the hovered widget follows it, a drag may start or a field's
+    /// selection follow it, and the tooltip follows the hovered widget.
     fn pointer_moved(&mut self, id: SurfaceId, x: f32, y: f32) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        let before = surface.ui.hovered();
+        let (before, selecting) = (surface.ui.hovered(), surface.ui.selecting());
         let event = surface.ui.pointer_motion(x, y);
         let hovered = surface.ui.hovered();
         let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
-        if event.is_some() || hovered != before {
+        if event.is_some() || hovered != before || selecting {
             self.changed(id, event);
         }
         self.point_tooltip(target.map(|w| (id, w)));
@@ -1551,8 +1551,11 @@ impl App {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
+            Keysym::Left if self.modifiers.shift => Key::SelectLeft,
+            Keysym::Right if self.modifiers.shift => Key::SelectRight,
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
+            Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
             Keysym::Up => Key::Up,
             Keysym::Down => Key::Down,
             Keysym::Home => Key::Home,

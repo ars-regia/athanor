@@ -388,6 +388,12 @@ pub enum Key {
     Escape,
     /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
     Menu,
+    /// Shift+Left: moves a field's selection one cluster to the left on screen.
+    SelectLeft,
+    /// Shift+Right: moves a field's selection one cluster to the right on screen.
+    SelectRight,
+    /// Ctrl+A: selects a field's whole text.
+    SelectAll,
 }
 
 /// One window's widgets, theme, reading direction and keyboard focus.
@@ -1238,11 +1244,15 @@ impl Ui {
     /// press that has moved past [`Ui::DRAG_THRESHOLD`] on either axis starts a drag.
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
-        let press = self.press.as_mut()?;
-        if let Kind::Slider(_) = self.widgets[press.widget].kind {
-            let id = press.widget;
+        let id = self.press?.widget;
+        if let Kind::Slider(_) = self.widgets[id].kind {
             return self.slide(id, x);
         }
+        // A press in a field selects its text as the pointer moves, and drags nothing.
+        if self.point_in_field(id, x, y, true) {
+            return None;
+        }
+        let press = self.press.as_mut()?;
         let moved = (x - press.x).abs().max((y - press.y).abs());
         if press.dragging || moved <= Self::DRAG_THRESHOLD {
             return None;
@@ -1277,11 +1287,41 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
-                // A slider takes its value from the press, and from the drag that follows.
-                id.and_then(|id| self.slide(id, x))
+                // A field puts its caret at the press; a slider takes its value from it, and
+                // from the drag that follows.
+                let id = id.filter(|&id| !self.point_in_field(id, x, y, false))?;
+                self.slide(id, x)
             }
             PointerButton::Secondary => id.map(Event::ContextMenu),
         }
+    }
+
+    /// Whether a press in a field is selecting its text, which follows the pointer until the
+    /// release.
+    pub(crate) fn selecting(&self) -> bool {
+        self.press.is_some_and(|p| {
+            matches!(self.widgets[p.widget].kind, Kind::Field(_) | Kind::TextArea(_))
+        })
+    }
+
+    /// Puts the caret of field `id` at the point, in logical pixels, or moves its selection's
+    /// focus there; false if `id` is not a field. The caret stays while the input method
+    /// composes, as it is the composition's.
+    fn point_in_field(&mut self, id: WidgetId, x: f32, y: f32, extend: bool) -> bool {
+        let r = self.widgets[id].rect;
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
+            return false;
+        };
+        if !field.is_composing() {
+            let cx = &mut self.text;
+            let (ox, oy) = field.origin(cx, r, self.theme.padding, self.rtl);
+            if extend {
+                field.drag_to(cx, x - ox, y - oy);
+            } else {
+                field.press_at(cx, x - ox, y - oy);
+            }
+        }
+        true
     }
 
     /// A pointer button was released at the point, in logical pixels: the primary button ends a
@@ -1353,12 +1393,30 @@ impl Ui {
                         field.down(cx);
                         false
                     }
+                    Key::SelectLeft => {
+                        field.select_left(cx);
+                        false
+                    }
+                    Key::SelectRight => {
+                        field.select_right(cx);
+                        false
+                    }
+                    Key::SelectAll => {
+                        field.select_all(cx);
+                        false
+                    }
                     _ => return self.navigate(key),
                 };
                 field.scroll_to_caret(cx);
                 return edited.then_some(Event::Edited(id));
             }
         }
+        // Outside a field, Shift leaves an arrow what it is.
+        let key = match key {
+            Key::SelectLeft => Key::Left,
+            Key::SelectRight => Key::Right,
+            key => key,
+        };
         if let Some(id) = focused {
             if let Kind::Slider(slider) = &self.widgets[id].kind {
                 let (min, max) = (slider.min, slider.max);
@@ -2791,6 +2849,83 @@ mod tests {
             assert_eq!(ui.key(Key::Tab), None);
             assert_eq!(ui.focus(), Some(after), "rtl {rtl}");
         }
+    }
+
+    /// The selected text of field `id`, if any.
+    fn selected(ui: &Ui, id: WidgetId) -> Option<String> {
+        match &ui.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_field_selects_with_shift_and_the_arrows_and_with_select_all() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        assert_eq!(ui.key(Key::SelectLeft), None, "a selection edits nothing");
+        ui.key(Key::SelectLeft);
+        assert_eq!(selected(&ui, name).as_deref(), Some("bc"));
+        ui.key(Key::SelectRight);
+        assert_eq!(selected(&ui, name).as_deref(), Some("c"));
+        ui.key(Key::SelectAll);
+        assert_eq!(selected(&ui, name).as_deref(), Some("abc"));
+        // What is typed replaces the selection, as in GTK's entries.
+        assert_eq!(ui.key(Key::Text("x".into())), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("x"));
+        assert_eq!(selected(&ui, name), None);
+
+        // Outside a field, Shift and an arrow are the arrow.
+        let (mut ui, id) = slider(0.0, 10.0, 1.0, 5.0, false);
+        assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
+        assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
+        assert_eq!(ui.key(Key::SelectLeft), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(6.0));
+    }
+
+    #[test]
+    fn a_press_and_a_drag_in_a_field_select_its_text() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Text", Theme::default(), rtl);
+            let name = ui.field(Ui::ROOT, "Name", "abcdef");
+            let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(other));
+            let r = ui.widget(name).rect;
+            let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+            // From one edge to the other: the whole text, and the field is not dragged.
+            assert_eq!(ui.pointer_press(start, y, PointerButton::Primary), None);
+            assert_eq!(ui.focus(), Some(name), "rtl {rtl}");
+            assert!(ui.selecting());
+            assert_eq!(ui.pointer_motion(end, y), None, "rtl {rtl}");
+            assert_eq!(ui.pointer_release(end, y, PointerButton::Primary), None);
+            assert!(!ui.selecting());
+            assert_eq!(selected(&ui, name).as_deref(), Some("abcdef"), "rtl {rtl}");
+            // A click puts the caret where it is: nothing is selected, and the text stays.
+            ui.click(start, y);
+            assert_eq!(selected(&ui, name), None, "rtl {rtl}");
+            assert_eq!(ui.field_text(name).as_deref(), Some("abcdef"));
+        }
+    }
+
+    #[test]
+    fn a_composing_field_keeps_its_caret_under_the_pointer() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        let r = ui.widget(name).rect;
+        ui.pointer_press(r.x + r.w - 1.0, r.y + r.h / 2.0, PointerButton::Primary);
+        ui.pointer_motion(r.x + 1.0, r.y + r.h / 2.0);
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(field.is_composing());
+        assert_eq!(field.shown(), "xab");
     }
 
     #[test]
