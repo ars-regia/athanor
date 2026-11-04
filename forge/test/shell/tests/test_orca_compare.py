@@ -17,6 +17,30 @@ REFERENCE = [
 ]
 
 
+class WalksTest(unittest.TestCase):
+    ON, OFF = "Lettore schermo attivo.", "Lettore schermo disattivato."
+
+    def walks(self, *ends):
+        return [line for end in ends for line in (self.ON, "Galleria", end, self.OFF)]
+
+    def test_walks_that_end_on_one_stop_pass_in_any_language(self):
+        self.assertEqual(compare.walk_problems(self.walks("Minimize button.", "Minimize button.")), [])
+
+    def test_a_walk_that_ends_elsewhere_fails(self):
+        problems = compare.walk_problems(self.walks("Minimize button.", "Uno pulsante."))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("'Uno pulsante.'", problems[0])
+
+    def test_a_transcript_with_one_walk_or_none_fails(self):
+        self.assertEqual(len(compare.walk_problems(self.walks("Minimize button."))), 1)
+        self.assertEqual(len(compare.walk_problems([])), 1)
+        self.assertEqual(len(compare.walk_problems([self.ON, self.OFF])), 1)
+
+    def test_walks_that_speak_nothing_fail(self):
+        silent = [self.ON, self.OFF, self.ON, self.OFF]
+        self.assertEqual(len(compare.walk_problems(silent)), 1)
+
+
 class CompareTest(unittest.TestCase):
     def test_every_utterance_spoken_in_any_order_passes(self):
         transcript = [
