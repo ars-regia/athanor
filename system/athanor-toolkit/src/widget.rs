@@ -1149,9 +1149,8 @@ impl Ui {
         if self.is_fixed(id) || self.widgets[id].sensitive == sensitive {
             return;
         }
-        let before = focus::chain(self);
         self.widgets[id].sensitive = sensitive;
-        self.keep_focus(&before);
+        self.keep_focus();
     }
 
     /// Whether `id` and all its ancestors are sensitive: what takes input.
@@ -1236,9 +1235,8 @@ impl Ui {
         if self.is_fixed(id) || self.widgets[id].visible == visible {
             return;
         }
-        let before = focus::chain(self);
         self.widgets[id].visible = visible;
-        self.keep_focus(&before);
+        self.keep_focus();
     }
 
     /// Whether `id` is the root, the title bar or one of its children, which stay shown and
@@ -1250,19 +1248,28 @@ impl Ui {
     }
 
     /// Moves the focus off a widget that can no longer hold it, hidden or insensitive, to the
-    /// next widget of the focus chain `before` that still takes it, or the previous one.
-    fn keep_focus(&mut self, before: &[WidgetId]) {
-        let Some(at) = self.focus.and_then(|f| before.iter().position(|&w| w == f)) else {
+    /// first stop of the focus chain after it in the order of the tree, or else the last one
+    /// before it: another row of its list, when one still takes it.
+    fn keep_focus(&mut self) {
+        let Some(focused) = self.focus else {
             return;
         };
-        if self.is_visible(before[at]) && self.is_sensitive(before[at]) {
+        if self.is_visible(focused) && self.is_sensitive(focused) {
             return;
         }
-        let after = focus::chain(self);
-        let next = before[at + 1..].iter().find(|w| after.contains(w));
-        let previous = before[..at].iter().rev().find(|w| after.contains(w));
-        let to = next.or(previous).copied();
-        self.move_focus(to);
+        // The order of the tree, which the chain follows, as `focus::chain` walks it.
+        let mut tree = Vec::with_capacity(self.widgets.len());
+        let mut stack = vec![Self::ROOT];
+        while let Some(w) = stack.pop() {
+            tree.push(w);
+            stack.extend(self.widgets[w].children.iter().rev());
+        }
+        let place = |w: &WidgetId| tree.iter().position(|t| t == w);
+        let here = place(&focused);
+        let chain = focus::chain(self);
+        let next = chain.iter().find(|w| place(w) > here);
+        let previous = chain.iter().rev().find(|w| place(w) < here);
+        self.move_focus(next.or(previous).copied());
     }
 
     /// Whether `id` and all its ancestors are visible: what the user can see and reach.
@@ -3942,6 +3949,29 @@ mod tests {
             "Down skips the row"
         );
         assert_eq!(ui.focus(), Some(rows[2]));
+    }
+
+    #[test]
+    fn the_focus_moves_to_another_row_when_its_row_goes() {
+        for hide in [false, true] {
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let (a, b) = (ui.list_row(list, "A"), ui.list_row(list, "B"));
+            ui.layout();
+            let set = |ui: &mut Ui, row, on| {
+                if hide {
+                    ui.set_visible(row, on);
+                } else {
+                    ui.set_sensitive(row, on);
+                }
+            };
+            ui.set_focus(Some(a));
+            set(&mut ui, a, false);
+            assert_eq!(ui.focus(), Some(b), "the next row, hidden: {hide}");
+            set(&mut ui, a, true);
+            set(&mut ui, b, false);
+            assert_eq!(ui.focus(), Some(a), "the previous row, hidden: {hide}");
+        }
     }
 
     #[test]
