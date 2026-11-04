@@ -112,17 +112,18 @@ impl Dispatch2<AthanorWorkspaceTilingV1, State> for TilingObject {
         &self,
         state: &mut State,
         _client: &Client,
-        object: &AthanorWorkspaceTilingV1,
+        _object: &AthanorWorkspaceTilingV1,
         request: athanor_workspace_tiling_v1::Request,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, State>,
     ) {
         use athanor_workspace_tiling_v1::{Request, State as Tiling};
         match request {
-            // An object whose workspace is gone changes nothing.
+            // An object whose workspace is gone changes nothing: `set_tiling` tiles no workspace
+            // on no output, and `workspaces_changed` floated the workspace when it went.
             Request::SetState {
                 state: WEnum::Value(asked),
-            } if state.workspace_tilings.contains(object) => {
+            } => {
                 if let Some(workspace) = self.workspace {
                     state.set_tiling(workspace, asked == Tiling::Tiled);
                 }

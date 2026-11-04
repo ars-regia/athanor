@@ -253,8 +253,8 @@ fn the_tiling_state_follows_the_toggle() {
     run.stop();
 }
 
-/// A workspace removed ends its tiling objects with `removed`, and their `set_state` changes
-/// nothing afterwards.
+/// A workspace removed ends its tiling objects with `removed`, and a `set_state` on them
+/// afterwards tiles nothing, as for any workspace that is gone.
 #[test]
 fn a_workspace_gone_ends_its_tiling_object() {
     let mut run = Running::start(None);
