@@ -1,5 +1,5 @@
 //! Decision 31 (`marks.rs`, `focus_theme.rs`): the focus outline and the border of confined
-//! windows, read from the frame.
+//! windows, and cosmic-comp's divider (#918), read from the frame.
 
 use super::*;
 use crate::focus_theme;
@@ -10,6 +10,8 @@ use wayland_client::protocol::wl_subcompositor;
 /// `focus_theme::FACTORY_WIDTH`.
 const ACCENT: [u8; 4] = [0x91, 0x41, 0xac, 255];
 const OUTLINE: i32 = 3;
+/// Calmo's dark `bg_divider`, which the divider takes before a theme is read.
+const DIVIDER: [u8; 4] = [0x39, 0x3b, 0x4a, 255];
 const BLACK: [u8; 4] = [0, 0, 0, 255];
 const WHITE: [u8; 4] = [255, 255, 255, 255];
 const GREY: [u8; 4] = [0x80, 0x80, 0x80, 255];
@@ -142,12 +144,49 @@ fn the_focused_window_alone_is_outlined() {
     }
     assert!(background(&at(&shown, x - OUTLINE - 1, middle)));
     assert!(background(&at(&shown, 39, 40 + HEIGHT / 2)), "no mark");
-    assert_eq!(at(&shown, x, middle), BLACK, "the window itself");
+    assert_eq!(at(&shown, x, middle), DIVIDER, "the divider, inside");
+    assert_eq!(at(&shown, x + 1, middle), BLACK, "the window itself");
 
     run.state.focus(&fixture);
     let shown = frame(&mut run);
     assert_eq!(at(&shown, 39, 40 + HEIGHT / 2), ACCENT);
     assert!(background(&at(&shown, x - 1, middle)), "the focus left");
+    assert_eq!(at(&shown, x, middle), DIVIDER, "the divider stays");
+    run.stop();
+}
+
+/// cosmic-comp's divider lies just inside the geometry of a window that has not the focus too,
+/// and at scale 1.5 it is 1 px wide on the left and 2 on the right, as cosmic-comp draws it.
+#[test]
+fn the_divider_follows_cosmic_comp_at_a_fractional_scale() {
+    let mut run = Running::start(None);
+    let fixture = clear_the_fixture(&mut run);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let second = run.state.space.outputs().nth(1).expect("an output").clone();
+    let origin = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("mapped")
+        .loc;
+    focused_at(&mut run, &local, (origin.x + 100, origin.y + 100));
+    run.state.focus(&fixture);
+    let shown = run.state.capture(1).expect("frame of output 1");
+    let w = OUTPUTS[1].width;
+    // The window's 100 to 300 logical pixels are 150 to 450 at scale 1.5.
+    let row = 150 + HEIGHT * 3 / 4;
+    assert!(background(&pixel(&shown, w, 149, row)), "left of the window");
+    assert!(background(&pixel(&shown, w, 450, row)), "right of the window");
+    for (column, colour) in [
+        (150, DIVIDER),
+        (151, BLACK),
+        (447, BLACK),
+        (448, DIVIDER),
+        (449, DIVIDER),
+    ] {
+        assert_eq!(pixel(&shown, w, column, row), colour, "{column}");
+    }
     run.stop();
 }
 
@@ -226,6 +265,7 @@ fn a_maximised_window_has_no_outline() {
     let (x, y) = AT;
     let middle = y + HEIGHT / 2;
     assert_eq!(at(&frame(&mut run), x - 1, middle), ACCENT, "before");
+    assert_eq!(at(&frame(&mut run), x, middle), DIVIDER, "the divider before");
     local.roundtrip(&mut run);
     local.client.configure = None;
     toplevel.set_maximized();
@@ -236,6 +276,7 @@ fn a_maximised_window_has_no_outline() {
         background(&at(&frame(&mut run), x - 1, middle)),
         "maximised"
     );
+    assert_eq!(at(&frame(&mut run), x, middle), BLACK, "no divider");
     run.stop();
 }
 
@@ -421,7 +462,8 @@ fn the_border_shows_on_a_grey_backdrop() {
         assert_eq!(at(&shown, x - BORDER, middle), BLACK);
         assert_eq!(at(&shown, x - 2, middle), WHITE);
         assert_eq!(at(&shown, x - 1, middle), BLACK);
-        assert_eq!(at(&shown, x, middle)[0], edge[2], "the window");
+        assert_eq!(at(&shown, x, middle), DIVIDER, "the divider");
+        assert_eq!(at(&shown, x + 1, middle)[0], edge[2], "the window");
     }
     run.stop();
 }
@@ -671,7 +713,7 @@ fn a_window_above_covers_the_marks_below() {
 }
 
 /// A change of the theme's files reaches the frame without a new client: the width and the
-/// colour of the outline, and the setting that turns it off.
+/// colour of the outline, the divider's colour, and the setting that turns the outline off.
 #[test]
 fn the_outline_follows_a_theme_change() {
     let mut run = Running::start(None);
@@ -696,6 +738,11 @@ fn the_outline_follows_a_theme_change() {
     let green = [0, 255, 0, 255];
     settled(&mut run, "the new outline", |shown| {
         at(shown, x - 6, middle) == green
+    });
+
+    std::fs::write(theme.join("background"), "(divider: \"#FF0000FF\")").expect("a divider");
+    settled(&mut run, "the new divider", |shown| {
+        at(shown, x, middle) == [255, 0, 0, 255]
     });
 
     std::fs::write(setting.join("active_hint"), "false").expect("the setting");
