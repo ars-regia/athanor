@@ -1418,3 +1418,26 @@ fn a_resize_to_any_size_keeps_the_tiles_in_the_area() {
     assert_eq!(tiles(&run, pair.id), 2);
     run.stop();
 }
+
+/// A full-screen tile, focused, stays above a window D5 floats on its workspace (D6).
+#[test]
+fn a_focused_full_screen_tile_stays_above_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    new.redraw(&mut run);
+    let window = new.server_window(&run, &surface);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+
+    run.state.focus(&pair.above);
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    assert!(level(&run, &window) > level(&run, &pair.below), "above the other tile");
+    run.stop();
+}

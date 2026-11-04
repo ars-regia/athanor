@@ -1029,14 +1029,28 @@ impl State {
     pub(crate) fn float_tile(&mut self, window: &Window) {
         if self.is_tile(window) && crate::handlers::floats(window) {
             self.leave_tile(window);
+            self.raise_float(window);
+        }
+    }
+
+    /// Raises `window`, which D5 floats, over the tiles of its workspace, unless one of them is
+    /// full screen: that one stays above it (D6).
+    fn raise_float(&mut self, window: &Window) {
+        let id = on(window);
+        let full_screen = self
+            .space
+            .elements()
+            .any(|kept| on(kept) == id && crate::state::is_full_screen(kept));
+        if !full_screen {
             self.space.raise_element(window, false);
         }
     }
 
     /// Raises the windows D5 floats on the workspace of `window`, a tile, over it, in their
-    /// order: a tile never covers them.
+    /// order: a tile never covers them. A full-screen tile stays above them (D6), and a
+    /// maximised one under them.
     pub(crate) fn keep_floats_above(&mut self, window: &Window) {
-        if !self.is_tile(window) {
+        if !self.is_tile(window) || crate::state::is_full_screen(window) {
             return;
         }
         let id = on(window);
@@ -1148,7 +1162,7 @@ impl State {
             return;
         }
         if crate::handlers::floats(window) {
-            self.space.raise_element(window, false);
+            self.raise_float(window);
             return;
         }
         let maximised: Vec<Window> = self
