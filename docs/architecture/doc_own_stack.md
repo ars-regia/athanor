@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment proposed for the maintainer's approval with the pull request of `feat/toolkit-clipboard`. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -47,6 +47,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   `doc_shell.md` SH2's exceptions; OS5, the tiling manager, with version 2 of the register;
   decision 32, with OS5, section 3's register rows 3 and 4 and the overview's amendment of the
   same date.
+- Amended on 2026-11-04: OS7, the text field's clipboard and primary selection.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
@@ -465,6 +466,28 @@ follows, where GTK gives `grouping`, so Orca says "panel" where it said "groupin
 5). The title bar the toolkit draws itself (maintainer decision of 2026-10-17) takes the names of
 its Minimize and Close buttons from `athanor-i18n` before the first surface moves: both choosers
 name them in English under Italian today (T1 results, task 5).
+*Amended on 2026-11-04, the amendment proposed for the maintainer's approval with the pull request of `feat/toolkit-clipboard`:* the
+text field takes the clipboard and the primary selection. Ctrl+C, Ctrl+X, Ctrl+V and Ctrl+A
+copy, cut, paste and select all on `wl_data_device`; Ctrl+C, Ctrl+X and Ctrl+V act once per
+press, not as the key repeats. A field's selection, made with the keyboard or the pointer, is
+offered as the primary selection on `zwp_primary_selection_device_v1` with the serial of the key
+or button that made it, a held key's repeat with that of its press, and a middle click pastes it
+into the field under the pointer. The offer ends with that selection, when it collapses, is
+edited or its window closes, unless a later selection has replaced it. A field offers and reads
+`text/plain;charset=utf-8`, then `UTF8_STRING`, then `text/plain`. A paste is at most 64 KiB,
+refused whole above that or when it is not UTF-8, and the field keeps at most its character cap
+of it; the control characters, but a text area's newlines, and the invisible formatting
+characters (bidirectional marks, overrides and isolates, line and paragraph separators) are
+dropped, as from a value an assistive technology sets, and a field that is composing takes none.
+A paste with no text left after that changes nothing, the selection included.
+One paste at a time is pending: a new one replaces it, and one whose owner has not sent the whole
+text in 3 seconds is dropped, with a message. An offer whose reader has not taken the whole text
+in 3 seconds is dropped too, and its pipe closed. A cut deletes the selection only after the
+request to set the clipboard is sent with the serial of the key: without a clipboard or without
+that serial the text stays, and a refusal the compositor sends later leaves it deleted. A field
+that holds a secret refuses copy, cut and the primary selection, and the toolkit gets that mode
+before the greeter's password field moves to it. A field's context menu stays with #719, and
+Orca's "opens popup" with #638.
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's
