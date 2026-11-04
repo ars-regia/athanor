@@ -138,6 +138,18 @@ Run after the open pull requests merge, because the moved files are touched by m
 
 ## Naming
 
+The components Athanor owns that a user or a developer recognises as products (pillars) take
+alchemical proper names; every other package keeps a descriptive `athanor-<function>` name
+([ADR-0134](../decisions/0134-alchemical-names-for-the-pillars.md)). Azoth is the kernel;
+Sulphur the compositor (`athanor-compositor`, `athanor-compositor-client` and the planned
+`athanor-compositor-session` become `athanor-sulphur`, `athanor-sulphur-client` and
+`athanor-sulphur-session`); Sal the toolkit (`athanor-toolkit` becomes `athanor-sal`); Sigillum
+the updates and the chain of trust (`athanor-update`, `athanor-trust-state`, the image and kernel
+signing); Opus the desktop shell as a whole, whose parts (`athanor-bar` and the rest) keep their
+names; Forge and Calmo keep theirs. Published Wayland and D-Bus identifiers (`athanor_*_v1`,
+`os.athanor.*`) are not renamed. Each rename lands in a pull request of its pillar; until it
+lands, the crate and the package keep the name they have today.
+
 Crates and packages are named `athanor-*`; no `ermete-*` crate remains (the project was
 Ermete OS until 2026-09-05, commit `02bf9c05`). Exceptions: the crates `xdg-desktop-portal-athanor` (its spec directory is
 `forge/specs/athanor-xdg-desktop-portal-athanor`) and `calmo-cosmic-theme` (`forge/tools`),

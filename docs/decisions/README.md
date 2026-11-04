@@ -201,3 +201,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0131 | 0131 | [The GitHub Release of each promotion, and release 0.9 without the VSA](0131-github-release-of-each-promotion.md) | accepted | build, release, process, security |
 | ADR-0132 | 0132 | [The own compositor becomes the default session before its full acceptance](0132-own-compositor-default-before-full-acceptance.md) | accepted | shell, security, process |
 | ADR-0133 | 0133 | [The own compositor takes the magnifier, the colour filters and the keyboard aids](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md) | accepted | accessibility, shell |
+| ADR-0134 | 0134 | [The pillars of Athanor take alchemical names; every other package keeps a descriptive one](0134-alchemical-names-for-the-pillars.md) | accepted | shell, update, security, process |
