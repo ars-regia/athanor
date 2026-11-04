@@ -811,6 +811,11 @@ fn the_clipboard_reaches_the_copier_and_the_next_focus() {
         pasting_devices.forget();
         copier_devices.set(&copier, Which::Clipboard, "copied text");
         copier.roundtrip(&mut run);
+        pasting.roundtrip(&mut run);
+        assert!(
+            pasting_devices.latest(Which::Clipboard).is_none(),
+            "a client without the focus is offered the clipboard (confined: {confined})"
+        );
         let own = copier_devices.offered(&mut copier, &mut run, Which::Clipboard);
         assert!(
             own.mimes().iter().any(|mime| mime == TEXT),
