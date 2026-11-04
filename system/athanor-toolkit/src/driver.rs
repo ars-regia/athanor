@@ -1,7 +1,10 @@
 //! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows, wlr-layer-shell surfaces
 //! and their xdg-popups (a menu, or a tooltip), several in one process, each drawn in shared memory by vello_cpu or through wgpu by
 //! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
-//! through text-input-v3, and one AccessKit adapter on AT-SPI per surface.
+//! through text-input-v3, the clipboard and the primary selection, and one AccessKit adapter on
+//! AT-SPI per surface.
+
+mod clipboard;
 
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
@@ -48,7 +51,7 @@ use smithay_client_toolkit::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
             cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_RIGHT,
+            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -302,6 +305,8 @@ fn run_on(
         ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
+        // Optional: without them, a field copies and pastes nothing.
+        clipboards: clipboard::Clipboards::bind(&globals, &qh),
         tooltip: Tooltip::default(),
         error: None,
     };
@@ -1233,6 +1238,7 @@ struct App {
     /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
+    clipboards: clipboard::Clipboards,
     /// When the tooltip of the widget under the pointer, or focused, shows.
     tooltip: Tooltip<(SurfaceId, WidgetId)>,
     /// An error raised inside a callback, returned by [`run`].
@@ -1246,11 +1252,12 @@ impl App {
     }
 
     /// Hands an event of `id`'s widgets to the application, then redraws and updates the
-    /// accessibility trees and the input method.
+    /// accessibility trees, the input method and the clipboards.
     fn changed(&mut self, id: SurfaceId, event: Option<Event>) {
         self.update(id, event);
         if !self.shell.exit {
             self.sync_text_input();
+            self.clips(id);
         }
     }
 
@@ -1475,6 +1482,7 @@ impl App {
         let button = match button {
             BTN_LEFT => PointerButton::Primary,
             BTN_RIGHT => PointerButton::Secondary,
+            BTN_MIDDLE => PointerButton::Middle,
             _ => return,
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -1556,6 +1564,9 @@ impl App {
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
             Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
+            Keysym::c | Keysym::C if self.modifiers.ctrl => Key::Copy,
+            Keysym::x | Keysym::X if self.modifiers.ctrl => Key::Cut,
+            Keysym::v | Keysym::V if self.modifiers.ctrl => Key::Paste,
             Keysym::Up => Key::Up,
             Keysym::Down => Key::Down,
             Keysym::Home => Key::Home,
@@ -1806,6 +1817,7 @@ impl SeatHandler for App {
         capability: Capability,
     ) {
         self.shell.seat = Some(seat.clone());
+        self.clipboards.seat(qh, &seat);
         let result: Result<(), Error> = match capability {
             Capability::Keyboard if self.keyboard.is_none() => {
                 if let (Some(manager), None) = (&self.text_input_manager, &self.text_input) {
