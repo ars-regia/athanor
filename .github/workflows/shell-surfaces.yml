@@ -127,6 +127,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
+      - name: The rig runs the cosmic-comp the session ships
+        run: bash forge/test/shell/rig.sh cosmic-comp-version
       - name: Build and test the compositor client
         run: bash forge/test/shell/rig.sh build-compositor-client
       - name: The client against cosmic-comp and sway

@@ -46,9 +46,15 @@ class BuildInputs(unittest.TestCase):
 
     def test_the_containerfile_takes_nothing_from_the_context(self):
         # build-inputs.sh hashes only the Containerfile and rig-image.digest: a file copied or
-        # mounted into the build would change the stage without changing the hash.
+        # mounted into the build would change the stage without changing the hash. A mount from a
+        # stage the Containerfile pins by digest (the tier 2 repository) is in the hash already.
         text = (SHELL / "Containerfile").read_text(encoding="utf-8")
-        found = re.findall(r"(?im)^\s*(?:COPY|ADD)\b.*$|--mount\b.*$", text)
+        pinned = re.findall(r"(?im)^FROM\s+\S+@\S+\s+AS\s+(\S+)$", text)
+        found = [
+            line
+            for line in re.findall(r"(?im)^\s*(?:COPY|ADD)\b.*$|--mount\b.*$", text)
+            if not any(re.match(rf"--mount=type=bind,from={re.escape(s)},", line) for s in pinned)
+        ]
         self.assertEqual(found, [], "add these inputs to build-inputs.sh, then update this test")
 
 

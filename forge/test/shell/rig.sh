@@ -9,6 +9,7 @@
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
+#   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version of forge/specs/cosmic-comp
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -128,10 +129,11 @@ build_image() {
     fi
 }
 
-# The base of the fixtures' layer: the published rig when there is one (see the Containerfile).
-rig_base=()
+# The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
+# and the registry of the forge's tier 2 repository, where the rig's cosmic-comp comes from.
+rig_base=(--build-arg "FORGE_REGISTRY=$registry")
 if [ -s "$rig/rig-image.digest" ]; then
-    rig_base=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
+    rig_base+=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
 fi
 
 # label=disable: under SELinux's container_t bubblewrap cannot mount devpts, glycin's
@@ -599,6 +601,19 @@ publish-build-image)
     echo "published $(cat "$out/build-image.ref")"
     echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
     echo "the pin trusts this run: the digest is unsigned, and rig.sh checks only the inputs label against the checkout"
+    ;;
+cosmic-comp-version)
+    # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
+    # carries the session's build, so a spec bump fails here until the rig is published again (#965).
+    want=$(awk '$1 == "Version:" { print $2 }' "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
+    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
+    case $have in
+    "$want"-*.athanor*) echo "the rig runs cosmic-comp $have, the version forge/specs/cosmic-comp ships" ;;
+    *)
+        echo "rig.sh: the rig runs cosmic-comp $have, the session ships Athanor's build of ${want:-an unreadable Version} (forge/specs/cosmic-comp); publish the rig again (rig.sh publish-image)" >&2
+        exit 1
+        ;;
+    esac
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
