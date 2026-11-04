@@ -167,7 +167,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI9 Kernel Bump
 
-- **File:** `kernel-bump.yml`. **Purpose:** bump bot. Group `kernel` moves the kernel pins and opens a `kernel-bump` PR with auto-merge when prep is green; group `system` moves the base image pins and opens a `system-bump` PR; every run mirrors the locked NVIDIA RPMs (O7, O8).
+- **File:** `kernel-bump.yml`. **Purpose:** bump bot. Group `kernel` moves the kernel pins and opens a `kernel-bump` PR with auto-merge when prep is green, no NVIDIA lock moves and the kernel closes no Fedora security advisory (`doc_pipeline.md`, PL55); group `system` moves the base image pins and opens a `system-bump` PR; every run mirrors the locked NVIDIA RPMs (O7, O8).
 - **Triggers:** cron `17 5 * * 1` (both groups) and `17 5 * * 0,2-6` (group `system` only, ADR-0109); dispatch; push of its own file. **Outputs:** PRs; artifacts `bump-pins`, `bump-prep`; image `KERNEL_REGISTRY/athanor-nvidia-rpms`.
 - **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_CLIENT_ID` (jobs `pr` and `system`: the PRs open with an App token, so that they start checks), `GITHUB_TOKEN`, `KERNEL_REGISTRY`. **Environment:** `bots` (jobs `pr` and `system`).
 - **Runner:** `prep` self-hosted (`:116`), the rest hosted. **Concurrency:** `kernel-bump`, no cancel.

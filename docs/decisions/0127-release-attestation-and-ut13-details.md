@@ -73,6 +73,13 @@ predicate type of point 1 as written below:
 7. **The Fedora half of PL55.** Only advisories of `type="security"` count. The updateinfo
    comes from the `updates` repository of the candidate's `VERSION_ID`, reached through the
    Fedora metalink and checked against the `repomd.xml` checksum.
+   *Amended on 2026-11-01 by the maintainer (#655):* `kernel` and `kernel-*` leave this
+   half, since Azoth's package carries Fedora's name and an NEVRA of its own. Their upstream
+   versions are compared, and a kernel change that closes an advisory fails `candidate`
+   unless a `security` file of point 6 is in the range: an advisory never sets the class of
+   the kernel.
+   *Amended on 2026-11-02:* the bump bot names that advisory in its pull request and does not
+   auto-merge it.
 8. **The opt-out wording.** UT6 and the last sentence of UT13's opt-out bullet are read with
    "it" as the opt-out: `SetAutomaticSecurityUpdates(false)` re-locks an unlocked security
    digest, and `SetAutomaticSecurityUpdates(true)` unlocks a waiting one and starts the lineage

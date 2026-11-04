@@ -473,12 +473,17 @@ impl State {
                 }
             },
         };
+        let instance = context.as_ref().and_then(|context| {
+            let id = context.instance_id.clone()?;
+            Some((context.creator_client_id.clone(), id))
+        });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
             identity,
+            instance,
         })
     }
 
@@ -491,6 +496,7 @@ impl State {
             confined: true,
             grants: Vec::new(),
             identity: None,
+            instance: None,
         })
     }
 
@@ -1524,6 +1530,10 @@ pub struct ClientState {
     grants: Vec<Privilege>,
     /// What the grants were decided on, when the process could be read.
     identity: Option<Identity>,
+    /// The application instance its security context names: the context's creator and its
+    /// instance id. The clients that share it are one application, as a terminal and the
+    /// commands it runs are (`same_instance`).
+    instance: Option<(ClientId, String)>,
 }
 
 /// The identity `client` connected with, when it could be read.
@@ -1531,6 +1541,19 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `a` and `b` connected through security contexts that name one application instance:
+/// the same creator, which is the launcher, and the same instance id. A context without an
+/// instance id names none, and neither does xwayland-satellite's socket.
+pub fn same_instance(a: &Client, b: &Client) -> bool {
+    let instance = |client: &Client| {
+        client
+            .get_data::<ClientState>()
+            .and_then(|data| data.instance.clone())
+    };
+    let first = instance(a);
+    first.is_some() && first == instance(b)
 }
 
 /// Whether `client` was granted `privilege` when it connected.

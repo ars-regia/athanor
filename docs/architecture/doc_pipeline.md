@@ -29,6 +29,9 @@
   lists the workflow files of `iso-v0` as they are (section 15).
   Amended 2026-10-21 ([ADR-0127](../decisions/0127-release-attestation-and-ut13-details.md)): the release attestation of PB4b, the class derivation of PL55
   and the cosign installer of `sign-images` (PL11, section 15).
+  Amended 2026-11-01 (#655), by the maintainer's decision: PL55 takes the Azoth
+  kernel out of the Fedora half, requires a `release-class.toml` file for a security fix of
+  a package Athanor builds, and has `candidate` check that file for the kernel.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -157,7 +160,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
-| `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green and no NVIDIA lock moves, and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
+| `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green, no NVIDIA lock moves and the kernel closes no Fedora security advisory (PL55), and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
 | `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard |
 
 ### 3.2 Reusable stages and composite actions
@@ -684,7 +687,9 @@ or images that expire (section 5), and never from a dispatch input:
 - for each Fedora package whose NEVRA differs between the RPM databases of `:latest` and
   the candidate, the Fedora updateinfo advisories of `type="security"` whose fixed NEVRA is newer than the
   `:latest` one and not newer than the candidate's, so nothing outside the difference is
-  claimed. This is a use of its own, not the scan of PL25. An advisory published late can
+  claimed. The Azoth kernel takes no part: its packages keep Fedora's names, `kernel` and
+  `kernel-*`, with an NEVRA of their own, so the comparison would be an inference (amended
+  2026-11-01, #655). This is a use of its own, not the scan of PL25. An advisory published late can
   change the answer, so the record of the release pins the answer that was used, with the
   timestamp of the updateinfo metadata, for audit. An unavailable source fails; an empty
   result is valid and means no Fedora advisory. The source is the updateinfo of the `updates`
@@ -692,7 +697,20 @@ or images that expire (section 5), and never from a dispatch input:
   against the `repomd.xml` checksum (ADR-0127); the spec names no other advisory
   source.
 
-The class is security if any source says so, and the advisory ids are their union. The
+The class is security if any source says so, and the advisory ids are their union. A
+release that carries a security fix to a package Athanor builds states it in a
+`release-class.toml` file of the git half: the maintainer adds the file, and for the kernel
+`candidate` checks it. The other packages Athanor builds under a Fedora name stay in the
+Fedora half above, and nothing checks their file. With a labelled baseline and the
+same `VERSION_ID`, a kernel change that closes a Fedora advisory of `type="security"` for
+`kernel`, one whose upstream version is newer than the `:latest` one and not newer than the
+candidate's, fails `candidate` unless a `security` file for that repository is in the range.
+A Fedora advisory never sets the class of the kernel by itself: a release would apply
+without confirmation on an inference from version numbers (amended 2026-11-01, #655). The
+kernel bump reads the same advisories: one that closes an advisory names it in its pull
+request and is not auto-merged, and the bot never writes the file (amended 2026-11-02). Each
+reads the repository as it stands: an advisory listed after the bump still fails `candidate`,
+and one dropped because a newer kernel update replaced it is seen by neither. The
 content of a release whose pending run was replaced (PL49) is in that difference, so the
 next release carries its class. The class is per repository: each image repository's own
 `:latest` is its baseline. The revision label is a build check: an image without it fails

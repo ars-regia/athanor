@@ -7215,7 +7215,15 @@ fn os9_the_keymap_follows_the_last_keyboard() {
 
 /// A client with a mapped toplevel and a `wl_keyboard`, given the keyboard, and its window.
 fn focused_window(run: &mut Running) -> (Local, smithay::desktop::Window) {
-    let mut local = Local::connect(run, None);
+    focused_window_in(run, None)
+}
+
+/// `focused_window` for a client connected inside `context`, if any.
+fn focused_window_in(
+    run: &mut Running,
+    context: Option<SecurityContext>,
+) -> (Local, smithay::desktop::Window) {
+    let mut local = Local::connect(run, context);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
     let wm_base: xdg_wm_base::XdgWmBase = local.bind(1);
@@ -11205,3 +11213,6 @@ mod aids;
 
 #[cfg(test)]
 mod parented;
+
+#[cfg(test)]
+mod instance;
