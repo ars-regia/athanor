@@ -56,5 +56,6 @@ athanor_toplevel_manager_v1 privileged
 athanor_toplevel_actions_v1 privileged
 athanor_keyboard_group_manager_v1 privileged
 athanor_a11y_manager_v1 privileged
+athanor_workspace_tiling_manager_v1 privileged
 ext_data_control_manager_v1 privileged
 zwlr_data_control_manager_v1 privileged

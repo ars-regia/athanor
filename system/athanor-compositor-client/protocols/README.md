@@ -44,3 +44,9 @@ and filters and the keyboard aids of athanor-compositor, through `athanor_a11y_m
 is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either. The client binds it in
 `src/a11y.rs` when it is offered, else `cosmic_a11y_manager_v1`; the compositor serves it from
 `src/a11y.rs`, and its RPM spec names it in a `# repo-input:` line.
+
+`athanor-workspace-tiling-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5 and OS12):
+whether a workspace of ext-workspace-v1 is tiled, made by `athanor_workspace_tiling_manager_v1`
+for an `ext_workspace_handle_v1`, and the request that tiles it or floats it, served by
+athanor-compositor from `src/workspace_tiling.rs`. It is MIT, 2026 Athanor Forge, and it is not
+in `SHA256SUMS` either.

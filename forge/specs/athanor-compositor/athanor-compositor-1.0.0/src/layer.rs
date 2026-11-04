@@ -69,6 +69,7 @@ impl WlrLayerShellHandler for State {
             }
         }
         self.fit_maximised();
+        self.fit_tiles();
         self.refocus(wl_surface);
     }
 }
@@ -102,6 +103,8 @@ impl State {
             layer.layer_surface().send_pending_configure();
         }
         self.fit_maximised();
+        // At each of a bar's frames: a tile whose size did not change is sent nothing.
+        self.fit_tiles();
 
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;

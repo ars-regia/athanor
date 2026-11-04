@@ -80,8 +80,8 @@ pub struct HeldCommit {
 struct Placed;
 
 /// Marks a window the user has moved, resized, maximised, minimised or made full screen since it
-/// was placed, or that went to another workspace: the cascade no longer follows it. A destroyed
-/// window ends the cascade too, at the next window `spawn` places.
+/// was placed, or that went to another workspace or took a tile: the cascade no longer follows
+/// it. A destroyed window ends the cascade too, at the next window `spawn` places.
 struct Moved;
 
 /// Takes `window` out of the cascade, as cosmic-comp does when the window leaves its place.
@@ -137,11 +137,14 @@ impl CompositorHandler for State {
                         .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
                 if unmapped {
                     self.forget_requests(&window);
+                    self.hide_tile(&window);
                 }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).
                 if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
+                    // A tile that hid takes a tile again at its next draw.
+                    self.tile_shown(&window);
                     let landed = self.relocated(&window);
                     self.anchor_resized(&window);
                     // Also what a full-screen window's answer lifts (`marks::lifted`), which an
@@ -156,13 +159,14 @@ impl CompositorHandler for State {
         }
         self.layer_commit(surface);
 
-        // The first commit of a toplevel or a popup gets its initial configure.
-        if let Some(toplevel) = self
-            .window_or_minimised(surface)
-            .as_ref()
-            .and_then(Window::toplevel)
-        {
-            if !toplevel.is_initial_configure_sent() {
+        // The first commit of a toplevel or a popup gets its initial configure; on a tiled
+        // workspace, with the tile the window will take.
+        if let Some(window) = self.window_or_minimised(surface) {
+            if let Some(toplevel) = window
+                .toplevel()
+                .filter(|toplevel| !toplevel.is_initial_configure_sent())
+            {
+                self.preview_tile(&window);
                 toplevel.send_configure();
             }
         }
@@ -336,15 +340,17 @@ impl State {
             self.space.relocate_element(window, (x, y));
         }
         self.place_on_workspace(window);
+        self.tile_placed(window, takes);
         self.follow_parent(window, true);
     }
 
-    /// Where `window`, at its first sized commit, goes on the first output's active workspace:
+    /// Where `window`, at its first sized commit, goes on its `placement_workspace`:
     /// cascaded from the windows placed there before it (`cascaded`), or as the first
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
-    /// and is left out of it, and so is one maximised or full screen before its first commit.
-    /// A window too tall for where it lands is sent the height that fits.
+    /// and is left out of it, and so is one maximised or full screen before its first commit,
+    /// and one on a tiled workspace, which takes a tile (`tile_placed`) and is sent nothing
+    /// here. A window too tall for where it lands is sent the height that fits.
     fn spawn(
         &mut self,
         window: &Window,
@@ -358,7 +364,10 @@ impl State {
         if self.parent_window(window).is_some() || window.user_data().get::<Moved>().is_some() {
             return first;
         }
-        let workspace = self.active_workspace(&output);
+        let workspace = self.placement_workspace(window);
+        if workspace.is_some_and(|id| self.is_tiled(id)) {
+            return first;
+        }
         let here: Vec<Window> = self
             .spawned
             .iter()
@@ -575,9 +584,11 @@ impl State {
     }
 
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
-    /// the keyboard exclusively; the others are deactivated.
+    /// the keyboard exclusively; the others are deactivated. Its workspace's tree, if it is
+    /// tiled, splits it next (D2).
     pub fn focus(&mut self, window: &Window) {
         self.space.raise_element(window, true);
+        self.focus_tile(window);
         // The window's own dialogs stay above it.
         for dialog in self.subtree(window) {
             self.space.raise_element(&dialog, false);
@@ -713,6 +724,7 @@ impl XdgShellHandler for State {
             if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
                 self.foreign_toplevel_state.remove_toplevel(handle);
             }
+            self.drop_tile(&window);
             self.space.unmap_elem(&window);
             self.minimised.retain(|(kept, _)| *kept != window);
             self.parked.retain(|(kept, _)| *kept != window);
@@ -743,11 +755,7 @@ impl XdgShellHandler for State {
                 self.move_window(&window, kept_reachable(area, from, kept.size));
             }
         }
-        let grab = MoveGrab {
-            start,
-            window,
-            from,
-        };
+        let grab = MoveGrab::new(start, window, from);
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }
 

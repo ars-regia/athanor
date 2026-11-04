@@ -1,10 +1,11 @@
 # repo-input: system/athanor-compositor-client/protocols/athanor-toplevel-state-v1.xml
 # repo-input: system/athanor-compositor-client/protocols/athanor-keyboard-group-v1.xml
 # repo-input: system/athanor-compositor-client/protocols/athanor-a11y-v1.xml
+# repo-input: system/athanor-compositor-client/protocols/athanor-workspace-tiling-v1.xml
 %global debug_package %{nil}
 Name:           athanor-compositor
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 
@@ -52,6 +53,12 @@ install -D -m 0644 forge/specs/athanor-compositor/athanor-compositor-1.0.0/data/
 /usr/share/athanor/compositor/privileged-clients
 
 %changelog
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- Tile the windows of a workspace while its tiling is on, each new window beside the one
+  focused last, with gaps of 8, and return each to its floating place when it is turned
+  off (doc_own_stack.md OS12, #894). athanor_workspace_tiling_v1, granted to the bar,
+  reads and sets the state of each workspace.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - A frame that a refused mode test forgot, whose VBlank still comes, no longer counts as
   a lock frame on screen (#813).

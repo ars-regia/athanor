@@ -128,10 +128,26 @@ macro_rules! passed_on {
 /// A window following the pointer from a press its client was sent, until every button is up.
 /// No client has the pointer meanwhile.
 pub struct MoveGrab {
-    pub start: GrabStartData<State>,
-    pub window: Window,
+    start: GrabStartData<State>,
+    window: Window,
     /// Where the window's geometry was when the pointer was at the press.
-    pub from: Point<i32, Logical>,
+    from: Point<i32, Logical>,
+}
+
+impl MoveGrab {
+    /// The grab of `window`, which a layout leaves alone until it ends (`Held`). A move ends the
+    /// resize it replaces, whose `unset` runs after this.
+    pub fn new(start: GrabStartData<State>, window: Window, from: Point<i32, Logical>) -> Self {
+        hold(&window);
+        if let Some(resizing) = window.user_data().get::<Resizing>() {
+            resizing.0.set(None);
+        }
+        Self {
+            start,
+            window,
+            from,
+        }
+    }
 }
 
 impl PointerGrab<State> for MoveGrab {
@@ -167,7 +183,11 @@ impl PointerGrab<State> for MoveGrab {
 
     passed_on!();
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, data: &mut State) {
+        if let_go(&self.window) {
+            data.grab_ended(&self.window);
+        }
+    }
 }
 
 /// A window's `edges` following the pointer from a press its client was sent, until every
@@ -188,6 +208,7 @@ impl ResizeGrab {
         edges: ResizeEdge,
         from: Rectangle<i32, Logical>,
     ) -> Self {
+        hold(&window);
         let resize = Resize {
             edges,
             from,
@@ -248,22 +269,57 @@ impl PointerGrab<State> for ResizeGrab {
     passed_on!();
 
     /// The release, or the lock: a configure without the `resizing` state, and the window
-    /// stays anchored until the commit that answers it.
-    fn unset(&mut self, _data: &mut State) {
-        let Some(toplevel) = self.window.toplevel() else {
-            return;
-        };
-        toplevel.with_pending_state(|state| {
-            state.states.unset(xdg_toplevel::State::Resizing);
-        });
-        let end = toplevel.send_pending_configure();
-        let resizing = self.window.user_data().get_or_insert(Resizing::default);
-        let resize = resizing.0.get().zip(end);
-        resizing.0.set(resize.map(|(resize, end)| Resize {
-            end: Some(end),
-            ..resize
-        }));
+    /// stays anchored until the commit that answers it. A grab that replaced this one keeps its
+    /// own record; a tile is not anchored, since its layout places it.
+    fn unset(&mut self, data: &mut State) {
+        let last = let_go(&self.window);
+        if let Some(toplevel) = self.window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.states.unset(xdg_toplevel::State::Resizing);
+            });
+            let end = toplevel.send_pending_configure();
+            if last {
+                let resizing = self.window.user_data().get_or_insert(Resizing::default);
+                let resize = resizing.0.get().zip(end).filter(|_| !data.is_tile(&self.window));
+                resizing.0.set(resize.map(|(resize, end)| Resize {
+                    end: Some(end),
+                    ..resize
+                }));
+            }
+        }
+        if last {
+            data.grab_ended(&self.window);
+        }
     }
+}
+
+/// How many window grabs hold a window. A grab replaced by another on the same window ends after
+/// the new one began, so the count, not the grab installed, says whether one still does.
+#[derive(Default)]
+struct Held(Cell<u32>);
+
+fn hold(window: &Window) {
+    let held = window.user_data().get_or_insert(Held::default);
+    held.0.set(held.0.get().saturating_add(1));
+}
+
+/// Ends a grab of `window`: whether no other holds it.
+fn let_go(window: &Window) -> bool {
+    let Some(held) = window.user_data().get::<Held>() else {
+        return true;
+    };
+    let count = held.0.get().saturating_sub(1);
+    held.0.set(count);
+    count == 0
+}
+
+/// Whether a `MoveGrab` or a `ResizeGrab` holds `window`: a layout leaves it where the pointer
+/// takes it.
+pub fn is_held(window: &Window) -> bool {
+    window
+        .user_data()
+        .get::<Held>()
+        .is_some_and(|held| held.0.get() > 0)
 }
 
 /// A window's resize, kept in its user data from the press until the commit that answers its

@@ -9,8 +9,10 @@
 // ponytail: no pinned workspace and no reordering yet; the overview's private interface adds them
 // (doc_overview.md, plan task 5).
 
+use crate::handlers::shown;
 use crate::identity::Privilege;
-use crate::state::{centred, granted, State};
+use crate::state::{centred, granted, kept_before, place_again, relocate, set_kept_before, State};
+use crate::tiling::Tree;
 use smithay::backend::input::InputTime;
 use smithay::desktop::{find_popup_root_surface, PopupManager, Window};
 use smithay::output::Output;
@@ -19,10 +21,11 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1, WorkspaceCapabilities},
     ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
 };
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::InvalidId;
 use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
-use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::cell::Cell;
 
@@ -36,6 +39,42 @@ struct OnWorkspace(Cell<WorkspaceId>);
 /// The workspace `window` is on; none before it is placed.
 fn on(window: &Window) -> Option<WorkspaceId> {
     window.user_data().get::<OnWorkspace>().map(|on| on.0.get())
+}
+
+/// The states a tile is configured with, so that its client squares its corners (D8).
+pub(crate) const TILED: [xdg_toplevel::State; 4] = [
+    xdg_toplevel::State::TiledLeft,
+    xdg_toplevel::State::TiledRight,
+    xdg_toplevel::State::TiledTop,
+    xdg_toplevel::State::TiledBottom,
+];
+
+/// Where a tile stood floating, from its entry in a tree, for the end of the tiling (D7); empty
+/// for a window born tiled, which `placed` places then.
+#[derive(Default)]
+struct Floating(Cell<Option<Rectangle<i32, Logical>>>);
+
+/// D8 in `window`'s pending state, out of its tree: no tiled states, and the size it had
+/// floating, unless it is maximised or full screen. That geometry, which it no longer keeps;
+/// empty for a window born tiled.
+fn floating_state(window: &Window) -> Rectangle<i32, Logical> {
+    let floating = window
+        .user_data()
+        .get::<Floating>()
+        .and_then(|kept| kept.0.take())
+        .unwrap_or_default();
+    let sized = kept_before(window).is_none();
+    if let Some(toplevel) = window.toplevel() {
+        toplevel.with_pending_state(|state| {
+            for tiled in TILED {
+                state.states.unset(tiled);
+            }
+            if sized {
+                state.size = (!floating.is_empty()).then_some(floating.size);
+            }
+        });
+    }
+    floating
 }
 
 /// A step along an output's workspaces, from the keyboard (OV13).
@@ -56,6 +95,11 @@ impl Strip {
     fn active_id(&self) -> Option<WorkspaceId> {
         self.list.get(self.active).copied()
     }
+
+    /// The workspaces of the output, in order.
+    pub(crate) fn ids(&self) -> &[WorkspaceId] {
+        &self.list
+    }
 }
 
 /// The user data of the global, of the managers and of the groups.
@@ -63,6 +107,12 @@ pub struct Workspaces;
 
 /// The user data of a workspace's handle: the workspace it stands for.
 pub struct Handle(WorkspaceId);
+
+impl Handle {
+    pub(crate) fn workspace(&self) -> WorkspaceId {
+        self.0
+    }
+}
 
 /// What a client of the protocol was sent: its manager, a group per output and a handle per
 /// workspace, with the activations it asked for since its last `commit`.
@@ -304,14 +354,15 @@ impl State {
         self.parked.iter().any(|(kept, _)| kept == window)
     }
 
-    /// Puts `window`, placed now on the first output, on that output's active workspace.
+    /// The workspace `window` is on, or, before it is placed, the one `place_on_workspace` puts
+    /// it on: the active workspace of the first output, where a new window is placed.
+    pub fn placement_workspace(&self, window: &Window) -> Option<WorkspaceId> {
+        on(window).or_else(|| self.active_workspace(self.space.outputs().next()?))
+    }
+
+    /// Puts `window`, placed now, on its `placement_workspace`.
     pub fn place_on_workspace(&mut self, window: &Window) {
-        let Some(id) = self
-            .space
-            .outputs()
-            .next()
-            .and_then(|output| self.active_workspace(output))
-        else {
+        let Some(id) = self.placement_workspace(window) else {
             return;
         };
         window
@@ -336,11 +387,22 @@ impl State {
         let Some(output) = self.space.output_under(centre.to_f64()).next().cloned() else {
             return;
         };
-        if self.output_of_workspace(on.0.get()).as_ref() == Some(&output) {
+        let from = on.0.get();
+        if self.output_of_workspace(from).as_ref() == Some(&output) {
             return;
         }
         if let Some(id) = self.active_workspace(&output) {
+            // Under the pointer's lock (`MoveGrab::button`): it stays where it was dropped, and
+            // the grab's end lays its new workspace out.
+            let left = self.leave_tree(window, from);
             on.0.set(id);
+            if left && !self.is_tiled(id) {
+                self.untile(window, false);
+            }
+            self.enter_tile(window, false);
+            if left {
+                self.tile_layout(from);
+            }
             self.workspaces_changed();
         }
     }
@@ -390,11 +452,13 @@ impl State {
         let Some(on) = window.user_data().get::<OnWorkspace>() else {
             return false;
         };
-        let from = on.0.replace(id);
+        let from = on.0.get();
         if from == id {
             return true;
         }
+        let left = self.leave_tree(window, from);
         crate::handlers::moved(window);
+        on.0.set(id);
         if self.output_of_workspace(from).as_ref() != Some(&output) {
             if let Some(at) = self
                 .window_area_on(&output)
@@ -417,7 +481,18 @@ impl State {
         } else if !mapped && active {
             self.unpark(|kept| kept == window);
         }
+        // D9: a tile leaves its tree, and a window the user sees enters the target's.
+        if left && !self.is_tiled(id) {
+            self.untile(window, true);
+        }
+        let entered = self.enter_tile(window, false);
         self.fit_maximised();
+        if left {
+            self.tile_layout(from);
+        }
+        if let Some(id) = entered {
+            self.tile_layout(id);
+        }
         self.workspaces_changed();
         true
     }
@@ -570,11 +645,22 @@ impl State {
         if back.is_empty() {
             return;
         }
+        let mut tiled = Vec::new();
         for (window, at) in back {
             let at = self.reachable(&window, at);
             self.space.map_element(window.clone(), at, false);
             // A move answered while it was out applies now.
             self.relocated(&window);
+            // One that hid and drew again while out takes its tile now.
+            self.enter_tile(&window, false);
+            if let Some(id) = on(&window).filter(|id| self.is_tiled(*id)) {
+                if !tiled.contains(&id) {
+                    tiled.push(id);
+                }
+            }
+        }
+        for id in tiled {
+            self.tile_layout(id);
         }
         self.fit_maximised();
         self.refresh_pointer();
@@ -598,19 +684,20 @@ impl State {
                 });
             }
         }
-        if let Some(home) = self.workspaces.first().and_then(Strip::active_id) {
-            let mut moved = false;
+        let home = self.workspaces.first().and_then(Strip::active_id);
+        let mut rehomed = Vec::new();
+        if let Some(home) = home {
             for window in self.windows() {
                 if let Some(on) = window.user_data().get::<OnWorkspace>() {
                     let id = on.0.get();
                     if !self.workspaces.iter().any(|strip| strip.list.contains(&id)) {
                         on.0.set(home);
                         crate::handlers::moved(window);
-                        moved = true;
+                        rehomed.push(window.clone());
                     }
                 }
             }
-            if moved {
+            if !rehomed.is_empty() {
                 self.unpark(|window| on(window) == Some(home));
             }
         }
@@ -634,6 +721,24 @@ impl State {
                 strip.list.push(WorkspaceId(self.next_workspace));
             }
         }
+        let gone: Vec<WorkspaceId> = self
+            .tilings
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| !self.workspaces.iter().any(|strip| strip.list.contains(id)))
+            .collect();
+        for id in gone {
+            self.float(id);
+        }
+        // Out of the trees gone, the re-homed windows take a tile of their new workspace's.
+        let entered: Vec<WorkspaceId> = rehomed
+            .iter()
+            .filter_map(|window| self.enter_tile(window, false))
+            .collect();
+        if let Some(home) = entered.first() {
+            self.tile_layout(*home);
+        }
+        self.end_gone_tilings();
         self.send_workspaces();
     }
 
@@ -675,6 +780,391 @@ impl State {
             Some(area) if !self.shown_at_home(window, kept) => centred(area, size),
             _ => at,
         }
+    }
+}
+
+/// The automatic tiling of a workspace (OS12, `docs/superpowers/plans/2026-10-31-compositor-tiling.md`).
+impl State {
+    pub fn is_tiled(&self, id: WorkspaceId) -> bool {
+        self.tilings.iter().any(|(kept, _)| *kept == id)
+    }
+
+    /// Whether `window` holds a tile of its workspace's tree.
+    pub fn is_tile(&self, window: &Window) -> bool {
+        on(window)
+            .and_then(|id| self.tilings.iter().find(|(kept, _)| *kept == id))
+            .is_some_and(|(_, tree)| tree.holds(window))
+    }
+
+    /// Tiles the workspace `id`, or floats it again (D7).
+    pub fn set_tiling(&mut self, id: WorkspaceId, tiled: bool) {
+        if tiled == self.is_tiled(id) {
+            return;
+        }
+        if tiled {
+            self.tile(id);
+        } else {
+            self.float(id);
+        }
+        self.send_tiling(id);
+    }
+
+    /// Takes every window of `id` the user can see into a new tree, the topmost first, each
+    /// beside the one before (D2), and out of the cascade (`handlers::moved`). A maximised or
+    /// full-screen window stays so, its tile what it returns to, and is sent nothing.
+    fn tile(&mut self, id: WorkspaceId) {
+        let Some(area) = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))
+        else {
+            return;
+        };
+        // Bottom to top: the space shows the workspace, or `parked` keeps its windows.
+        let stack: Vec<Window> = self
+            .space
+            .elements()
+            .chain(self.parked.iter().map(|(window, _)| window))
+            .filter(|window| on(window) == Some(id) && shown(window))
+            .cloned()
+            .collect();
+        let mut tree = Tree::default();
+        for window in stack.iter().rev() {
+            let floating = kept_before(window).unwrap_or_else(|| self.settled_geometry(window));
+            let kept = window.user_data().get_or_insert(Floating::default);
+            kept.0.set(Some(floating));
+            crate::handlers::moved(window);
+            tree.insert(window.clone(), area);
+        }
+        // The order of focus, which the walk left the stack's reversed: the topmost last, then
+        // the window with the keyboard.
+        for window in &stack {
+            tree.focus(window);
+        }
+        if let Some(focused) = self.focused_window() {
+            tree.focus(&focused);
+        }
+        self.tilings.push((id, tree));
+        self.tile_layout(id);
+    }
+
+    /// Ends the tiling of `id`: each window goes back to where it stood floating, at the size it
+    /// had (D7, D8).
+    fn float(&mut self, id: WorkspaceId) {
+        let Some(index) = self.tilings.iter().position(|(kept, _)| *kept == id) else {
+            return;
+        };
+        let (_, tree) = self.tilings.remove(index);
+        for window in tree.windows() {
+            self.untile(window, true);
+        }
+    }
+
+    /// D8 for `window`, out of its tree: a configure without the tiled states and with the size
+    /// it had floating, and with `moves` the window goes back to where it was at the commit that
+    /// answers it; without, it stays where it is. One born tiled is placed then, at the size it
+    /// answers with. A maximised or full-screen window is sent nothing, and returns to that place
+    /// when it is neither.
+    fn untile(&mut self, window: &Window, moves: bool) {
+        let floating = floating_state(window);
+        let Some(toplevel) = window.toplevel() else {
+            return;
+        };
+        if kept_before(window).is_some() {
+            set_kept_before(window, floating);
+            return;
+        }
+        let serial = toplevel.send_pending_configure();
+        if !moves {
+            return;
+        }
+        if floating.is_empty() {
+            place_again(window, serial);
+        } else {
+            let at = self.kept_place(window, floating);
+            self.go_to(window, at, serial);
+        }
+    }
+
+    /// Gives each tile of `id` its rectangle: a configure with its size and the tiled states,
+    /// when they are not those last sent, and the window goes to its tile's corner at the commit
+    /// that answers it. A maximised or full-screen window, and one a grab holds, keep theirs.
+    pub(crate) fn tile_layout(&mut self, id: WorkspaceId) {
+        let Some(area) = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))
+        else {
+            return;
+        };
+        let Some((_, tree)) = self.tilings.iter().find(|(kept, _)| *kept == id) else {
+            return;
+        };
+        let tiles: Vec<(Window, Rectangle<i32, Logical>)> = tree
+            .layout(area)
+            .into_iter()
+            .map(|(window, tile)| (window.clone(), tile))
+            .collect();
+        for (window, tile) in tiles {
+            let Some(toplevel) = window.toplevel() else {
+                continue;
+            };
+            // Maximised or full screen, it keeps that size and returns to its tile, with the
+            // tiled states it is sent then (D6, D7).
+            if kept_before(&window).is_some() {
+                toplevel.with_pending_state(|state| {
+                    for tiled in TILED {
+                        state.states.set(tiled);
+                    }
+                });
+                set_kept_before(&window, tile);
+                continue;
+            }
+            if crate::grabs::is_held(&window) {
+                continue;
+            }
+            // Set and never unset: the states compare in order, so an unset and a set would
+            // send a configure at every layout.
+            toplevel.with_pending_state(|state| {
+                state.size = Some(tile.size);
+                for tiled in TILED {
+                    state.states.set(tiled);
+                }
+            });
+            let serial = toplevel.send_pending_configure();
+            if self.settled_geometry(&window).loc != tile.loc {
+                self.go_to(&window, tile.loc, serial);
+            }
+        }
+    }
+
+    /// Moves `window` to `at`: at the commit that answers the configure of `serial` when there is
+    /// one, else as `move_window` does. A parked window comes back there.
+    fn go_to(&mut self, window: &Window, at: Point<i32, Logical>, serial: Option<Serial>) {
+        for (kept, place) in &mut self.parked {
+            if kept == window {
+                *place = at;
+            }
+        }
+        match serial {
+            Some(serial) => relocate(window, at, Some(serial)),
+            None => self.move_window(window, at),
+        }
+    }
+
+    /// The focus went to `window`: its tile is the one the next tile splits (D2).
+    pub(crate) fn focus_tile(&mut self, window: &Window) {
+        let Some(id) = on(window) else {
+            return;
+        };
+        if let Some((_, tree)) = self.tilings.iter_mut().find(|(kept, _)| *kept == id) {
+            tree.focus(window);
+        }
+    }
+
+    /// Every workspace an output shows laid out again, after the outputs or the layer surfaces'
+    /// zones changed the area.
+    pub(crate) fn fit_tiles(&mut self) {
+        let shown: Vec<WorkspaceId> = self.workspaces.iter().filter_map(Strip::active_id).collect();
+        for id in shown {
+            self.tile_layout(id);
+        }
+    }
+
+    /// D2 for `window`, on a tiled workspace, shown and in no tile yet: it splits the tile focused
+    /// last, and with `behind` the next tile still splits that one. Where it stood is kept for
+    /// the end of the tiling, unless it is kept already, and it leaves the cascade
+    /// (`handlers::moved`). The workspace, to lay out.
+    fn enter_tile(&mut self, window: &Window, behind: bool) -> Option<WorkspaceId> {
+        let id = on(window).filter(|id| self.is_tiled(*id))?;
+        if !shown(window) || self.is_tile(window) {
+            return None;
+        }
+        let area = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))?;
+        let floating = kept_before(window).unwrap_or_else(|| self.settled_geometry(window));
+        let kept = window.user_data().get_or_insert(Floating::default);
+        if kept.0.get().is_none() {
+            kept.0.set(Some(floating));
+        }
+        let (_, tree) = self.tilings.iter_mut().find(|(kept, _)| *kept == id)?;
+        crate::handlers::moved(window);
+        if behind {
+            tree.insert_behind(window.clone(), area);
+        } else {
+            tree.insert(window.clone(), area);
+        }
+        Some(id)
+    }
+
+    /// Takes `window` out of the tree of `id`; its sibling takes its space (D3). False when that
+    /// tree does not hold it.
+    fn leave_tree(&mut self, window: &Window, id: WorkspaceId) -> bool {
+        let Some((_, tree)) = self.tilings.iter_mut().find(|(kept, _)| *kept == id) else {
+            return false;
+        };
+        let held = tree.holds(window);
+        tree.remove(window);
+        held
+    }
+
+    /// A window drawn again, or brought back: it takes a tile if its workspace is tiled.
+    pub(crate) fn tile_shown(&mut self, window: &Window) {
+        if let Some(id) = self.enter_tile(window, false) {
+            self.tile_layout(id);
+        }
+    }
+
+    /// A tile minimised: it leaves its tree with D8's configure, and its workspace is laid out
+    /// (D9).
+    pub(crate) fn leave_tile(&mut self, window: &Window) {
+        let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) else {
+            return;
+        };
+        self.untile(window, true);
+        self.tile_layout(id);
+    }
+
+    /// A tile destroyed: its workspace is laid out without it.
+    pub(crate) fn drop_tile(&mut self, window: &Window) {
+        if let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) {
+            self.tile_layout(id);
+        }
+    }
+
+    /// A tile that committed a null buffer leaves its tree, and the rest of its workspace is laid
+    /// out. The workspace being still tiled, the initial configure the commit then sends carries
+    /// the tile `preview_tile` gives the window and the tiled states, in place of the floating
+    /// ones set here; a maximised or full-screen window keeps its size, without the tiled states.
+    /// It goes back to where it stood floating, or is placed at its next draw when it was born
+    /// tiled, and `tile_shown` gives it a tile again at that draw.
+    pub(crate) fn hide_tile(&mut self, window: &Window) {
+        let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) else {
+            return;
+        };
+        let floating = floating_state(window);
+        if floating.is_empty() {
+            place_again(window, None);
+        } else {
+            relocate(window, self.kept_place(window, floating), None);
+        }
+        self.tile_layout(id);
+    }
+
+    /// After `restore` or `leave_full_screen` sent a tile back to its kept geometry: the
+    /// layout's configure and move replace those (D6).
+    pub(crate) fn back_to_tile(&mut self, window: &Window) {
+        if self.is_tile(window) {
+            if let Some(id) = on(window) {
+                self.tile_layout(id);
+            }
+        }
+    }
+
+    /// The tile a new window would take by D2 on the workspace it will be placed on, in the
+    /// pending state of its initial configure, with D8's states. A window that asked to be
+    /// maximised or full screen keeps what it asked.
+    pub(crate) fn preview_tile(&self, window: &Window) {
+        if kept_before(window).is_some() {
+            return;
+        }
+        let Some(id) = self
+            .placement_workspace(window)
+            .filter(|id| self.is_tiled(*id))
+        else {
+            return;
+        };
+        let Some(tile) = self
+            .output_of_workspace(id)
+            .and_then(|output| self.window_area_on(&output))
+            .zip(self.tilings.iter().find(|(kept, _)| *kept == id))
+            .and_then(|(area, (_, tree))| tree.preview(window, area))
+        else {
+            return;
+        };
+        if let Some(toplevel) = window.toplevel() {
+            toplevel.with_pending_state(|state| {
+                state.size = Some(tile.size);
+                for tiled in TILED {
+                    state.states.set(tiled);
+                }
+            });
+        }
+    }
+
+    /// `place` put `window` on its workspace. On a tiled one it restores the other maximised
+    /// windows there (D6), takes its tile, behind the one focused last when it did not take the
+    /// keyboard, and stands there at once unless it asked to be maximised or full screen; it was
+    /// born tiled. On a floating one, a window sent a tile in its initial configure before the
+    /// toggle went off is sent D8's floating configure and placed at the size it answers with.
+    pub(crate) fn tile_placed(&mut self, window: &Window, focused: bool) {
+        let Some(id) = on(window) else {
+            return;
+        };
+        if !self.is_tiled(id) {
+            let Some(toplevel) = window.toplevel() else {
+                return;
+            };
+            let tiled = toplevel.with_pending_state(|state| {
+                TILED.iter().any(|tiled| state.states.contains(*tiled))
+            });
+            if tiled && kept_before(window).is_none() {
+                toplevel.with_pending_state(|state| {
+                    for tiled in TILED {
+                        state.states.unset(tiled);
+                    }
+                    state.size = None;
+                });
+                let serial = toplevel.send_pending_configure();
+                place_again(window, serial);
+            }
+            return;
+        }
+        let maximised: Vec<Window> = self
+            .space
+            .elements()
+            .filter(|other| {
+                *other != window
+                    && on(other) == Some(id)
+                    && crate::state::is_maximised(other)
+                    && !crate::state::is_full_screen(other)
+            })
+            .cloned()
+            .collect();
+        for other in &maximised {
+            self.restore(other);
+        }
+        window
+            .user_data()
+            .get_or_insert(Floating::default)
+            .0
+            .set(Some(Rectangle::default()));
+        if self.enter_tile(window, !focused).is_none() {
+            return;
+        }
+        if kept_before(window).is_none() {
+            let tile = self
+                .output_of_workspace(id)
+                .and_then(|output| self.window_area_on(&output))
+                .zip(self.tilings.iter().find(|(kept, _)| *kept == id))
+                .and_then(|(area, (_, tree))| tree.preview(window, area));
+            if let Some(tile) = tile {
+                self.space.relocate_element(window, tile.loc);
+            }
+        }
+        self.tile_layout(id);
+    }
+
+    /// The end of the last grab of `window` (`grabs::Held`): its workspace's layout, which the
+    /// grab held off, and the pointer's focus at the next idle, since the pointer is held while
+    /// a grab ends.
+    pub(crate) fn grab_ended(&mut self, window: &Window) {
+        let Some(id) = on(window).filter(|id| self.is_tiled(*id)) else {
+            return;
+        };
+        self.tile_layout(id);
+        let window = window.clone();
+        self.loop_handle
+            .insert_idle(move |state| state.repoint_moved(&window));
     }
 }
 
