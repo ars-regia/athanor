@@ -625,6 +625,18 @@ impl State {
         Some((pointer, start, window))
     }
 
+    /// Raises `window`, a tile gone full screen, with its own dialogs over the windows D5 floats
+    /// on its workspace (D6).
+    pub(crate) fn raise_full_screen_tile(&mut self, window: &Window) {
+        if !self.is_tile(window) {
+            return;
+        }
+        self.space.raise_element(window, false);
+        for dialog in self.subtree(window) {
+            self.space.raise_element(&dialog, false);
+        }
+    }
+
     /// Raises `window`, activates it and gives it the keyboard, unless a layer surface holds
     /// the keyboard exclusively; the others are deactivated. Its workspace's tree, if it is
     /// tiled, splits it next (D2).

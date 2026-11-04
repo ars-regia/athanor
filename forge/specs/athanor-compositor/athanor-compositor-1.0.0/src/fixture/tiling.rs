@@ -1492,3 +1492,69 @@ fn a_tile_drawn_smaller_is_resized_from_its_tile() {
     assert_eq!(tile_of(&run, pair.id, &pair.below), rect(NARROWER));
     run.stop();
 }
+
+/// A client of one size, floating above the tiles of `pair`'s workspace (D5).
+fn one_size(run: &mut Running) -> (Local, Window) {
+    let mut new = Local::connect(run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+    new.redraw(run);
+    let window = new.server_window(&*run, &surface);
+    (new, window)
+}
+
+/// A tile that goes full screen stands above a window D5 floats on its workspace (D6).
+#[test]
+fn a_tile_gone_full_screen_stands_above_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    assert_eq!(stack(&run).last(), Some(&float));
+
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    run.stop();
+}
+
+/// A tile that leaves full screen goes back under a window D5 floats on its workspace.
+#[test]
+fn a_tile_leaving_full_screen_goes_under_a_float() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (_new, float) = one_size(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+    assert_eq!(stack(&run).last(), Some(&pair.above));
+
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.leave_full_screen(&pair.above)
+    });
+
+    assert_eq!(stack(&run).last(), Some(&float), "the float is on top again");
+    run.stop();
+}
+
+/// A window that floats on a workspace with a full-screen tile, placed without the keyboard,
+/// stays under the full-screen tile (D6).
+#[test]
+fn a_float_placed_under_a_full_screen_tile_stays_under_it() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    answer_all(&mut run, &mut [&mut pair.upper], |run| {
+        run.state.full_screen(&pair.above, None)
+    });
+    run.state.focus(&pair.above);
+
+    let (_new, float) = one_size(&mut run);
+
+    assert_eq!(stack(&run).last(), Some(&pair.above), "the full-screen tile is on top");
+    assert!(stack(&run).contains(&float), "the float is placed");
+    run.stop();
+}

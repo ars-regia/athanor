@@ -1092,12 +1092,14 @@ impl State {
     }
 
     /// After `restore` or `leave_full_screen` sent a tile back to its kept geometry: the
-    /// layout's configure and move replace those (D6).
+    /// layout's configure and move replace those (D6), and the windows D5 floats go back above
+    /// it.
     pub(crate) fn back_to_tile(&mut self, window: &Window) {
         if self.is_tile(window) {
             if let Some(id) = on(window) {
                 self.tile_layout(id);
             }
+            self.keep_floats_above(window);
         }
     }
 
