@@ -22,6 +22,7 @@ ext_image_copy_capture_manager_v1 privileged
 athanor_toplevel_actions_v1 privileged
 athanor_keyboard_group_manager_v1 privileged
 athanor_a11y_manager_v1 privileged
+athanor_workspace_tiling_manager_v1 privileged
 """
 
 SPEC = """\
@@ -78,15 +79,16 @@ class AllowList(unittest.TestCase):
     def client(self):
         """A path dependency that binds the toplevel list at connect, the image copy
         capture at the first `capture`, the window actions at the first action of
-        `window_actions`, the keyboard group at the first `watch_keyboard_group` and the
-        accessibility manager at the first `watch_accessibility`, as athanor-compositor-client
-        does."""
+        `window_actions`, the keyboard group at the first `watch_keyboard_group`, the
+        accessibility manager at the first `watch_accessibility` and the tiling manager at the
+        first `watch_tiling`, as athanor-compositor-client does."""
         self.write(
             f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-compositor-client"\n'
         )
         self.write(
             f"{CLIENT}/src/lib.rs",
-            "mod a11y;\nmod actions;\nmod capture;\nmod connection;\nmod keyboard_group;\npub fn connect() {}\n",
+            "mod a11y;\nmod actions;\nmod capture;\nmod connection;\nmod keyboard_group;\n"
+            "mod workspace_tiling;\npub fn connect() {}\n",
         )
         self.write(
             f"{CLIENT}/src/connection.rs",
@@ -108,6 +110,10 @@ class AllowList(unittest.TestCase):
         self.write(
             f"{CLIENT}/src/a11y.rs",
             "use crate::protocols::athanor_a11y::client::athanor_a11y_manager_v1::AthanorA11yManagerV1;\n",
+        )
+        self.write(
+            f"{CLIENT}/src/workspace_tiling.rs",
+            'fn set_state() { Unavailable("athanor_workspace_tiling_manager_v1") }\n',
         )
 
     def problems(self, upstream=None):
@@ -382,6 +388,41 @@ class AllowList(unittest.TestCase):
                 )
                 self.assertEqual(self.problems(), [])
 
+    def test_the_tiling_manager_counts_only_for_a_target_that_watches_it(self):
+        # athanor-compositor's tiling manager is bound at the first `Client::watch_tiling`
+        # only: the dock, which reads the workspaces and never watches their tiling, needs no
+        # grant of it.
+        self.client()
+        dependency = '[dependencies]\nathanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }\n'
+        self.package(
+            "athanor-dock",
+            dependency,
+            {"src/main.rs": "use athanor_compositor_client::connect;\nfn f() { client.set_tiling(id, tiling); }\n"},
+        )
+        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        self.assertEqual(self.problems(), [])
+        for call in ("client.watch_tiling()", "Client::watch_tiling(&client)"):
+            with self.subTest(call):
+                self.package(
+                    "athanor-bar",
+                    dependency,
+                    {"src/main.rs": f"use athanor_compositor_client::Client;\nfn f() {{ {call}; }}\n"},
+                )
+                self.lines(
+                    "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1\n"
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-bar", out[0])
+                self.assertIn("athanor_workspace_tiling_manager_v1", out[0])
+                self.lines(
+                    "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-bar athanor-bar.service ext_foreign_toplevel_list_v1 "
+                    "athanor_workspace_tiling_manager_v1\n"
+                )
+                self.assertEqual(self.problems(), [])
+
     def test_a_top_layer_target_whose_line_omits_layer_shell_fails(self):
         self.package(
             "athanor-dock",
@@ -478,6 +519,9 @@ class AllowList(unittest.TestCase):
             ),
             "a client whose window actions moved": (
                 f"{CLIENT}/src/actions.rs", "\n", "binds at the first window action",
+            ),
+            "a client whose tiling watch moved": (
+                f"{CLIENT}/src/workspace_tiling.rs", "\n", "binds at the first watch of the tiling",
             ),
             "no target": ("forge/specs/athanor-dock/athanor-dock.spec", "Name: athanor-dock\n", "no target"),
         }

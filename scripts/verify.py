@@ -2316,9 +2316,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # code outside that crate makes the call, written as a method or as a path: athanor-compositor-
 # client binds the capture globals at the first `Client::capture`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
-# `Client::watch_keyboard_group`, and athanor-compositor's accessibility manager at the first
-# `Client::watch_accessibility`; capture.rs, actions.rs, keyboard_group.rs and a11y.rs hold every
-# name of them in the crate.
+# `Client::watch_keyboard_group`, athanor-compositor's accessibility manager at the first
+# `Client::watch_accessibility`, and its tiling manager at the first `Client::watch_tiling`;
+# capture.rs, actions.rs, keyboard_group.rs, a11y.rs and workspace_tiling.rs hold every name of
+# them in the crate.
 ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
              ("system/athanor-compositor-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-compositor-client/src/actions.rs":
@@ -2329,19 +2330,24 @@ ON_DEMAND = {"system/athanor-compositor-client/src/capture.rs":
               re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)")),
              "system/athanor-compositor-client/src/a11y.rs":
              ("system/athanor-compositor-client",
-              re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)")),
+             "system/athanor-compositor-client/src/workspace_tiling.rs":
+             ("system/athanor-compositor-client",
+              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)"))}
 CLIENT_CRATE = "system/athanor-compositor-client"
 # Where athanor-compositor-client names the privileged globals it binds at connect, at the
-# first capture, at the first window action, at the first watch of the keyboard group and at the
-# first watch of the accessibility state. Each names at least one, or the check no longer sees
-# what the client binds.
+# first capture, at the first window action, at the first watch of the keyboard group, at the
+# first watch of the accessibility state and at the first watch of the tiling. Each names at least
+# one, or the check no longer sees what the client binds.
 CLIENT_BINDS = {"system/athanor-compositor-client/src/connection.rs": "at connect",
                 "system/athanor-compositor-client/src/capture.rs": "at the first capture",
                 "system/athanor-compositor-client/src/actions.rs": "at the first window action",
                 "system/athanor-compositor-client/src/keyboard_group.rs":
                 "at the first watch of the keyboard group",
                 "system/athanor-compositor-client/src/a11y.rs":
-                "at the first watch of the accessibility state"}
+                "at the first watch of the accessibility state",
+                "system/athanor-compositor-client/src/workspace_tiling.rs":
+                "at the first watch of the tiling"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 

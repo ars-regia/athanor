@@ -282,7 +282,7 @@ impl Client {
     /// Whether the compositor is athanor-compositor: `athanor_toplevel_manager_v1`, which only
     /// it offers and only to the shell, is bound (doc_own_stack.md, decision 28).
     pub fn own_compositor(&self) -> bool {
-        self.inner.state.borrow().globals.athanor_toplevel.is_some()
+        self.inner.state.borrow().own_compositor()
     }
 
     /// `None` when the compositor offers no accessibility protocol.
@@ -291,26 +291,32 @@ impl Client {
         state.globals.a11y.as_ref().map(|_| state.accessibility)
     }
 
+    /// Through cosmic-comp's workspace extension, else athanor-compositor's tiling manager
+    /// after `watch_tiling`.
     pub fn set_tiling(&self, workspace: WorkspaceId, tiling: Tiling) -> Result<(), Error> {
         let state = self.inner.live_state()?;
-        let manager = state
-            .globals
-            .workspace_manager
-            .as_ref()
-            .ok_or(Error::Unavailable("ext_workspace_manager_v1"))?;
-        let handles = state
-            .workspace_handles
-            .get(&workspace)
-            .ok_or(Error::NoWorkspace)?;
-        let cosmic = handles
-            .cosmic
-            .as_ref()
-            .ok_or(Error::Unavailable("zcosmic_workspace_manager_v2"))?;
-        cosmic.set_tiling_state(match tiling {
-            Tiling::Floating => TilingState::FloatingOnly,
-            Tiling::Tiled => TilingState::TilingEnabled,
-        });
-        manager.commit();
+        if state.own_compositor() {
+            crate::workspace_tiling::set_state(&state, workspace, tiling)?;
+        } else {
+            let manager = state
+                .globals
+                .workspace_manager
+                .as_ref()
+                .ok_or(Error::Unavailable("ext_workspace_manager_v1"))?;
+            let handles = state
+                .workspace_handles
+                .get(&workspace)
+                .ok_or(Error::NoWorkspace)?;
+            let cosmic = handles
+                .cosmic
+                .as_ref()
+                .ok_or(Error::Unavailable("zcosmic_workspace_manager_v2"))?;
+            cosmic.set_tiling_state(match tiling {
+                Tiling::Floating => TilingState::FloatingOnly,
+                Tiling::Tiled => TilingState::TilingEnabled,
+            });
+            manager.commit();
+        }
         drop(state);
         self.flush()
     }
@@ -751,6 +757,8 @@ pub(crate) struct Globals {
     pub(crate) actions: crate::actions::Globals,
     /// athanor-compositor's keyboard group, bound at the first watch.
     pub(crate) keyboard_group: crate::keyboard_group::Globals,
+    /// athanor-compositor's tiling of the workspaces, bound at the first watch.
+    pub(crate) workspace_tiling: crate::workspace_tiling::Globals,
     workspace_manager: Option<ExtWorkspaceManagerV1>,
     cosmic_workspaces: Option<ZcosmicWorkspaceManagerV2>,
     seat: Option<wl_seat::WlSeat>,
@@ -835,6 +843,7 @@ impl State {
             athanor_toplevel: bind(globals, qh, 1..=1),
             actions: crate::actions::Globals::default(),
             keyboard_group: crate::keyboard_group::Globals::default(),
+            workspace_tiling: crate::workspace_tiling::Globals::default(),
             cosmic_workspaces: bind(globals, qh, 2..=2),
             keyboard_layouts: bind(globals, qh, 1..=1),
             a11y: crate::a11y::bind_cosmic(globals, qh),
@@ -955,6 +964,35 @@ impl State {
                 Change::Added(workspace) => Event::WorkspaceAdded(workspace),
                 Change::Changed(workspace) => Event::WorkspaceChanged(workspace),
             });
+        }
+    }
+
+    /// `Client::own_compositor`, for the modules that bind at the first call.
+    pub(crate) fn own_compositor(&self) -> bool {
+        self.globals.athanor_toplevel.is_some()
+    }
+
+    pub(crate) fn ext_workspaces(&self) -> Vec<(WorkspaceId, ExtWorkspaceHandleV1)> {
+        self.workspace_handles
+            .iter()
+            .map(|(id, handles)| (*id, handles.ext.clone()))
+            .collect()
+    }
+
+    /// athanor_workspace_tiling_v1 has no `done`: the state goes into both copies of the
+    /// workspace, and a reader that has seen it gets that value alone at once. What else is
+    /// pending still waits for the manager's `done`; a workspace no reader has seen waits whole.
+    pub(crate) fn set_workspace_tiling(&mut self, id: WorkspaceId, tiling: Option<Tiling>) {
+        let Some(workspace) = self.workspaces.pending(&id) else {
+            return;
+        };
+        workspace.tiling = tiling;
+        if let Some(seen) = self.workspaces.committed(&id) {
+            if seen.tiling != tiling {
+                seen.tiling = tiling;
+                let seen = seen.clone();
+                self.events.push(Event::WorkspaceChanged(seen));
+            }
         }
     }
 
@@ -1334,6 +1372,7 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
                     .cosmic_workspaces
                     .as_ref()
                     .map(|manager| manager.get_cosmic_workspace(&workspace, qh, id));
+                crate::workspace_tiling::watch(state, id, &workspace, qh);
                 state.workspaces.insert(
                     id,
                     Workspace {
@@ -1426,6 +1465,7 @@ impl Dispatch<ExtWorkspaceHandleV1, WorkspaceId> for State {
                 }
             }
             ext_workspace_handle_v1::Event::Removed => {
+                crate::workspace_tiling::forget(state, id);
                 if let Some(handles) = state.workspace_handles.remove(id) {
                     if let Some(cosmic) = handles.cosmic {
                         cosmic.destroy();
@@ -1516,5 +1556,101 @@ mod tests {
         assert_eq!(mode(Some(Transform::Flipped270), 1).logical(), (1600, 2560));
         assert_eq!(mode(Some(Transform::_180), 1).logical(), (2560, 1600));
         assert_eq!(OutputMode::default().logical(), (0, 0));
+    }
+
+    /// athanor-compositor's tiling comes with no `done`: a change is current, and news, at once.
+    #[test]
+    fn a_tiling_state_is_a_workspace_change_at_once() {
+        let id = WorkspaceId(1);
+        let mut state = State::default();
+        state.workspaces.insert(
+            id,
+            Workspace {
+                id,
+                name: "1".to_owned(),
+                active: true,
+                tiling: None,
+                output: Some("DP-1".to_owned()),
+            },
+        );
+        state.workspaces.commit_all();
+        // A workspace no reader has seen yet: its state waits for the workspace's `done`.
+        let unseen = WorkspaceId(2);
+        state.workspaces.insert(
+            unseen,
+            Workspace {
+                id: unseen,
+                name: "2".to_owned(),
+                active: false,
+                tiling: None,
+                output: None,
+            },
+        );
+        state.set_workspace_tiling(id, Some(Tiling::Tiled));
+        state.set_workspace_tiling(id, Some(Tiling::Tiled));
+        state.set_workspace_tiling(unseen, Some(Tiling::Floating));
+        state.set_workspace_tiling(WorkspaceId(3), Some(Tiling::Floating));
+        let tilings: Vec<_> = state
+            .events
+            .iter()
+            .map(|event| match event {
+                Event::WorkspaceChanged(workspace) => (workspace.id, workspace.tiling),
+                other => panic!("not a workspace change: {other:?}"),
+            })
+            .collect();
+        assert_eq!(tilings, [(id, Some(Tiling::Tiled))]);
+        let seen = state.workspaces.values().find(|w| w.id == id);
+        assert_eq!(seen.and_then(|w| w.output.as_deref()), Some("DP-1"));
+        let added: Vec<_> = state
+            .workspaces
+            .commit_all()
+            .into_iter()
+            .map(|change| match change {
+                Change::Added(workspace) => (workspace.id, workspace.tiling),
+                Change::Changed(workspace) => panic!("not new: {workspace:?}"),
+            })
+            .collect();
+        assert_eq!(added, [(unseen, Some(Tiling::Floating))]);
+    }
+
+    #[test]
+    fn a_tiling_state_does_not_commit_what_waits_for_done() {
+        let id = WorkspaceId(1);
+        let mut state = State::default();
+        state.workspaces.insert(
+            id,
+            Workspace {
+                id,
+                name: "1".to_owned(),
+                active: true,
+                tiling: None,
+                output: None,
+            },
+        );
+        state.workspaces.commit_all();
+        // ext-workspace-v1 renames it; the manager's `done` has not come yet.
+        if let Some(workspace) = state.workspaces.pending(&id) {
+            workspace.name = "one".to_owned();
+        }
+        state.set_workspace_tiling(id, Some(Tiling::Tiled));
+        let seen: Vec<_> = state
+            .events
+            .iter()
+            .map(|event| match event {
+                Event::WorkspaceChanged(workspace) => (workspace.name.as_str(), workspace.tiling),
+                other => panic!("not a workspace change: {other:?}"),
+            })
+            .collect();
+        assert_eq!(seen, [("1", Some(Tiling::Tiled))]);
+        let done: Vec<_> = state
+            .workspaces
+            .commit_all()
+            .into_iter()
+            .map(|change| match change {
+                Change::Changed(workspace) => (workspace.name, workspace.tiling),
+                Change::Added(workspace) => panic!("not seen: {workspace:?}"),
+            })
+            .collect();
+        assert_eq!(done, [("one".to_owned(), Some(Tiling::Tiled))]);
     }
 }

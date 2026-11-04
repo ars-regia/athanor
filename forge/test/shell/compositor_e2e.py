@@ -7,8 +7,8 @@ client built without GTK (cc-launch: a plain Wayland connection, GLib's main con
 calloop loop) reads the output from wl_output and launches a desktop entry behind a
 security context, through fake_systemd.py. Under RIG_COMPOSITOR=athanor the probe runs
 against athanor-compositor instead, as its rig unit (rig-cc-probe.service, which
-rig-privileged-clients grants the toplevel list, athanor_toplevel_manager_v1 and
-athanor_toplevel_actions_v1), and
+rig-privileged-clients grants the toplevel list, athanor_toplevel_manager_v1,
+athanor_toplevel_actions_v1, the workspaces and athanor_workspace_tiling_manager_v1), and
 outside that unit sees no window; there its Launcher opener calls athanor-launcher's
 os.athanor.Launcher1 (doc_own_stack.md, decision 28), here a fake that owns the name. Runs as
 the scene's RIG_HOLD; checks every expectation and exits 1 if any does not hold.
@@ -290,6 +290,18 @@ def athanor():
     code, lines = probe("group", "1", "group", "0", unit=True)
     expect("athanor: the keyboard group follows",
            code == 0 and events(lines, "keyboard_group") == [1, 0], lines)
+
+    # The bar's tiling switch: the probe watches the tiling as the bar does, and reads and sets
+    # it through athanor_workspace_tiling_v1 (doc_own_stack.md OS5, the tiling plan's D12). The
+    # watch's first state arrives as a change of its own, before the toggle's.
+    code, lines = probe("watch", "1", "snapshot", "tiling", "on", "tiling", "off", unit=True)
+    active = [w for w in snapshot(lines).get("workspaces", []) if w["active"]]
+    expect("athanor: the active workspace is floating, on headless-0",
+           code == 0 and len(active) == 1 and active[0]["tiling"] == "Floating"
+           and active[0]["output"] == "headless-0", lines)
+    tiling = [w["tiling"] for w in events(lines, "workspace_changed")]
+    expect("athanor: tiling on and off arrive as workspace changes",
+           code == 0 and tiling.count("Tiled") == 1 and tiling[-2:] == ["Tiled", "Floating"], lines)
 
     # cosmic-config writes a temporary file beside the old one and renames it over it.
     config = Path(os.environ["XDG_CONFIG_HOME"]) / "cosmic/com.system76.CosmicComp/v1/xkb_config"
