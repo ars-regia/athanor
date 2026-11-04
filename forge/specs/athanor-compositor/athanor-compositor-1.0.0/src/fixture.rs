@@ -1820,7 +1820,8 @@ fn layer_surfaces_take_and_give_back_the_keyboard() {
     let exclusive = layer(&run.state, "exclusive");
 
     // Placed in what the zone leaves: an eighth of its 750 below the zone, at y 143 rather
-    // than 100.
+    // than 100, as the first window, not cascaded from the fixture's.
+    run.state.spawned.clear();
     steps.send(Step::Window).expect("the shell's client");
     let (x, y) = ((OUTPUTS[0].width - WIDTH) / 2, 50 + 750 / 8);
     run.until("the window is placed below the zone", |state| {
@@ -2789,7 +2790,7 @@ impl Local {
 
     /// Binds the seat and its pointer, maps a `WIDTH`x`HEIGHT` window and gives it the keyboard.
     /// The fixture's own window holds the keyboard, so `place` leaves the new window at the
-    /// bottom, exactly under the fixture's: raised, the new window is the one under the pointer,
+    /// bottom, cascaded over the fixture's: raised, the new window is the one under the pointer,
     /// and `fixture_window`, the bottom element, is the fixture's again.
     fn toplevel(&mut self, run: &mut Running) -> xdg_toplevel::XdgToplevel {
         let compositor: wl_compositor::WlCompositor = self.bind(4);
@@ -3069,6 +3070,53 @@ fn the_first_window_is_placed_as_cosmic_comp_places_it() {
     run.stop();
 }
 
+/// The windows after the first cascade from the ones before them as cosmic-comp's do
+/// (`state::cascaded`), and once the user has moved the first, the next is placed as the first
+/// (#918).
+#[test]
+fn the_windows_after_the_first_cascade_until_the_first_is_moved() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    let area = run.state.placement_area().expect("the area");
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let origin = run
+        .state
+        .space
+        .output_geometry(&output)
+        .expect("its geometry")
+        .loc;
+    let geometry = |run: &Running, window: &smithay::desktop::Window| {
+        let at = run.state.space.element_location(window).expect("placed");
+        smithay::utils::Rectangle::new(at, window.geometry().size)
+    };
+    let mut spawned = vec![geometry(&run, &fixture)];
+    let mut open = Vec::new();
+    for _ in 0..3 {
+        let mut local = Local::connect(&mut run, None);
+        let toplevel = local.toplevel(&mut run);
+        let window = window_of_client(&run, local.id.as_ref().expect("an id"));
+        let (at, height) =
+            crate::state::cascaded(origin, area, &spawned, (WIDTH, HEIGHT).into(), 240)
+                .expect("a cascade");
+        assert_eq!(
+            (run.state.space.element_location(&window), height),
+            (Some(at), HEIGHT)
+        );
+        spawned.push(geometry(&run, &window));
+        open.push((local, toplevel));
+    }
+    // As a move grab marks it.
+    crate::handlers::moved(&fixture);
+    let mut local = Local::connect(&mut run, None);
+    let _toplevel = local.toplevel(&mut run);
+    let window = window_of_client(&run, local.id.as_ref().expect("an id"));
+    assert_eq!(
+        run.state.space.element_location(&window),
+        Some(crate::state::placed(area, window.geometry()))
+    );
+    run.stop();
+}
+
 /// At scale 1.5 a window is placed in the layer map's 853 logical pixels of the first output's
 /// 1280, not the space's 854: the chooser's 420 at 216, as on cosmic-comp's golden
 /// chooser-light-1.5-en (#738).
@@ -3090,6 +3138,8 @@ fn a_window_is_placed_in_the_layer_maps_area_at_a_fractional_scale() {
     );
     layer_map_for_output(&first).arrange();
     run.state.arrange_outputs();
+    // Placed as the first window, not cascaded from the fixture's.
+    run.state.spawned.clear();
     let mut local = Local::connect(&mut run, None);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);

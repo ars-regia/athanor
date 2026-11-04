@@ -20,7 +20,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{Logical, Point, Rectangle, Serial};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
@@ -78,6 +78,16 @@ pub struct HeldCommit {
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
 struct Placed;
+
+/// Marks a window the user has moved, resized, maximised, minimised or made full screen since it
+/// was placed, or that went to another workspace: the cascade no longer follows it. A destroyed
+/// window ends the cascade too, at the next window `spawn` places.
+struct Moved;
+
+/// Takes `window` out of the cascade, as cosmic-comp does when the window leaves its place.
+pub(crate) fn moved(window: &Window) {
+    window.user_data().insert_if_missing(|| Moved);
+}
 
 /// Whether the user can see `window` in the space: placed, and still drawing something, since a
 /// client can unmap a placed window by committing a null buffer.
@@ -281,8 +291,8 @@ impl State {
     }
 
     /// Places a window, at its first commit with a size, in what the layer surfaces' exclusive
-    /// zones leave of the output, as cosmic-comp places the first (`state::placed`); the
-    /// windows after it are not cascaded as cosmic-comp's are yet (#918). It takes the keyboard
+    /// zones leave of the output, as cosmic-comp places the first (`state::placed`) and cascades
+    /// the windows after it (`spawn`). It takes the keyboard
     /// only when no live surface holds it or its own application does, through the same client
     /// or another of the same security context's instance (`same_instance`): mapping a window
     /// is not the user's input, so a client cannot take the focus from another application by
@@ -308,7 +318,7 @@ impl State {
                 .new_toplevel::<Self>(title, app_id);
             window.user_data().insert_if_missing(|| handle);
         }
-        let (x, y) = crate::state::placed(area, geometry).into();
+        let (x, y) = self.spawn(window, area, geometry).into();
         let holder = self
             .seat
             .get_keyboard()
@@ -332,6 +342,80 @@ impl State {
         self.place_on_workspace(window);
         self.tile_placed(window, takes);
         self.follow_parent(window, true);
+    }
+
+    /// Where `window`, at its first sized commit, goes on the first output's active workspace:
+    /// cascaded from the windows placed there before it (`cascaded`), or as the first
+    /// (`placed`). The cascade starts again after the first of them that is gone or that the
+    /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
+    /// and is left out of it, and so is one maximised or full screen before its first commit.
+    /// A window too tall for where it lands is sent the height that fits.
+    fn spawn(
+        &mut self,
+        window: &Window,
+        area: Rectangle<i32, Logical>,
+        geometry: Rectangle<i32, Logical>,
+    ) -> Point<i32, Logical> {
+        let first = crate::state::placed(area, geometry);
+        let Some(output) = self.space.outputs().next().cloned() else {
+            return first;
+        };
+        if self.parent_window(window).is_some() || window.user_data().get::<Moved>().is_some() {
+            return first;
+        }
+        let workspace = self.active_workspace(&output);
+        let here: Vec<Window> = self
+            .spawned
+            .iter()
+            .filter(|spawned| self.workspace_of(spawned) == workspace)
+            .cloned()
+            .collect();
+        let gone =
+            |spawned: &Window| !spawned.alive() || spawned.user_data().get::<Moved>().is_some();
+        if let Some(cut) = here.iter().position(gone) {
+            let dropped = &here[cut..];
+            self.spawned.retain(|spawned| !dropped.contains(spawned));
+        }
+        let on = |spawned: &Window| {
+            let at = self.space.element_location(spawned)?;
+            Some(Rectangle::new(at, spawned.geometry().size))
+        };
+        let kept = here.iter().take_while(|spawned| !gone(spawned));
+        let last = kept.clone().last().map(on);
+        let geometries: Vec<_> = kept.filter_map(on).collect();
+        self.spawned.push(window.clone());
+        // The last one hidden, as when minimised: the window is placed as the first.
+        let (Some(Some(_)), Some(origin)) =
+            (last, self.space.output_geometry(&output).map(|o| o.loc))
+        else {
+            return first;
+        };
+        let min_height = window
+            .toplevel()
+            .map(|toplevel| {
+                with_states(toplevel.wl_surface(), |states| {
+                    let mut cached = states
+                        .cached_state
+                        .get::<smithay::wayland::shell::xdg::SurfaceCachedState>();
+                    cached.current().min_size
+                })
+            })
+            .filter(|size| size.w != 0 || size.h != 0)
+            .map_or(240, |size| size.h);
+        let Some((at, height)) =
+            crate::state::cascaded(origin, area, &geometries, geometry.size, min_height)
+        else {
+            return first;
+        };
+        if height < geometry.size.h {
+            if let Some(toplevel) = window.toplevel() {
+                toplevel.with_pending_state(|state| {
+                    state.size = Some((geometry.size.w, height).into());
+                });
+                toplevel.send_pending_configure();
+            }
+        }
+        at
     }
 
     /// A window with a parent is stacked above it and above the parent's other dialogs, on the
@@ -691,6 +775,7 @@ impl XdgShellHandler for State {
         let Some(from) = self.space.element_geometry(&window) else {
             return;
         };
+        moved(&window);
         let grab = ResizeGrab::new(start, window, edges, from);
         pointer.set_grab(self, grab, serial, Focus::Clear);
     }

@@ -456,6 +456,7 @@ impl State {
             return true;
         }
         let left = self.leave_tree(window, from);
+        crate::handlers::moved(window);
         on.0.set(id);
         if self.output_of_workspace(from).as_ref() != Some(&output) {
             if let Some(at) = self
@@ -690,6 +691,7 @@ impl State {
                     let id = on.0.get();
                     if !self.workspaces.iter().any(|strip| strip.list.contains(&id)) {
                         on.0.set(home);
+                        crate::handlers::moved(window);
                         rehomed.push(window.clone());
                     }
                 }

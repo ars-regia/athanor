@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 """orca_compare.py <reference> <transcript> [--own-compositor <preset|-> <dock|-> <lang>]
+orca_compare.py --walks <transcript>
 
 doc_own_stack.md, OS8: Orca's speech transcript of a surface "holds every name, role, state
 and value of the GTK transcript". Both files hold one utterance per line, as orca_walk.py
@@ -12,6 +13,8 @@ of each button decision 28 of doc_own_stack.md hides there is exempt, naming the
 the control's issue (golden_report.exemptions), and so is the bar's tiling button, which waits
 on a protocol rather than a decision (own_exemptions). An exempt line the transcript speaks
 fails, and so does an exemption that names no utterance of the reference.
+
+--walks checks the gallery's transcript, one walk per page, on its own (walk_problems).
 """
 
 import sys
@@ -143,7 +146,40 @@ def compare(reference, transcript, exempt=None):
     return lines, failures
 
 
+def walk_problems(transcript):
+    """The problems of a transcript of the gallery's walks, one per page, each opened by Orca's
+    first utterance and closed by its last ("Screen reader on." and "Screen reader off." in
+    English). Each walk ends with one Tab past the page's controls, which leaves the page for
+    the stop after it, the same for every page (cases.gallery_walks); a walk that ends anywhere
+    else tabbed a number of times its page does not have."""
+    if len(transcript) < 2:
+        return ["the transcript holds no walk"]
+    on, off = transcript[0], transcript[-1]
+    walks, walk = [], None
+    for line in transcript:
+        if line == on:
+            walk = []
+        elif line == off and walk is not None:
+            walks.append(walk)
+            walk = None
+        elif walk is not None:
+            walk.append(line)
+    ends = [walk[-1] if walk else None for walk in walks]
+    if len(ends) < 2:
+        return [f"{len(ends)} walk: the check needs one per page"]
+    if None in ends:
+        return [f"the walks end on {ends}: a walk spoke nothing"]
+    if len(set(ends)) > 1:
+        return [f"the walks end on {ends}, not on one stop: a page's count of Tabs is wrong"]
+    return []
+
+
 def main(argv):
+    if argv[:1] == ["--walks"] and len(argv) == 2:
+        problems = walk_problems(Path(argv[1]).read_text().splitlines())
+        for problem in problems:
+            print(f"FAIL {problem}", file=sys.stderr)
+        return 1 if problems else 0
     own = argv[2:]
     if len(argv) not in (2, 6) or (own and own[0] != "--own-compositor"):
         print(__doc__, file=sys.stderr)
