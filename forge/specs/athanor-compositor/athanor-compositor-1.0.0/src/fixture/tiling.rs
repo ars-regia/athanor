@@ -170,3 +170,115 @@ fn tiling_on_one_workspace_leaves_the_next_alone() {
     assert_eq!(geometry(&run, &kept), before);
     run.stop();
 }
+
+impl Local {
+    /// A tiling object of the workspace handle `handle`, from a new manager, its first state
+    /// heard.
+    fn tiling(
+        &mut self,
+        run: &mut Running,
+        handle: &ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+    ) -> athanor_workspace_tiling::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1 {
+        let manager: athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::AthanorWorkspaceTilingManagerV1 =
+            self.bind(1);
+        let qh = self.queue.handle();
+        let object = manager.get_tiling(handle, &qh, ());
+        self.roundtrip(run);
+        object
+    }
+
+    /// The events the tiling object `object` was sent, in order: a state, or `None` for
+    /// `removed`.
+    fn tilings_of(
+        &self,
+        object: &athanor_workspace_tiling::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1,
+    ) -> Vec<Option<u32>> {
+        self.client
+            .tilings
+            .iter()
+            .filter(|(id, _)| *id == object.id())
+            .map(|(_, state)| *state)
+            .collect()
+    }
+}
+
+const FLOATING: Option<u32> = Some(0);
+const TILED: Option<u32> = Some(1);
+
+/// `athanor_workspace_tiling_manager_v1` is privileged (OS4, D12): the fixture's bar, granted
+/// it, sees it; the bar's identity inside a security context, the control center and a client
+/// with no line do not.
+#[test]
+fn os4_only_the_bar_is_granted_tiling() {
+    const MANAGER: &str = "athanor_workspace_tiling_manager_v1";
+    let mut run = Running::start(None);
+    let bar = Local::connect(&mut run, None);
+    assert!(bar.sees(MANAGER), "the bar, granted it");
+    let context = sandbox(&run);
+    let sandboxed = Local::connect(&mut run, Some(context));
+    assert!(!sandboxed.sees(MANAGER), "the bar inside a context");
+    let control_center = Local::control_center(&mut run);
+    assert!(!control_center.sees(MANAGER), "the control center");
+    *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
+    let other = Local::connect(&mut run, None);
+    assert!(!other.sees(MANAGER), "a client with no line");
+    run.stop();
+}
+
+/// A tiling object is sent its workspace's state at once and at every change, whoever made
+/// it; its `set_state` applies at once, and an object of another workspace hears nothing.
+#[test]
+fn the_tiling_state_follows_the_toggle() {
+    let mut run = Running::start(None);
+    let (mut local, _manager) = workspace_client(&mut run);
+    let order = heard(&local.client, 0);
+    let (first, second) = (
+        workspace_handle(&local.client, &order[0].0),
+        workspace_handle(&local.client, &order[1].0),
+    );
+    let object = local.tiling(&mut run, &first);
+    let other = local.tiling(&mut run, &second);
+    assert_eq!(local.tilings_of(&object), [FLOATING], "sent at once");
+    let id = first_workspace(&run);
+
+    object.set_state(athanor_workspace_tiling::athanor_workspace_tiling_v1::State::Tiled);
+    local.roundtrip(&mut run);
+    assert!(run.state.is_tiled(id), "applied at once");
+    assert_eq!(local.tilings_of(&object), [FLOATING, TILED]);
+
+    run.state.set_tiling(id, false);
+    local.roundtrip(&mut run);
+    assert_eq!(local.tilings_of(&object), [FLOATING, TILED, FLOATING], "whoever changes it");
+    assert_eq!(local.tilings_of(&other), [FLOATING], "another workspace hears nothing");
+    run.stop();
+}
+
+/// A workspace removed ends its tiling objects with `removed`, and their `set_state` changes
+/// nothing afterwards.
+#[test]
+fn a_workspace_gone_ends_its_tiling_object() {
+    let mut run = Running::start(None);
+    let (mut watcher, _manager) = workspace_client(&mut run);
+    let mut app = Local::connect(&mut run, None);
+    let other = app.another(&mut run, "moved");
+    let window = app.server_window(&run, &other.surface);
+    let list = workspaces_of(&run, 0);
+    assert!(run.state.move_window_to(&window, list[1]));
+    watcher.roundtrip(&mut run);
+    let order = heard(&watcher.client, 0);
+    let second = workspace_handle(&watcher.client, &order[1].0);
+    let object = watcher.tiling(&mut run, &second);
+    assert_eq!(watcher.tilings_of(&object), [FLOATING]);
+
+    assert!(run.state.move_window_to(&window, list[0]));
+    watcher.roundtrip(&mut run);
+    assert_eq!(watcher.tilings_of(&object), [FLOATING, None], "removed");
+
+    object.set_state(athanor_workspace_tiling::athanor_workspace_tiling_v1::State::Tiled);
+    watcher.roundtrip(&mut run);
+    assert!(!run.state.is_tiled(list[1]), "inert");
+    assert_eq!(watcher.tilings_of(&object), [FLOATING, None]);
+    let late = watcher.tiling(&mut run, &second);
+    assert_eq!(watcher.tilings_of(&late), [None], "made for a workspace already gone");
+    run.stop();
+}

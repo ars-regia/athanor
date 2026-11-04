@@ -44,6 +44,8 @@ pub enum Privilege {
     ToplevelActions,
     /// `athanor_keyboard_group_manager_v1`: the keyboard's layout group, followed and switched.
     KeyboardGroup,
+    /// `athanor_workspace_tiling_manager_v1`: whether each workspace is tiled, read and set.
+    WorkspaceTiling,
     /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
     /// keyboard aids configured (doc_accessibility.md AX10, AX11).
     A11y,
@@ -60,7 +62,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 19] = [
+    const ALL: [(Self, &'static str); 20] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -85,6 +87,10 @@ impl Privilege {
         (Self::A11y, "athanor_a11y_manager_v1"),
         (Self::ExtDataControl, "ext_data_control_manager_v1"),
         (Self::WlrDataControl, "zwlr_data_control_manager_v1"),
+        (
+            Self::WorkspaceTiling,
+            "athanor_workspace_tiling_manager_v1",
+        ),
         (Self::TrustedPrompt, MARK),
     ];
 
@@ -818,6 +824,7 @@ mod tests {
                 "athanor_toplevel_actions_v1",
                 "athanor_keyboard_group_manager_v1",
                 "athanor_a11y_manager_v1",
+                "athanor_workspace_tiling_manager_v1",
             ],
         ),
         (

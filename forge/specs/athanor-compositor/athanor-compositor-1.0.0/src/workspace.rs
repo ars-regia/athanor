@@ -72,6 +72,11 @@ impl Strip {
     fn active_id(&self) -> Option<WorkspaceId> {
         self.list.get(self.active).copied()
     }
+
+    /// The workspaces of the output, in order.
+    pub(crate) fn ids(&self) -> &[WorkspaceId] {
+        &self.list
+    }
 }
 
 /// The user data of the global, of the managers and of the groups.
@@ -79,6 +84,12 @@ pub struct Workspaces;
 
 /// The user data of a workspace's handle: the workspace it stands for.
 pub struct Handle(WorkspaceId);
+
+impl Handle {
+    pub(crate) fn workspace(&self) -> WorkspaceId {
+        self.0
+    }
+}
 
 /// What a client of the protocol was sent: its manager, a group per output and a handle per
 /// workspace, with the activations it asked for since its last `commit`.
@@ -666,6 +677,7 @@ impl State {
         for id in gone {
             self.float(id);
         }
+        self.end_gone_tilings();
         self.send_workspaces();
     }
 
@@ -733,6 +745,7 @@ impl State {
         } else {
             self.float(id);
         }
+        self.send_tiling(id);
     }
 
     /// Takes every window of `id` the user can see into a new tree, the topmost first, each

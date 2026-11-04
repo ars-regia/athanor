@@ -44,6 +44,7 @@ mod xkb_config;
 mod udev;
 mod winit;
 mod workspace;
+mod workspace_tiling;
 mod xwayland;
 
 use headless::VirtualOutput;

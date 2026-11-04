@@ -144,7 +144,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -159,7 +159,9 @@ could blank the session.
 `athanor_toplevel_manager_v1` reads every window's state and `athanor_toplevel_actions_v1` acts
 on windows: the control center is granted the first, the bar, the dock and the launcher both.
 `athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
-keyboard's layout group: the bar alone is granted it, for its input-source switch. The layouts, options and repeat come from
+keyboard's layout group: the bar alone is granted it, for its input-source switch.
+`athanor_workspace_tiling_manager_v1` reads and sets whether each workspace is tiled (OS12): the
+bar alone is granted it, for its tiling switch. The layouts, options and repeat come from
 cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
 before the first client and again after each change of it (an inotify watch of its directory
 and of every ancestor of it, along each link on the way), so one file drives the

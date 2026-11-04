@@ -16,6 +16,7 @@ use crate::toplevel_state::protocol::athanor_toplevel_state_v1::AthanorToplevelS
 use crate::udev::Drm;
 use crate::winit::Nested;
 use crate::workspace::{Bound, Strip, WorkspaceId};
+use crate::workspace_tiling::protocol::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1;
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::InputTime;
@@ -231,6 +232,8 @@ pub struct State {
     pub parked: Vec<(Window, Point<i32, Logical>)>,
     /// The tree of each tiled workspace (OS12); a workspace without one floats.
     pub tilings: Vec<(WorkspaceId, crate::tiling::Tree<Window>)>,
+    /// The live objects of athanor-workspace-tiling-v1, those of a workspace gone excepted.
+    pub workspace_tilings: Vec<AthanorWorkspaceTilingV1>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -340,6 +343,7 @@ impl State {
         crate::workspace::global(&dh);
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
+        crate::workspace_tiling::global(&dh);
         crate::a11y::global(&dh);
         crate::output_management::global(&dh);
         crate::output_power::global(&dh);
@@ -429,6 +433,7 @@ impl State {
             next_workspace: 0,
             parked: Vec::new(),
             tilings: Vec::new(),
+            workspace_tilings: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
