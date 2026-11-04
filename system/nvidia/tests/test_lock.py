@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import io
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -456,6 +457,34 @@ class LegacyFedora45(unittest.TestCase):
     def test_the_fedora_45_releases_tree(self):
         self.assertEqual(lock.BRANCHES["legacy"]["baseurl"],
                          "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/")
+
+
+# The base release, read as system/build-image.sh reads it.
+BASE_ARG = re.compile(r"^ARG FEDORA_VERSION=(\d+)$", re.MULTILINE)
+# The Fedora release a repository URL names: negativo17's fedora-N/, RPM Fusion's releases/N/ and updates/N/.
+URL_RELEASE = re.compile(r"/fedora(?:-|/(?:releases|updates)/)(\d+)/")
+
+
+class FedoraRelease(unittest.TestCase):
+    """Every lock reads the repository of the base's Fedora release (#669): a lock left on another
+    release installs that release's userspace on the base."""
+
+    def test_every_lock_reads_the_base_release(self):
+        found = BASE_ARG.search((HERE.parent / "Containerfile").read_text())
+        self.assertIsNotNone(found, "system/Containerfile has no 'ARG FEDORA_VERSION=<N>' line")
+        base = found.group(1)
+        bound = set()
+        for branch, spec in lock.BRANCHES.items():
+            _, _, locked, entries = lock.read_lock(lock.LOCKS / f"{branch}.lock")
+            for url in filter(None, (locked, *(u for _, u in entries), spec["baseurl"], spec["successor"])):
+                release = URL_RELEASE.search(url)
+                if release:
+                    bound.add(branch)
+                    with self.subTest(branch=branch, url=url):
+                        self.assertEqual(release.group(1), base, f"{url} is not of Fedora {base}, the base release")
+        # Both driver sets read Fedora trees, so the pattern must find their release; NVIDIA's
+        # container toolkit repository names none.
+        self.assertEqual(bound, {"open", "legacy"})
 
 
 def run(argv, download):
