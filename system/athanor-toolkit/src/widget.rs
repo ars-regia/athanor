@@ -19,17 +19,29 @@ impl WidgetId {
     }
 }
 
-impl std::ops::Index<WidgetId> for Vec<Widget> {
-    type Output = Widget;
+/// The widgets of a [`Ui`], in the order they were added, indexed by their ids. A type of the
+/// crate's own, so that indexing by [`WidgetId`] stays out of the public API.
+pub(crate) struct Widgets(Vec<Widget>);
 
-    fn index(&self, id: WidgetId) -> &Widget {
-        &self[id.index()]
+impl std::ops::Deref for Widgets {
+    type Target = [Widget];
+
+    fn deref(&self) -> &[Widget] {
+        &self.0
     }
 }
 
-impl std::ops::IndexMut<WidgetId> for Vec<Widget> {
+impl std::ops::Index<WidgetId> for Widgets {
+    type Output = Widget;
+
+    fn index(&self, id: WidgetId) -> &Widget {
+        &self.0[id.index()]
+    }
+}
+
+impl std::ops::IndexMut<WidgetId> for Widgets {
     fn index_mut(&mut self, id: WidgetId) -> &mut Widget {
-        &mut self[id.index()]
+        &mut self.0[id.index()]
     }
 }
 
@@ -456,7 +468,7 @@ pub enum Key {
 
 /// One window's widgets, theme, reading direction and keyboard focus.
 pub struct Ui {
-    pub(crate) widgets: Vec<Widget>,
+    pub(crate) widgets: Widgets,
     /// The title of the window, which the title bar shows and assistive technologies read.
     pub title: String,
     /// The colours and sizes the widgets draw with.
@@ -484,7 +496,7 @@ impl Ui {
     /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
     pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
         Self {
-            widgets: vec![Widget::new(Kind::Column, None)],
+            widgets: Widgets(vec![Widget::new(Kind::Column, None)]),
             title: title.to_owned(),
             theme,
             rtl,
@@ -521,8 +533,9 @@ impl Ui {
         let next = self.widgets.len();
         assert!(next <= u32::MAX as usize, "a Ui holds at most 2^32 widgets");
         let id = WidgetId(next as u32);
-        self.widgets.push(Widget::new(kind, Some(parent)));
+        // The parent first: an id that names no widget panics before the arena changes.
         self.widgets[parent].children.push(id);
+        self.widgets.0.push(Widget::new(kind, Some(parent)));
         id
     }
 
@@ -1550,7 +1563,7 @@ impl Ui {
     /// field that composes, or whose selection is no longer `text`, keeps it.
     pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let (Kind::Field(field) | Kind::TextArea(field)) =
-            &mut self.widgets.get_mut(id.index())?.kind
+            &mut self.widgets.0.get_mut(id.index())?.kind
         else {
             return None;
         };
