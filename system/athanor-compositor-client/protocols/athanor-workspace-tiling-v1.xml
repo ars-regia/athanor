@@ -38,6 +38,11 @@
       Makes the tiling object of a workspace.
     </description>
 
+    <enum name="error">
+      <entry name="already_made" value="0"
+        summary="the client already has a tiling object of this workspace"/>
+    </enum>
+
     <request name="destroy" type="destructor">
       <description summary="destroy the manager">
         The tiling objects made from the manager stay valid.
@@ -48,7 +53,8 @@
       <description summary="the tiling of a workspace">
         Makes the tiling object of the workspace an ext_workspace_handle_v1 stands for. Its
         state is sent at once; for a workspace already removed, removed is sent instead. A
-        client may make several objects of one workspace, and each is sent every change.
+        second tiling object of the same workspace, while the client holds a first that was not
+        sent removed, is the already_made error.
       </description>
       <arg name="id" type="new_id" interface="athanor_workspace_tiling_v1"/>
       <arg name="workspace" type="object" interface="ext_workspace_handle_v1"/>

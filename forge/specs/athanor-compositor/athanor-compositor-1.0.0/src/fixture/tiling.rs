@@ -283,6 +283,50 @@ fn a_workspace_gone_ends_its_tiling_object() {
     run.stop();
 }
 
+/// A second tiling object of one workspace from one client is the `already_made` error, which
+/// bounds what each change walks; another client makes its own.
+#[test]
+fn a_second_tiling_object_of_a_workspace_is_an_error() {
+    let mut run = Running::start(None);
+    let (mut other, _other_manager) = workspace_client(&mut run);
+    let (mut local, _manager) = workspace_client(&mut run);
+    let first = workspace_handle(&local.client, &heard(&local.client, 0)[0].0);
+    let object = local.tiling(&mut run, &first);
+    let theirs = workspace_handle(&other.client, &heard(&other.client, 0)[0].0);
+    let their_object = other.tiling(&mut run, &theirs);
+    assert_eq!(other.tilings_of(&their_object), [FLOATING], "another client's own");
+    assert_eq!(local.tilings_of(&object), [FLOATING]);
+    assert_eq!(run.state.workspace_tilings.len(), 2);
+
+    let manager: athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::AthanorWorkspaceTilingManagerV1 =
+        local.bind(1);
+    let qh = local.queue.handle();
+    let _second = manager.get_tiling(&first, &qh, ());
+    local.connection.flush().expect("flush");
+    run.until("the client is disconnected", |state| {
+        state.workspace_tilings.len() == 1
+    });
+    let started = Instant::now();
+    let error = loop {
+        if let Some(error) = local.connection.protocol_error() {
+            break error;
+        }
+        assert!(started.elapsed() < TIMEOUT, "the error: not in time");
+        if let Some(guard) = local.queue.prepare_read() {
+            drop(guard.read());
+        }
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    };
+    assert_eq!(error.object_interface, "athanor_workspace_tiling_manager_v1");
+    assert_eq!(
+        error.code,
+        athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::Error::AlreadyMade as u32
+    );
+    run.stop();
+}
+
 /// The halves of the first output's left tile, one above the other (D2: it is higher than wide).
 const LEFT_TOP: (i32, i32, i32, i32) = (8, 8, 628, 388);
 const LEFT_BOTTOM: (i32, i32, i32, i32) = (8, 404, 628, 388);

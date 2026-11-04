@@ -82,7 +82,7 @@ impl Dispatch2<AthanorWorkspaceTilingManagerV1, State> for WorkspaceTilings {
         &self,
         state: &mut State,
         _client: &Client,
-        _manager: &AthanorWorkspaceTilingManagerV1,
+        manager: &AthanorWorkspaceTilingManagerV1,
         request: athanor_workspace_tiling_manager_v1::Request,
         _dh: &DisplayHandle,
         data_init: &mut DataInit<'_, State>,
@@ -93,7 +93,21 @@ impl Dispatch2<AthanorWorkspaceTilingManagerV1, State> for WorkspaceTilings {
                 // A handle the compositor did not make cannot be: its user data is its own. The
                 // object is made all the same, as every new_id must be, and ends at once.
                 let workspace = workspace_of(&workspace);
+                // One live object per workspace and client bounds what each change walks.
+                let made = workspace.is_some() && state.workspace_tilings.iter().any(|kept| {
+                    kept.id().same_client_as(&manager.id())
+                        && kept
+                            .data::<TilingObject>()
+                            .is_some_and(|data| data.workspace == workspace)
+                });
                 let object = data_init.init(id, TilingObject { workspace });
+                if made {
+                    manager.post_error(
+                        athanor_workspace_tiling_manager_v1::Error::AlreadyMade,
+                        "a second tiling object of the same workspace",
+                    );
+                    return;
+                }
                 match workspace.filter(|id| state.output_of_workspace(*id).is_some()) {
                     Some(workspace) => {
                         object.state(shown_as(state.is_tiled(workspace)));
