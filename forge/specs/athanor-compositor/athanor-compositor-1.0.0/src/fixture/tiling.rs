@@ -132,6 +132,8 @@ fn a_workspace_is_floating_by_default() {
             assert!(!run.state.is_tiled(*id));
         }
     }
+    // Placed as the first window, as the fixture's is, not cascaded from it (#941).
+    run.state.spawned.clear();
     let (_local, _, window) = window(&mut run);
     assert_eq!(tiled_states(&window), 0);
     let (fixture, _) = fixture_window(&run);
