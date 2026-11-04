@@ -20,7 +20,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
@@ -43,13 +43,14 @@ use smithay::wayland::selection::data_device::{
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::shell::xdg::{
-    Configure, PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    Configure, PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
+    XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -96,6 +97,43 @@ pub(crate) fn shown(window: &Window) -> bool {
     window.user_data().get::<Placed>().is_some() && size.w > 0 && size.h > 0
 }
 
+/// Whether `window` floats on a tiled workspace (D5, cosmic-comp's `layout::is_dialog`): it has
+/// a parent, or a minimum and a maximum size that are set and the same. The modal hint of
+/// xdg-dialog-v1, the reference's third case, reaches no window here: the global is not served.
+pub(crate) fn floats(window: &Window) -> bool {
+    let Some(toplevel) = window.toplevel() else {
+        return false;
+    };
+    let (min, max) = size_limits(toplevel);
+    toplevel.parent().is_some() || (min != Size::default() && min == max)
+}
+
+/// A minimum and a maximum size; 0 on an axis is no limit.
+type SizeLimits = (Size<i32, Logical>, Size<i32, Logical>);
+
+/// The size limits `toplevel` committed last.
+fn size_limits(toplevel: &ToplevelSurface) -> SizeLimits {
+    with_states(toplevel.wl_surface(), |states| {
+        let mut cached = states.cached_state.get::<SurfaceCachedState>();
+        let limits = cached.current();
+        (limits.min_size, limits.max_size)
+    })
+}
+
+/// The size limits a window committed last, so that a commit that changes them is seen (D5).
+#[derive(Default)]
+struct Limits(Cell<Option<SizeLimits>>);
+
+/// Whether this commit of `window` changed its size limits; its first commit does.
+fn limits_changed(window: &Window) -> bool {
+    let Some(toplevel) = window.toplevel() else {
+        return false;
+    };
+    let limits = Some(size_limits(toplevel));
+    let kept = window.user_data().get_or_insert(Limits::default);
+    kept.0.replace(limits) != limits
+}
+
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
@@ -129,6 +167,9 @@ impl CompositorHandler for State {
             }
             if let Some(window) = self.window_or_minimised(&root) {
                 window.on_commit();
+                if limits_changed(&window) {
+                    self.float_tile(&window);
+                }
                 // Only a null buffer takes a placed window back to before its initial configure,
                 // and the end of this function sends a new one.
                 let unmapped = window.user_data().get::<Placed>().is_some()
@@ -349,8 +390,9 @@ impl State {
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
     /// and is left out of it, and so is one maximised or full screen before its first commit,
-    /// and one on a tiled workspace, which takes a tile (`tile_placed`) and is sent nothing
-    /// here. A window too tall for where it lands is sent the height that fits.
+    /// and one on a tiled workspace, which takes a tile (`tile_placed`) or, one D5 floats, goes
+    /// where the first window of the cascade goes, and is sent nothing here. A window too tall
+    /// for where it lands is sent the height that fits.
     fn spawn(
         &mut self,
         window: &Window,
@@ -707,6 +749,7 @@ impl XdgShellHandler for State {
         // Before its first placement `place` stacks the window; a re-parent never gives it the keyboard.
         if let Some(window) = self.window_for(surface.wl_surface()) {
             if window.user_data().get::<Placed>().is_some() {
+                self.float_tile(&window);
                 self.follow_parent(&window, false);
             }
         }

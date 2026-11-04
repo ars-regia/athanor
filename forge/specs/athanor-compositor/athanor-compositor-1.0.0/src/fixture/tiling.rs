@@ -1156,3 +1156,127 @@ fn the_toggle_keeps_the_order_of_the_stack() {
     assert_eq!(geometry(&run, &window), rect(LEFT_BOTTOM));
     run.stop();
 }
+
+/// The place of `window` in the stack, from the bottom.
+fn level(run: &Running, window: &Window) -> usize {
+    stack(run)
+        .iter()
+        .position(|kept| kept == window)
+        .expect("in the stack")
+}
+
+/// A dialog takes no tile and stands above its parent, whose tile stays as it was, and stays
+/// above it when the parent is clicked (D5).
+#[test]
+fn a_dialog_floats_above_its_parent() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let (surface, toplevel) = pair.upper.unborn();
+    toplevel.set_parent(Some(&pair.upper_toplevel));
+    surface.commit();
+
+    let (width, height, _) = pair.upper.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "no tile in the initial configure");
+    let dialog = pair.upper.server_window(&run, &surface);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(tiled_states(&dialog), 0);
+    assert!(!configured(&mut run, &mut pair.lower));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.below), rect(RIGHT));
+    assert!(level(&run, &dialog) > level(&run, &pair.above), "above its parent");
+    run.state.focus(&pair.above);
+    assert!(
+        level(&run, &dialog) > level(&run, &pair.above),
+        "still above its parent once the parent is clicked"
+    );
+    run.stop();
+}
+
+/// A window whose minimum and maximum size are one size takes no tile, and stands above the
+/// tiles though it did not take the keyboard (D5).
+#[test]
+fn a_window_of_one_size_floats() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_min_size(WIDTH, HEIGHT);
+    toplevel.set_max_size(WIDTH, HEIGHT);
+    surface.commit();
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "no tile in the initial configure");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    let tiles_top = level(&run, &pair.above).max(level(&run, &pair.below));
+    assert!(level(&run, &window) > tiles_top, "above the tiles");
+    assert!(!configured(&mut run, &mut pair.upper));
+    assert!(!configured(&mut run, &mut pair.lower));
+    run.stop();
+}
+
+/// A tile of a new client, beneath the upper one, then `change`, which D5 floats: it leaves its
+/// tile with the floating configure of a window born tiled, is placed at the size it answers
+/// with, above the tiles, and the upper tile takes its space back.
+fn leaves_its_tile(
+    change: impl FnOnce(
+        &mut Running,
+        &mut Local,
+        &xdg_toplevel::XdgToplevel,
+        &wl_surface::WlSurface,
+    ),
+) {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    surface.commit();
+    new.redraw(&mut run);
+    pair.upper.redraw(&mut run);
+    let window = new.server_window(&run, &surface);
+    assert_eq!(geometry(&run, &window), rect(LEFT_BOTTOM));
+
+    change(&mut run, &mut new, &toplevel, &surface);
+    new.roundtrip(&mut run);
+
+    assert_eq!(tiles(&run, pair.id), 2, "it left its tile");
+    let (width, height, _) = new.redraw(&mut run);
+    assert_eq!((width, height), (0, 0), "no floating size: it was born tiled");
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    let tiles_top = level(&run, &pair.above).max(level(&run, &pair.below));
+    assert!(level(&run, &window) > tiles_top, "above the tiles");
+    let (width, height, _) = pair.upper.redraw(&mut run);
+    assert_eq!((width, height), (LEFT.2, LEFT.3));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A tile given a parent leaves its tile (D5). The parent is a toplevel the client has not
+/// mapped, so that the client answers the configures of one window.
+#[test]
+fn a_window_that_gains_a_parent_leaves_its_tile() {
+    leaves_its_tile(|_, new, toplevel, _| {
+        let compositor: wl_compositor::WlCompositor = new.bind(4);
+        let wm_base: xdg_wm_base::XdgWmBase = new.bind(1);
+        let qh = new.queue.handle();
+        let parent_surface = compositor.create_surface(&qh, ());
+        let parent_xdg = wm_base.get_xdg_surface(&parent_surface, &qh, ());
+        let parent = parent_xdg.get_toplevel(&qh, ());
+        toplevel.set_parent(Some(&parent));
+    });
+}
+
+/// A tile that commits a minimum and a maximum of one size leaves its tile (D5).
+#[test]
+fn a_tile_that_takes_one_size_leaves_its_tile() {
+    leaves_its_tile(|_, _, toplevel, surface| {
+        toplevel.set_min_size(WIDTH, HEIGHT);
+        toplevel.set_max_size(WIDTH, HEIGHT);
+        surface.commit();
+    });
+}

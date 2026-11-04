@@ -969,13 +969,13 @@ impl State {
         }
     }
 
-    /// D2 for `window`, on a tiled workspace, shown and in no tile yet: it splits the tile focused
-    /// last, and with `behind` the next tile still splits that one. Where it stood is kept for
+    /// D2 for `window`, on a tiled workspace, shown, in no tile yet and not one D5 floats: it
+    /// splits the tile focused last, and with `behind` the next tile still splits that one. Where it stood is kept for
     /// the end of the tiling, unless it is kept already, and it leaves the cascade
     /// (`handlers::moved`). The workspace, to lay out.
     fn enter_tile(&mut self, window: &Window, behind: bool) -> Option<WorkspaceId> {
         let id = on(window).filter(|id| self.is_tiled(*id))?;
-        if !shown(window) || self.is_tile(window) {
+        if !shown(window) || self.is_tile(window) || crate::handlers::floats(window) {
             return None;
         }
         let area = self
@@ -1014,14 +1014,23 @@ impl State {
         }
     }
 
-    /// A tile minimised: it leaves its tree with D8's configure, and its workspace is laid out
-    /// (D9).
+    /// A tile minimised, or one D5 floats now: it leaves its tree with D8's configure, and its
+    /// workspace is laid out (D9).
     pub(crate) fn leave_tile(&mut self, window: &Window) {
         let Some(id) = on(window).filter(|id| self.leave_tree(window, *id)) else {
             return;
         };
         self.untile(window, true);
         self.tile_layout(id);
+    }
+
+    /// A tile that a change of its parent or its size limits makes one D5 floats: it leaves its
+    /// tree, as `leave_tile` takes it out, and stands above the tiles.
+    pub(crate) fn float_tile(&mut self, window: &Window) {
+        if self.is_tile(window) && crate::handlers::floats(window) {
+            self.leave_tile(window);
+            self.space.raise_element(window, false);
+        }
     }
 
     /// A tile destroyed: its workspace is laid out without it.
@@ -1062,9 +1071,9 @@ impl State {
 
     /// The tile a new window would take by D2 on the workspace it will be placed on, in the
     /// pending state of its initial configure, with D8's states. A window that asked to be
-    /// maximised or full screen keeps what it asked.
+    /// maximised or full screen keeps what it asked, and one D5 floats is sent no tile.
     pub(crate) fn preview_tile(&self, window: &Window) {
-        if kept_before(window).is_some() {
+        if kept_before(window).is_some() || crate::handlers::floats(window) {
             return;
         }
         let Some(id) = self
@@ -1091,7 +1100,8 @@ impl State {
         }
     }
 
-    /// `place` put `window` on its workspace. On a tiled one it restores the other maximised
+    /// `place` put `window` on its workspace. On a tiled one a window D5 floats stands above the
+    /// tiles, with or without the keyboard, and any other restores the other maximised
     /// windows there (D6), takes its tile, behind the one focused last when it did not take the
     /// keyboard, and stands there at once unless it asked to be maximised or full screen; it was
     /// born tiled. On a floating one, a window sent a tile in its initial configure before the
@@ -1117,6 +1127,10 @@ impl State {
                 let serial = toplevel.send_pending_configure();
                 place_again(window, serial);
             }
+            return;
+        }
+        if crate::handlers::floats(window) {
+            self.space.raise_element(window, false);
             return;
         }
         let maximised: Vec<Window> = self
