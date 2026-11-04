@@ -2093,7 +2093,7 @@ def check_panics():
             # One finding per occurrence, so that scripts/ci/known-red.txt can list each and
             # a new one is red even while an old one is fixed.
             for at in where[k]:
-                r.fail(f"{at}: {k} over the budget of {budget}, return an error instead (`?`)")
+                r.fail(f"{at}: {k} over the budget of {budget}, propagate with `?`")
             r.note(f"{k}: {counts[k]} occorrenze, budget {budget}")
         elif counts[k] < budget:
             r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
