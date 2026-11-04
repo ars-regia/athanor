@@ -13,7 +13,8 @@ branches, and NVIDIA's container toolkit (the container-toolkit set) both varian
                                     package in the repository metadata
   lock.py verify SET --version V     compare locks/<SET>.lock, which must be at V, with the
                                     repository metadata; RPMs are downloaded only from a
-                                    repository whose metadata gives another checksum than SHA-256
+                                    repository whose metadata gives another checksum than SHA-256;
+                                    fails when the set's successor repository publishes it
   lock.py mirrored SET               print the mirror reference of locks/<SET>.lock and exit 0
                                     if the mirror holds every locked RPM
 
@@ -72,6 +73,7 @@ BRANCHES = {
         # nvidia-kmod-common requires (nvidia-driver-selinux if selinux-policy-targeted).
         "companions": ["nvidia-driver-selinux"],
         "floor": False,
+        "successor": None,
     },
     # RPM Fusion's Fedora 45 tree names the 580 branch -580xx; the unsuffixed names are the 615
     # branch. It ships nvidia-modprobe and nvidia-persistenced only at 615, which the 580xx
@@ -88,6 +90,9 @@ BRANCHES = {
         "companions": ["nvidia-modprobe", "nvidia-persistenced"],
         # The 580xx packages require both at least at their own epoch:version (#943).
         "floor": True,
+        # Where the set's updates will appear: verify fails once it publishes the primary
+        # package, so the set moves there instead of staying on the frozen releases tree.
+        "successor": "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/",
     },
     # CDI specs and the OCI hook for GPU containers (S4). NVIDIA's repository, not Fedora's
     # golang-github-nvidia-container-toolkit, which lags the security fixes. Not a kernel input:
@@ -101,6 +106,7 @@ BRANCHES = {
         ],
         "companions": [],
         "floor": False,
+        "successor": None,
     },
 }
 
@@ -402,16 +408,23 @@ def read_lock(path):
     return branch, version, baseurl, entries
 
 
-def primary_xml(branch, download):
-    base = BRANCHES[branch]["baseurl"]
+def primary_xml(base, download):
     href = primary_href(download(base + "repodata/repomd.xml"))
     return gzip.decompress(download(base + href))
 
 
 def resolve(branch, version, download):
     spec = BRANCHES[branch]
-    return select(primary_xml(branch, download), spec["packages"], version, spec["companions"],
+    return select(primary_xml(spec["baseurl"], download), spec["packages"], version, spec["companions"],
                   spec["primary"] if spec["floor"] else None)
+
+
+def moved_to(branch, download):
+    """LockError when the branch's successor repository publishes its primary package."""
+    successor, name = BRANCHES[branch]["successor"], BRANCHES[branch]["primary"]
+    if successor and any(pkg.findtext(f"{COMMON}name") == name
+                         for pkg in parse_xml(primary_xml(successor, download)).iter(f"{COMMON}package")):
+        raise LockError(f"{successor} publishes {name}: the {branch} set must move there from {BRANCHES[branch]['baseurl']}")
 
 
 def downloaded_sha256(entry, url, download):
@@ -455,12 +468,13 @@ def main(argv=None, download=http_get, mirror=None):
         if args.command == "latest":
             if not args.major:
                 raise LockError("latest needs --major")
-            print(newest(primary_xml(args.branch, download), BRANCHES[args.branch]["primary"], args.major))
+            print(newest(primary_xml(BRANCHES[args.branch]["baseurl"], download), BRANCHES[args.branch]["primary"], args.major))
             return 0
         if args.command == "verify":
             path, version, entries = load_lock(args.locks, args.branch)
             if version != args.version:
                 raise LockError(f"{path}: lock at {version}, {args.version} expected")
+            moved_to(args.branch, download)
             base = BRANCHES[args.branch]["baseurl"]
             published = {
                 (e["digest"] if e["checksum"] == "sha256" else downloaded_sha256(e, base + e["href"], download), base + e["href"])

@@ -375,12 +375,16 @@ class Repomd(unittest.TestCase):
 
 
 LEGACY = lock.BRANCHES["legacy"]["baseurl"]
+# The legacy set's successor repository: verify reads it on every run.
+UPDATES = "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/"
 REPOMD = b'<repomd xmlns="http://linux.duke.edu/metadata/repo"><data type="primary"><location href="repodata/p.xml.gz"/></data></repomd>'
 
 
-def legacy_repo(*packages):
-    """A download function serving RPM Fusion metadata that lists `packages`."""
-    files = {LEGACY + "repodata/repomd.xml": REPOMD, LEGACY + "repodata/p.xml.gz": gzip.compress(primary(*packages))}
+def legacy_repo(*packages, updates=()):
+    """A download function serving RPM Fusion metadata that lists `packages`, and the legacy
+    set's successor tree listing `updates` (empty on 2026-11-04)."""
+    files = {LEGACY + "repodata/repomd.xml": REPOMD, LEGACY + "repodata/p.xml.gz": gzip.compress(primary(*packages)),
+             UPDATES + "repodata/repomd.xml": REPOMD, UPDATES + "repodata/p.xml.gz": gzip.compress(primary(*updates))}
     return lambda url: files[url]
 
 
@@ -566,6 +570,24 @@ class Verify(unittest.TestCase):
             raise OSError("connection reset")
         code, _, _ = self.verify(download)
         self.assertEqual(code, 1)
+
+    def test_updates_publishing_the_primary_package_fails_naming_the_move(self):
+        # Even with the lock matching the releases tree: the frozen tree never sees an update.
+        updates = [package("xorg-x11-drv-nvidia-580xx", 3, "580.205.01", "1.fc45", "x86_64", "x/new.rpm", "f" * 64)]
+        code, _, err = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
+        self.assertEqual(code, 1)
+        self.assertIn(f"{UPDATES} publishes xorg-x11-drv-nvidia-580xx: the legacy set must move there from {LEGACY}", err)
+
+    def test_updates_with_other_nvidia_packages_only_is_not_a_move(self):
+        updates = [package(n, 3, "615.80.01", "1.fc45", "x86_64", f"x/{n}.rpm", "f" * 64)
+                   for n in ("xorg-x11-drv-nvidia", "nvidia-persistenced", "akmod-nvidia-580xx")]
+        code, _, _ = self.verify(legacy_repo(*legacy_family("580.178.04", 1, "a" * 64), updates=updates))
+        self.assertEqual(code, 0)
+
+    def test_the_successor_is_fedora_45_updates_and_only_for_legacy(self):
+        self.assertEqual({b: s["successor"] for b, s in lock.BRANCHES.items()}, {
+            "open": None, "container-toolkit": None,
+            "legacy": UPDATES})
 
 
 
