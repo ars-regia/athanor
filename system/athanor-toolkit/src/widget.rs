@@ -1344,7 +1344,8 @@ impl Ui {
     /// Pastes `text` into field `id` at its caret, replacing its selection, as typing it would:
     /// without the control characters but a text area's newlines, without the bidirectional
     /// formats, as [`Ui::set_field_text`] takes text from outside, and at most
-    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none.
+    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none, and a paste with no
+    /// text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
@@ -1358,6 +1359,10 @@ impl Ui {
             .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
             .take(Self::FIELD_MAX_CHARS)
             .collect();
+        // Inserting nothing would delete the selection.
+        if text.is_empty() {
+            return None;
+        }
         field.insert(&mut self.text, &text);
         field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
@@ -3061,6 +3066,24 @@ mod tests {
         assert_eq!(ui.paste(name, "y"), None);
         assert_eq!(ui.paste(Ui::ROOT, "y"), None);
         assert_eq!(ui.paste(usize::MAX, "y"), None);
+    }
+
+    #[test]
+    fn a_paste_with_nothing_left_to_take_leaves_the_field_as_it_was() {
+        // An owner that sends nothing, or only what a field drops, deletes no selection.
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.take_clips();
+        for text in ["", "\u{202E}\u{7}"] {
+            assert_eq!(ui.paste(name, text), None, "{text:?}");
+            assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+            ui.key(Key::Copy);
+            assert_eq!(ui.take_clips(), [Clip::Copy("c".into())], "the selection stays");
+        }
     }
 
     #[test]
