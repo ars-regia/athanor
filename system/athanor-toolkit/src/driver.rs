@@ -1,7 +1,10 @@
 //! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows, wlr-layer-shell surfaces
 //! and their xdg-popups (a menu, or a tooltip), several in one process, each drawn in shared memory by vello_cpu or through wgpu by
 //! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
-//! through text-input-v3, and one AccessKit adapter on AT-SPI per surface.
+//! through text-input-v3, the clipboard and the primary selection, and one AccessKit adapter on
+//! AT-SPI per surface.
+
+mod clipboard;
 
 use crate::a11y::tree_update;
 #[cfg(feature = "gpu")]
@@ -48,7 +51,7 @@ use smithay_client_toolkit::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
             cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_RIGHT,
+            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -302,6 +305,8 @@ fn run_on(
         ime: Ime::default(),
         loop_handle: event_loop.handle(),
         modifiers: Modifiers::default(),
+        // Optional: without them, a field copies and pastes nothing.
+        clipboards: clipboard::Clipboards::bind(&globals, &qh),
         tooltip: Tooltip::default(),
         error: None,
     };
@@ -1233,6 +1238,7 @@ struct App {
     /// called once per process.
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
+    clipboards: clipboard::Clipboards,
     /// When the tooltip of the widget under the pointer, or focused, shows.
     tooltip: Tooltip<(SurfaceId, WidgetId)>,
     /// An error raised inside a callback, returned by [`run`].
@@ -1246,11 +1252,12 @@ impl App {
     }
 
     /// Hands an event of `id`'s widgets to the application, then redraws and updates the
-    /// accessibility trees and the input method.
+    /// accessibility trees, the input method and the clipboards.
     fn changed(&mut self, id: SurfaceId, event: Option<Event>) {
         self.update(id, event);
         if !self.shell.exit {
             self.sync_text_input();
+            self.clips(id);
         }
     }
 
@@ -1349,9 +1356,11 @@ impl App {
     }
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
-    /// send for a surface that is gone: the next `enter` then sends `enable` again.
+    /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
+    /// selection its fields offered ends with it.
     fn close(&mut self, id: SurfaceId) {
         self.shell.close(id);
+        self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
         }
@@ -1443,17 +1452,17 @@ impl App {
         }
     }
 
-    /// The pointer moved on `id`: the hovered widget follows it, a drag may start, and the
-    /// tooltip follows the hovered widget.
+    /// The pointer moved on `id`: the hovered widget follows it, a drag may start or a field's
+    /// selection follow it, and the tooltip follows the hovered widget.
     fn pointer_moved(&mut self, id: SurfaceId, x: f32, y: f32) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        let before = surface.ui.hovered();
+        let (before, selecting) = (surface.ui.hovered(), surface.ui.selecting());
         let event = surface.ui.pointer_motion(x, y);
         let hovered = surface.ui.hovered();
         let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
-        if event.is_some() || hovered != before {
+        if event.is_some() || hovered != before || selecting {
             self.changed(id, event);
         }
         self.point_tooltip(target.map(|w| (id, w)));
@@ -1475,6 +1484,7 @@ impl App {
         let button = match button {
             BTN_LEFT => PointerButton::Primary,
             BTN_RIGHT => PointerButton::Secondary,
+            BTN_MIDDLE => PointerButton::Middle,
             _ => return,
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -1526,8 +1536,8 @@ impl App {
         }
     }
 
-    /// A key held down: as pressed again, except Enter outside a text area, and Space outside
-    /// a field, which activate once.
+    /// A key held down: as pressed again, with the serial of its press, which the repeat does
+    /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
         let focused = self
             .keyboard_focus
@@ -1536,13 +1546,10 @@ impl App {
         let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
         let in_area =
             focused.is_some_and(|(ui, id)| matches!(ui.widget(id).kind, Kind::TextArea(_)));
-        let activates = match event.keysym {
-            Keysym::Return | Keysym::KP_Enter => !in_area,
-            Keysym::space => !in_field,
-            _ => false,
-        };
-        if !activates {
+        if !once_per_press(event.keysym, self.modifiers.ctrl, in_field, in_area) {
+            self.shell.grab.repeat();
             self.key(event);
+            self.shell.grab.key(None);
         }
     }
 
@@ -1551,8 +1558,14 @@ impl App {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
+            Keysym::Left if self.modifiers.shift => Key::SelectLeft,
+            Keysym::Right if self.modifiers.shift => Key::SelectRight,
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
+            Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
+            Keysym::c | Keysym::C if self.modifiers.ctrl => Key::Copy,
+            Keysym::x | Keysym::X if self.modifiers.ctrl => Key::Cut,
+            Keysym::v | Keysym::V if self.modifiers.ctrl => Key::Paste,
             Keysym::Up => Key::Up,
             Keysym::Down => Key::Down,
             Keysym::Home => Key::Home,
@@ -1803,6 +1816,7 @@ impl SeatHandler for App {
         capability: Capability,
     ) {
         self.shell.seat = Some(seat.clone());
+        self.clipboards.seat(qh, &seat);
         let result: Result<(), Error> = match capability {
             Capability::Keyboard if self.keyboard.is_none() => {
                 if let (Some(manager), None) = (&self.text_input_manager, &self.text_input) {
@@ -2031,9 +2045,39 @@ impl ProvidesRegistryState for App {
 
 smithay_client_toolkit::delegate_dispatch2!(App);
 
+/// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
+/// area and Space outside a field, which activate, and Ctrl+C, Ctrl+X and Ctrl+V, which copy,
+/// cut and paste once per press.
+fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> bool {
+    match keysym {
+        Keysym::Return | Keysym::KP_Enter => !in_area,
+        Keysym::space => !in_field,
+        Keysym::c | Keysym::C | Keysym::x | Keysym::X | Keysym::v | Keysym::V => ctrl,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_held_key_acts_again_but_the_clipboard_keys_and_the_activating_ones() {
+        let once = |keysym, ctrl| once_per_press(keysym, ctrl, true, false);
+        assert!(!once(Keysym::Right, false), "an arrow repeats");
+        assert!(!once(Keysym::Right, true));
+        assert!(!once(Keysym::c, false), "a letter repeats");
+        assert!(!once(Keysym::a, true), "Ctrl+A selecting all again changes nothing");
+        for keysym in [Keysym::c, Keysym::C, Keysym::x, Keysym::X, Keysym::v, Keysym::V] {
+            assert!(once(keysym, true), "{keysym:?}");
+        }
+        // Enter breaks lines in a text area and activates once elsewhere; Space activates once
+        // outside a field.
+        assert!(once_per_press(Keysym::Return, false, true, false));
+        assert!(!once_per_press(Keysym::Return, false, true, true));
+        assert!(once_per_press(Keysym::space, false, false, false));
+        assert!(!once_per_press(Keysym::space, false, true, false));
+    }
 
     #[test]
     fn the_renderer_variable_takes_cpu_or_gpu_only() {

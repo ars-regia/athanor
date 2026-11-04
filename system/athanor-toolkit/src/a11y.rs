@@ -792,4 +792,26 @@ mod tests {
         assert_eq!(selection, Some(caret(at(text_run_id(area, 1), 0))));
         assert_eq!(find(text_run_id(area, 1)).and_then(Node::value), Some(""));
     }
+
+    #[test]
+    fn a_selection_made_with_shift_and_an_arrow_is_the_fields_text_selection() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        ui.commit("abc");
+        let selection = |ui: &mut Ui| {
+            ui.layout();
+            let s = node(ui, field, 1.0).text_selection().copied()?;
+            let at = |p: TextPosition| (p.node, p.character_index);
+            Some((at(s.anchor), at(s.focus)))
+        };
+        let run = text_run_id(field, 0);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 3))));
+        ui.key(crate::Key::SelectLeft);
+        ui.key(crate::Key::SelectLeft);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 1))));
+        ui.key(crate::Key::SelectRight);
+        assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
+    }
 }
