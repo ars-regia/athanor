@@ -344,7 +344,7 @@ impl State {
         self.follow_parent(window, true);
     }
 
-    /// Where `window`, at its first sized commit, goes on the first output's active workspace:
+    /// Where `window`, at its first sized commit, goes on its `placement_workspace`:
     /// cascaded from the windows placed there before it (`cascaded`), or as the first
     /// (`placed`). The cascade starts again after the first of them that is gone or that the
     /// user moved (`Moved`), as cosmic-comp's does; a window with a parent follows the parent
@@ -364,7 +364,7 @@ impl State {
         if self.parent_window(window).is_some() || window.user_data().get::<Moved>().is_some() {
             return first;
         }
-        let workspace = self.active_workspace(&output);
+        let workspace = self.placement_workspace(window);
         if workspace.is_some_and(|id| self.is_tiled(id)) {
             return first;
         }

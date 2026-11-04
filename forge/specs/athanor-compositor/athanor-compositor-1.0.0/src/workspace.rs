@@ -354,14 +354,15 @@ impl State {
         self.parked.iter().any(|(kept, _)| kept == window)
     }
 
-    /// Puts `window`, placed now on the first output, on that output's active workspace.
+    /// The workspace `window` is on, or, before it is placed, the one `place_on_workspace` puts
+    /// it on: the active workspace of the first output, where a new window is placed.
+    pub fn placement_workspace(&self, window: &Window) -> Option<WorkspaceId> {
+        on(window).or_else(|| self.active_workspace(self.space.outputs().next()?))
+    }
+
+    /// Puts `window`, placed now, on its `placement_workspace`.
     pub fn place_on_workspace(&mut self, window: &Window) {
-        let Some(id) = self
-            .space
-            .outputs()
-            .next()
-            .and_then(|output| self.active_workspace(output))
-        else {
+        let Some(id) = self.placement_workspace(window) else {
             return;
         };
         window
@@ -1066,11 +1067,8 @@ impl State {
         if kept_before(window).is_some() {
             return;
         }
-        let Some(id) = on(window)
-            .or_else(|| {
-                let output = self.space.outputs().next()?;
-                self.active_workspace(output)
-            })
+        let Some(id) = self
+            .placement_workspace(window)
             .filter(|id| self.is_tiled(*id))
         else {
             return;
