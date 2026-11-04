@@ -127,11 +127,14 @@ impl CompositorHandler for State {
                         .is_some_and(|toplevel| !toplevel.is_initial_configure_sent());
                 if unmapped {
                     self.forget_requests(&window);
+                    self.hide_tile(&window);
                 }
                 // A minimised window, or one on an inactive workspace, is placed and moved when
                 // it comes back (`unminimise`, `activate_workspace`).
                 if !self.is_minimised(&window) && !self.is_parked(&window) {
                     self.place(&window);
+                    // A tile that hid takes a tile again at its next draw.
+                    self.tile_shown(&window);
                     let landed = self.relocated(&window);
                     self.anchor_resized(&window);
                     // Also what a full-screen window's answer lifts (`marks::lifted`), which an
@@ -146,13 +149,14 @@ impl CompositorHandler for State {
         }
         self.layer_commit(surface);
 
-        // The first commit of a toplevel or a popup gets its initial configure.
-        if let Some(toplevel) = self
-            .window_or_minimised(surface)
-            .as_ref()
-            .and_then(Window::toplevel)
-        {
-            if !toplevel.is_initial_configure_sent() {
+        // The first commit of a toplevel or a popup gets its initial configure; on a tiled
+        // workspace, with the tile the window will take.
+        if let Some(window) = self.window_or_minimised(surface) {
+            if let Some(toplevel) = window
+                .toplevel()
+                .filter(|toplevel| !toplevel.is_initial_configure_sent())
+            {
+                self.preview_tile(&window);
                 toplevel.send_configure();
             }
         }
@@ -326,6 +330,7 @@ impl State {
             self.space.relocate_element(window, (x, y));
         }
         self.place_on_workspace(window);
+        self.tile_placed(window, takes);
         self.follow_parent(window, true);
     }
 
@@ -631,6 +636,7 @@ impl XdgShellHandler for State {
             if let Some(handle) = window.user_data().get::<ForeignToplevelHandle>() {
                 self.foreign_toplevel_state.remove_toplevel(handle);
             }
+            self.drop_tile(&window);
             self.space.unmap_elem(&window);
             self.minimised.retain(|(kept, _)| *kept != window);
             self.parked.retain(|(kept, _)| *kept != window);

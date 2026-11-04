@@ -534,6 +534,8 @@ impl State {
         self.space.unmap_output(output);
         self.fit_to_outputs();
         self.workspaces_changed();
+        // Its tiles re-homed, or the trees of its workspaces gone, after the fit.
+        self.fit_tiles();
     }
 
     /// After the outputs changed (one went, or took another size): the windows their home output
@@ -568,6 +570,8 @@ impl State {
         }
         self.fit_kept_places(&changed);
         self.fit_maximised();
+        // Last: the layout, not the fit, gives a tile its place.
+        self.fit_tiles();
         self.space.refresh();
         if let Some(pointer) = self.seat.get_pointer() {
             let at = pointer.current_location();
@@ -793,6 +797,7 @@ impl State {
             state.states.unset(xdg_toplevel::State::Maximized);
         });
         self.back_to(window, kept);
+        self.back_to_tile(window);
         Some(kept)
     }
 
@@ -951,6 +956,7 @@ impl State {
             self.maximise(window);
         } else {
             self.back_to(window, kept.before);
+            self.back_to_tile(window);
         }
     }
 
@@ -969,6 +975,8 @@ impl State {
         self.end_window_grab(window);
         self.dismiss_popups(window);
         window.set_activated(false);
+        // D9: a tile leaves its tree; the configure that deactivates it gives its floating size.
+        self.leave_tile(window);
         if let Some(toplevel) = window.toplevel() {
             toplevel.send_pending_configure();
         }
@@ -1005,6 +1013,8 @@ impl State {
         self.relocated(&window);
         self.fit_maximised();
         self.focus(&window);
+        // Focused first: it splits the tile focused last before it (D2, D9).
+        self.tile_shown(&window);
         self.refresh_pointer();
         self.request_redraw();
         true
@@ -1665,6 +1675,14 @@ pub fn full_screen_area(window: &Window) -> Option<Rectangle<i32, Logical>> {
 
 pub fn is_full_screen(window: &Window) -> bool {
     full_screen_area(window).is_some()
+}
+
+/// Whether `window` is maximised, with a geometry kept for `restore`.
+pub(crate) fn is_maximised(window: &Window) -> bool {
+    window
+        .user_data()
+        .get::<Maximised>()
+        .is_some_and(|maximised| maximised.0.get().is_some())
 }
 
 /// The geometry a maximised or full-screen `window` returns to; none while it is neither. Of a

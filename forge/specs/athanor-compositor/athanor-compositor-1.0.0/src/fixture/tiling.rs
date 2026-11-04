@@ -282,3 +282,791 @@ fn a_workspace_gone_ends_its_tiling_object() {
     assert_eq!(watcher.tilings_of(&late), [None], "made for a workspace already gone");
     run.stop();
 }
+
+/// The halves of the first output's left tile, one above the other (D2: it is higher than wide).
+const LEFT_TOP: (i32, i32, i32, i32) = (8, 8, 628, 388);
+const LEFT_BOTTOM: (i32, i32, i32, i32) = (8, 404, 628, 388);
+/// The halves of the first output under a bar 30 high (`Local::bar`).
+const LEFT_UNDER_BAR: (i32, i32, i32, i32) = (8, 38, 628, 754);
+const RIGHT_UNDER_BAR: (i32, i32, i32, i32) = (644, 38, 628, 754);
+/// The whole first output, where a window is maximised or full screen.
+const OUTPUT: (i32, i32, i32, i32) = (0, 0, 1280, 800);
+
+/// Two windows tiled side by side on the first output's workspace, each answered.
+struct Pair {
+    lower: Local,
+    upper: Local,
+    upper_toplevel: xdg_toplevel::XdgToplevel,
+    below: Window,
+    above: Window,
+    id: WorkspaceId,
+}
+
+fn tiled_pair(run: &mut Running) -> Pair {
+    without_the_fixture(run);
+    let (mut lower, _, below) = window(run);
+    let (mut upper, upper_toplevel, above) = window(run);
+    let id = first_workspace(run);
+    answer_all(run, &mut [&mut upper, &mut lower], |run| {
+        run.state.set_tiling(id, true)
+    });
+    assert_eq!(geometry(run, &above), rect(LEFT));
+    assert_eq!(geometry(run, &below), rect(RIGHT));
+    Pair {
+        lower,
+        upper,
+        upper_toplevel,
+        below,
+        above,
+        id,
+    }
+}
+
+/// How many windows the tree of `id` holds.
+fn tiles(run: &Running, id: WorkspaceId) -> usize {
+    run.state
+        .tilings
+        .iter()
+        .find(|(kept, _)| *kept == id)
+        .map_or(0, |(_, tree)| tree.windows().len())
+}
+
+/// Whether `local` was sent a configure since it last answered one, after a roundtrip.
+fn configured(run: &mut Running, local: &mut Local) -> bool {
+    local.roundtrip(run);
+    local.client.configure.is_some()
+}
+
+/// Where `placed` puts a window of the fixture's size on its home output.
+fn placed_new(run: &Running, window: &Window) -> Rectangle<i32, Logical> {
+    let area = run.state.home_area(window).expect("an area");
+    let size = (WIDTH, HEIGHT).into();
+    let at = crate::state::placed(area, Rectangle::new((0, 0).into(), size));
+    Rectangle::new(at, size)
+}
+
+impl Local {
+    /// A toplevel of a new surface, before its first commit; `redraw` maps it at the size of its
+    /// initial configure.
+    fn unborn(&mut self) -> (wl_surface::WlSurface, xdg_toplevel::XdgToplevel) {
+        let compositor: wl_compositor::WlCompositor = self.bind(4);
+        let wm_base: xdg_wm_base::XdgWmBase = self.bind(1);
+        let seat: wl_seat::WlSeat = self.bind(1);
+        let qh = self.queue.handle();
+        self.pointer = Some(seat.get_pointer(&qh, ()));
+        self.seat = Some(seat);
+        let surface = compositor.create_surface(&qh, ());
+        let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg.get_toplevel(&qh, ());
+        self.client.configure = None;
+        self.window = Some((surface.clone(), xdg));
+        (surface, toplevel)
+    }
+
+    /// Answers the next configure with a buffer of `width` by `height`, whatever it asked.
+    fn draw_at(&mut self, run: &mut Running, width: i32, height: i32) {
+        self.pump(run, "the window is configured", |client, _| {
+            client.configure.is_some()
+        });
+        let (surface, xdg) = self.window.clone().expect("a window");
+        xdg.ack_configure(self.client.configure.take().expect("a configure"));
+        self.client.toplevel_configure = None;
+        let shm: wl_shm::WlShm = self.bind(1);
+        let (buffer, _) = self.buffer(&shm, width, height, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+    }
+
+    /// Commits a null buffer: the window hides.
+    fn hide(&mut self, run: &mut Running) {
+        let (surface, _) = self.window.clone().expect("a window");
+        surface.attach(None, 0, 0);
+        surface.commit();
+        self.roundtrip(run);
+    }
+
+    /// Presses the left button at `at`, over this client's window: the serial it was sent.
+    fn press_at(&mut self, run: &mut Running, at: Point<f64, Logical>) -> u32 {
+        self.client.button = None;
+        press(run, at);
+        self.pump(run, "the press", |client, _| client.button.is_some());
+        self.client.button.take().expect("a press")
+    }
+}
+
+/// A move of `toplevel`, granted for its client's press at `at`.
+fn move_tile(
+    run: &mut Running,
+    local: &mut Local,
+    toplevel: &xdg_toplevel::XdgToplevel,
+    at: Point<f64, Logical>,
+) {
+    let serial = local.press_at(run, at);
+    let seat = local.seat.clone().expect("a seat");
+    toplevel._move(&seat, serial);
+    local.roundtrip(run);
+    assert!(moving(run), "the move is granted");
+}
+
+/// A resize of `toplevel` by its bottom right corner, granted for its client's press at `at`.
+fn resize_tile(
+    run: &mut Running,
+    local: &mut Local,
+    toplevel: &xdg_toplevel::XdgToplevel,
+    at: Point<f64, Logical>,
+) {
+    let serial = local.press_at(run, at);
+    let seat = local.seat.clone().expect("a seat");
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(run);
+}
+
+fn maximised(window: &Window) -> bool {
+    crate::state::is_maximised(window)
+}
+
+/// A window born on a tiled workspace, then floating when the toggle turns off, is placed as a
+/// new window is, at the size it answers with (D7).
+#[test]
+fn a_window_born_tiled_is_placed_when_tiling_ends() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut upper, _, _) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    let mut born = Local::connect(&mut run, None);
+    let (surface, _) = born.unborn();
+    surface.commit();
+    born.redraw(&mut run);
+    let window = born.server_window(&run, &surface);
+    assert!(run.state.is_tile(&window), "born tiled");
+    upper.redraw(&mut run);
+
+    let answers = answer_all(&mut run, &mut [&mut born, &mut upper], |run| {
+        run.state.set_tiling(id, false)
+    });
+
+    assert_eq!((answers[0].0, answers[0].1), (0, 0), "its own size");
+    assert_eq!(tiled_states(&window), 0);
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    run.stop();
+}
+
+/// A bar's frame lays the tiles out, and a tile whose size did not change is sent nothing, nor
+/// is one whose client answered with another size.
+#[test]
+fn a_bar_frame_sends_no_configure() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        ..
+    } = tiled_pair(&mut run);
+    let mut shell = Local::connect(&mut run, None);
+    upper.roundtrip(&mut run);
+    lower.roundtrip(&mut run);
+    upper.client.configure = None;
+    lower.client.configure = None;
+    let bar = shell.bar(&mut run, 30);
+    upper.redraw(&mut run);
+    lower.draw_at(&mut run, 600, 700);
+
+    bar.commit();
+    shell.roundtrip(&mut run);
+
+    assert!(!configured(&mut run, &mut upper), "the same size");
+    assert!(!configured(&mut run, &mut lower), "another size answered");
+    run.stop();
+}
+
+/// A bar's exclusive zone takes its height off the tiles, and gives it back when it goes.
+#[test]
+fn a_bar_zone_narrows_the_tiles() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        ..
+    } = tiled_pair(&mut run);
+    let mut shell = Local::connect(&mut run, None);
+    let mut bar = None;
+
+    let answers = answer_all(&mut run, &mut [&mut upper, &mut lower], |run| {
+        bar = Some(shell.bar(run, 30));
+    });
+    assert_eq!(
+        (answers[0].0, answers[0].1),
+        (LEFT_UNDER_BAR.2, LEFT_UNDER_BAR.3)
+    );
+    assert_eq!(geometry(&run, &above), rect(LEFT_UNDER_BAR));
+    assert_eq!(geometry(&run, &below), rect(RIGHT_UNDER_BAR));
+
+    // The bar's client goes, and its layer surface with it (`layer_destroyed`).
+    answer_all(&mut run, &mut [&mut upper, &mut lower], move |_| {
+        drop((bar, shell));
+    });
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
+    run.stop();
+}
+
+/// An output that takes another size lays its tiles out again.
+#[test]
+fn a_tile_fits_a_changed_output() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        ..
+    } = tiled_pair(&mut run);
+
+    let answers = answer_all(&mut run, &mut [&mut upper, &mut lower], |run| {
+        resize_first(run, 1000, 800)
+    });
+
+    assert_eq!((answers[0].0, answers[1].0), (488, 488));
+    assert_eq!(geometry(&run, &above), rect((8, 8, 488, 784)));
+    assert_eq!(geometry(&run, &below), rect((504, 8, 488, 784)));
+    run.stop();
+}
+
+/// A client that does not answer its tile's configure stays where it stood, and goes to the
+/// tile when it answers: a layout never waits on a client (Review Focus 2).
+#[test]
+fn a_client_slow_to_answer_keeps_its_place() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut lower, _, below) = window(&mut run);
+    let (mut upper, _, above) = window(&mut run);
+    let id = first_workspace(&run);
+    let before = geometry(&run, &below);
+    lower.roundtrip(&mut run);
+    lower.client.configure = None;
+
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(geometry(&run, &below), before, "not answered yet");
+    run.state.fit_tiles();
+    assert_eq!(geometry(&run, &below), before, "a second layout does not move it");
+
+    lower.redraw(&mut run);
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
+    run.stop();
+}
+
+/// A new window on a tiled workspace is sent its tile's size in its initial configure and maps
+/// at its tile; the window it splits takes the other half.
+#[test]
+fn a_new_window_first_shows_at_its_tile() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut upper, _, above) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    let mut new = Local::connect(&mut run, None);
+    let (surface, _) = new.unborn();
+    surface.commit();
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (RIGHT.2, RIGHT.3), "the initial configure");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiled_states(&window), 4);
+    assert_eq!(geometry(&run, &window), rect(RIGHT), "at its first commit");
+    assert!(!configured(&mut run, &mut new), "no second configure");
+    let (width, _, _) = upper.redraw(&mut run);
+    assert_eq!(width, LEFT.2);
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    run.stop();
+}
+
+/// A window that commits without ever drawing takes no tile: the tiles stay as they are.
+#[test]
+fn a_window_that_never_draws_holds_no_tile() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut new = Local::connect(&mut run, None);
+    let (surface, _) = new.unborn();
+    surface.commit();
+    new.pump(&mut run, "the initial configure", |client, _| {
+        client.configure.is_some()
+    });
+
+    assert_eq!(tiles(&run, pair.id), 2);
+    assert!(!configured(&mut run, &mut pair.upper));
+    assert!(!configured(&mut run, &mut pair.lower));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    assert_eq!(geometry(&run, &pair.below), rect(RIGHT));
+    run.stop();
+}
+
+/// Every way a window's place on a workspace ends takes it out of the tree: its destruction, a
+/// null buffer, a minimise, a move to another workspace, a drop on another output, and the
+/// removal of its output (Review Focus 1).
+#[test]
+fn no_end_leaves_a_tile_behind() {
+    let mut run = Running::start(None);
+    let pair = tiled_pair(&mut run);
+    let id = pair.id;
+    let output = output_at(&run, 0);
+    let next = run.state.workspaces(&output)[1];
+
+    let (mut destroyed, toplevel, gone) = window(&mut run);
+    assert_eq!(tiles(&run, id), 3, "a new window enters");
+    toplevel.destroy();
+    destroyed.roundtrip(&mut run);
+    assert_eq!(tiles(&run, id), 2, "destroyed");
+    assert!(!run.state.is_tile(&gone));
+
+    let (mut hidden, _, hiding) = window(&mut run);
+    hidden.hide(&mut run);
+    assert!(!run.state.is_tile(&hiding), "a null buffer");
+
+    let (_minimised, _, minimising) = window(&mut run);
+    assert!(run.state.minimise(&minimising));
+    assert!(!run.state.is_tile(&minimising), "minimised");
+
+    let (_moved, _, moving_on) = window(&mut run);
+    assert!(run.state.move_window_to(&moving_on, next));
+    assert!(!run.state.is_tile(&moving_on), "moved to another workspace");
+
+    let (_dropped, _, dropping) = window(&mut run);
+    let second = output_at(&run, 1);
+    let shown = run.state.space.output_geometry(&second).expect("placed");
+    run.state
+        .space
+        .relocate_element(&dropping, shown.loc + Point::from((10, 10)));
+    run.state.settle(&dropping);
+    let there = run.state.active_workspace(&second).expect("a workspace");
+    assert_eq!(run.state.workspace_of(&dropping), Some(there));
+    assert!(!run.state.is_tile(&dropping), "dropped on another output");
+    assert_eq!(tiles(&run, id), 2);
+
+    run.state.set_tiling(there, true);
+    assert!(run.state.is_tile(&dropping));
+    run.state.set_tiling(id, false);
+    run.state.remove_output(&second);
+    assert!(!run.state.is_tile(&dropping), "its output removed");
+    assert_eq!(tiled_states(&dropping), 0);
+    assert!(run.state.tilings.is_empty());
+    run.stop();
+}
+
+/// A tile that hides with a null buffer gives its space to its sibling, and takes a tile again
+/// at its next draw.
+#[test]
+fn a_hidden_tile_gives_up_its_place() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        id,
+        ..
+    } = tiled_pair(&mut run);
+    upper.client.configure = None;
+
+    lower.hide(&mut run);
+    let (width, _, _) = upper.redraw(&mut run);
+
+    assert_eq!(width, WHOLE.2);
+    assert_eq!(geometry(&run, &above), rect(WHOLE));
+    assert_eq!(tiles(&run, id), 1);
+    let (width, _, _) = lower.redraw(&mut run);
+    assert_eq!(width, RIGHT.2, "its initial configure again, with its tile");
+    assert!(run.state.is_tile(&below));
+    upper.redraw(&mut run);
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
+    run.stop();
+}
+
+/// A full-screen tile keeps its tile, its neighbour does not change, and it returns to the tile
+/// when it leaves full screen (D6, R4).
+#[test]
+fn a_full_screen_tile_returns_to_its_tile() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        ..
+    } = tiled_pair(&mut run);
+
+    answer_all(&mut run, &mut [&mut upper], |run| {
+        run.state.full_screen(&above, None)
+    });
+    assert_eq!(geometry(&run, &above), rect(OUTPUT));
+    assert!(run.state.is_tile(&above));
+    assert!(!configured(&mut run, &mut lower), "the neighbour does not change");
+    assert_eq!(geometry(&run, &below), rect(RIGHT));
+
+    let answers = answer_all(&mut run, &mut [&mut upper], |run| {
+        run.state.leave_full_screen(&above)
+    });
+    assert_eq!((answers[0].0, answers[0].1), (LEFT.2, LEFT.3));
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert_eq!(tiled_states(&above), 4);
+    run.stop();
+}
+
+/// A new tile restores a maximised window of its workspace, which takes its tile (D6).
+#[test]
+fn a_new_tile_restores_a_maximised_window() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut upper, _, above) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.maximise(&above));
+    assert_eq!(geometry(&run, &above), rect(OUTPUT));
+    upper.client.configure = None;
+
+    let (_new, _, window) = window(&mut run);
+    let (width, _, _) = upper.redraw(&mut run);
+
+    assert_eq!(width, LEFT.2);
+    assert!(!maximised(&above));
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    assert!(run.state.is_tile(&window));
+    run.stop();
+}
+
+/// A window maximised before its first commit keeps that size and takes a tile behind it, and
+/// goes to that tile when restored; one maximised while a layout's move waits goes to the tile
+/// that move was for when restored (D6).
+#[test]
+fn a_window_maximised_before_its_first_commit_keeps_that_size() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut upper, upper_toplevel, above) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    let mut new = Local::connect(&mut run, None);
+    let (surface, toplevel) = new.unborn();
+    toplevel.set_maximized();
+    surface.commit();
+
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (OUTPUT.2, OUTPUT.3), "the maximised size");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(geometry(&run, &window), rect(OUTPUT));
+    assert!(run.state.is_tile(&window));
+    upper.redraw(&mut run);
+    assert_eq!(geometry(&run, &above), rect(LEFT));
+    let answers = answer_all(&mut run, &mut [&mut new], |run| {
+        run.state.restore(&window);
+    });
+    assert_eq!((answers[0].0, answers[0].1), (RIGHT.2, RIGHT.3));
+    assert_eq!(geometry(&run, &window), rect(RIGHT));
+
+    // The upper window's end gives the new one the whole area, and it is maximised before it
+    // answers that move.
+    new.roundtrip(&mut run);
+    new.client.configure = None;
+    upper_toplevel.destroy();
+    upper.roundtrip(&mut run);
+    run.state.maximise(&window);
+    // Both configures in, so that the maximise's is the one answered.
+    new.roundtrip(&mut run);
+    new.redraw(&mut run);
+    assert_eq!(geometry(&run, &window), rect(OUTPUT));
+    let answers = answer_all(&mut run, &mut [&mut new], |run| {
+        run.state.restore(&window);
+    });
+    assert_eq!((answers[0].0, answers[0].1), (WHOLE.2, WHOLE.3));
+    assert_eq!(geometry(&run, &window), rect(WHOLE));
+    run.stop();
+}
+
+/// A window moved to a tiled workspace not shown splits the tile focused last there, and takes
+/// its tile when the workspace is shown (D2, D9).
+#[test]
+fn a_move_to_a_workspace_not_shown_splits_its_last_focused_tile() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let output = output_at(&run, 0);
+    let (_first, _, x) = window(&mut run);
+    let (mut second, _, y) = window(&mut run);
+    let (mut third, _, w) = window(&mut run);
+    let next = run.state.workspaces(&output)[1];
+    assert!(run.state.move_window_to(&x, next));
+    assert!(run.state.move_window_to(&y, next));
+    second.roundtrip(&mut run);
+    second.client.configure = None;
+    run.state.set_tiling(next, true);
+    second.redraw(&mut run);
+
+    answer_all(&mut run, &mut [&mut third, &mut second], |run| {
+        assert!(run.state.move_window_to(&w, next));
+        assert!(run.state.activate_workspace(next));
+    });
+
+    assert_eq!(geometry(&run, &y), rect(LEFT_TOP));
+    assert_eq!(geometry(&run, &w), rect(LEFT_BOTTOM));
+    assert_eq!(tiles(&run, next), 3);
+    run.stop();
+}
+
+/// A tile dragged and dropped on its own output goes back to its tile.
+#[test]
+fn a_dropped_tile_goes_back_to_the_layout() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+    assert_eq!(geometry(&run, &pair.above).loc, (108, 58).into(), "it follows");
+
+    release(&mut run);
+    pair.upper.roundtrip(&mut run);
+
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A drop that puts the tile back from under the pointer gives the pointer to the client now
+/// under it.
+#[test]
+fn a_dropped_tile_reaches_the_client_under_the_pointer() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((700.0, 0.0)), InputTime::now());
+    pair.lower.roundtrip(&mut run);
+    pair.lower.client.pointer_enter = None;
+
+    release(&mut run);
+
+    pair.lower
+        .pump(&mut run, "the pointer enters the lower tile", |client, _| {
+            client.pointer_enter.is_some()
+        });
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// The lock ends a move: the tile goes back to its tile.
+#[test]
+fn a_grab_replaced_by_the_lock_leaves_no_tile_astray() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    move_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+
+    let (_locker, _lock) = lock_session(&mut run);
+
+    assert!(!moving(&run));
+    assert!(!crate::grabs::is_held(&pair.above));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A move replaced by another of the same tile keeps it out of the layout until the last ends.
+#[test]
+fn a_second_grab_keeps_the_tile_out_of_the_layout() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((28.0, 18.0));
+    let serial = pair.upper.press_at(&mut run, at);
+    let seat = pair.upper.seat.clone().expect("a seat");
+    pair.upper_toplevel._move(&seat, serial);
+    pair.upper.roundtrip(&mut run);
+    pair.upper_toplevel._move(&seat, serial);
+    pair.upper.roundtrip(&mut run);
+    assert!(moving(&run));
+    run.state
+        .pointer_to(at + Point::from((100.0, 50.0)), InputTime::now());
+
+    run.state.tile_layout(pair.id);
+
+    assert!(crate::grabs::is_held(&pair.above));
+    assert_eq!(geometry(&run, &pair.above).loc, (108, 58).into(), "held");
+    release(&mut run);
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A tile resized by its client ends at its tile when the resize ends.
+#[test]
+fn a_resized_tile_ends_at_its_tile() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    let (width, height, _) = pair.upper.redraw(&mut run);
+    assert_eq!((width, height), (LEFT.2 + 30, LEFT.3 - 100), "resized");
+
+    release(&mut run);
+    let (width, height, _) = pair.upper.redraw(&mut run);
+
+    assert_eq!((width, height), (LEFT.2, LEFT.3));
+    assert_eq!(geometry(&run, &pair.above), rect(LEFT));
+    run.stop();
+}
+
+/// A bar's frame during a resize leaves the resized tile alone.
+#[test]
+fn a_bar_frame_leaves_a_resize_alone() {
+    let mut run = Running::start(None);
+    let mut pair = tiled_pair(&mut run);
+    let mut shell = Local::connect(&mut run, None);
+    let mut bar = None;
+    answer_all(&mut run, &mut [&mut pair.upper, &mut pair.lower], |run| {
+        bar = Some(shell.bar(run, 30));
+    });
+    let at = Point::from((600.0, 700.0));
+    resize_tile(&mut run, &mut pair.upper, &pair.upper_toplevel, at);
+    run.state
+        .pointer_to(at + Point::from((30.0, -100.0)), InputTime::now());
+    pair.upper.redraw(&mut run);
+    let resized = geometry(&run, &pair.above);
+
+    bar.as_ref().expect("a bar").commit();
+    shell.roundtrip(&mut run);
+
+    assert!(!configured(&mut run, &mut pair.upper));
+    assert_eq!(geometry(&run, &pair.above), resized);
+    release(&mut run);
+    run.stop();
+}
+
+/// A window hidden by a null buffer takes no tile at the toggle (D7).
+#[test]
+fn a_hidden_window_takes_no_tile_at_the_toggle() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut lower, _, below) = window(&mut run);
+    let (mut upper, _, above) = window(&mut run);
+    lower.hide(&mut run);
+    let id = first_workspace(&run);
+
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+
+    assert_eq!(geometry(&run, &above), rect(WHOLE));
+    assert!(!run.state.is_tile(&below));
+    assert_eq!(tiles(&run, id), 1);
+    run.stop();
+}
+
+/// A tile on a workspace not shown that hides leaves the tree, and the workspace is laid out
+/// without it when it is shown.
+#[test]
+fn a_parked_tile_that_hides_leaves_the_tree() {
+    let mut run = Running::start(None);
+    let Pair {
+        mut lower,
+        mut upper,
+        below,
+        above,
+        id,
+        ..
+    } = tiled_pair(&mut run);
+    let output = output_at(&run, 0);
+    let next = run.state.workspaces(&output)[1];
+    assert!(run.state.activate_workspace(next));
+    assert!(run.state.is_parked(&below));
+    upper.roundtrip(&mut run);
+    upper.client.configure = None;
+
+    lower.hide(&mut run);
+
+    assert!(!run.state.is_tile(&below));
+    assert_eq!(tiles(&run, id), 1);
+    assert!(run.state.activate_workspace(id));
+    upper.redraw(&mut run);
+    assert_eq!(geometry(&run, &above), rect(WHOLE));
+    run.stop();
+}
+
+/// A window sent its tile in its initial configure floats when the toggle turns off before its
+/// first buffer: a configure without the tiled states, at its own size, and it is placed then.
+#[test]
+fn a_window_sent_a_tile_floats_when_the_toggle_beats_its_buffer() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (mut upper, _, _) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, true));
+    let mut new = Local::connect(&mut run, None);
+    let (surface, _) = new.unborn();
+    surface.commit();
+    new.pump(&mut run, "the initial configure", |client, _| {
+        client.configure.is_some()
+    });
+    answer_all(&mut run, &mut [&mut upper], |run| run.state.set_tiling(id, false));
+
+    let (width, _, _) = new.redraw(&mut run);
+    assert_eq!(width, RIGHT.2, "the tile it was sent");
+    let window = new.server_window(&run, &surface);
+    assert_eq!(tiled_states(&window), 0);
+    let (width, height, _) = new.redraw(&mut run);
+
+    assert_eq!((width, height), (0, 0), "its own size");
+    assert_eq!(geometry(&run, &window), placed_new(&run, &window));
+    assert!(!run.state.is_tile(&window));
+    run.stop();
+}
+
+/// A request served before a window's first commit moves it to a tiled workspace without
+/// entering its tree, and sends no configure early.
+#[test]
+fn a_request_before_the_first_commit_enters_no_tree() {
+    let mut run = Running::start(None);
+    let second = output_at(&run, 1);
+    let there = run.state.active_workspace(&second).expect("a workspace");
+    run.state.set_tiling(there, true);
+    let mut new = Local::connect(&mut run, None);
+    let (_surface, toplevel) = new.unborn();
+    let output = new.output(1);
+    new.roundtrip(&mut run);
+
+    toplevel.set_fullscreen(Some(&output));
+    new.roundtrip(&mut run);
+
+    assert_eq!(tiles(&run, there), 0);
+    assert!(
+        new.client.configure.is_none(),
+        "no configure before the first commit"
+    );
+    run.stop();
+}
+
+/// The toggle keeps the order of the stack: the next window splits the topmost tile (D7).
+#[test]
+fn the_toggle_keeps_the_order_of_the_stack() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let (_a, _, _) = window(&mut run);
+    let (_b, _, _) = window(&mut run);
+    let (mut c, _, top) = window(&mut run);
+    let id = first_workspace(&run);
+    answer_all(&mut run, &mut [&mut c], |run| run.state.set_tiling(id, true));
+    assert_eq!(geometry(&run, &top), rect(LEFT));
+
+    let mut new = Local::connect(&mut run, None);
+    let (surface, _) = new.unborn();
+    surface.commit();
+    new.redraw(&mut run);
+    c.redraw(&mut run);
+
+    let window = new.server_window(&run, &surface);
+    assert_eq!(geometry(&run, &top), rect(LEFT_TOP));
+    assert_eq!(geometry(&run, &window), rect(LEFT_BOTTOM));
+    run.stop();
+}
