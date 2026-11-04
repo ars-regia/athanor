@@ -90,7 +90,10 @@ BRANCHES = {
             "xorg-x11-drv-nvidia-580xx-power",
         ],
         "companions": ["nvidia-modprobe", "nvidia-persistenced"],
-        # The 580xx packages require both at least at their own epoch:version (#943).
+        # Each companion at least at the driver's epoch:version (#943). RPM Fusion's metadata
+        # requires it of both through xorg-x11-drv-nvidia-580xx-cuda, which the set locks, and of
+        # nvidia-modprobe through xorg-x11-drv-nvidia-580xx as well. The floor is one rule for
+        # every companion, so a companion a future 580xx build stops requiring keeps it too.
         "floor": True,
         # Where the set's updates will appear: verify fails once it publishes the primary
         # package, so the set moves there instead of staying on the frozen releases tree.
