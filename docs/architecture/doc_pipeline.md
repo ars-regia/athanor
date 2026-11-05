@@ -32,6 +32,10 @@
   Amended 2026-11-01 (#655), by the maintainer's decision: PL55 takes the Azoth
   kernel out of the Fedora half, requires a `release-class.toml` file for a security fix of
   a package Athanor builds, and has `candidate` check that file for the kernel.
+  Amended 2026-11-05 (#437, [ADR-0136](../decisions/0136-one-release-approval-per-promotion.md)),
+  approved by the maintainer with the pull request that makes the change: PL32 and PL35 name
+  the last step of the `promote` job of `promote-stable.yml`, not an `iso` job, as the writer
+  of the ISO's `:stable`, so a promotion asks for one `release` approval.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -564,8 +568,8 @@ doc_update_trust.md before any key is placed in a scheduled job.
 images are signed, so its `SHA256SUMS` is signed keylessly (Sigstore) by the stage that
 built it, `call-iso.yml`, with build provenance beside it, and published with the ISO: no key and no
 approval, and a user verifies it with `cosign verify-blob` against that exact workflow
-identity (PQ2). The ISO users are given is the one `:stable` names: the `iso` job of
-`promote-stable.yml` moves `athanor-iso:stable` to the digest of the ISO the promoted run's
+identity (PQ2). The ISO users are given is the one `:stable` names: the last step of the
+`promote` job of `promote-stable.yml` moves `athanor-iso:stable` to the digest of the ISO the promoted run's
 acceptance tested, which the promotion record names (PL35). Its kickstart leaves the machine on
 `:stable` through the signed transport (UD2, ADR-0114), and the installer carries the policy
 of UT3 (UD22).
@@ -896,9 +900,9 @@ images' `:latest` without a marker (PL55). Those old jobs are outside this rule 
 ADR-0098 option A deletes `main`; a later ISO release path names its writer (PL32).
 Before this revision only `main` moved the ISO's `:latest` too, so this is no regression. `:stable`,
 `:stable-previous`, `:stable-<YYYYMMDD>`, `:promoted-<run_id>` are written only by `promote.sh`; the ISO's
-`:stable` only by `system/promote-iso.sh`, through `system/tag-images.sh --iso`, in the `iso`
-job of `promote-stable.yml`, after `promote.sh` and only while the system's `:stable` names
-the build the ISO installs (ADR-0114). There is one
+`:stable` only by `system/promote-iso.sh`, through `system/tag-images.sh --iso`, in the last
+step of the `promote` job of `promote-stable.yml`, after `promote.sh` and only while the system's `:stable` names
+the build the ISO installs (ADR-0114, ADR-0136). There is one
 writer per tag and repository. Since PB13 `verify.py workflows` refuses a call of
 `system/tag-images.sh` that moves `:latest` outside `tag-latest` of `release.yml`, and a call of
 `promote.sh` or a move of `:stable` outside a job of the environment `release`; the full check is
