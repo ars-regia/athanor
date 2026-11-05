@@ -300,7 +300,9 @@ class StablePromotions(unittest.TestCase):
         self.fails("unreadable, so not checked")
 
     def test_no_registry_owner_is_assumed(self):
+        # A GitHub runner sets GITHUB_REPOSITORY_OWNER, which the script reads as the owner.
         del self.environ["REGISTRY"]
+        self.environ.pop("GITHUB_REPOSITORY_OWNER", None)
         r = self.check()
         self.assertEqual(r.returncode, 2)
 
