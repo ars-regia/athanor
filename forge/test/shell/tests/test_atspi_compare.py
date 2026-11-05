@@ -127,6 +127,19 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertIn("note: role 'toggle button'", lines[0])
 
+    def test_a_gallery_switch_may_lack_checkable_and_a_check_box_may_not(self):
+        # AccessKit gives a toggle button no checkable state (node.rs:336; maintainer, 2026-11-05).
+        lines, failures = compare.compare(
+            [node("check box", "A switch", ["checkable", "checked"])],
+            [node("toggle button", "A switch", ["pressed"])],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("'checkable' absent", lines[0])
+        _, failures = compare.compare(
+            [node("check box", "Option one", ["checkable"])], [node("check box", "Option one")]
+        )
+        self.assertEqual(failures, ["check box 'Option one': state 'checkable' missing"])
+
     def test_a_check_box_that_is_not_a_gallery_switch_stays_a_check_box(self):
         _, failures = compare.compare(
             [node("check box", "Option one")], [node("toggle button", "Option one")]
