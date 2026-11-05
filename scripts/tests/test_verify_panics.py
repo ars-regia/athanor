@@ -91,7 +91,7 @@ class PanickingMacrosTest(unittest.TestCase):
         with (
             mock.patch.object(verify, "rust_files", lambda: [pathlib.Path("a.rs")]),
             mock.patch.object(verify, "read", lambda p: src),
-            mock.patch.object(verify, "BUDGET", {k: 0 for k in MACROS + (".unwrap()", ".expect(", "panic!(")}),
+            mock.patch.object(verify, "BUDGET", {k: 0 for k in {*verify.BUDGET, *MACROS}}),
         ):
             res = verify.check_panics()
         return sorted(p.split(": ")[1].split(" over")[0] for p in res.problems)
@@ -123,6 +123,18 @@ class PanickingMacrosTest(unittest.TestCase):
             "fn e() {}\n"
         )
         self.assertEqual(self.counts(src), [])
+
+    def test_raw_strings_and_character_escapes_are_lexed(self):
+        # Each case lexes differently under the plain-string rule: a raw string keeps its inner
+        # `"` and ends at no backslash, and an escaped `'\"'` does not open a string.
+        cases = (
+            ('fn a() { let s = r#"a"b.unwrap()"#; }\n', []),
+            ('fn a() { let s = r"C:\\"; x.unwrap(); }\n', [".unwrap()"]),
+            ("fn a() { let q = '\\\"'; x.unwrap(); let s = \"a\"; }\n", [".unwrap()"]),
+        )
+        for src, want in cases:
+            with self.subTest(src=src):
+                self.assertEqual(self.counts(src), want)
 
     def test_a_url_in_a_string_does_not_hide_the_call_after_it(self):
         # The old `split("//")` cut the line at the `//` of the URL and missed the unwrap.
