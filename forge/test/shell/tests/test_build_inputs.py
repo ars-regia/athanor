@@ -99,8 +99,12 @@ class SpecNevr(unittest.TestCase):
             ).stdout.strip()
 
     def test_the_real_spec(self):
-        spec = SHELL.parent.parent / "specs" / "cosmic-comp" / "cosmic-comp.spec"
-        self.assertRegex(self.nevr(spec.read_text(encoding="utf-8")), r"^\d+\.\d+\.\d+-\S+\.athanor\d+$")
+        spec = (SHELL.parent.parent / "specs" / "cosmic-comp" / "cosmic-comp.spec").read_text(encoding="utf-8")
+        macros = dict(re.findall(r"(?m)^%global\s+(\w+)\s+(.+?)\s*$", spec))
+        version = re.search(r"(?m)^Version:\s*(\S+)", spec).group(1)
+        release = re.search(r"(?m)^Release:\s*(\S+)", spec).group(1)
+        release = re.sub(r"%\{(\w+)\}", lambda m: macros[m.group(1)], release)
+        self.assertEqual(self.nevr(spec), f"{version}-{release}")
 
     def test_nested_macros_expand(self):
         self.assertEqual(self.nevr("%global a 2\n%global b %{a}.fc43\nVersion: 1\nRelease: %{b}.x\n"), "1-2.fc43.x")
@@ -110,6 +114,25 @@ class SpecNevr(unittest.TestCase):
 
     def test_a_self_reference_fails_closed(self):
         self.assertEqual(self.nevr("%global a %{a}\nVersion: 1\nRelease: %{a}\n"), "")
+
+    def test_a_global_takes_the_text_after_its_name(self):
+        self.assertEqual(self.nevr("%global a g\nVersion: 1\nRelease: %{a}\n"), "1-g")
+
+    def test_version_expands_too(self):
+        self.assertEqual(self.nevr("%global v 3.4\nVersion: %{v}\nRelease: 1\n"), "3.4-1")
+        self.assertEqual(self.nevr("Version: %{v}\nRelease: 1\n"), "")
+
+    def test_a_shell_macro_fails_closed(self):
+        self.assertEqual(self.nevr("Version: 1\nRelease: %(echo x)\n"), "")
+
+    def test_define_is_not_handled_and_fails_closed(self):
+        self.assertEqual(self.nevr("%define a 2\nVersion: 1\nRelease: %{a}\n"), "")
+
+    def test_a_missing_release_prints_nothing(self):
+        self.assertEqual(self.nevr("Version: 1\n"), "")
+
+    def test_only_the_first_version_and_release_count(self):
+        self.assertEqual(self.nevr("Version: 1\nRelease: 2\n%package sub\nVersion: 9\nRelease: 8\n"), "1-2")
 
     def test_a_conditional_fails_closed(self):
         self.assertEqual(self.nevr("Version: 1\nRelease: %{?dist}\n"), "")
