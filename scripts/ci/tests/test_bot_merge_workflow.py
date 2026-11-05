@@ -52,6 +52,18 @@ class BranchFilterTest(unittest.TestCase):
             sorted(as_filter(regex.pattern) for regex in bot.BRANCH.values()),
         )
 
+    def test_the_job_condition_names_the_branches_bot_merge_accepts(self):
+        # The job's `if:` pairs each workflow with its bot branch: an exact name, or a prefix
+        # that stands for BRANCH's `<prefix>.+`.
+        condition = yaml.safe_load(WORKFLOW.read_text())["jobs"]["merge"]["if"]
+        head = r"github\.event\.workflow_run\.head_branch"
+        exact = re.findall(rf"{head} == '([^']+)'", condition)
+        prefixes = re.findall(rf"startsWith\({head}, '([^']+)'\)", condition)
+        self.assertEqual(
+            sorted(exact + [prefix + ".+" for prefix in prefixes]),
+            sorted(regex.pattern for regex in bot.BRANCH.values()),
+        )
+
     def test_the_branches_the_bots_open_pass_both(self):
         # forge-util-update-specs.yml and kernel-bump.yml (bump/system-$(date -u +%Y%m%d-%H%M)).
         for kind, branch in (
