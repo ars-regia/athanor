@@ -30,10 +30,12 @@ impl TextContext {
     /// with. Fontconfig orders sans-serif by the locale's language, so under Arabic or Hebrew it
     /// starts with a font of that script without Latin letters (Noto Sans Arabic, Droid Sans
     /// Hebrew). Parley sizes every line by at least its family's first font, the strut of CSS 2
-    /// § 10.8, so a Latin line took that font's ascent, descent and leading. Pango sorts
-    /// sans-serif for `en` and draws Latin with the first font that has the letters: Noto Sans
-    /// under ar_EG, he_IL and ja_JP on the image, Vazirmatn under fa_IR. That font now leads.
-    /// Glyphs from the fonts after it still grow the line, so Arabic text keeps its own height.
+    /// § 10.8, so a Latin line took that font's ascent, descent and leading. Pango gives a Latin
+    /// run the locale's language when that language is written in Latin, and `en` when it is
+    /// not, and draws it with the first font of sans-serif sorted for that language that has the
+    /// letters: Noto Sans under ar_EG, he_IL and ja_JP on the image, Vazirmatn under fa_IR. That
+    /// font now leads. Glyphs from the fonts after it still grow the line, so Arabic text keeps
+    /// its own height.
     fn new(mut fonts: FontContext) -> Self {
         let collection = &mut fonts.collection;
         let sorted = fontconfig::sans_serif_for_english();

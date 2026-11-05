@@ -1,17 +1,19 @@
 //! The font GTK draws Latin text with, asked of fontconfig as Pango asks it (#590).
 //!
-//! Pango gives a Latin run the language `en`, its sample language for the script, and draws it
-//! with the first font of fontconfig's sort of sans-serif for that language that has the
-//! letters. Fontique sorts sans-serif only for the locale's languages, so this module puts the
-//! same query to fontconfig itself. It is the crate's only fontconfig FFI: each call is one
-//! `unsafe` block, and every pattern, font set and configuration it takes is released on every
-//! path.
+//! Pango gives a Latin run the locale's language when that language is written in Latin, and
+//! otherwise `en`, its sample language for the script. It draws the run with the first font of
+//! fontconfig's sort of sans-serif for that language that has the letters. Fontique sorts
+//! sans-serif only for the locale's languages, which under Arabic, Hebrew or Japanese start
+//! with a font without Latin letters, so this module asks fontconfig itself, always for `en`.
+//! Under the image's locales written in Latin (de_DE, it_IT, fr_FR, pl_PL, tr_TR, vi_VN and
+//! others) the sort for the locale's language and the sort for `en` give the same first Latin
+//! font, Noto Sans, so asking for the locale's language would change no font and would need
+//! Pango's table of the scripts each language is written in. It is the crate's only fontconfig
+//! FFI: each call is one `unsafe` block, and every pattern, font set and configuration it takes
+//! is released on every path.
 
 #![allow(unsafe_code)]
 
-use std::ffi::CStr;
-use std::ptr;
-use std::slice;
 use fontconfig_sys::constants::{FC_CHARSET, FC_FAMILY, FC_LANG};
 use fontconfig_sys::{
     FcCharSetHasChar, FcConfig, FcConfigDestroy, FcConfigReference, FcConfigSubstitute,
@@ -19,6 +21,9 @@ use fontconfig_sys::{
     FcPatternAddString, FcPatternCreate, FcPatternDestroy, FcPatternGetCharSet, FcPatternGetString,
     FcResultMatch, FcResultNoMatch,
 };
+use std::ffi::CStr;
+use std::ptr;
+use std::slice;
 
 /// The letters a font must have to draw a Latin run.
 fn latin_letters() -> impl Iterator<Item = char> {
