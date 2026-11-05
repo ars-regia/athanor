@@ -135,9 +135,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          echo "${GITHUB_TOKEN}" | nix run nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | nix run --inputs-from . nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       - name: Tier repositories signed by a trusted run (UD44)
-        run: nix shell nixpkgs#cosign -c bash system/tier-digests.sh verify
+        run: nix shell --inputs-from . nixpkgs#cosign -c bash system/tier-digests.sh verify
       - name: 🧱 Build the system stage
         # The Containerfile pulls its base and the tier repository images by digest and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
@@ -178,7 +178,7 @@ jobs:
         # ships: exactly one Authenticode signature, by the project certificate. An image signed
         # only by pesign's test certificate fails under Secure Boot with "bad shim signature".
         # It also fails when the boot content of the image carries a UKI (none ships before 1.1).
-        run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
+        run: nix shell --inputs-from . nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
 
       - name: 🐳 Build OS Images
         # build-variants.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
@@ -288,15 +288,15 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          nix run nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
+          nix run --inputs-from . nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
           mapfile -t names < artifacts/variants.txt
           for name in "${names[@]}"; do
             image="${IMAGE_REGISTRY}/${name}:${RUN_ID}"
             # The SBOM comes from the mounted root filesystem of the local image, not from
             # syft's image source: with about 120 layers and 270k files that source needs
             # more than 20 GiB and took the runner down (sbom_rootfs.sh).
-            nix shell nixpkgs#syft -c bash forge/scripts/sbom_rootfs.sh "${image}" "${name}-sbom.spdx.json"
-            nix shell nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
+            nix shell --inputs-from . nixpkgs#syft -c bash forge/scripts/sbom_rootfs.sh "${image}" "${name}-sbom.spdx.json"
+            nix shell --inputs-from . nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
           done
 
       - name: 🧹 Free the NVIDIA images before the ISO

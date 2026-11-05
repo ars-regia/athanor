@@ -9,6 +9,9 @@ description = "Athanor's own widget toolkit: Wayland driver, widgets, text on Pa
 accesskit = "0.25"
 accesskit_unix = "0.24"
 parley = "0.12"
+# Asks fontconfig for the font GTK draws Latin text with (text/fontconfig.rs). The version fontique
+# already links, so no crate enters the tree.
+yeslogic-fontconfig-sys = "6.0.1"
 vello_cpu = "0.3"
 # Rasterises the SVG icons of the icon theme; no text, fonts or embedded raster images.
 resvg = { version = "0.48.1", default-features = false }

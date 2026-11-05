@@ -31,20 +31,26 @@ import time
 import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
+# The repository the fake ISO of these tests was built from.
+ISO_REPOSITORY = "ghcr.io/acme/athanor-system"
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None):
+def verdict(
+    tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None,
+    serial: bytes = b"console output\n", digest: str = "", layers: str = "",
+):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
-    (out / "serial.log").write_bytes(b"console output\n")
+    (out / "serial.log").write_bytes(serial)
     for name, text in (files or {}).items():
         (out / name).write_text(text)
     proc = subprocess.run(
         [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
         text=True,
+        env={**os.environ, "ATHANOR_ISO_DIGEST": digest, "ATHANOR_ISO_LAYERS": layers},
     )
     return proc.returncode, (out / "verdict.md").read_text()
 
@@ -392,7 +398,7 @@ def test_console_boots_our_kickstart(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn, _ = server.accept()
@@ -468,7 +474,7 @@ def test_installed_systems_own_grub_is_not_a_loop(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn, _ = server.accept()
@@ -628,7 +634,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         ],
         stdout=subprocess.DEVNULL,
         # The login path waits on the guest in real time; the fake guest answers at once.
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn = play_first_boot(server, run)
@@ -693,7 +699,7 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         [sys.executable, str(HERE / "console.py"), sock, str(run / "serial.log"),
          str(run / "phases.txt"), str(run / "monitor.sock")],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_CONSOLE_HOLD": "1"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY, "ATHANOR_CONSOLE_HOLD": "1"},
     )
     try:
         conn = play_first_boot(server, run)
@@ -858,12 +864,19 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     """ORIGIN_PROBE run verbatim against a fake sysroot: /proc/cmdline and /sysroot are
     pointed at a scratch directory and `sudo` is a pass-through. `ostree=` names the
     deployment through the boot.N symlinks, as on a booted system. A signed :stable origin
-    answers OK; :latest, an unverified :stable and a remote-verified :stable answer
-    WRONG with what they carry, and an origin with no container reference WRONG with
+    answers OK; :latest, an unverified :stable, a remote-verified :stable and the signed
+    :stable of another repository answer WRONG with what they carry, and an origin with no container reference WRONG with
     `none`; an empty or missing origin, or no `ostree=`, answers UNREADABLE. Under sh and
     under bash, the guest's shell."""
     sys.path.insert(0, str(HERE))
     import console
+
+    for bad in ("", "ghcr.io/*", "a b/c", "x;y/z", "athanor-system"):
+        try:
+            console.origin_probe(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"origin_probe accepted {bad!r}")
 
     work = tmp / "origin"
     shutil.rmtree(work, ignore_errors=True)
@@ -878,11 +891,12 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     (boot / "0").symlink_to("../../../deploy/athanor/deploy/abc.0")
     (work / "sysroot" / "ostree" / "boot.1").symlink_to("boot.1.1")
     booted = "root=UUID=x ostree=/ostree/boot.1/athanor/bc/0 rw\n"
-    probe = console.ORIGIN_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
+    probe = console.origin_probe("ghcr.io/acme/athanor-system").replace(b"/proc/cmdline", str(work / "cmdline").encode())
     probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
     (work / "probe.sh").write_bytes(probe + b"\n")
 
     repository = "ghcr.io/acme/athanor-system"
+    other = "ghcr.io/mallory/athanor-system"
     unread = "ORIGIN_UNREADABLE /ostree/boot.1/athanor/bc/0"
     cases = tuple(
         (booted, f"[origin]\ncontainer-image-reference={ref}\n", f"ORIGIN_{answer} {ref}")
@@ -892,6 +906,9 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             (f"ostree-unverified-image:docker://{repository}:stable", "WRONG"),
             (f"ostree-remote-image:fedora:docker://{repository}:stable", "WRONG"),
             (f"ostree-image-signed:docker://{repository}:38546669761", "WRONG"),
+            (f"ostree-image-signed:docker://{other}:stable", "WRONG"),
+            (f"ostree-image-signed:docker://{repository}-nvidia:stable", "WRONG"),
+            (f"ostree-image-signed:docker://x/{repository}:stable", "WRONG"),
         )
     ) + (
         (booted, "[origin]\nrefspec=x\n", "ORIGIN_WRONG none"),
@@ -914,6 +931,129 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
                 check=False,
             )
             assert proc.stdout.strip() == expected, f"{shell} {cmdline!r} {content!r}: {proc.stdout!r} != {expected!r}"
+
+
+IDS = ["sha256:" + c * 64 for c in "123"]
+
+
+def test_booted_layers_are_compared(tmp: pathlib.Path) -> None:
+    """The layers of the image the installed system booted, read in the guest from the
+    booted commit's image config, must be those of the image the ISO was built from (issue
+    402). A mismatch, no answer and BOOTED_UNREADABLE fail the verdict, with the reason; the
+    manifest digest and both layer digests are recorded. A run with neither (the upgrade
+    case) says it skipped the check and records `image: null`."""
+    sys.path.insert(0, str(HERE))
+    import verdict as verdict_module
+
+    manifest = "sha256:" + "a" * 64
+    want = verdict_module.layers_digest(IDS)
+    other = verdict_module.layers_digest(IDS[::-1])
+    assert want != other, "the order of the layers is part of the digest"
+
+    def run(serial: bytes, **kwargs):
+        code, report = verdict(tmp, COMPLETE, serial=serial, digest=manifest, layers=want, **kwargs)
+        return code, report, json.loads((tmp / "run" / "verdict.json").read_text())
+
+    code, report, data = run(b"echo: BOOTED_%s sha256:%s\r\nBOOTED_LAYERS " + want.encode() + b"\r\n")
+    assert code == 0 and data["checks"]["booted-layers"] is True, report
+    assert data["image"] == {"manifest_digest": manifest, "layers": {"expected": want, "booted": want}}, data
+
+    code, report, data = run(b"BOOTED_LAYERS " + other.encode() + b"\r\n")
+    assert code != 0 and data["checks"]["booted-layers"] is False, report
+    assert f"MISMATCH, booted layers {other}, expected {want}" in report, report
+    assert data["image"]["layers"]["booted"] == other, data
+
+    for name, serial, reason in (
+        ("no answer", b"console output\nBOOTED_%s sha256:%s\n", "NO ANSWER"),
+        ("unreadable", b"BOOTED_UNREADABLE\r\n", "UNREADABLE"),
+        ("short digest", b"BOOTED_LAYERS sha256:abc\r\n", "NO ANSWER"),
+        ("garbled", b"BOOTED_LAYERS sha256:12[   2.1] kernel: x\r\n", "NO ANSWER"),
+    ):
+        code, report, data = run(serial)
+        assert code != 0 and data["checks"]["booted-layers"] is False, (name, report)
+        assert data["image"]["layers"]["booted"] is None and reason in report, (name, report)
+
+    code, report = verdict(tmp, COMPLETE)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and data["image"] is None and "booted-layers" not in data["checks"], data
+    assert "booted the digest the ISO was built from: skipped (upgrade case, ISO digest not known)" in report, report
+
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "verdict.py"), str(tmp / "run"), "900", "0"],
+        capture_output=True, text=True, env={**os.environ, "ATHANOR_ISO_DIGEST": manifest, "ATHANOR_ISO_LAYERS": ""},
+    )
+    assert proc.returncode == 2, "a digest without its layers is refused"
+
+
+def test_booted_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """BOOTED_PROBE run verbatim against a fake sysroot, `sudo` a pass-through and `ostree` a
+    stub that prints the image config the way `ostree show --print-metadata-key` does: as a
+    single-quoted GVariant string, and as a double-quoted one with escaped quotes. The answer
+    is the one line verdict.py reads; a config without layers, or no output, answers
+    UNREADABLE. Under sh and bash. The host side computes the same digest as the shell
+    pipeline run_iso_test.sh uses on the registry config. And run_iso_test.sh refuses a run
+    without ISO_DIGEST, and one with ISO_DIGEST and UPDATE_TO."""
+    sys.path.insert(0, str(HERE))
+    import console
+    import verdict as verdict_module
+
+    work = tmp / "booted"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "sysroot" / "ostree" / "deploy" / "athanor" / "deploy" / "abc.0").mkdir(parents=True)
+    (work / "sudo.sh").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
+    # The stub checks it is asked for the booted commit of the fake sysroot, as `ostree show` is.
+    (work / "ostree.sh").write_text(
+        '#!/bin/sh\n[ "$*" = "show --repo=' + str(work) + '/sysroot/ostree/repo'
+        ' --print-metadata-key=ostree.container.image-config abc" ] || exit 3\ncat "$FAKE_CONFIG"\n'
+    )
+    for name in ("sudo", "ostree"):
+        (work / "bin" / name).write_text((work / f"{name}.sh").read_text())
+        (work / "bin" / name).chmod(0o755)
+    probe = console.BOOTED_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
+    probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
+    (work / "probe.sh").write_bytes(probe + b"\n")
+    (work / "cmdline").write_text("root=UUID=x ostree=/ostree/deploy/athanor/deploy/abc.0 rw\n")
+
+    config = json.dumps({"label": "it's", "rootfs": {"type": "layers", "diff_ids": IDS}, "x": "sha256:" + "f" * 64})
+    quoted = "'" + config + "'"
+    escaped = '"' + config.replace('"', '\\"') + '"'
+    want = verdict_module.layers_digest(IDS)
+    cases = (
+        (quoted.replace("it's", "its"), f"BOOTED_LAYERS {want}"),
+        (escaped, f"BOOTED_LAYERS {want}"),
+        ("'" + json.dumps({"rootfs": {"diff_ids": []}}) + "'", "BOOTED_UNREADABLE"),
+        ("", "BOOTED_UNREADABLE"),
+    )
+    for shell in ("sh", "bash"):
+        for text, expected in cases:
+            (work / "config").write_text(text)
+            proc = subprocess.run(
+                [shell, str(work / "probe.sh")], capture_output=True, text=True, check=False,
+                env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_CONFIG": str(work / "config")},
+            )
+            assert proc.stdout.strip() == expected, f"{shell} {text[:40]!r}: {proc.stdout!r}"
+
+    # The expected side: what run_iso_test.sh computes from a registry config.
+    registry = json.dumps({"rootfs": {"type": "layers", "diff_ids": IDS}})
+    shell_side = subprocess.run(
+        ["bash", "-c", "ids=$(jq -r '.rootfs.diff_ids[]' <<< \"$0\"); echo sha256:$(sha256sum <<< \"$ids\" | cut -d' ' -f1)", registry],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert shell_side == want, (shell_side, want)
+
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    base = {k: v for k, v in os.environ.items() if k not in ("ISO_DIGEST", "UPDATE_TO", "UPDATE_REPOSITORY")}
+    base.update(ISO_REPOSITORY=ISO_REPOSITORY, SECURE_BOOT="1")
+    for extra, needle in (
+        ({}, "ISO_DIGEST is not a digest"),
+        ({"ISO_DIGEST": "sha256:" + "a" * 64, "UPDATE_TO": "sha256:" + "b" * 64, "UPDATE_REPOSITORY": ISO_REPOSITORY}, "exclude each other"),
+    ):
+        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                              capture_output=True, text=True, env={**base, **extra})
+        assert proc.returncode == 2 and needle in proc.stderr, (extra, proc)
+        assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
 
 
 def test_mok_missing_fails(tmp: pathlib.Path) -> None:
@@ -1052,11 +1192,47 @@ def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
     iso = tmp / "fake.iso"
     iso.write_bytes(b"")
     env = {k: v for k, v in os.environ.items() if k != "SECURE_BOOT"}
-    env.update(UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
+    env.update(ISO_REPOSITORY=ISO_REPOSITORY, UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
     proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
                           capture_output=True, text=True, env=env)
     assert proc.returncode == 2 and "Secure Boot" in proc.stderr, proc
     assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
+
+
+def utf8_locale() -> str:
+    """A UTF-8 locale for the shell side: where `[a-z]` follows collation, it matches more than ASCII."""
+    names = subprocess.run(["locale", "-a"], capture_output=True, text=True, check=False).stdout.split()
+    return "en_US.UTF-8" if "en_US.utf8" in names else "C.UTF-8"
+
+
+def test_iso_repository_is_checked_before_the_boot(tmp: pathlib.Path) -> None:
+    """run_iso_test.sh and console.py apply one rule to ISO_REPOSITORY (issue 462): the same
+    corpus is accepted by both and refused by both, the shell under a UTF-8 locale, where a
+    range such as [a-z] follows collation and lets non-ASCII letters and digits through. A
+    refusal is exit 2 before anything is written; an accepted name goes on to the next check,
+    which here is the missing ISO."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    good = ("ghcr.io/acme/athanor-system", "localhost:5000/a/b", "r.example/a-b_c.d/athanor-system-nvidia", "0/9")
+    bad = (
+        "", "athanor-system", "ghcr.io/Acme/athanor-system", "ghcr.io/a b/x", "ghcr.io/*/x",
+        "ghcr.io/\u00e9/x", "a/\u00e9", "\u00e9/x", "ghcr.io/\u0661/x", "ghcr.io/\uff41/x",
+        "ghcr.io/acme/x\n", "ghcr.io/acme/", "/a/b", "-a/b", "a/-b", "ghcr.io:/a", "a:b/c",
+    )
+    gone = tmp / "missing.iso"
+    for value in good + bad + (None,):
+        env = {k: v for k, v in os.environ.items() if k != "ISO_REPOSITORY"}
+        env["LC_ALL"] = utf8_locale()
+        if value is not None:
+            env["ISO_REPOSITORY"] = value
+        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(gone), str(tmp / "never")],
+                              capture_output=True, text=True, env=env)
+        refused = "ISO_REPOSITORY is not a repository name" in proc.stderr
+        assert proc.returncode == 2 and not (tmp / "never").exists(), (value, proc)
+        assert refused == (value not in good), (value, proc.stderr)
+        if value is not None:
+            assert bool(console.REPOSITORY.fullmatch(value)) == (value in good), value
 
 
 def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
@@ -1076,7 +1252,7 @@ def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
     (stubs / "ssh-keygen").chmod(0o755)
     iso = tmp / "fake.iso"
     iso.write_bytes(b"")
-    env = dict(os.environ, SECURE_BOOT="1", UPDATE_TO="sha256:" + "a" * 64,
+    env = dict(os.environ, SECURE_BOOT="1", ISO_REPOSITORY=ISO_REPOSITORY, UPDATE_TO="sha256:" + "a" * 64,
                UPDATE_REPOSITORY="ghcr.io/owner/athanor-system", PATH=f"{stubs}:{os.environ['PATH']}")
     proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(out)],
                           capture_output=True, text=True, env=env)
@@ -1135,7 +1311,7 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
         [sys.executable, str(HERE / "console.py"), str(run / "serial.sock"), str(run / "serial.log"),
          str(run / "phases.txt"), str(run / "monitor.sock")],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
 
     def keys() -> list[str]:
@@ -1271,6 +1447,7 @@ def main() -> int:
             test_origin_missing_or_wrong_fails,
             test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
+            test_iso_repository_is_checked_before_the_boot,
             test_greetd_starting_is_not_a_greeter,
             test_installed_but_no_greeter,
             test_text_login_is_not_a_greeter,
@@ -1296,6 +1473,8 @@ def main() -> int:
             test_upgrade_clears_the_last_runs_files,
             test_upgrade_deadline_ends_inside_the_job,
             test_plain_case_unchanged,
+            test_booted_layers_are_compared,
+            test_booted_probe_answers_from_the_guest,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,

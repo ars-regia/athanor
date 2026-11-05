@@ -28,6 +28,17 @@ while [[ $# -gt 0 ]]; do
 done
 """
 
+# Fails the first download with curl's HTTP error status, as GitHub's 504s did on 2026-11-05;
+# every call appends a line to $CURL_CALLS.
+FLAKY_CURL = """#!/usr/bin/env bash
+echo "$*" >> "$CURL_CALLS"
+[[ $(wc -l < "$CURL_CALLS") -gt 1 ]] || exit 22
+while [[ $# -gt 0 ]]; do
+    if [[ $1 == -o ]]; then printf 'not the archive\\n' > "$2"; shift; fi
+    shift
+done
+"""
+
 
 class ChecksumTest(unittest.TestCase):
     def test_a_mismatching_download_stops_the_install(self):
@@ -49,6 +60,31 @@ class ChecksumTest(unittest.TestCase):
             self.assertNotEqual(run.returncode, 0)
             self.assertIn("FAILED", run.stdout + run.stderr)
             self.assertFalse((out / "bin" / "just").exists())
+
+    def test_a_failed_download_is_retried(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = pathlib.Path(tmp) / "fake"
+            fake.mkdir()
+            # sleep is faked so retry.sh's 15 s delay costs nothing.
+            for name, text in (("curl", FLAKY_CURL), ("python3", FAKE_PYTHON),
+                               ("sleep", "#!/usr/bin/env bash\n")):
+                (fake / name).write_text(text)
+                (fake / name).chmod(0o755)
+            calls = pathlib.Path(tmp) / "curl-calls"
+            env = {**os.environ, "LC_ALL": "C", "PATH": f"{fake}:{os.environ['PATH']}",
+                   "CURL_CALLS": str(calls)}
+            run = subprocess.run(
+                ["bash", str(SCRIPT), str(pathlib.Path(tmp) / "tools")],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            urls = [line.split()[-1] for line in calls.read_text().splitlines()]
+        # The first URL is fetched again after its failure; the payload then fails the digest.
+        self.assertEqual(urls[:2], [urls[0]] * 2)
+        self.assertIn("retrying", run.stderr)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("FAILED", run.stdout + run.stderr)
 
     def test_python_packages_are_installed_by_hash_only(self):
         with tempfile.TemporaryDirectory() as tmp:

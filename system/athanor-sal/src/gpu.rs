@@ -2,7 +2,7 @@
 //! window's wl_surface (doc_own_stack.md section 7, the renderer milestone T1 measures).
 //!
 //! wgpu takes the window as libwayland-client's raw pointers, which no safe interface hands
-//! over: this is the only module of the crate with `unsafe` code.
+//! over: with text/fontconfig.rs, this is one of the two modules of the crate with `unsafe` code.
 
 #![allow(unsafe_code)]
 

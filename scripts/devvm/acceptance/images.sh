@@ -130,7 +130,7 @@ attest() { # attest TAG KEY CLASS [ADVISORY...]: CLASS "none" writes a predicate
   jq -n --arg class "$class" --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg revision "$(printf '0%.0s' {1..40})" \
     '{class: $class, advisories: $ARGS.positional, class_reason: "", build_time: $built, revision: $revision, build_run_id: "0", updateinfo_timestamp: null}
      | if $class == "none" then del(.class) else . end' --args "$@" > "$predicate"
-  COSIGN_PASSWORD='' nix run nixpkgs#cosign -- attest --yes --allow-insecure-registry --key "$keys/$key.private" --type "$PREDICATE_TYPE" \
+  COSIGN_PASSWORD='' nix run --inputs-from "$ROOT" nixpkgs#cosign -- attest --yes --allow-insecure-registry --key "$keys/$key.private" --type "$PREDICATE_TYPE" \
     --use-signing-config=false --tlog-upload=false --new-bundle-format=false --predicate "$predicate" "$REPO@$digest"
   rm -f "$predicate"
 }
@@ -162,11 +162,11 @@ COSIGN_PRIVATE_KEY=$(< "$keys/acc-1.private") COSIGN_PASSWORD='' SIGN_KEYS_DIR=$
 # v3b: the only signature is what cosign 3 writes, a bundle index at sha256-<hex>.
 # cosign signs with a key pair of its own making; the image ships that public key, so the
 # refusal is about the format and not about the key.
-[[ -f $keys/cosign-1.pub ]] || (cd "$keys" && COSIGN_PASSWORD='' nix run nixpkgs#cosign -- generate-key-pair --output-key-prefix cosign-1)
+[[ -f $keys/cosign-1.pub ]] || (cd "$keys" && COSIGN_PASSWORD='' nix run --inputs-from "$ROOT" nixpkgs#cosign -- generate-key-pair --output-key-prefix cosign-1)
 build v3b 2026-09-16 cosign-1
 printf '%s' '{"mediaType":"application/vnd.dev.sigstore.signingconfig.v0.2+json","rekorTlogConfig":{},"tsaConfig":{}}' > "$ACC_STATE/no-rekor.json"
 digest=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:v3b")
-COSIGN_PASSWORD='' nix run nixpkgs#cosign -- sign --yes --allow-insecure-registry --signing-config "$ACC_STATE/no-rekor.json" \
+COSIGN_PASSWORD='' nix run --inputs-from "$ROOT" nixpkgs#cosign -- sign --yes --allow-insecure-registry --signing-config "$ACC_STATE/no-rekor.json" \
   --key "$keys/cosign-1.key" "$REPO@$digest"
 point_stable v1
 echo "images published under $ACC_REGISTRY; stable -> v1"

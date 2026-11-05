@@ -2145,11 +2145,15 @@ GUEST_SHELL_BUDGET = 8
 DEV_NULL = r"""["']?/dev/null["']?"""
 # Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
 # a quote that spans lines; text run through `eval` or `$(...)`; a construct split across byte
-# strings that the guest's shell joins with `+`.
+# strings that the guest's shell joins with `+`; a here-document opened inside a double-quoted
+# `$(...)` that spans lines (`out="$(cat <<EOF`), whose body is read as code (a false positive);
+# a `#` after an escaped space (`\ #`), read as a comment (a false negative).
+NOOP = r"(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)"
 HIDDEN_FAILURE = re.compile(
-    rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
-    r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
-    r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
+    rf"2>[>|]?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\|?\s*{DEV_NULL}\s+2>&1|2>&-"
+    rf"|\|\|\s*(?:{NOOP}(?![\w-])|\{{\s*{NOOP}\s*;?\s*\}}|\(\s*{NOOP}\s*;?\s*\))"
+    rf"|\|\|(?!\s*[{{(])[^;|&]*(?:;|&&)\s*{NOOP}(?![\w-])"
+    r"|\|\|\s*[{(][^;|&]*;\s*(?:true|:)\s*;?\s*[})]"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
 # and the one error sent away is "No such process". Only a plain operand (no substitution) and
@@ -2204,6 +2208,17 @@ def shell_code(line):
     return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
 
 
+OR_CONTINUED = re.compile(r"\|\|\s*\\$")
+
+
+def or_continued(carry, code):
+    """`(code, wait)`: `code` joined to the `|| \\` carried from the line above, and whether it
+    ends with another one, so that the next line is joined in its turn."""
+    if carry:
+        code = carry + code.lstrip()
+    return OR_CONTINUED.sub("|| ", code), bool(OR_CONTINUED.search(code))
+
+
 def hidden(code):
     """The constructs of `code` that hide a failure, a probe left out."""
     return HIDDEN_FAILURE.findall(PROBE.sub(" ", code))
@@ -2213,7 +2228,7 @@ def scan_shell(text):
     """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
     hides a failure, and the line of a here-document still open at the end, whose rest no one
     checked (0 when none is). Neither a comment nor the body of a here-document counts."""
-    found, pending = [], []
+    found, pending, carry, start = [], [], "", 0
     for i, line in enumerate(text.split("\n"), 1):
         if pending:
             word, tabs, _ = pending[0]
@@ -2221,12 +2236,20 @@ def scan_shell(text):
                 pending.pop(0)
             continue
         code, bare = shell_code(line)
-        if hidden(code):
-            found.append(i)
         for m in HEREDOC_START.finditer(bare):
             w = HEREDOC_WORD.match(code, m.end())
             if w:
                 pending.append((w.group(2), m.group(1) == "-", i))
+        # A `|| \\` goes on in the next line: the two are read as one, reported at the first.
+        code, wait = or_continued(carry, code)
+        if wait:
+            carry, start = code, start or i
+        else:
+            if hidden(code):
+                found.append(start or i)
+            carry, start = "", 0
+    if carry and hidden(carry):
+        found.append(start)
     return found, pending[0][2] if pending else 0
 
 
@@ -2260,8 +2283,18 @@ def shell_scripts(base):
 def workflow_failures(text):
     """The numbers of the lines of workflow `text` that hide a failure. A step's script is
     indented in the YAML, so a here-document's end is not looked for: every line is read."""
-    return [i for i, line in enumerate(text.split("\n"), 1)
-            if CONTINUE_ON_ERROR.match(line) or hidden(shell_code(line)[0])]
+    found, carry, start = [], "", 0
+    for i, line in enumerate(text.split("\n"), 1):
+        code, wait = or_continued(carry, shell_code(line)[0])
+        if wait:
+            carry, start = code, start or i
+            continue
+        if CONTINUE_ON_ERROR.match(line) or hidden(code):
+            found.append(start or i)
+        carry, start = "", 0
+    if carry and hidden(carry):
+        found.append(start)
+    return found
 
 
 def guest_failures(text):
@@ -3429,6 +3462,69 @@ def registry_problems(root):
 def check_registry():
     r = Result()
     for problem in registry_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
+# nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
+# --inputs-from pins only the bare `nixpkgs#` of its own nix command: `nixpkgs/<ref>#`,
+# `nixpkgs-<alias>#`, `nixpkgs?<query>#`, `flake:nixpkgs#` and `github:NixOS/nixpkgs[/<ref>]#`
+# name a source of their own.
+PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+", re.I)
+# Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
+NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
+
+
+def logical_lines(text):
+    """(first line number, text) of each command, its backslash continuations joined; comment
+    lines are dropped."""
+    start, parts = None, []
+    for i, line in enumerate(text.split("\n"), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if start is None:
+            start = i
+        parts.append(line[:-1] if line.endswith("\\") else line)
+        if not line.endswith("\\"):
+            yield start, " ".join(parts)
+            start, parts = None, []
+    if parts:
+        yield start, " ".join(parts)
+
+
+def pinning_problems(root):
+    """Every nixpkgs#<tool> a workflow, action, recipe or script runs is a bare nixpkgs#
+    reference after --inputs-from in the same nix command, so nixpkgs is the locked input of
+    the repository flake."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in PINNING_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(set(paths)):
+        relative = path.relative_to(root)
+        # Unit test fixtures need an unpinned reference to prove the check reports one.
+        if (not path.is_file() or relative.parts[1:2] == ("tests",)
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in logical_lines(read(path)):
+            for ref in NIXPKGS_REF.finditer(line):
+                command = NIX_COMMAND_BREAK.split(line[:ref.start()])[-1]
+                if not ref.group().startswith("nixpkgs#") or "--inputs-from " not in command:
+                    problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
+                                    f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
+                                    f"nix command, so nixpkgs is flake.lock's")
+    return problems
+
+
+@check("pinning", "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)")
+def check_pinning():
+    r = Result()
+    for problem in pinning_problems(ROOT):
         r.fail(problem)
     return r
 
