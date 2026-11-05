@@ -350,16 +350,27 @@ def origin_probe(repository: str) -> bytes:
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
 
-# Ask the guest which image it booted (issue 402). The whole `bootc status --json` goes back
-# on one line and verdict.py reads the booted digest from it on the host, so a status that
-# cannot be read is a line the verdict cannot parse and not a guess made here. Under
-# `timeout`, because bootc waits for the sysroot lock while greenboot holds it and prints
-# no JSON until it has it. As with the other probes printf assembles the marker.
+# Ask the guest which image it booted (issue 402). The comparison is on the layers, not on
+# the manifest digest `bootc status` reports: the ISO builder re-serialises the manifest
+# (the installed system's imageDigest is in no registry), and the config digest changes
+# with it, while the uncompressed layer digests (`rootfs.diff_ids`) do not. ostree-ext keeps
+# the image config in the booted commit's metadata, `ostree.container.image-config`; the
+# guest lists its diff_ids in order and answers one short line, BOOTED_LAYERS sha256:<hex>,
+# the digest of that list one id per line (the host computes the same from the registry
+# config). Nothing readable answers BOOTED_UNREADABLE. The grep does not depend on how
+# ostree quotes the string. As with the other probes printf assembles the marker.
 BOOTED_PROBE = (
-    b"s=$(printf 'collaudo\\n' | sudo -S timeout 60 bootc status --json | tr -d '\\r\\n');"
-    b" printf 'BOOTED_%s %s\\n' STATUS \"$s\""
+    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+    b' d=$(readlink -f "/sysroot$p");'
+    b" c=$(printf 'collaudo\\n' | sudo -S ostree show --repo=/sysroot/ostree/repo"
+    b' --print-metadata-key=ostree.container.image-config "$(basename "$d" | cut -d. -f1)");'
+    b" l=$(printf '%s\\n' \"$c\" | grep -o 'diff_ids[^]]*' | grep -o 'sha256:[0-9a-f]\\{64\\}');"
+    b' if [ -n "$l" ]; then printf \'BOOTED_%s sha256:%s\\n\' LAYERS'
+    b' "$(printf \'%s\\n\' "$l" | sha256sum | cut -d" " -f1)";'
+    b" else printf 'BOOTED_%s\\n' UNREADABLE; fi"
 )
-BOOTED_PROBE_WAIT = 20.0
+# A cmdline read, a symlink, a metadata read under sudo and one hash.
+BOOTED_PROBE_WAIT = 10.0
 
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
@@ -634,8 +645,10 @@ def main() -> int:
         note("karg-asked")
         ask(origin_probe(iso_repository), ORIGIN_PROBE_WAIT)
         note("origin-asked")
-        ask(BOOTED_PROBE, BOOTED_PROBE_WAIT)
-        note("booted-asked")
+        # The upgrade case boots an ISO whose layers the run does not know (HOLD).
+        if not HOLD:
+            ask(BOOTED_PROBE, BOOTED_PROBE_WAIT)
+            note("booted-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 

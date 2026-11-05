@@ -37,7 +37,7 @@ ISO_REPOSITORY = "ghcr.io/acme/athanor-system"
 
 def verdict(
     tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None,
-    serial: bytes = b"console output\n", digest: str = "",
+    serial: bytes = b"console output\n", digest: str = "", layers: str = "",
 ):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
@@ -50,7 +50,7 @@ def verdict(
         [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
         text=True,
-        env={**os.environ, "ATHANOR_ISO_DIGEST": digest},
+        env={**os.environ, "ATHANOR_ISO_DIGEST": digest, "ATHANOR_ISO_LAYERS": layers},
     )
     return proc.returncode, (out / "verdict.md").read_text()
 
@@ -933,58 +933,66 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert proc.stdout.strip() == expected, f"{shell} {cmdline!r} {content!r}: {proc.stdout!r} != {expected!r}"
 
 
-def test_booted_digest_is_compared(tmp: pathlib.Path) -> None:
-    """The digest the installed system booted, read from `bootc status --json` in the guest,
-    must be the one the ISO was built from (issue 402). A mismatch, no answer, and a status
-    that is not JSON, names no booted image or carries no digest fail the verdict, with the
-    reason; the digest is recorded either way. A run given no digest (the upgrade case) is
-    not judged on it."""
-    want = "sha256:" + "a" * 64
-    other = "sha256:" + "b" * 64
+IDS = ["sha256:" + c * 64 for c in "123"]
 
-    def status(digest):
-        image = {"imageDigest": digest} if digest is not None else {}
-        return json.dumps({"status": {"booted": {"image": image}, "staged": None}}).encode()
 
-    def answer(raw: bytes) -> bytes:
-        return b"echo of the typed line: BOOTED_%s %s\r\nBOOTED_STATUS " + raw + b"\r\n"
+def test_booted_layers_are_compared(tmp: pathlib.Path) -> None:
+    """The layers of the image the installed system booted, read in the guest from the
+    booted commit's image config, must be those of the image the ISO was built from (issue
+    402). A mismatch, no answer and BOOTED_UNREADABLE fail the verdict, with the reason; the
+    manifest digest and both layer digests are recorded. A run with neither (the upgrade
+    case) says it skipped the check and records `image: null`."""
+    sys.path.insert(0, str(HERE))
+    import verdict as verdict_module
 
-    code, report = verdict(tmp, COMPLETE, serial=answer(status(want)), digest=want)
+    manifest = "sha256:" + "a" * 64
+    want = verdict_module.layers_digest(IDS)
+    other = verdict_module.layers_digest(IDS[::-1])
+    assert want != other, "the order of the layers is part of the digest"
+
+    def run(serial: bytes, **kwargs):
+        code, report = verdict(tmp, COMPLETE, serial=serial, digest=manifest, layers=want, **kwargs)
+        return code, report, json.loads((tmp / "run" / "verdict.json").read_text())
+
+    code, report, data = run(b"echo: BOOTED_%s sha256:%s\r\nBOOTED_LAYERS " + want.encode() + b"\r\n")
+    assert code == 0 and data["checks"]["booted-layers"] is True, report
+    assert data["image"] == {"manifest_digest": manifest, "layers": {"expected": want, "booted": want}}, data
+
+    code, report, data = run(b"BOOTED_LAYERS " + other.encode() + b"\r\n")
+    assert code != 0 and data["checks"]["booted-layers"] is False, report
+    assert f"MISMATCH, booted layers {other}, expected {want}" in report, report
+    assert data["image"]["layers"]["booted"] == other, data
+
+    for name, serial, reason in (
+        ("no answer", b"console output\nBOOTED_%s sha256:%s\n", "NO ANSWER"),
+        ("unreadable", b"BOOTED_UNREADABLE\r\n", "UNREADABLE"),
+        ("short digest", b"BOOTED_LAYERS sha256:abc\r\n", "NO ANSWER"),
+        ("garbled", b"BOOTED_LAYERS sha256:12[   2.1] kernel: x\r\n", "NO ANSWER"),
+    ):
+        code, report, data = run(serial)
+        assert code != 0 and data["checks"]["booted-layers"] is False, (name, report)
+        assert data["image"]["layers"]["booted"] is None and reason in report, (name, report)
+
+    code, report = verdict(tmp, COMPLETE)
     data = json.loads((tmp / "run" / "verdict.json").read_text())
-    assert code == 0 and data["checks"]["booted-digest"] is True, report
-    assert data["digest"] == {"expected": want, "booted": want}, data
+    assert code == 0 and data["image"] is None and "booted-layers" not in data["checks"], data
+    assert "booted the digest the ISO was built from: skipped (upgrade case, ISO digest not known)" in report, report
 
-    code, report = verdict(tmp, COMPLETE, serial=answer(status(other)), digest=want)
-    data = json.loads((tmp / "run" / "verdict.json").read_text())
-    assert code != 0 and data["checks"]["booted-digest"] is False, report
-    assert f"MISMATCH, booted {other}, expected {want}" in report, report
-    assert data["digest"] == {"expected": want, "booted": other}, data
-
-    unreadable = {
-        "no answer": b"console output\nBOOTED_%s %s\n",
-        "waiting for the lock": answer(b""),
-        "not json": answer(b"Waiting for sysroot lock..."),
-        "no booted image": answer(b'{"status": {"booted": null}}'),
-        "no digest": answer(status(None)),
-        "not a digest": answer(status("latest")),
-        "digest not a string": answer(status(7)),
-    }
-    for name, serial in unreadable.items():
-        code, report = verdict(tmp, COMPLETE, serial=serial, digest=want)
-        data = json.loads((tmp / "run" / "verdict.json").read_text())
-        assert code != 0 and data["checks"]["booted-digest"] is False, (name, report)
-        assert data["digest"]["booted"] is None, (name, data)
-        assert "NO ANSWER" in report or "UNREADABLE" in report, (name, report)
-
-    code, report = verdict(tmp, COMPLETE, serial=b"console output\n")
-    data = json.loads((tmp / "run" / "verdict.json").read_text())
-    assert code == 0 and "booted-digest" not in data["checks"] and "digest" not in data, data
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "verdict.py"), str(tmp / "run"), "900", "0"],
+        capture_output=True, text=True, env={**os.environ, "ATHANOR_ISO_DIGEST": manifest, "ATHANOR_ISO_LAYERS": ""},
+    )
+    assert proc.returncode == 2, "a digest without its layers is refused"
 
 
 def test_booted_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
-    """BOOTED_PROBE run verbatim with `sudo` as a pass-through and a `bootc` that prints a
-    pretty-printed status: the answer is one line the verdict reads the digest from. And
-    run_iso_test.sh refuses a case that is not the upgrade one without ISO_DIGEST."""
+    """BOOTED_PROBE run verbatim against a fake sysroot, `sudo` a pass-through and `ostree` a
+    stub that prints the image config the way `ostree show --print-metadata-key` does: as a
+    single-quoted GVariant string, and as a double-quoted one with escaped quotes. The answer
+    is the one line verdict.py reads; a config without layers, or no output, answers
+    UNREADABLE. Under sh and bash. The host side computes the same digest as the shell
+    pipeline run_iso_test.sh uses on the registry config. And run_iso_test.sh refuses a run
+    without ISO_DIGEST, and one with ISO_DIGEST and UPDATE_TO."""
     sys.path.insert(0, str(HERE))
     import console
     import verdict as verdict_module
@@ -992,29 +1000,60 @@ def test_booted_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     work = tmp / "booted"
     shutil.rmtree(work, ignore_errors=True)
     (work / "bin").mkdir(parents=True)
-    (work / "bin" / "sudo").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
-    (work / "bin" / "bootc").write_text(
-        '#!/bin/sh\nprintf \'{\\n  "status": {\\n    "booted": {"image": {"imageDigest": "sha256:%s"}}\\n  }\\n}\\n\' "$(printf a%.0s $(seq 64))"\n'
+    (work / "sysroot" / "ostree" / "deploy" / "athanor" / "deploy" / "abc.0").mkdir(parents=True)
+    (work / "sudo.sh").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
+    # The stub checks it is asked for the booted commit of the fake sysroot, as `ostree show` is.
+    (work / "ostree.sh").write_text(
+        '#!/bin/sh\n[ "$*" = "show --repo=' + str(work) + '/sysroot/ostree/repo'
+        ' --print-metadata-key=ostree.container.image-config abc" ] || exit 3\ncat "$FAKE_CONFIG"\n'
     )
-    for name in ("sudo", "bootc"):
+    for name in ("sudo", "ostree"):
+        (work / "bin" / name).write_text((work / f"{name}.sh").read_text())
         (work / "bin" / name).chmod(0o755)
-    (work / "probe.sh").write_bytes(console.BOOTED_PROBE + b"\n")
+    probe = console.BOOTED_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
+    probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
+    (work / "probe.sh").write_bytes(probe + b"\n")
+    (work / "cmdline").write_text("root=UUID=x ostree=/ostree/deploy/athanor/deploy/abc.0 rw\n")
+
+    config = json.dumps({"label": "it's", "rootfs": {"type": "layers", "diff_ids": IDS}, "x": "sha256:" + "f" * 64})
+    quoted = "'" + config + "'"
+    escaped = '"' + config.replace('"', '\\"') + '"'
+    want = verdict_module.layers_digest(IDS)
+    cases = (
+        (quoted.replace("it's", "its"), f"BOOTED_LAYERS {want}"),
+        (escaped, f"BOOTED_LAYERS {want}"),
+        ("'" + json.dumps({"rootfs": {"diff_ids": []}}) + "'", "BOOTED_UNREADABLE"),
+        ("", "BOOTED_UNREADABLE"),
+    )
     for shell in ("sh", "bash"):
-        proc = subprocess.run(
-            [shell, str(work / "probe.sh")], capture_output=True, check=False,
-            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}"},
-        )
-        ok, text, booted = verdict_module.check_booted_digest(proc.stdout, "sha256:" + "a" * 64)
-        assert ok and booted == "sha256:" + "a" * 64, (shell, proc.stdout, text)
+        for text, expected in cases:
+            (work / "config").write_text(text)
+            proc = subprocess.run(
+                [shell, str(work / "probe.sh")], capture_output=True, text=True, check=False,
+                env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}", "FAKE_CONFIG": str(work / "config")},
+            )
+            assert proc.stdout.strip() == expected, f"{shell} {text[:40]!r}: {proc.stdout!r}"
+
+    # The expected side: what run_iso_test.sh computes from a registry config.
+    registry = json.dumps({"rootfs": {"type": "layers", "diff_ids": IDS}})
+    shell_side = subprocess.run(
+        ["bash", "-c", "ids=$(jq -r '.rootfs.diff_ids[]' <<< \"$0\"); echo sha256:$(sha256sum <<< \"$ids\" | cut -d' ' -f1)", registry],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert shell_side == want, (shell_side, want)
 
     iso = tmp / "fake.iso"
     iso.write_bytes(b"")
-    env = {k: v for k, v in os.environ.items() if k != "ISO_DIGEST"}
-    env.update(ISO_REPOSITORY=ISO_REPOSITORY)
-    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
-                          capture_output=True, text=True, env=env)
-    assert proc.returncode == 2 and "ISO_DIGEST" in proc.stderr, proc
-    assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
+    base = {k: v for k, v in os.environ.items() if k not in ("ISO_DIGEST", "UPDATE_TO", "UPDATE_REPOSITORY")}
+    base.update(ISO_REPOSITORY=ISO_REPOSITORY, SECURE_BOOT="1")
+    for extra, needle in (
+        ({}, "ISO_DIGEST is not a digest"),
+        ({"ISO_DIGEST": "sha256:" + "a" * 64, "UPDATE_TO": "sha256:" + "b" * 64, "UPDATE_REPOSITORY": ISO_REPOSITORY}, "exclude each other"),
+    ):
+        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                              capture_output=True, text=True, env={**base, **extra})
+        assert proc.returncode == 2 and needle in proc.stderr, (extra, proc)
+        assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
 
 
 def test_mok_missing_fails(tmp: pathlib.Path) -> None:
@@ -1417,7 +1456,7 @@ def main() -> int:
             test_upgrade_clears_the_last_runs_files,
             test_upgrade_deadline_ends_inside_the_job,
             test_plain_case_unchanged,
-            test_booted_digest_is_compared,
+            test_booted_layers_are_compared,
             test_booted_probe_answers_from_the_guest,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,

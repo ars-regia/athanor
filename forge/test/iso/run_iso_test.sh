@@ -24,8 +24,11 @@
 # of any other repository (issue 462).
 #
 # ISO_DIGEST=<digest> is the athanor-system digest the ISO was built from, required except in
-# the upgrade case, whose ISO is the previous :stable's. The verdict fails unless the installed
-# system booted that digest (issue 402).
+# the upgrade case, whose ISO is the previous :stable's (the two are refused together). The
+# registry config of ISO_REPOSITORY@ISO_DIGEST gives the image's layers, and the verdict fails
+# unless the installed system booted an image with those layers (issue 402). Layers, not the
+# manifest digest: the ISO build re-serialises the manifest, so the digest bootc reports is
+# in no registry.
 #
 # UPDATE_TO=<digest> UPDATE_REPOSITORY=<repository> runs the upgrade case of
 # doc_update_delivery.md UD18 on top, on Secure Boot firmware only: the candidate is served
@@ -47,14 +50,25 @@ if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ ${SECURE_BOOT:-0} == 1 ]] || { echo "the upgrade case runs on Secure Boot firmware: set SECURE_BOOT=1" >&2; exit 2; }
 fi
 
-iso_digest=
-if [[ -z ${UPDATE_TO:-} ]]; then
+iso_digest= iso_layers=
+if [[ -n ${UPDATE_TO:-} ]]; then
+    [[ -z ${ISO_DIGEST:-} ]] || { echo "ISO_DIGEST and UPDATE_TO exclude each other: the upgrade case installs the previous :stable ISO, whose image is not ISO_DIGEST" >&2; exit 2; }
+else
     [[ ${ISO_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ISO_DIGEST is not a digest: ${ISO_DIGEST:-unset}" >&2; exit 2; }
     iso_digest=$ISO_DIGEST
 fi
 
 [[ -f $iso ]] || { echo "ISO not found: $iso" >&2; exit 2; }
 [[ -f "${here}/collaudo.ks" ]] || { echo "collaudo.ks missing next to this script" >&2; exit 2; }
+
+if [[ -n $iso_digest ]]; then
+    # The layer ids of the image the ISO was built from, one per line, in order: the registry
+    # answers for the digest, so a pushed image is what is compared, not a tag.
+    config=$(skopeo inspect --config "docker://${ISO_REPOSITORY}@${iso_digest}")
+    ids=$(jq -r '.rootfs.diff_ids[]' <<< "$config")
+    [[ -n $ids ]] || { echo "the config of ${ISO_REPOSITORY}@${iso_digest} lists no layers" >&2; exit 2; }
+    iso_layers=sha256:$(sha256sum <<< "$ids" | cut -d' ' -f1)
+fi
 
 # Space for the installed system plus room for btrfs to breathe. The image is ~6 GiB.
 DISK_GIB=${DISK_GIB:-30}
@@ -327,7 +341,7 @@ kill "$shots_pid" 2> /dev/null || true
 # Both run whatever the first answers, so a failed install still gets its memory report and
 # a session over budget still gets its verdict; the script exits with the worse of the two.
 status=0
-ATHANOR_ISO_DIGEST=$iso_digest python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
+ATHANOR_ISO_DIGEST=$iso_digest ATHANOR_ISO_LAYERS=$iso_layers python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
 python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
 # REMOVE_DISK=1 frees the disk image once the verdict is written; logs and screenshots stay.
 if [[ ${REMOVE_DISK:-0} == 1 ]]; then rm -f "$disk"; fi
