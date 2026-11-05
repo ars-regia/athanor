@@ -2207,6 +2207,17 @@ def shell_code(line):
     return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
 
 
+OR_CONTINUED = re.compile(r"\|\|\s*\\$")
+
+
+def or_continued(carry, code):
+    """`(code, wait)`: `code` joined to the `|| \\` carried from the line above, and whether it
+    ends with another one, so that the next line is joined in its turn."""
+    if carry:
+        code = carry + code.lstrip()
+    return OR_CONTINUED.sub("|| ", code), bool(OR_CONTINUED.search(code))
+
+
 def hidden(code):
     """The constructs of `code` that hide a failure, a probe left out."""
     return HIDDEN_FAILURE.findall(PROBE.sub(" ", code))
@@ -2216,7 +2227,7 @@ def scan_shell(text):
     """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
     hides a failure, and the line of a here-document still open at the end, whose rest no one
     checked (0 when none is). Neither a comment nor the body of a here-document counts."""
-    found, pending = [], []
+    found, pending, carry, start = [], [], "", 0
     for i, line in enumerate(text.split("\n"), 1):
         if pending:
             word, tabs, _ = pending[0]
@@ -2224,12 +2235,18 @@ def scan_shell(text):
                 pending.pop(0)
             continue
         code, bare = shell_code(line)
-        if hidden(code):
-            found.append(i)
         for m in HEREDOC_START.finditer(bare):
             w = HEREDOC_WORD.match(code, m.end())
             if w:
                 pending.append((w.group(2), m.group(1) == "-", i))
+        # A `|| \\` goes on in the next line: the two are read as one, reported at the first.
+        code, wait = or_continued(carry, code)
+        if wait:
+            carry, start = code, start or i
+        else:
+            if hidden(code):
+                found.append(start or i)
+            carry, start = "", 0
     return found, pending[0][2] if pending else 0
 
 
@@ -2263,8 +2280,16 @@ def shell_scripts(base):
 def workflow_failures(text):
     """The numbers of the lines of workflow `text` that hide a failure. A step's script is
     indented in the YAML, so a here-document's end is not looked for: every line is read."""
-    return [i for i, line in enumerate(text.split("\n"), 1)
-            if CONTINUE_ON_ERROR.match(line) or hidden(shell_code(line)[0])]
+    found, carry, start = [], "", 0
+    for i, line in enumerate(text.split("\n"), 1):
+        code, wait = or_continued(carry, shell_code(line)[0])
+        if wait:
+            carry, start = code, start or i
+            continue
+        if CONTINUE_ON_ERROR.match(line) or hidden(code):
+            found.append(start or i)
+        carry, start = "", 0
+    return found
 
 
 def guest_failures(text):

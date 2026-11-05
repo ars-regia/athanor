@@ -64,6 +64,15 @@ class HiddenFailuresTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [])
 
+    def test_an_or_continued_on_the_next_line_is_read_as_one(self):
+        for text in ("run || \\\ntrue", "run || \\\n  { true; }", "run || \\\n  \\\n:",
+                     "run 2>/dev/null || \\\ntrue"):
+            with self.subTest(text=text):
+                self.assertEqual(verify.hidden_failures(text), [1])
+                self.assertEqual(verify.workflow_failures(text), [1])
+        text = "run || \\\nexit 1\nrun 2>/dev/null\n"
+        self.assertEqual(verify.hidden_failures(text), [3])
+
     def test_a_bogus_here_document_does_not_hide_the_rest(self):
         for first in ("x=$((1<<2))", "read a <<<foo", 'echo "<<EOF"', "(( x = 1<<2 ))",
                       "echo '<<EOF'", "echo \\<<EOF"):
