@@ -2136,8 +2136,12 @@ HIDDEN_FAILURE = re.compile(
     r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
-# and the one error sent away is "No such process". Nothing else is excused.
-PROBE = re.compile(rf"\bkill\s+-0\s+(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)\s+2>\s*{DEV_NULL}")
+# and the one error sent away is "No such process". Only a plain operand (no substitution) and
+# only `kill` in command position are excused; `echo kill -0 $p 2>/dev/null` still counts.
+_VAR = r"\$\{?\w+\}?"
+PROBE = re.compile(
+    r"(?:^\s*(?:!\s*)?|(?:[;(!{]|&&|\|\||\||(?<![\w-])(?:if|while|until|then|do|elif)(?![\w-]))\s*)"
+    rf"kill\s+-0\s+(?:\"[^\"$`()]*\"|\"{_VAR}\"|'[^']*'|{_VAR}|\w+|-?\d+)\s+2>\s*{DEV_NULL}")
 CONTINUE_ON_ERROR = re.compile(r"^\s*(?:-\s+)?continue-on-error:(?!\s*false\b)")
 SHELL_SHEBANG = re.compile(rb"#!.*\b(?:ba|da)?sh\b")
 HEREDOC_START = re.compile(r"(?<!<)<<(?!<)(-?)")
