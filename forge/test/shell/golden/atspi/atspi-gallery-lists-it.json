@@ -1,0 +1,1593 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "gallery_gtk.py",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "Galleria",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "label",
+  "name": "Pagine",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Pulsanti",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Pulsanti",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Scelte",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Scelte",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Valori",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Valori",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Elenchi",
+  "states": [
+   "focusable",
+   "focused",
+   "pressed",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Elenchi",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Testo",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Testo",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Stati",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Stati",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "label",
+  "name": "Elenchi",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "scroll pane",
+  "name": "",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "list",
+  "name": "Un elenco",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 1",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 2",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 3",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 4",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 5",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 6",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 7",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 8",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 9",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 10",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 11",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 12",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 13",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 14",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 15",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 16",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 17",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 18",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 19",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 20",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 21",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 22",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 23",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 24",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 25",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 26",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 27",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 28",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 29",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 30",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 31",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 32",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 33",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 34",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 35",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 36",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 37",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 38",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 39",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 40",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 41",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 42",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 43",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 44",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 45",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 46",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 47",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 48",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 49",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Riga 50",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "scroll bar",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": "0.0"
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": "0.0"
+ },
+ {
+  "depth": 2,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "label",
+  "name": "Galleria",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Minimize",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Close",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]
