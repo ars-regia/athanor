@@ -282,7 +282,7 @@ impl Painter {
                 // Left out, so not drawn; the rest of the window is.
                 if !resources.skipped.iter().any(|s| Arc::ptr_eq(s, pixmap)) {
                     eprintln!(
-                        "athanor-toolkit: an image of {}x{} pixels is not drawn: the window's \
+                        "athanor-sal: an image of {}x{} pixels is not drawn: the window's \
                          images pass the GPU atlas budget of {ATLAS_BUDGET} pixels",
                         pixmap.width(),
                         pixmap.height()

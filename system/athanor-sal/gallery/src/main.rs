@@ -1,11 +1,11 @@
-//! Every widget of athanor-toolkit on a page of its own, for an application developer to see
+//! Every widget of athanor-sal on a page of its own, for an application developer to see
 //! what the toolkit offers and for the rig to compare with its GTK 4 twin
 //! (`forge/test/shell/gallery_gtk.py`), which shows the same pages from the same strings.
 //!
-//! `athanor-toolkit-gallery [--lang en|it] [--rtl] [--page <name>]`: `--lang` picks a column of
+//! `athanor-sal-gallery [--lang en|it] [--rtl] [--page <name>]`: `--lang` picks a column of
 //! `strings.tsv`, `--rtl` mirrors the window and `--page` names the page shown at the start.
 
-use athanor_toolkit::{driver, Event, Kind, Theme, Ui, WidgetId};
+use athanor_sal::{driver, Event, Kind, Theme, Ui, WidgetId};
 use std::process::ExitCode;
 
 /// One line per string: the key, then its text in each language, tab separated.
@@ -198,13 +198,13 @@ fn main() -> ExitCode {
         let options = Options::parse(std::env::args().skip(1))?;
         let (ui, gallery) = build(&options)?;
         let on_event = move |ui: &mut Ui, event: Event| on_event(ui, &gallery, event);
-        driver::run_window(ui, "athanor-toolkit-gallery", Box::new(on_event))
+        driver::run_window(ui, "athanor-sal-gallery", Box::new(on_event))
             .map_err(|error| error.to_string())
     };
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("athanor-toolkit-gallery: {error}");
+            eprintln!("athanor-sal-gallery: {error}");
             ExitCode::FAILURE
         }
     }

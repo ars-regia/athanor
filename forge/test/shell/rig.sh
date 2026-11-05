@@ -18,8 +18,8 @@
 #   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-sulphur into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-toolkit's chooser, text field, test input method, layer surfaces, popups, test pointer and gallery into <out>/bin,
-#                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-sal's chooser, text field, test input method, layer surfaces, popups, test pointer and gallery into <out>/bin,
+#                           with and without the gpu feature; the binaries carry it, so ATHANOR_SAL_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-sulphur offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
 #   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
@@ -58,11 +58,11 @@
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
 #   rig.sh measure-chooser  stripped size, start-up time to the first frame and memory after a minute of the GTK chooser and of the toolkit's with each renderer, and the toolkit's lines (T1 task 7; run build-layout and build-toolkit first)
-#   rig.sh input-method     athanor-toolkit's text field takes a preedit and a commit from a test input method (run build-toolkit first)
+#   rig.sh input-method     athanor-sal's text field takes a preedit and a commit from a test input method (run build-toolkit first)
 #                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the input method as its rig unit (run build-compositor first)
-#   rig.sh toolkit-clipboard   athanor-toolkit's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
-#   rig.sh toolkit-layer    athanor-toolkit's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
-#   rig.sh toolkit-popup    athanor-toolkit's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
+#   rig.sh toolkit-clipboard   athanor-sal's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
+#   rig.sh toolkit-layer    athanor-sal's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
+#   rig.sh toolkit-popup    athanor-sal's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
@@ -142,7 +142,7 @@ fi
 # cosmic-comp (session.sh) on RIG_HEADLESS_OUTPUTS outputs, and runs the container in systemd
 # mode, whose cgroup tree is writable: bar_session.py --unit and in-unit.sh put a client in its
 # unit's cgroup there, for the compositor's allow-list (OS4).
-# ATHANOR_TOOLKIT_RENDERER reaches athanor-toolkit's clients: cpu (the default) or gpu, which
+# ATHANOR_SAL_RENDERER reaches athanor-sal's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
     local image=$1 opts=()
@@ -159,8 +159,8 @@ in_rig() { # in_rig <image> <command...>
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
         opts+=(--systemd=always)
     fi
-    if [ -n "${ATHANOR_TOOLKIT_RENDERER:-}" ]; then
-        opts+=(-e ATHANOR_TOOLKIT_RENDERER)
+    if [ -n "${ATHANOR_SAL_RENDERER:-}" ]; then
+        opts+=(-e ATHANOR_SAL_RENDERER)
     fi
     mkdir -p "$out"
     podman run --rm --memory 6g --security-opt label=disable "${opts[@]}" \
@@ -320,7 +320,7 @@ stage_chooser_catalogs() {
         msgfmt -o /out/locale/chooser/rtl.mo /out/chooser-pseudo-rtl.po'
 }
 
-# ATHANOR_CHOOSER_BIN runs another chooser in the GTK chooser's scenes, athanor-toolkit's
+# ATHANOR_CHOOSER_BIN runs another chooser in the GTK chooser's scenes, athanor-sal's
 # (doc_own_stack.md, T1 task 4); its captures then differ from the GTK goldens by design.
 capture_chooser() {
     unit_words "${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}"
@@ -339,12 +339,12 @@ capture_chooser() {
     done < <(python3 -B "$rig/cases.py" chooser)
 }
 
-# doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
+# doc_own_stack.md, C1 task 1 and T1 task 4: athanor-sal's chooser under
 # athanor-sulphur, in the GTK chooser's catalogs, mirrored by the right-to-left one. At 1.5
 # the toolkit draws at 1.5 itself, through wp_fractional_scale_v1 and wp_viewporter.
 capture_toolkit_chooser() {
     require athanor-sulphur build-compositor
-    require athanor-toolkit-chooser build-toolkit
+    require athanor-sal-chooser build-toolkit
     stage_chooser_catalogs
     while IFS=$'\t' read -r tag _ scale locale catalog; do
         tags+=("$tag")
@@ -354,7 +354,7 @@ capture_toolkit_chooser() {
         fi
         in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE="$locale" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
-            /out/bin/athanor-toolkit-chooser
+            /out/bin/athanor-sal-chooser
     done < <(python3 -B "$rig/cases.py" toolkit-chooser)
 }
 
@@ -366,9 +366,9 @@ capture_gallery() { # capture_gallery <toolkit-gallery|gtk-gallery>
     local surface=$1 compositor=() bin=/repo/forge/test/shell/gallery_gtk.py
     if [ "$surface" = toolkit-gallery ]; then
         require athanor-sulphur build-compositor
-        require athanor-toolkit-gallery build-toolkit
+        require athanor-sal-gallery build-toolkit
         compositor=(RIG_COMPOSITOR=athanor)
-        bin=/out/bin/athanor-toolkit-gallery
+        bin=/out/bin/athanor-sal-gallery
     fi
     while IFS=$'\t' read -r tag variant scale locale _ page direction; do
         tags+=("$tag")
@@ -701,21 +701,21 @@ build-toolkit)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-toolkit --all-targets -- -D warnings \
-                 && cargo clippy --locked -p athanor-toolkit --all-targets --features gpu -- -D warnings \
-                 && cargo rustdoc --locked -p athanor-toolkit -- -D warnings \
-                 && cargo test --locked -p athanor-toolkit \
-                 && cargo test --locked -p athanor-toolkit --features gpu \
-                 && cargo build --release --locked -p athanor-toolkit --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer \
-                 && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-toolkit-chooser \
-                 && install -m 0755 /out/target/release/examples/field /out/bin/athanor-toolkit-field \
-                 && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-toolkit-input-method \
-                 && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-toolkit-layer \
-                 && install -m 0755 /out/target/release/examples/popup /out/bin/athanor-toolkit-popup \
-                 && install -m 0755 /out/target/release/examples/pointer /out/bin/athanor-toolkit-pointer \
-                 && cargo clippy --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml --all-targets -- -D warnings \
-                 && cargo build --release --locked --manifest-path system/athanor-toolkit/gallery/Cargo.toml \
-                 && install -m 0755 /out/target/release/athanor-toolkit-gallery /out/bin/athanor-toolkit-gallery'
+        bash -c 'cargo clippy --locked -p athanor-sal --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-sal --all-targets --features gpu -- -D warnings \
+                 && cargo rustdoc --locked -p athanor-sal -- -D warnings \
+                 && cargo test --locked -p athanor-sal \
+                 && cargo test --locked -p athanor-sal --features gpu \
+                 && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer \
+                 && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-sal-chooser \
+                 && install -m 0755 /out/target/release/examples/field /out/bin/athanor-sal-field \
+                 && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-sal-input-method \
+                 && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-sal-layer \
+                 && install -m 0755 /out/target/release/examples/popup /out/bin/athanor-sal-popup \
+                 && install -m 0755 /out/target/release/examples/pointer /out/bin/athanor-sal-pointer \
+                 && cargo clippy --locked --manifest-path system/athanor-sal/gallery/Cargo.toml --all-targets -- -D warnings \
+                 && cargo build --release --locked --manifest-path system/athanor-sal/gallery/Cargo.toml \
+                 && install -m 0755 /out/target/release/athanor-sal-gallery /out/bin/athanor-sal-gallery'
     ;;
 compositor-globals)
     # doc_own_stack.md, C1 tasks 1, 4 and 5 and OS9 tasks 1, 2 and 6: what a client of athanor-sulphur binds.
@@ -788,7 +788,7 @@ cargo)
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
 toolkit-gpu)
-    bash "$0" cargo test --locked -p athanor-toolkit --features gpu --lib -- --ignored | tee "$out/toolkit-gpu.log"
+    bash "$0" cargo test --locked -p athanor-sal --features gpu --lib -- --ignored | tee "$out/toolkit-gpu.log"
     # Cargo exits 0 when no test ran: a renamed test must not leave a green run of nothing.
     grep -q 'test result: ok\. [1-9]' "$out/toolkit-gpu.log"
     ;;
@@ -1137,7 +1137,7 @@ atspi)
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
-        # ATHANOR_CHOOSER_BIN runs another chooser, athanor-toolkit's (doc_own_stack.md, T1), in
+        # ATHANOR_CHOOSER_BIN runs another chooser, athanor-sal's (doc_own_stack.md, T1), in
         # the same scene. The transcript, every node's role, name, states and value, must hold
         # all the reference holds: the GTK chooser's, recorded (OS8).
         # To record it again, copy <out>/atspi-chooser[-it].json of a GTK run into golden/atspi/.
@@ -1159,8 +1159,8 @@ atspi)
         # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
         # hold all the reference holds, the GTK twin's, recorded (OS8).
         # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
-        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-toolkit-gallery}
-        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-toolkit-gallery build-toolkit; fi
+        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-sal-gallery}
+        if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-sal-gallery build-toolkit; fi
         transcript=atspi-gallery${3:+-$3}.json
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
             ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
@@ -1171,14 +1171,14 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     toolkit-chooser)
-        # The same 8 choices in athanor-toolkit's chooser, under athanor-sulphur, through
+        # The same 8 choices in athanor-sal's chooser, under athanor-sulphur, through
         # AccessKit (doc_own_stack.md, C1 task 1).
         require athanor-sulphur build-compositor
-        require athanor-toolkit-chooser build-toolkit
+        require athanor-sal-chooser build-toolkit
         in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-toolkit-chooser 8" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-sal-chooser 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
-            bash -c "$enable && exec /out/bin/athanor-toolkit-chooser"
+            bash -c "$enable && exec /out/bin/athanor-sal-chooser"
         ;;
     bar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
@@ -1224,7 +1224,7 @@ atspi)
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
-        # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-toolkit's
+        # Settings of the seed, applications. ATHANOR_DOCK_BIN runs another dock, athanor-sal's
         # (doc_own_stack.md, the dock plan), whose transcript must hold all the GTK dock's holds.
         # Under athanor-sulphur 2: decision 28 hides workspaces (#835) and applications (#836).
         # To record it again, copy <out>/atspi-dock[-it].json of a GTK run into golden/atspi/.
@@ -1280,7 +1280,7 @@ orca)
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
     # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
-    # athanor-toolkit's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
+    # athanor-sal's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
     # of the Containerfile's rig stage.
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
     # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
@@ -1341,10 +1341,10 @@ orca)
         # page without its count, or a count without its control, ends a walk elsewhere. The
         # GTK twin's cannot: Tab steps through its list's rows, and wraps to the first page
         # toggle, whose state is read with it.
-        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-toolkit-gallery}
+        bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-sal-gallery}
         extra=0
         if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then
-            require athanor-toolkit-gallery build-toolkit
+            require athanor-sal-gallery build-toolkit
             extra=1
         fi
         rm -f "$out/$transcript"
@@ -1438,35 +1438,35 @@ orca)
         "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
-    # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-toolkit's, with vello_cpu and with
+    # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-sal's, with vello_cpu and with
     # vello_gpu, in the same scene under cosmic-comp, one after the other; measure_chooser.py
     # launches each, so the scene's own client only holds it open. The tables go to
     # <out>/measure/report.md.
     require athanor-layout-chooser build-layout
-    require athanor-toolkit-chooser build-toolkit
+    require athanor-sal-chooser build-toolkit
     mkdir -p "$out/measure"
-    runs=(athanor-layout-chooser: athanor-toolkit-chooser:cpu athanor-toolkit-chooser:gpu)
+    runs=(athanor-layout-chooser: athanor-sal-chooser:cpu athanor-sal-chooser:gpu)
     for run in "${runs[@]}"; do
         bin=${run%%:*} renderer=${run#*:}
         name=$bin${renderer:+-$renderer}
-        ATHANOR_TOOLKIT_RENDERER=$renderer in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
+        ATHANOR_SAL_RENDERER=$renderer in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
             RIG_HOLD="python3 -B /repo/forge/test/shell/measure_chooser.py run /out/bin/$bin /out/measure/$name.json" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "measure-$name" -- sleep 600
     done
-    in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/measure_chooser.py report /repo/system/athanor-toolkit \
-        /out/measure/athanor-layout-chooser.json /out/measure/athanor-toolkit-chooser-cpu.json \
-        /out/measure/athanor-toolkit-chooser-gpu.json > "$out/measure/report.md"
+    in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/measure_chooser.py report /repo/system/athanor-sal \
+        /out/measure/athanor-layout-chooser.json /out/measure/athanor-sal-chooser-cpu.json \
+        /out/measure/athanor-sal-chooser-gpu.json > "$out/measure/report.md"
     cat "$out/measure/report.md"
     ;;
 input-method)
     # doc_own_stack.md, T1 task 6 (OS9 item 3): the test input method pre-edits and commits into
-    # athanor-toolkit's text field. cosmic-comp offers zwp_input_method_v2 to the scene's clients
+    # athanor-sal's text field. cosmic-comp offers zwp_input_method_v2 to the scene's clients
     # because none is behind a security context; under RIG_COMPOSITOR=athanor the input method
     # runs as rig-input-method.service, which rig-privileged-clients grants the protocol
     # (input_method_check.py).
-    require athanor-toolkit-field build-toolkit
-    require athanor-toolkit-input-method build-toolkit
+    require athanor-sal-field build-toolkit
+    require athanor-sal-input-method build-toolkit
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
         require athanor-sulphur build-compositor
     fi
@@ -1474,11 +1474,11 @@ input-method)
         RIG_HOLD="python3 /repo/forge/test/shell/input_method_check.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 input-method -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec /out/bin/athanor-toolkit-field"
+                 && exec /out/bin/athanor-sal-field"
     echo "look at $out/input-method-preedit.png (the preedit underlined) and $out/input-method-commit.png"
     ;;
 toolkit-clipboard)
-    # #719: Ctrl+C, Ctrl+X and Ctrl+V of athanor-toolkit's field, its context menu's items and
+    # #719: Ctrl+C, Ctrl+X and Ctrl+V of athanor-sal's field, its context menu's items and
     # its primary selection, read and set with wl-paste and wl-copy (toolkit_clipboard_check.py).
     # wl-clipboard reaches the selection through wlr-data-control, which athanor-sulphur does
     # not offer: there it hangs, so the scene runs under cosmic-comp only.
@@ -1486,23 +1486,23 @@ toolkit-clipboard)
         echo "rig.sh: toolkit-clipboard runs under cosmic-comp: wl-clipboard hangs under athanor-sulphur" >&2
         exit 2
     fi
-    require athanor-toolkit-field build-toolkit
+    require athanor-sal-field build-toolkit
     in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=4 \
         RIG_HOLD="python3 /repo/forge/test/shell/toolkit_clipboard_check.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 toolkit-clipboard -- \
-        /out/bin/athanor-toolkit-field
+        /out/bin/athanor-sal-field
     ;;
 toolkit-layer)
     # The dock plan, task 3: the driver keeps one layer surface per output. sway's headless
     # backend adds and removes outputs, which athanor-sulphur's fixture cannot yet (C1 task 8).
-    require athanor-toolkit-layer build-toolkit
+    require athanor-sal-layer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_layer_check.py
     ;;
 toolkit-popup)
     # The dock plan, task 4: a menu and a tooltip in xdg-popups of a layer surface, under sway's
     # headless backend with a virtual pointer and wtype's keyboard.
-    require athanor-toolkit-popup build-toolkit
-    require athanor-toolkit-pointer build-toolkit
+    require athanor-sal-popup build-toolkit
+    require athanor-sal-pointer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_popup_check.py
     ;;
 chooser-e2e)

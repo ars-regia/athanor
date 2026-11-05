@@ -120,7 +120,7 @@ class ProcessTest(unittest.TestCase):
 
     def test_the_adapter_the_toolkit_names_is_recorded(self):
         trace = (
-            "echo 'athanor-toolkit: vello_gpu on llvmpipe (Gl, Cpu, )' >&2;"
+            "echo 'athanor-sal: vello_gpu on llvmpipe (Gl, Cpu, )' >&2;"
             "echo ' -> xdg_wm_base#3.get_xdg_surface(new id xdg_surface#9, wl_surface#7)' >&2;"
             "echo ' -> wl_surface#7.attach(wl_buffer#12, 0, 0)' >&2;"
             "echo ' -> wl_surface#7.commit()' >&2; sleep 60"
@@ -145,7 +145,7 @@ class ProcessTest(unittest.TestCase):
             client.chmod(0o755)
             with (
                 unittest.mock.patch.dict(
-                    os.environ, {"ATHANOR_TOOLKIT_RENDERER": "gpu"}
+                    os.environ, {"ATHANOR_SAL_RENDERER": "gpu"}
                 ),
                 self.assertRaisesRegex(SystemExit, "named no GPU adapter"),
             ):

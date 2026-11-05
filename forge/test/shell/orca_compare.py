@@ -51,7 +51,7 @@ def gallery_labels(key):
     return [
         line.split("\t")[1:]
         for line in (
-            Path(__file__).resolve().parents[3] / "system/athanor-toolkit/gallery/strings.tsv"
+            Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
         )
         .read_text(encoding="utf-8")
         .splitlines()

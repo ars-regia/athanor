@@ -1,7 +1,7 @@
 #!/usr/bin/python3
-"""input_method_check.py - doc_own_stack.md, milestone T1 task 6 (OS9 item 3): athanor-toolkit's
+"""input_method_check.py - doc_own_stack.md, milestone T1 task 6 (OS9 item 3): athanor-sal's
 text field takes composed input from an input method. Run as RIG_HOLD beside
-athanor-toolkit-field. Starts the test input method; captures the field with the preedit, then
+athanor-sal-field. Starts the test input method; captures the field with the preedit, then
 with the commit; and reads the field's text on the accessibility bus at each step: empty under
 the preedit, which is not text yet, and the committed text after.
 
@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import find_application, value_of
 
 PREEDIT, COMMIT = "ni", "你"
-METHOD = "/out/bin/athanor-toolkit-input-method"
+METHOD = "/out/bin/athanor-sal-input-method"
 IN_UNIT = "/repo/forge/test/shell/in-unit.sh"
 TIMEOUT = 10
 # Between two captures of a frame that may still be on its way.
@@ -32,7 +32,7 @@ CAPTURE_INTERVAL_S = 0.1
 
 
 def entry(Atspi):
-    app = find_application(Atspi, "athanor-toolkit-field")
+    app = find_application(Atspi, "athanor-sal-field")
     stack = [app] if app is not None else []
     while stack:
         node = stack.pop()
@@ -126,7 +126,7 @@ def main():
     node = entry(Atspi)
     if node is None:
         print(
-            "FAIL no editable text field of athanor-toolkit-field on the accessibility bus",
+            "FAIL no editable text field of athanor-sal-field on the accessibility bus",
             file=sys.stderr,
         )
         return 1

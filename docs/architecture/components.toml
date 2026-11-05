@@ -669,7 +669,7 @@ item = "SH5"
 purpose = "Calmo tokens and the generator of the shell's style"
 
 [[component]]
-path = "system/athanor-toolkit"
+path = "system/athanor-sal"
 kind = "crate"
 area = "shell"
 status = "specified"

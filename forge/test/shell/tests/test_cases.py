@@ -54,7 +54,7 @@ class CasesTest(unittest.TestCase):
             )
 
     def test_the_two_galleries_list_the_same_pages_and_every_string_has_both_languages(self):
-        gallery = Path(__file__).resolve().parents[4] / "system/athanor-toolkit/gallery"
+        gallery = Path(__file__).resolve().parents[4] / "system/athanor-sal/gallery"
         pages = re.search(
             r"const PAGES: \[&str; \d+\] = \[(.*?)\];", (gallery / "src/main.rs").read_text()
         )

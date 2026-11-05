@@ -20,7 +20,7 @@ gtk = [
 # The dock drawn with Athanor's own toolkit (the dock plan, task 6), beside the GTK one until
 # the switch: no GTK crate in its tree. GLib's main context runs in the toolkit's loop.
 toolkit = [
-  "dep:athanor-toolkit",
+  "dep:athanor-sal",
   "dep:gio",
   "dep:gio-unix",
   "dep:wayland-client",
@@ -33,7 +33,7 @@ athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", d
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-style = { path = "../../../../system/athanor-style", default-features = false }
-athanor-toolkit = { path = "../../../../system/athanor-toolkit", optional = true }
+athanor-sal = { path = "../../../../system/athanor-sal", optional = true }
 athanor-unit = { path = "../../../../system/athanor-unit" }
 gio = { workspace = true, optional = true }
 gio-unix = { workspace = true, optional = true }

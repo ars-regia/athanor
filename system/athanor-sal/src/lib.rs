@@ -5,7 +5,7 @@
 #![warn(missing_docs)]
 
 // The chooser's tree is shared by the example and the tests, which name the crate.
-extern crate self as athanor_toolkit;
+extern crate self as athanor_sal;
 
 pub(crate) mod a11y;
 pub mod driver;

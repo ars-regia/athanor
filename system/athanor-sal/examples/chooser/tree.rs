@@ -4,7 +4,7 @@
 //! translated again.
 
 use athanor_i18n::Catalog;
-use athanor_toolkit::{Kind, Theme, Ui, WidgetId};
+use athanor_sal::{Kind, Theme, Ui, WidgetId};
 
 pub const TITLE: &str = "Layout";
 
