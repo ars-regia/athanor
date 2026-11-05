@@ -85,35 +85,38 @@ pub const RENDERER: &str = "ATHANOR_SAL_RENDERER";
 /// warning, until the 1.0 cut.
 const OLD_RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
 
-/// What [`RENDERER`] holds, falling back to [`OLD_RENDERER`]; the second value is a warning to
-/// print. The new name wins when both are set.
+/// What [`RENDERER`] holds, falling back to [`OLD_RENDERER`]: the value, a warning to print and
+/// the name of the variable the value came from. The new name wins when both are set.
 fn renderer_value(
     new: Option<std::ffi::OsString>,
     old: Option<std::ffi::OsString>,
-) -> (Option<std::ffi::OsString>, Option<String>) {
+) -> (Option<std::ffi::OsString>, Option<String>, &'static str) {
     match (new, old) {
         (None, Some(old)) => (
             Some(old),
             Some(format!("{OLD_RENDERER} is deprecated; set {RENDERER}")),
+            OLD_RENDERER,
         ),
         (new, Some(_)) => (
             new,
             Some(format!("{OLD_RENDERER} is ignored because {RENDERER} is set")),
+            RENDERER,
         ),
-        (new, None) => (new, None),
+        (new, None) => (new, None, RENDERER),
     }
 }
 
-/// Whether [`RENDERER`]'s value asks for the GPU. Anything but `cpu`, `gpu` or unset is refused.
-fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
+/// Whether the value of the variable `name` asks for the GPU. Anything but `cpu`, `gpu` or unset
+/// is refused.
+fn wants_gpu(value: Option<std::ffi::OsString>, name: &str) -> Result<bool, Error> {
     match value.as_deref().map(|v| v.to_str()) {
         None | Some(Some("cpu")) => Ok(false),
         Some(Some("gpu")) if cfg!(feature = "gpu") => Ok(true),
         Some(Some("gpu")) => {
-            Err(format!("{RENDERER} is gpu; this build has no gpu feature").into())
+            Err(format!("{name} is gpu; this build has no gpu feature").into())
         }
-        Some(Some(other)) => Err(format!("{RENDERER} is {other:?}; it takes cpu or gpu").into()),
-        Some(None) => Err(format!("{RENDERER} is not valid UTF-8; it takes cpu or gpu").into()),
+        Some(Some(other)) => Err(format!("{name} is {other:?}; it takes cpu or gpu").into()),
+        Some(None) => Err(format!("{name} is not valid UTF-8; it takes cpu or gpu").into()),
     }
 }
 
@@ -276,12 +279,12 @@ fn run_on(
     application: impl Application + 'static,
     insert: impl FnOnce(&LoopHandle<'static, App>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let (value, warning) =
+    let (value, warning, name) =
         renderer_value(std::env::var_os(RENDERER), std::env::var_os(OLD_RENDERER));
     if let Some(warning) = warning {
         eprintln!("athanor-sal: {warning}");
     }
-    let gpu = wants_gpu(value)?;
+    let gpu = wants_gpu(value, name)?;
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
     let qh = queue.handle();
@@ -2211,30 +2214,33 @@ mod tests {
     fn the_renderer_variable_falls_back_to_its_old_name() {
         let gpu = || Some(std::ffi::OsString::from("gpu"));
         let cpu = || Some(std::ffi::OsString::from("cpu"));
-        assert_eq!(renderer_value(None, None), (None, None));
-        let (value, warning) = renderer_value(None, gpu());
-        assert_eq!(value, gpu());
+        assert_eq!(renderer_value(None, None), (None, None, RENDERER));
+        let (value, warning, name) = renderer_value(None, gpu());
+        assert_eq!((value, name), (gpu(), OLD_RENDERER));
         assert!(warning.is_some_and(|w| w.contains("set ATHANOR_SAL_RENDERER")));
-        let (value, warning) = renderer_value(cpu(), gpu());
-        assert_eq!(value, cpu());
+        let (value, warning, name) = renderer_value(cpu(), gpu());
+        assert_eq!((value, name), (cpu(), RENDERER));
         assert!(warning.is_some_and(|w| w.contains("ignored")));
-        assert_eq!(renderer_value(gpu(), None), (gpu(), None));
+        assert_eq!(renderer_value(gpu(), None), (gpu(), None, RENDERER));
+        let (value, _, name) = renderer_value(None, Some("foo".into()));
+        let error = wants_gpu(value, name).unwrap_err().to_string();
+        assert!(error.starts_with("ATHANOR_TOOLKIT_RENDERER is"), "{error}");
     }
 
     #[test]
     fn the_renderer_variable_takes_cpu_or_gpu_only() {
-        assert!(!wants_gpu(None).unwrap());
-        assert!(!wants_gpu(Some("cpu".into())).unwrap());
+        assert!(!wants_gpu(None, RENDERER).unwrap());
+        assert!(!wants_gpu(Some("cpu".into()), RENDERER).unwrap());
         assert_eq!(
-            wants_gpu(Some("gpu".into())).ok(),
+            wants_gpu(Some("gpu".into()), RENDERER).ok(),
             cfg!(feature = "gpu").then_some(true)
         );
         for refused in ["", "GPU", "vulkan"] {
-            assert!(wants_gpu(Some(refused.into())).is_err(), "{refused:?}");
+            assert!(wants_gpu(Some(refused.into()), RENDERER).is_err(), "{refused:?}");
         }
         use std::os::unix::ffi::OsStringExt;
         let invalid = std::ffi::OsString::from_vec(vec![0x67, 0xff]);
-        let error = wants_gpu(Some(invalid)).unwrap_err().to_string();
+        let error = wants_gpu(Some(invalid), RENDERER).unwrap_err().to_string();
         assert!(error.contains("is not valid UTF-8"), "{error}");
     }
 
