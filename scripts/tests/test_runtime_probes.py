@@ -15,6 +15,18 @@ spec.loader.exec_module(probes)
 
 EXPECT = probes.load(ACC / "expectations.toml")
 CONTACTS = probes.load(ROOT / "forge" / "config" / "contacts.toml")
+# The image's own sysctl.d files, as the guest's `systemd-sysctl --cat-config` prints them.
+SYSCTL = probes.parse_sysctl_config(
+    "".join(
+        p.read_text()
+        for p in sorted(ROOT.glob("forge/specs/*/SOURCES/usr/lib/sysctl.d/*.conf"))
+    )
+)
+
+
+IMAGE = "localhost:5000/acc/athanor-system:stable"
+DIGEST = "sha256:" + "a" * 64
+SIGNED = (IMAGE, DIGEST)
 
 
 def good():
@@ -24,8 +36,11 @@ def good():
         "units",
         "avc",
         "trust",
+        "trust:bootc",
         "pam:check",
         "sysctl",
+        "sysctl:config",
+        "sysctl:live",
         "nix:build",
         "nix:gc",
         "backup",
@@ -49,8 +64,16 @@ def good():
             "faillock": {k: str(v) for k, v in EXPECT["pam"]["faillock"].items()},
         },
         "sysctl": "",
+        "sysctl_set": SYSCTL,
+        "sysctl_live": {k: v for k, (v, _) in SYSCTL.items()},
         "trust": {
+            "value": True,
             "reason": "signature",
+            "booted_digest": DIGEST,
+            "bootc_digest": DIGEST,
+            "bootc_image": IMAGE,
+            "bootc_signature": "containerPolicy",
+            "policy_shipped": True,
             "schema": 2,
             "automatic_security_updates": True,
             "postpone_published": True,
@@ -63,7 +86,7 @@ TUNNEL = 5000  # the default ACC_PORT of lib.sh
 
 
 def failed(facts, tunnel_port=TUNNEL):
-    return {c for c, _ in probes.evaluate(facts, EXPECT, CONTACTS, tunnel_port)}
+    return {c for c, _ in probes.evaluate(facts, EXPECT, CONTACTS, tunnel_port, SIGNED)}
 
 
 class Parsers(unittest.TestCase):
@@ -152,9 +175,66 @@ class Expectations(unittest.TestCase):
         f["sysctl"] = "Couldn't write '1' to 'kernel/x'"
         self.assertEqual(failed(f), {"sysctl"})
 
+    def test_a_sysctl_value_changed_after_boot_fails(self):
+        f = good()
+        f["sysctl_live"] = {**f["sysctl_live"], "kernel.kptr_restrict": "0"}
+        self.assertEqual(failed(f), {"sysctl"})
+
+    def test_a_sysctl_key_the_kernel_lacks_fails_unless_optional(self):
+        f = good()
+        f["sysctl_live"] = dict(f["sysctl_live"])
+        del f["sysctl_live"]["kernel.kptr_restrict"]
+        self.assertEqual(failed(f), {"sysctl"})
+        f["sysctl_set"] = {**f["sysctl_set"], "kernel.kptr_restrict": ["2", True]}
+        self.assertEqual(failed(f), set())
+
+    def test_no_sysctl_key_read_fails(self):
+        f = good()
+        f["sysctl_set"], f["sysctl_live"] = {}, {}
+        self.assertEqual(failed(f), {"sysctl"})
+
+    def test_sysctl_config_last_assignment_wins(self):
+        text = (
+            "# /usr/lib/sysctl.d/50-default.conf\nnet.core.default_qdisc = fq_codel\n"
+            "-net.ipv4.ping_group_range = 0 2147483647\nnet.ipv4.conf.*.rp_filter = 2\n"
+            "; a = 1\n# /usr/lib/sysctl.d/99-x.conf\nnet.core.default_qdisc=fq\n"
+        )
+        self.assertEqual(
+            probes.parse_sysctl_config(text),
+            {
+                "net.core.default_qdisc": ["fq", False],
+                "net.ipv4.ping_group_range": ["0 2147483647", True],
+            },
+        )
+        self.assertEqual(SYSCTL["kernel.kptr_restrict"], ["2", False])
+
+    def test_collect_reads_the_live_value_of_each_configured_key(self):
+        calls = {
+            "/usr/lib/systemd/systemd-sysctl --cat-config": (
+                0,
+                "a.b = 1\n-c.d = 0 1\n",
+                "",
+            ),
+            "sysctl -e a.b c.d": (0, "a.b = 1\nc.d = 0\t1\n", ""),
+        }
+        facts = self.collect_with(calls)
+        self.assertEqual(facts["sysctl_live"], {"a.b": "1", "c.d": "0\t1"})
+        f = good() | {k: facts[k] for k in ("sysctl_set", "sysctl_live")}
+        self.assertEqual(failed(f), set())
+
     def test_a_unit_in_the_wrong_state_fails(self):
         f = good()
         f["units"]["rpm-ostree-countme.timer"] = "disabled"
+        self.assertEqual(failed(f), {"units"})
+
+    def test_an_installed_absent_unit_fails(self):
+        f = good()
+        f["units"]["qemu-guest-agent.service"] = "disabled"
+        self.assertEqual(failed(f), {"units"})
+
+    def test_an_unmasked_debug_shell_fails(self):
+        f = good()
+        f["units"]["debug-shell.service"] = "static"
         self.assertEqual(failed(f), {"units"})
 
     def test_an_unverified_image_fails(self):
@@ -177,6 +257,49 @@ class Expectations(unittest.TestCase):
         f["trust"] = {**f["trust"], "automatic_security_updates": False}
         self.assertEqual(failed(f), {"trust"})
 
+    def test_a_booted_image_that_is_not_the_signed_one_fails(self):
+        other = "sha256:" + "b" * 64
+        for change in (
+            # bootc and athanor-update agree, on a digest the registry does not sign.
+            {"bootc_digest": other, "booted_digest": other},
+            {"bootc_image": "localhost:5000/acc/athanor-system:v2"},
+            {"booted_digest": other},
+            {"bootc_signature": "insecure"},
+            {"policy_shipped": False},
+            {"value": False},
+        ):
+            f = good()
+            f["trust"] = f["trust"] | change
+            self.assertEqual(failed(f), {"trust"}, change)
+
+    def test_collect_reads_what_bootc_booted(self):
+        status = (
+            '{"status": {"booted": {"image": {"imageDigest": "%s", "image": '
+            '{"image": "%s", "transport": "registry", "signature": "containerPolicy"}}}}}'
+        ) % (DIGEST, IMAGE)
+        state = '{"booted": {"digest": "%s"}, "policy": {"shipped": true}}' % DIGEST
+        facts = self.collect_with(
+            {
+                "bootc status --format json": (0, status, ""),
+                "cat /run/athanor-update/state.json": (0, state, ""),
+            }
+        )
+        self.assertEqual(
+            {k: facts["trust"][k] for k in good()["trust"] if k in facts["trust"]},
+            {
+                "booted_digest": DIGEST,
+                "policy_shipped": True,
+                "bootc_digest": DIGEST,
+                "bootc_image": IMAGE,
+                "bootc_signature": "containerPolicy",
+                "schema": None,
+                "automatic_security_updates": None,
+                "postpone_published": False,
+            },
+        )
+        facts = self.collect_with({"bootc status --format json": (0, "{", "")})
+        self.assertEqual(facts["rc"]["trust:bootc"]["rc"], 65)
+
     def test_no_snapshot_after_the_hourly_unit_fails(self):
         f = good()
         f["backup"] = []
@@ -190,7 +313,8 @@ class Expectations(unittest.TestCase):
     def test_a_listener_contact_missing_from_the_expectations_fails(self):
         contacts = {"listener": [*CONTACTS["listener"], {"unit": "telnet.socket"}]}
         self.assertEqual(
-            {c for c, _ in probes.evaluate(good(), EXPECT, contacts, TUNNEL)}, {"listeners"}
+            {c for c, _ in probes.evaluate(good(), EXPECT, contacts, TUNNEL, SIGNED)},
+            {"listeners"},
         )
 
     def test_a_ceiling_without_a_measurement_fails(self):
@@ -204,8 +328,11 @@ class Expectations(unittest.TestCase):
             "units": "units",
             "avc": "selinux",
             "trust": "trust",
+            "trust:bootc": "trust",
             "pam:check": "pam",
             "sysctl": "sysctl",
+            "sysctl:config": "sysctl",
+            "sysctl:live": "sysctl",
             "nix:build": "nix",
             "nix:gc": "nix",
             "backup": "backup",
@@ -301,7 +428,9 @@ class Expectations(unittest.TestCase):
 
     def firewall_checks(self, facts):
         return [
-            d for c, d in probes.evaluate(facts, EXPECT, CONTACTS, TUNNEL) if c == "firewall"
+            d
+            for c, d in probes.evaluate(facts, EXPECT, CONTACTS, TUNNEL, SIGNED)
+            if c == "firewall"
         ]
 
     def test_collect_keeps_one_probe_key_per_zone(self):
@@ -365,7 +494,7 @@ class Expectations(unittest.TestCase):
             {
                 c
                 for c, _ in probes.evaluate(
-                    facts | {"pam": good()["pam"]}, EXPECT, CONTACTS, TUNNEL
+                    facts | {"pam": good()["pam"]}, EXPECT, CONTACTS, TUNNEL, SIGNED
                 )
             },
         )
