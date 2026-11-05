@@ -39,6 +39,12 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent.parent
 RS_DIRS = ["system", "forge/specs"]
+# Published crates the repository carries with a patch of its own, by directory: somebody else's
+# code, whose manifest declares upstream's licence exactly and whose panics the budget does not
+# count. Each directory's PATCHES.md says what it changes and when it goes.
+VENDORED_CRATES = {
+    "system/athanor-sal/vendor/accesskit_atspi_common": "MIT OR Apache-2.0",
+}
 
 # --------------------------------------------------------------------------- #
 # infrastruttura minima
@@ -94,6 +100,11 @@ def walk(base, suffix):
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
+
+
+def vendored(path):
+    """Whether `path`, relative to the repository, lies in a crate of VENDORED_CRATES."""
+    return any(path.startswith(d + "/") for d in VENDORED_CRATES)
 
 
 def rust_files():
@@ -1054,6 +1065,10 @@ TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
 # The gallery is a client of the toolkit outside the workspace: its one dependency.
 GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
 GALLERY_DEPENDENCY = {"athanor-sal": {"path": ".."}}
+# The one patch the gallery may carry: the toolkit's own patch of AccessKit's AT-SPI bridge, the
+# same as the repository root's, which a workspace root of its own does not inherit (#638;
+# system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md). It goes when the patch does.
+GALLERY_PATCH = {"crates-io": {"accesskit_atspi_common": {"path": "../vendor/accesskit_atspi_common"}}}
 
 
 def dependency_tables(data, kinds):
@@ -1068,7 +1083,7 @@ def dependency_tables(data, kinds):
 
 def gallery_problems(root):
     """The gallery depends on the toolkit by its path and on nothing else, as an application
-    outside Athanor would (ADR-0126)."""
+    outside Athanor would (ADR-0126), and patches nothing but the toolkit's AccessKit patch."""
     if not (root / GALLERY_MANIFEST).is_file():
         return []
     try:
@@ -1077,7 +1092,7 @@ def gallery_problems(root):
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
     tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
     out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
-           for kind in ("patch", "replace") if kind in data]
+           for kind in ("patch", "replace") if kind in data and data[kind] != GALLERY_PATCH]
     out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
             for key in data.get("workspace", {})]
     for table, deps in tables:
@@ -2094,7 +2109,7 @@ def check_panics():
     files = list(rust_files())
     test_modules = test_module_files(files)
     for p in files:
-        if is_test_file(p) or p in test_modules:
+        if is_test_file(p) or p in test_modules or vendored(rel(p)):
             continue
         txt = without_literals(without_test_items(read(p)))
         for i, code in enumerate(txt.split("\n"), 1):
@@ -3466,6 +3481,69 @@ def check_registry():
     return r
 
 
+# PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
+# nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
+# --inputs-from pins only the bare `nixpkgs#` of its own nix command: `nixpkgs/<ref>#`,
+# `nixpkgs-<alias>#`, `nixpkgs?<query>#`, `flake:nixpkgs#` and `github:NixOS/nixpkgs[/<ref>]#`
+# name a source of their own.
+PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+", re.I)
+# Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
+NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
+
+
+def logical_lines(text):
+    """(first line number, text) of each command, its backslash continuations joined; comment
+    lines are dropped."""
+    start, parts = None, []
+    for i, line in enumerate(text.split("\n"), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if start is None:
+            start = i
+        parts.append(line[:-1] if line.endswith("\\") else line)
+        if not line.endswith("\\"):
+            yield start, " ".join(parts)
+            start, parts = None, []
+    if parts:
+        yield start, " ".join(parts)
+
+
+def pinning_problems(root):
+    """Every nixpkgs#<tool> a workflow, action, recipe or script runs is a bare nixpkgs#
+    reference after --inputs-from in the same nix command, so nixpkgs is the locked input of
+    the repository flake."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in PINNING_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(set(paths)):
+        relative = path.relative_to(root)
+        # Unit test fixtures need an unpinned reference to prove the check reports one.
+        if (not path.is_file() or relative.parts[1:2] == ("tests",)
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in logical_lines(read(path)):
+            for ref in NIXPKGS_REF.finditer(line):
+                command = NIX_COMMAND_BREAK.split(line[:ref.start()])[-1]
+                if not ref.group().startswith("nixpkgs#") or "--inputs-from " not in command:
+                    problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
+                                    f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
+                                    f"nix command, so nixpkgs is flake.lock's")
+    return problems
+
+
+@check("pinning", "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)")
+def check_pinning():
+    r = Result()
+    for problem in pinning_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Golden rules 2 and 3 of docs/architecture/doc_forge_development_guide.md.
 SPEC_SECTION = re.compile(
     r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
@@ -3631,7 +3709,7 @@ def licence_problems(root=None):
             if pkg is None:
                 continue
             lic = pkg.get("license")
-            want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
+            want = VENDORED_CRATES.get(f.rsplit("/", 1)[0]) or OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
                 out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):

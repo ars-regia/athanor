@@ -4,6 +4,7 @@
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -44,6 +45,52 @@ class AtspiReferences(unittest.TestCase):
             self.assertIn(f'ATSPI_TRANSCRIPT="/out/{name}"', body, surface)
             self.assertIn(f"golden/atspi/{name}", body, surface)
             self.assertIn("atspi_compare.py", body, surface)
+
+
+class OwnCompositorScenesRunInSystemdMode(unittest.TestCase):
+    """#971: a recipe that always runs under athanor-sulphur must set RIG_COMPOSITOR where
+    in_rig reads it, or the container runs without --systemd=always and in-unit.sh cannot make
+    grim's cgroup (mkdir /sys/fs/cgroup/rig-grim.service: Read-only file system)."""
+
+    def scenes(self, *args):
+        """The podman runs of scene.sh by `rig.sh <args>` without RIG_COMPOSITOR on the host,
+        each with the RIG_COMPOSITOR podman sees, through a podman that only records."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "path").mkdir()
+            (tmp / "out" / "bin").mkdir(parents=True)
+            for name in ("athanor-sulphur", "athanor-sal-chooser", "athanor-sal-gallery"):
+                (tmp / "out" / "bin" / name).write_text("")
+                (tmp / "out" / "bin" / name).chmod(0o755)
+            podman = tmp / "path" / "podman"
+            podman.write_text(f'#!/bin/sh\necho "${{RIG_COMPOSITOR:-}}|$*" >> {tmp}/runs\n')
+            podman.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k != "RIG_COMPOSITOR"}
+            env.update(PATH=f"{tmp / 'path'}:{env['PATH']}", ATHANOR_RIG_OUT=str(tmp / "out"))
+            subprocess.run(["bash", str(RIG), *args], capture_output=True, text=True, env=env, check=False)
+            runs = (tmp / "runs").read_text(encoding="utf-8").splitlines()
+        return [run for run in runs if "scene.sh" in run]
+
+    def test_each_scene_of_an_own_compositor_recipe_runs_in_systemd_mode(self):
+        for args in (
+            ("surface", "toolkit-gallery"),
+            ("surface", "toolkit-chooser"),
+            ("atspi", "toolkit-chooser"),
+            ("compositor-globals",),
+        ):
+            scenes = self.scenes(*args)
+            self.assertTrue(scenes, args)
+            for run in scenes:
+                seen, _, command = run.partition("|")
+                self.assertEqual(seen, "athanor", (args, command))
+                self.assertIn("--systemd=always", command, args)
+                self.assertIn("-e RIG_COMPOSITOR", command, args)
+
+    def test_the_gtk_gallery_stays_under_cosmic_comp(self):
+        scenes = self.scenes("surface", "gtk-gallery")
+        self.assertTrue(scenes)
+        for run in scenes:
+            self.assertNotIn("--systemd=always", run)
 
 
 if __name__ == "__main__":

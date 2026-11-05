@@ -13,6 +13,8 @@ name: Pull Request
 # kernel:  the kernel check (call-kernel.yml) when changes.json selects the kernel.
 # specs:   Spec Build Check (spec-build-check.yml) when changes.json selects the specs.
 # shell:   the visual tests of the shell rig (shell-surfaces.yml) when changes.json selects shell.
+# rust_audit: clippy and the cargo-deny advisories (rust-security-audit.yml) when changes.json
+#   selects rust_audit.
 # gate:    the one required check. It needs every other job, always runs, and is red when a job
 #   it needs failed or was cancelled, or when an area the change selects did not run
 #   (scripts/ci/gate.py). A skipped build is a pass.
@@ -175,8 +177,15 @@ jobs:
       contents: read
     uses: ./.github/workflows/shell-surfaces.yml
 
+  rust_audit:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.changes).rust_audit }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust-security-audit.yml
+
   gate:
-    needs: [changes, check-static, check-system, check-other, check-rust, kernel, specs, shell]
+    needs: [changes, check-static, check-system, check-other, check-rust, kernel, specs, shell, rust_audit]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

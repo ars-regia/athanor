@@ -33,8 +33,10 @@ REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
 
 # fetch URL SHA256 FILE: downloads URL to FILE and fails unless FILE has digest SHA256.
+# curl's own --retry gives up within seconds; a GitHub release download answered 504 for
+# minutes on 2026-11-05 (runs 42044791243 and 42044817489), so retry.sh spaces the attempts.
 fetch() {
-    curl -fsSL --retry 3 -o "$3" "$1"
+    bash "$here/../../forge/scripts/retry.sh" curl -fsSL -o "$3" "$1"
     echo "$2  $3" | sha256sum -c -
 }
 

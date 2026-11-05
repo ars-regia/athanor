@@ -6,10 +6,13 @@ Usage: changes.py BASE OUT
 Lists the files that differ between BASE and HEAD (both sides of a rename) and writes OUT,
 the changes.json of doc_pipeline.md section 3.3:
 
-  {"base": "<sha>", "kernel": bool, "specs": bool, "shell": bool, "docs_only": bool}
+  {"base": "<sha>", "kernel": bool, "specs": bool, "shell": bool, "rust_audit": bool,
+   "docs_only": bool}
 
 pr.yml runs a build job only for an area set to true. The areas repeat the path filters the
 build workflows had before pr.yml (kernel-build.yml, spec-build-check.yml, shell-surfaces.yml);
+`rust_audit` selects the clippy and advisory audit of rust-security-audit.yml, which ran on
+every pull request before it had an area;
 an area exists only with the pr.yml job that consumes it, so the image check joins with its job
 (doc_pipeline.md PB11, PB12). `shell` selects the visual tests of the shell rig only: the tests
 of every crate of the workspace run in `just check` on every change. A change to the selection
@@ -26,7 +29,8 @@ import pathlib
 import subprocess
 import sys
 
-# An entry ending in "/" names a directory and everything under it; any other names a file.
+# An entry ending in "/" names a directory and everything under it, one starting with "*/"
+# a file name in any directory, one starting with "*." a file extension; any other names a file.
 AREAS = {
     "kernel": (
         "forge/specs/azoth/",
@@ -60,6 +64,8 @@ AREAS = {
         "system/athanor-layout/",
         "forge/specs/athanor-layout-chooser/",
         "system/athanor-sulphur-client/",
+        "system/athanor-sal/",
+        "forge/specs/athanor-sulphur/",
         "system/athanor-i18n/",
         "forge/specs/athanor-shelld/",
         "forge/specs/athanor-bar/",
@@ -80,6 +86,26 @@ AREAS = {
         ".cargo/",
         ".github/workflows/shell-surfaces.yml",
     ),
+    # What clippy and the cargo-deny advisories read, and the builder image they run in. The
+    # job pulls the published builder, so a builder change is audited again by the weekly run
+    # once the new image is out. rust-security-audit.yml's push filter repeats this area.
+    "rust_audit": (
+        "*.rs",
+        "*/Cargo.toml",
+        "*/Cargo.lock",
+        "*/rust-toolchain",
+        "*/rust-toolchain.toml",
+        "*/clippy.toml",
+        "*/.clippy.toml",
+        ".cargo/",
+        "deny.toml",
+        "forge/builder/",
+        "flake.nix",
+        "flake.lock",
+        "forge/scripts/retry.sh",
+        "scripts/ci/security-audit.sh",
+        ".github/workflows/rust-security-audit.yml",
+    ),
 }
 # Inside an area's directories, what belongs to another workflow: the kernel spec is Kernel
 # Build's, not Spec Build Check's.
@@ -88,8 +114,14 @@ EVERY_AREA = (".github/workflows/pr.yml", "scripts/ci/")
 
 
 def touches(path, entries):
-    """Whether path is one of entries, an entry ending in "/" naming a whole directory."""
-    return any(path == e or (e.endswith("/") and path.startswith(e)) for e in entries)
+    """Whether path is one of entries: a directory ("dir/"), a name or extension anywhere
+    ("*/name", "*.ext"), or a file."""
+    return any(
+        path == e
+        or (e.endswith("/") and path.startswith(e))
+        or (e.startswith("*") and ("/" + path).endswith(e[1:]))
+        for e in entries
+    )
 
 
 def is_documentation(path):

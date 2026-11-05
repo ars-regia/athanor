@@ -92,7 +92,7 @@ step_publish() {
 }
 
 step_sbom() {
-  nix run nixpkgs#syft -- packages "$(image_lower)@$(cat "$RUNNER_TEMP/image.digest")" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
+  nix run --inputs-from "$here/../.." nixpkgs#syft -- packages "$(image_lower)@$(cat "$RUNNER_TEMP/image.digest")" -o "spdx-json=sbom-${PKG_NAME}.spdx.json"
 }
 
 step_tag() {
