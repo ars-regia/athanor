@@ -905,4 +905,66 @@ mod tests {
         ui.key(crate::Key::SelectRight);
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
     }
+
+    /// Through the AT-SPI bridge itself: a menu button reads as expandable, and expanded while
+    /// its menu is open, and both it and a field as opening a popup, as GTK's do and W3C
+    /// Core-AAM 1.2 maps `aria-expanded` and `aria-haspopup` (#638; the patch of
+    /// `vendor/accesskit_atspi_common`). Neither says collapsed: Orca reads an expandable that is
+    /// not expanded as collapsed.
+    #[test]
+    fn a_menu_button_and_a_field_reach_at_spi_with_their_popup_states() {
+        use accesskit::{ActionHandler, ActionRequest};
+        use accesskit_atspi_common::{
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, PlatformNode,
+            State, WindowBounds,
+        };
+        struct NoCallback;
+        impl AdapterCallback for NoCallback {
+            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn emit_event(&self, _: &Adapter, _: Event) {}
+        }
+        struct NoActions;
+        impl ActionHandler for NoActions {
+            fn do_action(&mut self, _: ActionRequest) {}
+        }
+        fn find(node: &PlatformNode, name: &str) -> Option<PlatformNode> {
+            if node.name().ok()? == name {
+                return Some(node.clone());
+            }
+            (0..node.child_count().ok()?).find_map(|i| {
+                let child = node.relative(node.child_at_index(usize::try_from(i).ok()?).ok()??);
+                find(&child, name)
+            })
+        }
+        let states = |ui: &Ui, name: &str| {
+            let adapter = Adapter::new(
+                &AppContext::new(None),
+                NoCallback,
+                tree_update(ui, 1.0),
+                true,
+                WindowBounds::default(),
+                NoActions,
+            );
+            let root = adapter.platform_node(adapter.root_id());
+            let node = find(&root, name).expect("the node reaches AT-SPI");
+            [
+                State::Expandable,
+                State::Expanded,
+                State::Collapsed,
+                State::HasPopup,
+            ]
+            .map(|s| node.state().contains(s))
+        };
+        let mut ui = Ui::new("Dock", Theme::default(), false);
+        let app = ui.add(Ui::ROOT, Kind::Button("Files".into()));
+        ui.set_has_popup(app, true);
+        ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        // [expandable, expanded, collapsed, has popup]
+        assert_eq!(states(&ui, "Files"), [true, false, false, true]);
+        assert_eq!(states(&ui, "Name"), [false, false, false, true]);
+        ui.set_expanded(app, true);
+        assert_eq!(states(&ui, "Files"), [true, true, false, true]);
+    }
 }

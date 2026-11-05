@@ -13,6 +13,12 @@ athanor-sal = { path = ".." }
 # Athanor would be, and takes nothing from the repository's workspace.
 [workspace]
 
+# The toolkit's patch of AccessKit's AT-SPI bridge (#638), which a workspace root of its own does
+# not inherit either: the repository root carries the same entry
+# (../vendor/accesskit_atspi_common/PATCHES.md).
+[patch.crates-io]
+accesskit_atspi_common = { path = "../vendor/accesskit_atspi_common" }
+
 # The repository root's profiles, which a workspace root of its own does not inherit.
 [profile.dev]
 panic = "abort"

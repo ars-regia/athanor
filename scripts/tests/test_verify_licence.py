@@ -112,6 +112,16 @@ class ExceptionSelfCheckTest(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("no entry in OWN_LICENCE_EXCEPTIONS", problems[0])
 
+    def test_a_vendored_crate_declares_upstreams_licence_exactly(self):
+        crate, lic = sorted(verify.VENDORED_CRATES.items())[0]
+        root = self.tree(None)
+        self.write(root, crate + "/Cargo.toml", CRATE % lic)
+        self.assertEqual(verify.licence_problems(root), [])
+        self.write(root, crate + "/Cargo.toml", CRATE % OWN)
+        problems = verify.licence_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"expected {lic!r}", problems[0])
+
 
 class LicenceProblemsTest(unittest.TestCase):
     def repo(self, files):
