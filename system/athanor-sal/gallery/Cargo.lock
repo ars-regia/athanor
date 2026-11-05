@@ -213,6 +213,7 @@ dependencies = [
  "smithay-client-toolkit",
  "vello_cpu",
  "wayland-client",
+ "yeslogic-fontconfig-sys",
 ]
 
 [[package]]
