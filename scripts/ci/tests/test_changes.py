@@ -95,6 +95,10 @@ class ClassifyTest(unittest.TestCase):
             "fuzz/Cargo.lock",
             "system/athanor-sal/gallery/Cargo.lock",
             "fuzz/fuzz_targets/parse.rs",
+            "rust-toolchain",
+            "fuzz/rust-toolchain.toml",
+            "clippy.toml",
+            "system/athanor-sal/.clippy.toml",
             "deny.toml",
             "flake.nix",
             ".github/workflows/rust-security-audit.yml",
@@ -102,7 +106,7 @@ class ClassifyTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(changes.classify([path])["rust_audit"])
         # A name anywhere matches the whole name, an extension the end of the name only.
-        for path in ("docs/MyCargo.toml", "system/x/Cargo.toml.orig", "scripts/notes.rst"):
+        for path in ("docs/MyCargo.toml", "system/x/Cargo.toml.orig", "scripts/notes.rst", "x/myclippy.toml"):
             with self.subTest(path=path):
                 self.assertFalse(changes.classify([path])["rust_audit"])
 

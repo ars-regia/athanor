@@ -77,13 +77,28 @@ class ShellAreaTest(unittest.TestCase):
 
 
 class RustAuditTest(unittest.TestCase):
-    """The Rust audit runs on a pull request only through pr.yml, when its area is selected."""
+    """The Rust audit runs on a pull request only through pr.yml, when its area is selected,
+    and on a push to iso-v0 only for the paths of the same area."""
 
-    def test_only_the_weekly_run_and_pr_yml_start_it(self):
+    def test_no_pull_request_trigger_of_its_own(self):
         triggers = yaml.safe_load(AUDIT.read_text())[True]
-        self.assertEqual(set(triggers), {"workflow_call", "schedule"})
+        self.assertEqual(set(triggers), {"workflow_call", "schedule", "push"})
         job = yaml.safe_load(PR.read_text())["jobs"]["rust_audit"]
         self.assertEqual(job["uses"], "./.github/workflows/rust-security-audit.yml")
+
+    def test_push_filter_matches_the_rust_audit_area(self):
+        push = yaml.safe_load(AUDIT.read_text())[True]["push"]
+        self.assertEqual(push["branches"], ["iso-v0"])
+        any_dir = "*" * 2
+
+        def as_area(path):
+            if path.endswith("/" + any_dir):
+                return path[: -len(any_dir)]
+            if path.startswith(any_dir):
+                return path[len(any_dir) - 1 :]
+            return path
+
+        self.assertEqual({as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"]))
 
 
 if __name__ == "__main__":

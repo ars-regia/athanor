@@ -4,6 +4,27 @@ name: Rust Security & FFI Audit
 # (Rust sources, Cargo files, deny.toml, the builder); its verdict reaches the required `gate`.
 on:
   workflow_call:
+  # A merge into iso-v0 that touches the same paths: two pull requests green on their own can
+  # merge into a red iso-v0. The filter repeats the rust_audit area of scripts/ci/changes.py
+  # (scripts/ci/tests/test_pr_workflow.py).
+  push:
+    branches: [iso-v0]
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/rust-toolchain"
+      - "**/rust-toolchain.toml"
+      - "**/clippy.toml"
+      - "**/.clippy.toml"
+      - ".cargo/**"
+      - "deny.toml"
+      - "forge/builder/**"
+      - "flake.nix"
+      - "flake.lock"
+      - "forge/scripts/retry.sh"
+      - "scripts/ci/security-audit.sh"
+      - ".github/workflows/rust-security-audit.yml"
   # The advisory database changes without a commit: the weekly run catches an advisory
   # published against a lockfile nobody touched.
   schedule:

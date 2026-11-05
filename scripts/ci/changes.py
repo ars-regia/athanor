@@ -86,11 +86,15 @@ AREAS = {
     ),
     # What clippy and the cargo-deny advisories read, and the builder image they run in. The
     # job pulls the published builder, so a builder change is audited again by the weekly run
-    # once the new image is out.
+    # once the new image is out. rust-security-audit.yml's push filter repeats this area.
     "rust_audit": (
         "*.rs",
         "*/Cargo.toml",
         "*/Cargo.lock",
+        "*/rust-toolchain",
+        "*/rust-toolchain.toml",
+        "*/clippy.toml",
+        "*/.clippy.toml",
         ".cargo/",
         "deny.toml",
         "forge/builder/",
