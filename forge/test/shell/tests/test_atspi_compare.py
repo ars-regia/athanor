@@ -140,6 +140,23 @@ class CompareTest(unittest.TestCase):
         )
         self.assertEqual(failures, ["check box 'Option one': state 'checkable' missing"])
 
+    def test_a_disabled_control_may_lack_focusable(self):
+        # doc_own_stack.md, lines 506-508: a disabled control takes no focus (maintainer, 2026-11-05).
+        lines, failures = compare.compare(
+            [node("button", "Waits", ["focusable", "showing"])], [node("button", "Waits", ["showing"])]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("'focusable' absent", lines[0])
+        # Enabled on either side, the control must take the focus.
+        for reference, transcript in [
+            (["focusable", "sensitive"], []),
+            (["focusable"], ["enabled", "sensitive"]),
+        ]:
+            _, failures = compare.compare(
+                [node("button", "Waits", reference)], [node("button", "Waits", transcript)]
+            )
+            self.assertIn("button 'Waits': state 'focusable' missing", failures)
+
     def test_a_check_box_that_is_not_a_gallery_switch_stays_a_check_box(self):
         _, failures = compare.compare(
             [node("check box", "Option one")], [node("toggle button", "Option one")]

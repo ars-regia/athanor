@@ -64,6 +64,11 @@ BUTTONS = {"button", "push button", "toggle button", "check box"}
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").
 SWITCH = ("check box", "toggle button")
+# A disabled control takes no focus (doc_own_stack.md, lines 506-508: "it takes neither the focus
+# nor the pointer"), where GTK keeps an insensitive widget focusable. A control disabled in both
+# trees, neither sensitive in the reference nor enabled or sensitive in the transcript, may lack
+# `focusable` (maintainer, 2026-11-05, #648).
+ENABLED = {"enabled", "sensitive"}
 
 
 def significant(node):
@@ -114,6 +119,9 @@ def known_absence(state, ref, node):
     """Why the transcript may lack `state` of the reference, or None: a known difference."""
     if state == "checkable" and gallery_switch(ref["role"], node["role"], ref["name"]):
         return "AccessKit's toggle button is not checkable (node.rs:336)"
+    disabled = "sensitive" not in ref["states"] and not ENABLED & set(node["states"])
+    if state == "focusable" and disabled:
+        return "a disabled control takes no focus (doc_own_stack.md, lines 506-508)"
     return None
 
 
