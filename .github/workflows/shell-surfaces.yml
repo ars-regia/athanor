@@ -72,12 +72,17 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi greeter it
       - name: Greeter surface cases (12) against the goldens
         run: bash forge/test/shell/rig.sh surface greeter
+      - name: Orca's speech on the greeter against its transcript
+        run: bash forge/test/shell/rig.sh orca greeter
+      - name: Orca's speech on the greeter in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca greeter it
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: shell-rig-greeter
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/greeter-*.png
 
   layout:
@@ -107,6 +112,10 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi chooser it
       - name: Chooser surface cases (12) against the goldens
         run: bash forge/test/shell/rig.sh surface chooser
+      - name: Orca's speech on the chooser against its transcript
+        run: bash forge/test/shell/rig.sh orca chooser
+      - name: Orca's speech on the chooser in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca chooser it
       - name: A preset picked in the chooser applies without a restart
         run: bash forge/test/shell/rig.sh chooser-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -115,6 +124,7 @@ jobs:
           name: shell-rig-layout
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/layout-*.png
             .scratch/shell-rig/chooser-*.png
 
@@ -191,6 +201,10 @@ jobs:
         run: bash forge/test/shell/rig.sh surface toolkit-gallery
       - name: Chooser surface cases (6) against the goldens
         run: bash forge/test/shell/rig.sh surface toolkit-chooser
+      - name: Orca's speech on the gallery against its transcript
+        run: bash forge/test/shell/rig.sh orca gallery
+      - name: Orca's speech on the gallery in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca gallery it
       - name: One layer surface per output as outputs come and go
         run: bash forge/test/shell/rig.sh toolkit-layer
       - name: Tooltip and menu popups of a layer surface
@@ -201,6 +215,7 @@ jobs:
           name: shell-rig-toolkit-surfaces
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/toolkit-gallery-*.png
             .scratch/shell-rig/toolkit-chooser-*.png
 
@@ -244,6 +259,10 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi bar it
       - name: Accessibility tree of the bar with every system module
         run: bash forge/test/shell/rig.sh atspi bar-modules
+      - name: Orca's speech on the bar against its transcript
+        run: bash forge/test/shell/rig.sh orca bar
+      - name: Orca's speech on the bar in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca bar it
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
       - name: The network, Bluetooth, audio and battery modules against their fixtures
@@ -260,6 +279,7 @@ jobs:
           name: shell-rig-bar
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/bar-e2e.png
             .scratch/shell-rig/bar-modules-e2e.png
             .scratch/shell-rig/notifications-e2e.png
@@ -351,6 +371,10 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi dock
       - name: Accessibility tree of the dock in Italian
         run: bash forge/test/shell/rig.sh atspi dock it
+      - name: Orca's speech on the dock against its transcript
+        run: bash forge/test/shell/rig.sh orca dock
+      - name: Orca's speech on the dock in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca dock it
       - name: Openers, running windows, pinning, the knob and presets live, and memory
         run: bash forge/test/shell/rig.sh dock-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -359,6 +383,7 @@ jobs:
           name: shell-rig-dock
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/dock-e2e.png
 
   dock-scene:
@@ -420,10 +445,21 @@ jobs:
         run: bash forge/test/shell/rig.sh surface launcher
       - name: Window preview against its golden
         run: bash forge/test/shell/rig.sh launcher-window-preview
+      - name: Build and test athanor-sulphur
+        run: bash forge/test/shell/rig.sh build-compositor
+      - name: Orca's speech on the launcher under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
+        run: bash forge/test/shell/rig.sh orca launcher
+      - name: Orca's speech on the launcher in Italian under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
+        run: bash forge/test/shell/rig.sh orca launcher it
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: shell-rig-launcher
           path: |
             .scratch/shell-rig/*.log
+            .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/launcher-*.png
