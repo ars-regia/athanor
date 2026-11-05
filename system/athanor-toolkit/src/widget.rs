@@ -314,9 +314,9 @@ pub struct Widget {
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,
     pub(crate) description: Option<String>,
-    /// Takes neither the focus nor the pointer, as GTK's insensitive widgets: see
-    /// [`Ui::set_disabled`].
-    pub(crate) disabled: bool,
+    /// Whether the widget itself takes input, as GTK's `sensitive` property: see
+    /// [`Ui::set_sensitive`].
+    pub(crate) sensitive: bool,
 }
 
 impl Widget {
@@ -331,13 +331,14 @@ impl Widget {
             expanded: None,
             tooltip: None,
             description: None,
-            disabled: false,
+            sensitive: true,
         }
     }
 
-    /// Whether the keyboard can focus the widget: not when it is disabled.
+    /// Whether the keyboard can focus the widget: not when it is insensitive itself. An
+    /// insensitive ancestor makes it unreachable too; see [`Ui::is_sensitive`].
     pub fn is_focusable(&self) -> bool {
-        !self.disabled
+        self.sensitive
             && matches!(
                 self.kind,
                 Kind::Button(_)
@@ -367,7 +368,7 @@ pub enum Event {
     Toggled(WidgetId),
     /// A slider's value changed; ask [`Ui::value`] what it is.
     Changed(WidgetId),
-    /// A field's committed text changed.
+    /// A field's committed text changed, or [`Ui::set_text`] changed a widget's text.
     Edited(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
@@ -731,6 +732,90 @@ impl Ui {
         )
     }
 
+    /// Sets the state of the toggle, check button or switch `id` as activating it would, without
+    /// moving the focus, and returns the event the activation raises: [`Event::Toggled`] for a
+    /// check button or a switch, [`Event::Selected`] for a toggle, which becomes the active one
+    /// of its group and releases the others. Only another toggle of its group releases a
+    /// toggle, as a click does, so setting one inactive changes nothing. `None`, and nothing
+    /// changes, for another kind and for the state the widget already has. An insensitive
+    /// widget is set as well.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_active(&mut self, id: WidgetId, active: bool) -> Option<Event> {
+        match self.widgets[id].kind {
+            Kind::Check {
+                active: ref mut now,
+                ..
+            }
+            | Kind::Switch {
+                active: ref mut now,
+                ..
+            } => {
+                if *now == active {
+                    return None;
+                }
+                *now = active;
+                Some(Event::Toggled(id))
+            }
+            Kind::Toggle { active: false, .. } if active => Some(self.select_toggle(id)),
+            _ => None,
+        }
+    }
+
+    /// Makes the toggle `id` the active one of its group, the toggles that share its parent.
+    fn select_toggle(&mut self, id: WidgetId) -> Event {
+        let siblings = self.widgets[id]
+            .parent
+            .map(|p| self.widgets[p].children.clone())
+            .unwrap_or_default();
+        for s in siblings {
+            if let Kind::Toggle { active, .. } = &mut self.widgets[s].kind {
+                *active = s == id;
+            }
+        }
+        Event::Selected(id)
+    }
+
+    /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
+    /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider or an icon button;
+    /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
+    /// and nothing changes, for the same text, for a field or a text area, whose text
+    /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
+    /// takes, and for a widget that has no text. Call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_text(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        if self.is_fixed(id) {
+            return None;
+        }
+        let now = match &mut self.widgets[id].kind {
+            Kind::Group(t)
+            | Kind::Label(t)
+            | Kind::Button(t)
+            | Kind::MenuItem(t)
+            | Kind::ListRow(t)
+            | Kind::Tooltip(t)
+            | Kind::Toggle { label: t, .. }
+            | Kind::Check { label: t, .. }
+            | Kind::Switch { label: t, .. }
+            | Kind::IconButton { label: t, .. }
+            | Kind::List { name: t, .. }
+            | Kind::Image { description: t, .. } => t,
+            Kind::Slider(slider) => &mut slider.name,
+            _ => return None,
+        };
+        if *now == text {
+            return None;
+        }
+        *now = text.to_owned();
+        Some(Event::Edited(id))
+    }
+
     /// Adds a slider named `name` for assistive technologies, from `min` to `max` in steps of
     /// `step` counted from `min` (`max` is always a value, even when the step does not divide
     /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
@@ -940,6 +1025,7 @@ impl Ui {
                 && self.widgets[id].rect.contains(x, y)
                 && self.clip(id).is_none_or(|c| c.contains(x, y))
                 && self.is_visible(id)
+                && self.is_sensitive(id)
         });
         // The innermost: the one with the most ancestors.
         let depth = |id: WidgetId| {
@@ -1048,14 +1134,33 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
-    /// Disables widget `id`, or enables it again. A disabled widget takes neither the focus,
-    /// which it loses, nor the pointer, nor an activation, an assistive technology reads it as
-    /// unavailable, and a menu's item draws its label faint, as GTK's insensitive widgets.
-    pub(crate) fn set_disabled(&mut self, id: WidgetId, disabled: bool) {
-        self.widgets[id].disabled = disabled;
-        if disabled && self.focus == Some(id) {
-            self.set_focus(None);
+    /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
+    /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
+    /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
+    /// reads it as unavailable; the application's setters still change it. Making the widget
+    /// that has the focus insensitive moves the focus as hiding it does, and a press on it moves
+    /// it no more. The root, the title bar and its children stay sensitive: asking otherwise
+    /// changes nothing.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_sensitive(&mut self, id: WidgetId, sensitive: bool) {
+        if self.is_fixed(id) || self.widgets[id].sensitive == sensitive {
+            return;
         }
+        self.widgets[id].sensitive = sensitive;
+        self.keep_focus();
+    }
+
+    /// Whether `id` and all its ancestors are sensitive: what takes input.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_sensitive(&self, id: WidgetId) -> bool {
+        std::iter::successors(Some(id), |&w| self.widgets[w].parent)
+            .all(|w| self.widgets[w].sensitive)
     }
 
     /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
@@ -1078,7 +1183,10 @@ impl Ui {
     /// When `id` is `Some` id that names no widget of this `Ui`.
     pub fn set_focus(&mut self, id: Option<WidgetId>) {
         match id {
-            Some(id) if !self.widgets[id].is_focusable() || !self.is_visible(id) => {}
+            Some(id)
+                if !self.widgets[id].is_focusable()
+                    || !self.is_visible(id)
+                    || !self.is_sensitive(id) => {}
             Some(id) if self.focus != Some(id) => {
                 self.move_focus(Some(id));
                 self.reveal(id);
@@ -1124,23 +1232,49 @@ impl Ui {
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
-        let in_title_bar = std::iter::successors(Some(id), |&w| self.widgets[w].parent)
-            .any(|w| Some(w) == self.title_bar);
-        if id == Self::ROOT || in_title_bar || self.widgets[id].visible == visible {
+        if self.is_fixed(id) || self.widgets[id].visible == visible {
             return;
         }
-        let before = focus::chain(self);
         self.widgets[id].visible = visible;
-        let Some(at) = self.focus.and_then(|f| before.iter().position(|&w| w == f)) else {
+        self.keep_focus();
+    }
+
+    /// Whether `id` is the root, the title bar or one of its children, which stay shown and
+    /// sensitive.
+    fn is_fixed(&self, id: WidgetId) -> bool {
+        id == Self::ROOT
+            || std::iter::successors(Some(id), |&w| self.widgets[w].parent)
+                .any(|w| Some(w) == self.title_bar)
+    }
+
+    /// Moves the focus off a widget that can no longer hold it, hidden or insensitive. A row of a
+    /// list that still has a stop in the focus chain moves it to that stop, wherever it lies;
+    /// any other widget moves it to the first stop of the chain after it in the order of the
+    /// tree, or else the last one before it.
+    fn keep_focus(&mut self) {
+        let Some(focused) = self.focus else {
             return;
         };
-        if !self.is_visible(before[at]) {
-            let after = focus::chain(self);
-            let next = before[at + 1..].iter().find(|w| after.contains(w));
-            let previous = before[..at].iter().rev().find(|w| after.contains(w));
-            let to = next.or(previous).copied();
-            self.move_focus(to);
+        if self.is_visible(focused) && self.is_sensitive(focused) {
+            return;
         }
+        // The order of the tree, which the chain follows, as `focus::chain` walks it.
+        let mut tree = Vec::with_capacity(self.widgets.len());
+        let mut stack = vec![Self::ROOT];
+        while let Some(w) = stack.pop() {
+            tree.push(w);
+            stack.extend(self.widgets[w].children.iter().rev());
+        }
+        let place = |w: &WidgetId| tree.iter().position(|t| t == w);
+        let here = place(&focused);
+        let chain = focus::chain(self);
+        let list = self.widgets[focused]
+            .parent
+            .filter(|&p| matches!(self.widgets[p].kind, Kind::List { .. }));
+        let row = list.and_then(|l| chain.iter().find(|&&w| self.widgets[w].parent == Some(l)));
+        let next = chain.iter().find(|w| place(w) > here);
+        let previous = chain.iter().rev().find(|w| place(w) < here);
+        self.move_focus(row.or(next).or(previous).copied());
     }
 
     /// Whether `id` and all its ancestors are visible: what the user can see and reach.
@@ -1491,7 +1625,7 @@ impl Ui {
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
-        if !self.is_visible(id) || self.widgets[id].disabled {
+        if !self.is_visible(id) || !self.is_sensitive(id) {
             return None;
         }
         self.set_focus(Some(id));
@@ -1502,18 +1636,7 @@ impl Ui {
                 *active = !*active;
                 Some(Event::Toggled(id))
             }
-            Kind::Toggle { .. } => {
-                let siblings = self.widgets[id]
-                    .parent
-                    .map(|p| self.widgets[p].children.clone())
-                    .unwrap_or_default();
-                for s in siblings {
-                    if let Kind::Toggle { active, .. } = &mut self.widgets[s].kind {
-                        *active = s == id;
-                    }
-                }
-                Some(Event::Selected(id))
-            }
+            Kind::Toggle { .. } => Some(self.select_toggle(id)),
             Kind::ListRow(_) => {
                 let list = self.list_of(id);
                 if let Some(Kind::List { selected, .. }) = list.map(|l| &mut self.widgets[l].kind) {
@@ -1526,13 +1649,14 @@ impl Ui {
     }
 
     /// The focusable widget under the point, in logical pixels; a widget scrolled out of its
-    /// scroll's viewport is not under any.
+    /// scroll's viewport, or insensitive, is not under any.
     pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
         self.ids().find(|&id| {
             self.widgets[id].is_focusable()
                 && self.widgets[id].rect.contains(x, y)
                 && self.clip(id).is_none_or(|c| c.contains(x, y))
                 && self.is_visible(id)
+                && self.is_sensitive(id)
         })
     }
 
@@ -1545,14 +1669,19 @@ impl Ui {
 
     /// The widget under the pointer, which is drawn highlighted, if any.
     pub fn hovered(&self) -> Option<WidgetId> {
-        self.hover.filter(|&id| self.is_visible(id))
+        self.hover
+            .filter(|&id| self.is_visible(id) && self.is_sensitive(id))
     }
 
     /// The pointer moved to the point, in logical pixels: the widget under it is hovered, and a
-    /// press that has moved past [`Ui::DRAG_THRESHOLD`] on either axis starts a drag.
+    /// press that has moved past [`Ui::DRAG_THRESHOLD`] on either axis starts a drag. A press
+    /// on a widget made insensitive since moves nothing and starts no drag.
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
         let id = self.press?.widget;
+        if !self.is_sensitive(id) {
+            return None;
+        }
         if let Kind::Slider(_) = self.widgets[id].kind {
             return self.slide(id, x);
         }
@@ -1638,10 +1767,13 @@ impl Ui {
     /// Pastes `text` into field `id` at its caret, replacing its selection, as typing it would:
     /// without the control characters but a text area's newlines, without the bidirectional
     /// formats, as [`Ui::set_field_text`] takes text from outside, and at most
-    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes takes none, and a paste with no
-    /// text left changes nothing, its selection included.
+    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes or is insensitive takes none, and a
+    /// paste with no text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets.get(id.index())?.kind, Kind::TextArea(_));
+        if !self.is_sensitive(id) {
+            return None;
+        }
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
@@ -1663,8 +1795,11 @@ impl Ui {
     }
 
     /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
-    /// field that composes, or whose selection is no longer `text`, keeps it.
+    /// field that composes, is insensitive, or whose selection is no longer `text`, keeps it.
     pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        if self.widgets.get(id.index()).is_none() || !self.is_sensitive(id) {
+            return None;
+        }
         let (Kind::Field(field) | Kind::TextArea(field)) =
             &mut self.widgets.0.get_mut(id.index())?.kind
         else {
@@ -1691,7 +1826,7 @@ impl Ui {
 
     /// The context menu of field `id`, in this window's theme and direction, and the key each
     /// of its items does in the field with [`Ui::field_edit`]; `None` if `id` is not a field.
-    /// An item that does not apply is disabled, as in GTK's: Cut, Copy and Delete without a
+    /// An item that does not apply is insensitive, as in GTK's: Cut, Copy and Delete without a
     /// selection, Paste without text on the clipboard (`can_paste`), Select All in an empty
     /// field, and every item while the input method composes, as the field then takes no edit
     /// but the composition's.
@@ -1721,7 +1856,7 @@ impl Ui {
                 menu.add(list, Kind::Separator);
             }
             let item = menu.add(list, Kind::MenuItem(label.into()));
-            menu.set_disabled(item, !applies);
+            menu.set_sensitive(item, applies);
             items.push((item, key));
         }
         Some((menu, items))
@@ -1782,9 +1917,13 @@ impl Ui {
         let press = self.press.take()?;
         match &self.widgets[press.widget].kind {
             Kind::Slider(_) => return None,
-            // The text a drag selected is the primary selection.
+            // The text a drag selected is the primary selection, unless the field turned
+            // insensitive during the drag.
             Kind::Field(field) | Kind::TextArea(field) => {
-                if let Some(text) = field.selected_text() {
+                if let Some(text) = field
+                    .selected_text()
+                    .filter(|_| self.is_sensitive(press.widget))
+                {
                     self.offered = Some((press.widget, text.clone()));
                     self.clips.push(Clip::Select(text));
                 }
@@ -1914,7 +2053,9 @@ impl Ui {
             }
         }
         if let Some((list, id)) = focused.and_then(|id| Some((self.list_of(id)?, id))) {
-            let rows = self.visible_children(list);
+            // The arrows skip an insensitive row, as GTK's ListBox does.
+            let mut rows = self.visible_children(list);
+            rows.retain(|&r| self.widgets[r].sensitive);
             let at = rows.iter().position(|&r| r == id).unwrap_or(0);
             let last = rows.len().saturating_sub(1);
             let to = match key {
@@ -3712,24 +3853,263 @@ mod tests {
     }
 
     #[test]
-    fn a_disabled_widget_takes_neither_the_focus_nor_the_pointer_nor_an_activation() {
+    fn an_insensitive_widget_takes_neither_the_focus_nor_the_pointer_nor_an_activation() {
         let mut ui = Ui::new("Menu", Theme::default(), false);
         let list = ui.add(Ui::ROOT, Kind::Menu);
         let cut = ui.add(list, Kind::MenuItem("Cut".into()));
         let paste = ui.add(list, Kind::MenuItem("Paste".into()));
         ui.layout();
         ui.set_focus(Some(cut));
-        ui.set_disabled(cut, true);
-        assert_eq!(ui.focus(), None, "a widget disabled loses the focus");
+        ui.set_sensitive(cut, false);
+        assert!(!ui.is_sensitive(cut));
+        assert_eq!(
+            ui.focus(),
+            Some(paste),
+            "the focus moves on, as from a widget hidden"
+        );
         assert!(!ui.widget(cut).is_focusable());
         ui.set_focus(Some(cut));
-        assert_eq!(ui.focus(), None);
+        assert_eq!(ui.focus(), Some(paste));
         let r = ui.widget(cut).rect;
         assert_eq!(ui.hit(r.x + 1.0, r.y + 1.0), None);
         assert_eq!(ui.activate(cut), None);
         assert_eq!(ui.activate(paste), Some(Event::Clicked(paste)));
-        ui.set_disabled(cut, false);
+        ui.set_sensitive(cut, true);
+        assert!(ui.is_sensitive(cut));
         assert_eq!(ui.activate(cut), Some(Event::Clicked(cut)));
+    }
+
+    #[test]
+    fn an_insensitive_group_makes_everything_under_it_insensitive() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("First".into()));
+        let group = ui.add(Ui::ROOT, Kind::Group("Group".into()));
+        let inside = ui.add(group, Kind::Button("Inside".into()));
+        let slider = ui
+            .slider(group, "Volume", 0.0, 10.0, 1.0, 5.0)
+            .expect("a valid range");
+        let last = ui.add(Ui::ROOT, Kind::Button("Last".into()));
+        ui.layout();
+        let centre = |ui: &Ui, id| {
+            let r = ui.widget(id).rect;
+            (r.x + r.w / 2.0, r.y + r.h / 2.0)
+        };
+        let (sx, sy) = centre(&ui, slider);
+        ui.pointer_press(sx, sy, PointerButton::Primary);
+        let (ix, iy) = centre(&ui, inside);
+        ui.set_focus(Some(inside));
+        ui.pointer_motion(ix, iy);
+        assert_eq!(ui.hovered(), Some(inside));
+        let held = ui.value(slider);
+
+        ui.set_sensitive(group, false);
+        assert!(!ui.is_sensitive(group) && !ui.is_sensitive(inside) && !ui.is_sensitive(slider));
+        assert!(
+            ui.is_sensitive(first) && ui.widget(inside).is_focusable(),
+            "each keeps its own state"
+        );
+        assert_eq!(
+            ui.focus(),
+            Some(last),
+            "the focus moves to the next widget that takes it"
+        );
+        assert_eq!(ui.hovered(), None);
+        assert_eq!(focus::chain(&ui), vec![first, last]);
+        assert_eq!(ui.hit(ix, iy), None);
+        assert_eq!(ui.click(ix, iy), None);
+        assert_eq!(ui.activate(inside), None);
+        ui.set_focus(Some(inside));
+        assert_eq!(ui.focus(), Some(last));
+        // A press made before moves the slider no more.
+        assert_eq!(ui.pointer_motion(ui.widget(slider).rect.x, sy), None);
+        assert_eq!(
+            ui.pointer_release(ui.widget(slider).rect.x, sy, PointerButton::Primary),
+            None
+        );
+        assert_eq!(ui.value(slider), held);
+        // The application still sets it, as GTK's setters do.
+        assert_eq!(ui.set_value(slider, 7.0), Some(Event::Changed(slider)));
+
+        ui.set_sensitive(Ui::ROOT, false);
+        assert!(
+            ui.is_sensitive(Ui::ROOT),
+            "the root cannot be made insensitive"
+        );
+        ui.set_sensitive(group, true);
+        assert!(ui.is_sensitive(inside) && ui.is_sensitive(slider));
+        assert_eq!(focus::chain(&ui), vec![first, inside, slider, last]);
+    }
+
+    #[test]
+    fn an_insensitive_row_is_skipped_by_the_keyboard() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let rows: Vec<WidgetId> = ["A", "B", "C"]
+            .iter()
+            .map(|t| ui.list_row(list, t))
+            .collect();
+        ui.layout();
+        ui.set_sensitive(rows[0], false);
+        assert_eq!(
+            focus::chain(&ui),
+            vec![rows[1]],
+            "the first sensitive row is the list's stop"
+        );
+        ui.set_sensitive(rows[0], true);
+        ui.set_focus(Some(rows[0]));
+        ui.set_sensitive(rows[1], false);
+        assert_eq!(
+            ui.key(Key::Down),
+            Some(Event::Selected(rows[2])),
+            "Down skips the row"
+        );
+        assert_eq!(ui.focus(), Some(rows[2]));
+    }
+
+    #[test]
+    fn the_focus_moves_to_another_row_when_its_row_goes() {
+        for hide in [false, true] {
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let (a, b) = (ui.list_row(list, "A"), ui.list_row(list, "B"));
+            ui.layout();
+            let set = |ui: &mut Ui, row, on| {
+                if hide {
+                    ui.set_visible(row, on);
+                } else {
+                    ui.set_sensitive(row, on);
+                }
+            };
+            ui.set_focus(Some(a));
+            set(&mut ui, a, false);
+            assert_eq!(ui.focus(), Some(b), "the next row, hidden: {hide}");
+            set(&mut ui, a, true);
+            set(&mut ui, b, false);
+            assert_eq!(ui.focus(), Some(a), "the previous row, hidden: {hide}");
+
+            // The list's stop takes the focus, though it comes before the row that went and a
+            // button comes after the list.
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let a = ui.list_row(list, "A");
+            ui.list_row(list, "B");
+            let c = ui.list_row(list, "C");
+            ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(a));
+            assert_eq!(ui.key(Key::End), Some(Event::Selected(c)));
+            set(&mut ui, c, false);
+            assert_eq!(ui.focus(), Some(a), "the list's stop, hidden: {hide}");
+        }
+    }
+
+    #[test]
+    fn an_insensitive_field_takes_no_input_that_arrives_after() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        ui.layout();
+        let r = ui.widget(name).rect;
+        let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+        ui.pointer_press(start, y, PointerButton::Primary);
+        ui.pointer_motion(end, y);
+        ui.set_sensitive(name, false);
+        ui.pointer_release(end, y, PointerButton::Primary);
+        assert!(ui.take_clips().is_empty(), "no selection is offered");
+        assert_eq!(ui.paste(name, "x"), None, "a queued paste");
+        assert_eq!(ui.cut(name, "abc"), None, "a queued cut");
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        ui.set_sensitive(name, true);
+        assert_eq!(ui.cut(name, "abc"), Some(Event::Edited(name)));
+    }
+
+    #[test]
+    fn an_insensitive_scroll_does_not_follow_the_wheel() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let list = ui.list(scroll, "Rows");
+        for n in 0..20 {
+            ui.list_row(list, &n.to_string());
+        }
+        ui.layout();
+        let r = ui.widget(scroll).rect;
+        ui.set_sensitive(scroll, false);
+        assert!(!ui.pointer_axis(r.x + 1.0, r.y + 1.0, 30.0));
+        ui.set_sensitive(scroll, true);
+        assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, 30.0));
+    }
+
+    #[test]
+    fn set_active_turns_a_check_or_a_switch_and_selects_a_toggle_as_activating_does() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let (a, b) = (ui.toggle(row, "A", true), ui.toggle(row, "B", false));
+        let check = ui.check(Ui::ROOT, "C", false);
+        let switch = ui.switch(Ui::ROOT, "D", true);
+        let label = ui.add(Ui::ROOT, Kind::Label("E".into()));
+        ui.layout();
+
+        assert_eq!(ui.set_active(check, true), Some(Event::Toggled(check)));
+        assert_eq!(
+            ui.set_active(check, true),
+            None,
+            "a check already on stays as it is"
+        );
+        assert_eq!(ui.set_active(switch, false), Some(Event::Toggled(switch)));
+        assert_eq!([check, switch].map(|id| ui.is_active(id)), [true, false]);
+        // A toggle becomes the active one of its group and releases the others; only another
+        // toggle of the group releases it, as a click does.
+        assert_eq!(ui.set_active(b, true), Some(Event::Selected(b)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, true]);
+        assert_eq!(ui.set_active(b, true), None);
+        assert_eq!(ui.set_active(b, false), None);
+        assert!(ui.is_active(b));
+        assert_eq!(ui.set_active(label, true), None, "a label has no state");
+        // Unlike an activation, a setter leaves the focus where it is, and reaches an
+        // insensitive widget.
+        assert_eq!(ui.focus(), None);
+        ui.set_sensitive(check, false);
+        assert_eq!(ui.set_active(check, false), Some(Event::Toggled(check)));
+        assert!(!ui.is_active(check));
+    }
+
+    #[test]
+    fn set_text_replaces_what_a_widget_shows_or_is_named_by() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("Idle".into()));
+        let button = ui.add(Ui::ROOT, Kind::Button("Go".into()));
+        let check = ui.check(Ui::ROOT, "On", false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.add_title_bar();
+        ui.layout();
+        let narrow = ui.widget(label).rect.w;
+
+        let text = "Downloading the update";
+        assert_eq!(ui.set_text(label, text), Some(Event::Edited(label)));
+        assert_eq!(
+            ui.set_text(label, text),
+            None,
+            "the same text changes nothing"
+        );
+        ui.layout();
+        assert!(
+            ui.widget(label).rect.w > narrow,
+            "the next layout shapes the new text"
+        );
+        assert_eq!(ui.set_text(button, "Stop"), Some(Event::Edited(button)));
+        assert_eq!(ui.set_text(check, "Off"), Some(Event::Edited(check)));
+        assert_eq!(ui.set_text(list, "Others"), Some(Event::Edited(list)));
+        assert!(matches!(&ui.widget(button).kind, Kind::Button(t) if t == "Stop"));
+        assert!(matches!(&ui.widget(check).kind, Kind::Check { label, .. } if label == "Off"));
+        assert!(matches!(&ui.widget(list).kind, Kind::List { name, .. } if name == "Others"));
+        // A field's text is set_field_text's, the title bar's is the window's title, and a
+        // column has none.
+        assert_eq!(ui.set_text(field, "b"), None);
+        assert_eq!(ui.field_text(field).as_deref(), Some("a"));
+        let title = ui.widget(ui.widget(Ui::ROOT).children[0]).children[0];
+        assert_eq!(ui.set_text(title, "Other"), None);
+        assert!(matches!(&ui.widget(title).kind, Kind::Label(t) if t == "Test"));
+        assert_eq!(ui.set_text(Ui::ROOT, "Root"), None);
     }
 
     #[test]
