@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -74,6 +74,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- The fetch of a signature or attestation attachment reads its manifest first, within the
+  verifier's manifest cap, and copies nothing when the manifest is an index or names a blob
+  above the verifier's payload cap; the copy names the digest of the manifest read, and each
+  skopeo call is killed after 30 seconds (#658).
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Each check removes the stored signature objects as it does the release attestations,
   keeping those of the booted, staged, rollback and candidate digests (#666).
