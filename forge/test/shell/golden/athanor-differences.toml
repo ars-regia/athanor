@@ -8,7 +8,6 @@
 #   #918: at scale 1.5 cosmic-comp places a window at a fractional logical offset and athanor-sulphur at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides
 #   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none
-#   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
 #
 # Decision 28 of doc_own_stack.md hides controls under the own compositor until their replacement
 # comes: one entry per case and hidden control, covering its absence and the move it causes, for
@@ -288,34 +287,9 @@ cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offs
 issue = 918
 
 [[difference]]
-case = "launcher-light-1.0-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.0-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.0-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
 case = "launcher-light-1.5-en"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
 
 [[difference]]
 case = "launcher-light-1.5-de"
@@ -324,33 +298,8 @@ issue = 743
 
 [[difference]]
 case = "launcher-light-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "launcher-dark-1.0-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.0-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.0-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-en"
@@ -359,18 +308,8 @@ issue = 743
 
 [[difference]]
 case = "launcher-dark-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-de"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-rtl"
