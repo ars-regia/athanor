@@ -296,7 +296,7 @@ jobs:
             # syft's image source: with about 120 layers and 270k files that source needs
             # more than 20 GiB and took the runner down (sbom_rootfs.sh).
             nix shell --inputs-from . nixpkgs#syft -c bash forge/scripts/sbom_rootfs.sh "${image}" "${name}-sbom.spdx.json"
-            nix shell nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
+            nix shell --inputs-from . nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
           done
 
       - name: 🧹 Free the NVIDIA images before the ISO

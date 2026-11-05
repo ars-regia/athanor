@@ -118,7 +118,7 @@ jobs:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
-          nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+          nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
 
       - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
         if: steps.check.outputs.skip != 'true'
