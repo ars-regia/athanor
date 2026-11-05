@@ -113,6 +113,31 @@ class PanickingMacrosTest(unittest.TestCase):
         )
         self.assertEqual(self.counts(src), [])
 
+    def test_text_that_is_not_a_call_counts_zero(self):
+        src = (
+            'fn a() { let s = "x.unwrap() assert!(x)"; }\n'
+            'fn b() { let s = r#"panic!(\\"q\\") .expect("#; let t = r"todo!(x)"; }\n'
+            'fn c() { let s = b"unreachable!(x)"; let e = "\\" .unwrap()"; }\n'
+            "fn d() { let q = '\"'; let e = '\\''; } // assert!(x)\n"
+            "/* assert!(x) /* nested .unwrap() */ still .expect( */\n"
+            "fn e() {}\n"
+        )
+        self.assertEqual(self.counts(src), [])
+
+    def test_code_after_literals_and_comments_still_counts(self):
+        src = "fn a() { let q = '\"'; /* /* */ x.unwrap() */ assert!(\"m\"); }\n"
+        self.assertEqual(self.counts(src), ["assert!("])
+
+    def test_a_macro_rules_body_counts_where_it_panics(self):
+        src = "macro_rules! m { () => { assert!(x) } }\n"
+        self.assertEqual(self.counts(src), ["assert!("])
+
+    def test_without_literals_keeps_line_numbers(self):
+        src = 'let a = "x\ny"; /* a\nb */ let b = 1;\n'
+        out = verify.without_literals(src)
+        self.assertEqual(out.count("\n"), src.count("\n"))
+        self.assertEqual(len(out), len(src))
+
 
 MACROS = (
     "assert!(", "assert_eq!(", "assert_ne!(", "unreachable!(", "todo!(", "unimplemented!(",

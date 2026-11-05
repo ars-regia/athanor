@@ -2068,6 +2068,23 @@ def without_test_items(txt):
     return "".join(out)
 
 
+def without_literals(txt):
+    """`txt` with each string, character literal and comment (line or block) blanked, newlines
+    kept so that line numbers hold: a budget key in text that is not a call is not a panic.
+    The body of a `macro_rules!` is code and stays: it panics where the macro is expanded."""
+    out, at, i = [], 0, 0
+    while i < len(txt):
+        j = skip_rust(txt, i)
+        if j == i:
+            i += 1
+            continue
+        out.append(txt[at:i])
+        out.append(re.sub(r"[^\n]", " ", txt[i:j]))
+        at = i = j
+    out.append(txt[at:])
+    return "".join(out)
+
+
 @check("panics", "Il budget di panic in codice non di test non cresce")
 def check_panics():
     r = Result()
@@ -2079,9 +2096,8 @@ def check_panics():
     for p in files:
         if is_test_file(p) or p in test_modules:
             continue
-        txt = without_test_items(read(p))
-        for i, line in enumerate(txt.split("\n"), 1):
-            code = line.split("//")[0]
+        txt = without_literals(without_test_items(read(p)))
+        for i, code in enumerate(txt.split("\n"), 1):
             for k in BUDGET:
                 n = count_panic(code, k)
                 if n:
