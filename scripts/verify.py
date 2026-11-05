@@ -3466,6 +3466,45 @@ def check_registry():
     return r
 
 
+# PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
+# nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
+# `nixpkgs/<ref>#` names a ref of its own, which --inputs-from does not pin.
+PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
+NIXPKGS_REF = re.compile(r"(?<![\w./:-])nixpkgs(/[\w.-]+)?#[\w.+-]+")
+
+
+def pinning_problems(root):
+    """Every nixpkgs#<tool> a workflow, action, recipe or script runs comes with --inputs-from
+    earlier on the same line, so nixpkgs is the locked input of the repository flake."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in PINNING_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(set(paths)):
+        relative = path.relative_to(root)
+        # Unit test fixtures need an unpinned reference to prove the check reports one.
+        if (not path.is_file() or relative.parts[1:2] == ("tests",)
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in enumerate(read(path).split("\n"), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for ref in NIXPKGS_REF.finditer(line):
+                if ref.group(1) or "--inputs-from " not in line[:ref.start()]:
+                    problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
+                                    f"it with --inputs-from <checkout> so nixpkgs is flake.lock's")
+    return problems
+
+
+@check("pinning", "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)")
+def check_pinning():
+    r = Result()
+    for problem in pinning_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Golden rules 2 and 3 of docs/architecture/doc_forge_development_guide.md.
 SPEC_SECTION = re.compile(
     r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
