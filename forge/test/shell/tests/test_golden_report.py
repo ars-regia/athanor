@@ -197,7 +197,7 @@ class GoldenReportTest(unittest.TestCase):
         import tomllib
 
         entries = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8")).get("difference", [])
-        # Every case differs today (#736): each must name every control it draws and hides.
+        # Every case has an entry today: each must name every control it draws and hides.
         results = [gr.Result(s, t, 10**6, 64, False) for s, t in gr.expected(gr.surfaces())]
         self.assertEqual(gr.report(results, entries)[1], [])
 

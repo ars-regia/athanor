@@ -1491,26 +1491,17 @@ fn headless_on_a_render_node() {
     fixture(Some(&node));
 }
 
-/// The background is Calmo's dark `bg1` as the generator derives it from tokens.toml; the
-/// generator's own check keeps the sheet in step with the tokens.
+/// The background is cosmic-comp 1.11's `CLEAR_COLOR` (src/backend/render/mod.rs), which its
+/// goldens carry wherever no surface is, in 8-bit sRGB.
 #[test]
-fn the_background_is_calmo_bg1() {
-    let sheet = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../system/athanor-style/calmo/generated/css/calmo-dark.css");
-    let sheet = std::fs::read_to_string(sheet).expect("calmo-dark.css");
-    let hex = sheet
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("@define-color ath_bg1 #")?
-                .strip_suffix(';')
-        })
-        .expect("ath_bg1 in calmo-dark.css");
+fn the_background_is_cosmic_comps_clear_colour() {
+    let cosmic: [f32; 3] = [0.153, 0.161, 0.165];
     let bytes = BACKGROUND.map(|c| (c * 255.0).round() as u8);
-    assert_eq!(
-        format!("{:02x}{:02x}{:02x}", bytes[0], bytes[1], bytes[2]),
-        hex
-    );
+    assert_eq!(bytes[..3], cosmic.map(|c| (c * 255.0).round() as u8));
+    assert_eq!(bytes[..3], [39, 41, 42]);
+    assert_eq!(bytes[3], 255);
 }
+
 /// What the test asks its second client, the shell's stand-in, to do next.
 enum Step {
     /// A top-layer surface along the output's top edge, 50 high, with an exclusive zone of 50

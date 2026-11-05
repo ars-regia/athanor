@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        18%{?dist}
+Release:        19%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,6 +55,11 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-19
+- Clear the outputs to cosmic-comp's clear colour, srgb(39,41,42), in place of Calmo's
+  dark bg1, so that the shell's surfaces match the cosmic-comp goldens where no surface
+  is drawn (#736).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
 - Rename the package, its binaries, its user unit and its session script from
   athanor-compositor to athanor-sulphur, and its data directory from
