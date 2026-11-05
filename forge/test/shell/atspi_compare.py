@@ -69,6 +69,10 @@ SWITCH = ("check box", "toggle button")
 # trees, neither sensitive in the reference nor enabled or sensitive in the transcript, may lack
 # `focusable` (maintainer, 2026-11-05, #648).
 ENABLED = {"enabled", "sensitive"}
+# The gallery's pages whose tree is known to differ from GTK's, each with its issue: still compared
+# and reported, its differences are notes, and the page fails once it holds no difference, so that
+# the entry is removed with the fix (maintainer, 2026-11-05, #648).
+EXPECTED_DIFFERENCES = {"lists": 982}  # the list's role, focus, rows and scroll bar
 
 
 def significant(node):
@@ -195,7 +199,8 @@ def compare(reference, transcript, exempt=None):
 
 def gallery_problems(references, transcripts, lang):
     """Returns (lines, failures) for the gallery's pages, each compared on its own and its lines
-    prefixed with the page; a page with no reference or no transcript is a failure."""
+    prefixed with the page; a page with no reference or no transcript is a failure. A page of
+    EXPECTED_DIFFERENCES reports its failures as expected, and fails when it has none."""
     suffix = "" if lang == "en" else f"-{lang}"
     lines, failures = [], []
     for page in GALLERY_PAGES:
@@ -210,7 +215,13 @@ def gallery_problems(references, transcripts, lang):
         )
         found, failed = compare(reference, transcript)
         lines += [f"{page}: {line}" for line in found]
-        failures += [f"{page}: {line}" for line in failed]
+        issue = EXPECTED_DIFFERENCES.get(page)
+        if issue is None:
+            failures += [f"{page}: {line}" for line in failed]
+        elif failed:
+            lines += [f"{page}: expected difference (#{issue}): {line}" for line in failed]
+        else:
+            failures.append(f"{page}: no difference left; remove its expected difference (#{issue})")
     return lines, failures
 
 
