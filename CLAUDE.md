@@ -34,14 +34,15 @@ applies to Claude Code only.
   `mergeable` is `MERGEABLE`; `reviewDecision` is `REVIEW_REQUIRED`, `APPROVED` or empty
   (`required_approving_review_count` 0, ADR-0107, leaves it empty after an approval); no
   reviewer's latest review in `gh pr view <n> --json reviews` is `CHANGES_REQUESTED`; base and
-  head sha equal the card's; every check of the head that ran comes from a workflow run created
-  after the base's head commit landed, at its first attempt (`created_at` and `run_attempt` of
-  `gh api repos/<repo>/actions/runs/<id>`, the id from each check's `detailsUrl` in
-  `gh pr view <n> --json statusCheckRollup`), since a run takes the base of the event that
-  created it and a re-run keeps it. The landing time is the base commit's committer date, which
-  GitHub sets when it merges; on a base that also takes pushes, such as `rebase/*`, the base is
-  always merged into the branch first. When a run is older or re-run, the base is merged into
-  the branch and the card waits for the new checks *(maintainer decision, 2026-11-05: #1000
+  head sha equal the card's. The checks ran on the current base: either the head contains the
+  base head (`git merge-base --is-ancestor <base sha> <head sha>`), or every workflow run behind
+  the head's checks (the run id in each check's `detailsUrl` in
+  `gh pr view <n> --json statusCheckRollup`) was created more than a minute after the base head
+  landed (`created_at` of `gh api repos/<repo>/actions/runs/<id>` against the base commit's
+  committer date, which GitHub sets when it merges), since a run keeps the base of the event
+  that created it, through a queue or a re-run. A check with no workflow run, and a base that
+  also takes pushes, such as `rebase/*`, take the first way only. Otherwise the base is merged
+  into the branch and the card waits for the new checks *(maintainer decision, 2026-11-05: #1000
   merged on checks that predated #992, and `iso-v0` failed the toolkit-surfaces job until
   #1012)*. A new commit or a retarget voids the card and any approval on it.
 
