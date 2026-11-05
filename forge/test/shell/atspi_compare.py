@@ -20,6 +20,7 @@ from pathlib import Path
 
 from atspi_check import INTERACTIVE
 from golden_report import exemptions
+from orca_compare import switch_labels
 
 # States that tell when the tree was read, not what the widget is: which widget holds the focus
 # and whether the window is the active one depend on the compositor's timing.
@@ -46,6 +47,13 @@ SAME_ROLE = [
 # repeats its button's name counts as part of the button; a label under any other parent is
 # its own element, as the title under the window.
 BUTTONS = {"button", "push button", "toggle button"}
+# A switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
+# button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
+# switch, a sibling that repeats its name, where the toolkit's switch draws both as one widget:
+# that label counts as part of the switch. Both rules hold only for a check box that names a
+# switch of the gallery (the `switch` and `enable` keys of its strings.tsv): a real check box,
+# whatever its label, said as a toggle button still fails.
+SWITCH = ("check box", "toggle button")
 
 
 def significant(node):
@@ -59,11 +67,12 @@ def significant(node):
 def spoken(nodes):
     """The significant nodes, less the labels that repeat their button's name: a screen reader
     speaks the two once, as the button's name (BUTTONS). Any other child, an image for one,
-    stays an element of its own."""
-    parents, out = [], []
+    stays an element of its own. So are the labels beside a gallery's switch (SWITCH)."""
+    parents, out, parent_of = [], [], []
     for node in nodes:
         del parents[node["depth"]:]
         parent = parents[-1] if parents else None
+        parent_of.append(id(parent))
         repeats = (
             node["role"] == "label"
             and parent
@@ -73,7 +82,22 @@ def spoken(nodes):
         if significant(node) and not (node["name"] and repeats):
             out.append(node)
         parents.append(node)
-    return out
+    switches = {
+        (parent, node["name"])
+        for node, parent in zip(nodes, parent_of)
+        if node["role"] == SWITCH[0] and node["name"] and node["name"] in switch_labels()
+    }
+    beside = {
+        id(node)
+        for node, parent in zip(nodes, parent_of)
+        if node["role"] == "label" and (parent, node["name"]) in switches
+    }
+    return [node for node in out if id(node) not in beside]
+
+
+def gallery_switch(reference_role, role, name):
+    """A check box of the reference that names a gallery's switch, said as a toggle button."""
+    return (reference_role, role) == SWITCH and name in switch_labels()
 
 
 def same_role(a, b):
@@ -115,7 +139,10 @@ def compare(reference, transcript, exempt=None):
             continue
         candidates.remove(match)
         problems, notes = [], []
-        if not same_role(match["role"], ref["role"]):
+        if not (
+            same_role(match["role"], ref["role"])
+            or gallery_switch(ref["role"], match["role"], ref["name"])
+        ):
             problems.append(f"role {match['role']!r}")
         elif match["role"] != ref["role"]:
             notes.append(f"role {match['role']!r}")

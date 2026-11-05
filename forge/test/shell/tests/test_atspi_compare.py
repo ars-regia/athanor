@@ -107,6 +107,34 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare([node("label", "Sample text")], [node("entry", "Sample text")])
         self.assertEqual(failures, ["label 'Sample text': role 'entry'"])
 
+    def test_a_gallery_switch_and_the_label_beside_it_are_a_toggle_button(self):
+        for name in ("A switch", "Abilita il pulsante"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable", "checked"]), depth=1),
+            ]
+            transcript = [node("toggle button", name, ["checkable", "pressed"])]
+            lines, failures = compare.compare(reference, transcript)
+            self.assertEqual(failures, [])
+            self.assertEqual(len(lines), 1)
+            self.assertIn("note: role 'toggle button'", lines[0])
+
+    def test_a_check_box_that_is_not_a_gallery_switch_stays_a_check_box(self):
+        _, failures = compare.compare(
+            [node("check box", "Option one")], [node("toggle button", "Option one")]
+        )
+        self.assertEqual(failures, ["check box 'Option one': role 'toggle button'"])
+        # A label beside another parent's switch is its own element.
+        reference = [
+            node("panel", ""),
+            dict(node("check box", "A switch"), depth=1),
+            node("panel", ""),
+            dict(node("label", "A switch"), depth=1),
+        ]
+        _, failures = compare.compare(reference, [node("toggle button", "A switch")])
+        self.assertEqual(failures, ["label 'A switch': missing"])
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
