@@ -12,6 +12,8 @@ URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
 BuildRequires:  dbus-daemon
+# prlimit: the %check bounds a stub skopeo with the real one.
+BuildRequires:  util-linux
 Requires:       bootc skopeo ostree systemd polkit containers-common util-linux
 
 %description

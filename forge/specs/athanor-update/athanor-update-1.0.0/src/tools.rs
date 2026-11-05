@@ -324,7 +324,7 @@ struct Blob {
 /// attaches to the attachment itself (`--remove-signatures`): their layers have no bound, and
 /// nothing reads them. The copy names the digest of the manifest read, so the registry cannot serve
 /// it another one. Each call is killed past `bounds.time`.
-fn fetch_attachment(skopeo: &str, repository: &str, digest: &str, suffix: &str, dest: &Path, bounds: Bounds) -> Result<(), Failure> {
+fn fetch_attachment(prlimit: &str, skopeo: &str, repository: &str, digest: &str, suffix: &str, dest: &Path, bounds: Bounds) -> Result<(), Failure> {
     let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
     let host = host_of(repository);
     let tagged = format!("docker://{repository}:sha256-{hex}.{suffix}");
@@ -344,7 +344,7 @@ fn fetch_attachment(skopeo: &str, repository: &str, digest: &str, suffix: &str, 
     let pinned = format!("docker://{repository}@sha256:{}", hex::encode(Sha256::digest(&raw)));
     let dest = format!("dir:{}", dest.display());
     let fsize = format!("--fsize={}", (raw.len() as u64).max(bounds.blob));
-    run_bounded(PRLIMIT, &[fsize.as_str(), "--", skopeo, "copy", "--remove-signatures", "--policy", ATTACHMENTS_POLICY, &pinned, &dest], host, None, bounds.time).map(drop).map_err(|(failure, stderr)| {
+    run_bounded(prlimit, &[fsize.as_str(), "--", skopeo, "copy", "--remove-signatures", "--policy", ATTACHMENTS_POLICY, &pinned, &dest], host, None, bounds.time).map(drop).map_err(|(failure, stderr)| {
         // EFBIG, as Go and coreutils word it: a blob larger than the limit, whatever it declared.
         if stderr.to_ascii_lowercase().contains("file too large") {
             out_of_bounds
@@ -486,12 +486,12 @@ impl Tools for System {
 
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
         let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time: FETCH_TIME };
-        fetch_attachment(SKOPEO, repository, digest, "sig", dest, bounds)
+        fetch_attachment(PRLIMIT, SKOPEO, repository, digest, "sig", dest, bounds)
     }
 
     fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
         let bounds = Bounds { manifest: crate::attestation::MAX_MANIFEST, blob: crate::attestation::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time: FETCH_TIME };
-        fetch_attachment(SKOPEO, repository, digest, "att", dest, bounds)
+        fetch_attachment(PRLIMIT, SKOPEO, repository, digest, "att", dest, bounds)
     }
 
     fn metered(&self) -> bool {
@@ -670,7 +670,9 @@ mod tests {
 
         fn fetch(&self, time: Duration) -> Result<(), Failure> {
             let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time };
-            fetch_attachment(self.dir.join("skopeo").to_str().expect("utf-8"), REPO, DIGEST, "sig", &self.dir.join("store"), bounds)
+            // The real prlimit, found on PATH as the bus tests find dbus-daemon: the RPM build
+            // root has no /usr/bin, and its util-linux is under /bin.
+            fetch_attachment("prlimit", self.dir.join("skopeo").to_str().expect("utf-8"), REPO, DIGEST, "sig", &self.dir.join("store"), bounds)
         }
 
         fn copied(&self) -> bool {
