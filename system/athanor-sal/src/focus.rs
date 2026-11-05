@@ -14,14 +14,8 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
         if !ui.widget(id).visible || !ui.widget(id).sensitive {
             continue;
         }
-        if let Kind::List { selected, .. } = ui.widget(id).kind {
-            let mut rows = ui.visible_children(id);
-            rows.retain(|&r| ui.widget(r).sensitive);
-            let stop = [ui.focus(), selected]
-                .into_iter()
-                .flatten()
-                .find(|r| rows.contains(r));
-            out.extend(stop.or(rows.first().copied()));
+        if let Kind::List { .. } = ui.widget(id).kind {
+            out.extend(list_stop(ui, id));
             continue;
         }
         if ui.widget(id).is_focusable() {
@@ -30,6 +24,21 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
         stack.extend(ui.widget(id).children.iter().rev());
     }
     out
+}
+
+/// The row of the list `id` that takes the focus: its focused row, else its selected row, else
+/// its first; none of its hidden or insensitive rows, and none when `id` is not a list.
+pub fn list_stop(ui: &Ui, id: WidgetId) -> Option<WidgetId> {
+    let Kind::List { selected, .. } = ui.widget(id).kind else {
+        return None;
+    };
+    let mut rows = ui.visible_children(id);
+    rows.retain(|&r| ui.widget(r).sensitive);
+    let stop = [ui.focus(), selected]
+        .into_iter()
+        .flatten()
+        .find(|r| rows.contains(r));
+    stop.or(rows.first().copied())
 }
 
 /// The next focusable widget after the focused one, or before it when `backwards`, wrapping
