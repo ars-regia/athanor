@@ -54,7 +54,7 @@
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
+#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
@@ -1305,8 +1305,8 @@ orca)
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
     # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
-    # athanor-sal's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
-    # of the Containerfile's rig stage.
+    # athanor-sal's. The rig stage installs Orca and wtype; the published rig carries them since
+    # the image pinned by #974, and shell-surfaces.yml compares every transcript (#954).
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
     # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
     # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-sulphur, the clients
