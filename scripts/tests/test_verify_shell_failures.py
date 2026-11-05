@@ -56,7 +56,10 @@ class HiddenFailuresTest(unittest.TestCase):
     def test_the_constructs_listed_in_801_are_found(self):
         for line in ("run 2>|/dev/null", "run >| /dev/null 2>&1", "run || { true; }",
                      "run || { : }", "run || (exit 0)", "run || (true)", "run || echo x; true",
-                     "run || echo x; :"):
+                     "run || echo x; :",
+                     "run || ( exit 0 ; )", "run || (true; )", "run || echo x; exit 0",
+                     "run || echo x; return 0", "run || echo x; /bin/true",
+                     "run || echo x && true"):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [1])
         for line in ("run || (exit 1)", "run || { echo x; }", "run || echo x; true_value",
@@ -70,6 +73,10 @@ class HiddenFailuresTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(verify.hidden_failures(text), [1])
                 self.assertEqual(verify.workflow_failures(text), [1])
+        for text in ("run 2>/dev/null || \\", "a\nrun 2>/dev/null || \\"):
+            with self.subTest(text=text):
+                self.assertEqual(verify.hidden_failures(text), [text.count("\n") + 1])
+                self.assertEqual(verify.workflow_failures(text), [text.count("\n") + 1])
         text = "run || \\\nexit 1\nrun 2>/dev/null\n"
         self.assertEqual(verify.hidden_failures(text), [3])
 
