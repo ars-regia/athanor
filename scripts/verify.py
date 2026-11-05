@@ -2108,15 +2108,15 @@ def check_panics():
 # A line of a script that discards stderr, or the whole output, or swallows a failure with
 # `|| true`: AGENTS.md "No hidden failures". Each tree has its own budget, measured on the repo
 # on 2026-10-25 (forge/test) and 2026-10-31; like BUDGET they only go down. A probe whose failure
-# is the answer (`kill -0 "$pid" 2> /dev/null`) counts too, until it is written so that the check
-# can tell it from a hidden crash.
+# is the answer, `kill -0 "$pid" 2> /dev/null`, does not count (PROBE); the other probes
+# (`command -v`, `skopeo inspect`, `grep -q`) count until they are written as such a rule.
 SHELL_BUDGETS = {
     "forge/build": 7,
     "forge/builder": 1,
     "forge/scripts": 15,
-    "forge/test": 15,
+    "forge/test": 9,
     "forge/tools": 0,
-    "scripts": 43,
+    "scripts": 40,
     "system": 7,
 }
 # The same constructs in the steps of a workflow or of an action, with `continue-on-error`.
@@ -2135,6 +2135,9 @@ HIDDEN_FAILURE = re.compile(
     r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
     r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
+# `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
+# and the one error sent away is "No such process". Nothing else is excused.
+PROBE = re.compile(rf"\bkill\s+-0\s+(?:\"[^\"]*\"|'[^']*'|[^\s;&|]+)\s+2>\s*{DEV_NULL}")
 CONTINUE_ON_ERROR = re.compile(r"^\s*(?:-\s+)?continue-on-error:(?!\s*false\b)")
 SHELL_SHEBANG = re.compile(rb"#!.*\b(?:ba|da)?sh\b")
 HEREDOC_START = re.compile(r"(?<!<)<<(?!<)(-?)")
@@ -2181,6 +2184,11 @@ def shell_code(line):
     return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
 
 
+def hidden(code):
+    """The constructs of `code` that hide a failure, a probe left out."""
+    return HIDDEN_FAILURE.findall(PROBE.sub(" ", code))
+
+
 def scan_shell(text):
     """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
     hides a failure, and the line of a here-document still open at the end, whose rest no one
@@ -2193,7 +2201,7 @@ def scan_shell(text):
                 pending.pop(0)
             continue
         code, bare = shell_code(line)
-        if HIDDEN_FAILURE.search(code):
+        if hidden(code):
             found.append(i)
         for m in HEREDOC_START.finditer(bare):
             w = HEREDOC_WORD.match(code, m.end())
@@ -2233,7 +2241,7 @@ def workflow_failures(text):
     """The numbers of the lines of workflow `text` that hide a failure. A step's script is
     indented in the YAML, so a here-document's end is not looked for: every line is read."""
     return [i for i, line in enumerate(text.split("\n"), 1)
-            if CONTINUE_ON_ERROR.match(line) or HIDDEN_FAILURE.search(shell_code(line)[0])]
+            if CONTINUE_ON_ERROR.match(line) or hidden(shell_code(line)[0])]
 
 
 def guest_failures(text):
@@ -2247,7 +2255,7 @@ def guest_failures(text):
             lines, open_from = scan_shell(shell)
             code = shell.split("\n")
             for i in lines:
-                found += [node.lineno] * len(HIDDEN_FAILURE.findall(shell_code(code[i - 1])[0]))
+                found += [node.lineno] * len(hidden(shell_code(code[i - 1])[0]))
             if open_from:
                 opened.append(node.lineno)
     return sorted(found), opened
