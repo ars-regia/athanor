@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import atspi_compare as compare
@@ -217,6 +218,13 @@ class GalleryTest(unittest.TestCase):
             )
             _, failures = compare.gallery_problems(references, transcripts, "en")
             self.assertEqual(failures, ["values: button 'values': role 'list box'"])
+
+    def test_an_expected_difference_of_no_page_fails(self):
+        stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}
+        with mock.patch.object(compare, "EXPECTED_DIFFERENCES", stale):
+            _, failures = compare.gallery_problems(GOLDEN, GOLDEN, "en")
+        self.assertEqual(failures[0], "tables: expected difference (#1) names no page of cases.py")
+        self.assertEqual(len(failures), 2)
 
     def test_a_page_without_its_reference_or_its_transcript_fails(self):
         with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:

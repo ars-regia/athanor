@@ -200,9 +200,15 @@ def compare(reference, transcript, exempt=None):
 def gallery_problems(references, transcripts, lang):
     """Returns (lines, failures) for the gallery's pages, each compared on its own and its lines
     prefixed with the page; a page with no reference or no transcript is a failure. A page of
-    EXPECTED_DIFFERENCES reports its failures as expected, and fails when it has none."""
+    EXPECTED_DIFFERENCES reports its failures as expected, and fails when it has none; a key of
+    EXPECTED_DIFFERENCES that names no page fails."""
     suffix = "" if lang == "en" else f"-{lang}"
-    lines, failures = [], []
+    lines = []
+    failures = [
+        f"{page}: expected difference (#{issue}) names no page of cases.py"
+        for page, issue in EXPECTED_DIFFERENCES.items()
+        if page not in GALLERY_PAGES
+    ]
     for page in GALLERY_PAGES:
         name = f"atspi-gallery-{page}{suffix}.json"
         paths = {"reference": Path(references) / name, "transcript": Path(transcripts) / name}
