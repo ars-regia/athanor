@@ -59,10 +59,13 @@ class HiddenFailuresTest(unittest.TestCase):
                      "run || echo x; :",
                      "run || ( exit 0 ; )", "run || (true; )", "run || echo x; exit 0",
                      "run || echo x; return 0", "run || echo x; /bin/true",
-                     "run || echo x && true"):
+                     "run || echo x && true", "run || { echo x; true; }", "run || (echo x; true)",
+                     'run || echo "$(date)"; true', "run || echo ${x}; true",
+                     'run || echo "a (b)"; true'):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [1])
-        for line in ("run || (exit 1)", "run || { echo x; }", "run || echo x; true_value",
+        for line in ("run || (exit 1)", "run || { echo x; }",
+                     "run || { echo unverified; return 0; }", "run || (echo x; exit 0)", "run || echo x; true_value",
                      "run || echo x; echo y", "run 2>|\"$log\""):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [])

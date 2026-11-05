@@ -2152,7 +2152,8 @@ NOOP = r"(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)"
 HIDDEN_FAILURE = re.compile(
     rf"2>[>|]?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\|?\s*{DEV_NULL}\s+2>&1|2>&-"
     rf"|\|\|\s*(?:{NOOP}(?![\w-])|\{{\s*{NOOP}\s*;?\s*\}}|\(\s*{NOOP}\s*;?\s*\))"
-    rf"|\|\|[^;|&{{(]*(?:;|&&)\s*{NOOP}(?![\w-])"
+    rf"|\|\|(?!\s*[{{(])[^;|&]*(?:;|&&)\s*{NOOP}(?![\w-])"
+    r"|\|\|\s*[{(][^;|&]*;\s*(?:true|:)\s*;?\s*[})]"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
 # and the one error sent away is "No such process". Only a plain operand (no substitution) and
