@@ -2107,11 +2107,6 @@ cause = "decision 28 hides the dock's application library button"
 issue = 836
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.0-land"
-cause = "decision 28 hides the bar's application library button"
-issue = 836
-
-[[difference]]
 case = "layout-bar-bottom-1o-1.5-land"
 cause = "decision 28 hides the bar's application library button"
 issue = 836
@@ -2227,11 +2222,6 @@ cause = "decision 28 hides the bar's application library button"
 issue = 836
 
 [[difference]]
-case = "layout-bar-top-1o-1.0-land"
-cause = "decision 28 hides the bar's application library button"
-issue = 836
-
-[[difference]]
 case = "layout-minimal-top-visible-1o-1.0-land"
 cause = "decision 28 hides the bar's workspaces module"
 issue = 835
@@ -2319,11 +2309,6 @@ issue = 835
 [[difference]]
 case = "layout-float-top-visible-1o-1.0-port"
 cause = "decision 28 hides the dock's application library button"
-issue = 836
-
-[[difference]]
-case = "layout-bar-bottom-1o-1.0-port"
-cause = "decision 28 hides the bar's application library button"
 issue = 836
 
 [[difference]]
