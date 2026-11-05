@@ -134,8 +134,8 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(field.name.as_str());
             node.set_value(field.text());
             node.add_action(Action::SetValue);
-            // Its edit menu, as GTK 4.24's entry says; AccessKit's AT-SPI bridge does not yet
-            // pass it on (#638).
+            // Its edit menu, as GTK 4.24's entry says; AT-SPI receives it through the patched
+            // accesskit_atspi_common (vendor/accesskit_atspi_common/PATCHES.md, #638).
             node.set_has_popup(HasPopup::Menu);
             node
         }
