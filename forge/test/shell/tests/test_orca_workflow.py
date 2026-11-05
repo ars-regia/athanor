@@ -40,5 +40,23 @@ class EveryTranscriptHasAStep(unittest.TestCase):
         )
 
 
+class SulphurWalksRunUnderSulphur(unittest.TestCase):
+    # The dock's and the launcher's references are athanor-sulphur's transcripts, the default
+    # session of 1.0 (ADR-0135): under cosmic-comp the launcher is never activated (#751) and
+    # 1.11 does not speak the dock's Shift+F10 menu.
+    def test_dock_and_launcher_steps_set_the_compositor_and_always_run(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        found = []
+        for job in workflow["jobs"].values():
+            for step in job.get("steps", []):
+                match = STEP.fullmatch(step.get("run", "").strip())
+                if match and match[1] in ("dock", "launcher"):
+                    found.append(match[0])
+                    with self.subTest(step=match[0]):
+                        self.assertEqual(step.get("env", {}).get("RIG_COMPOSITOR"), "athanor")
+                        self.assertNotIn("if", step)
+        self.assertEqual(len(found), 4, found)
+
+
 if __name__ == "__main__":
     unittest.main()
