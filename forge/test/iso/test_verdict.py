@@ -1199,23 +1199,40 @@ def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
     assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
 
 
+def utf8_locale() -> str:
+    """A UTF-8 locale for the shell side: where `[a-z]` follows collation, it matches more than ASCII."""
+    names = subprocess.run(["locale", "-a"], capture_output=True, text=True, check=False).stdout.split()
+    return "en_US.UTF-8" if "en_US.utf8" in names else "C.UTF-8"
+
+
 def test_iso_repository_is_checked_before_the_boot(tmp: pathlib.Path) -> None:
-    """run_iso_test.sh refuses a missing or malformed ISO_REPOSITORY before it writes anything,
-    by the rule console.py applies (issue 462)."""
+    """run_iso_test.sh and console.py apply one rule to ISO_REPOSITORY (issue 462): the same
+    corpus is accepted by both and refused by both, the shell under a UTF-8 locale, where a
+    range such as [a-z] follows collation and lets non-ASCII letters and digits through. A
+    refusal is exit 2 before anything is written; an accepted name goes on to the next check,
+    which here is the missing ISO."""
     sys.path.insert(0, str(HERE))
     import console
 
-    iso = tmp / "fake.iso"
-    iso.write_bytes(b"")
-    for bad in (None, "", "athanor-system", "ghcr.io/Acme/athanor-system", "ghcr.io/a b/x", "ghcr.io/*/x"):
+    good = ("ghcr.io/acme/athanor-system", "localhost:5000/a/b", "r.example/a-b_c.d/athanor-system-nvidia", "0/9")
+    bad = (
+        "", "athanor-system", "ghcr.io/Acme/athanor-system", "ghcr.io/a b/x", "ghcr.io/*/x",
+        "ghcr.io/\u00e9/x", "a/\u00e9", "\u00e9/x", "ghcr.io/\u0661/x", "ghcr.io/\uff41/x",
+        "ghcr.io/acme/x\n", "ghcr.io/acme/", "/a/b", "-a/b", "a/-b", "ghcr.io:/a", "a:b/c",
+    )
+    gone = tmp / "missing.iso"
+    for value in good + bad + (None,):
         env = {k: v for k, v in os.environ.items() if k != "ISO_REPOSITORY"}
-        if bad is not None:
-            env["ISO_REPOSITORY"] = bad
-        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+        env["LC_ALL"] = utf8_locale()
+        if value is not None:
+            env["ISO_REPOSITORY"] = value
+        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(gone), str(tmp / "never")],
                               capture_output=True, text=True, env=env)
-        assert proc.returncode == 2 and "ISO_REPOSITORY" in proc.stderr, (bad, proc)
-        assert not (tmp / "never").exists()
-        assert bad is None or not console.REPOSITORY.fullmatch(bad), bad
+        refused = "ISO_REPOSITORY is not a repository name" in proc.stderr
+        assert proc.returncode == 2 and not (tmp / "never").exists(), (value, proc)
+        assert refused == (value not in good), (value, proc.stderr)
+        if value is not None:
+            assert bool(console.REPOSITORY.fullmatch(value)) == (value in good), value
 
 
 def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:

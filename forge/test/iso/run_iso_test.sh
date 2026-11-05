@@ -42,7 +42,13 @@ iso=$1 output=$2
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # The rule of REPOSITORY in console.py, checked here too so a bad name stops the run before QEMU.
-[[ ${ISO_REPOSITORY:-} =~ ^[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+$ ]] || { echo "ISO_REPOSITORY is not a repository name: ${ISO_REPOSITORY:-unset}" >&2; exit 2; }
+# Under the C locale: in a UTF-8 one a range such as [a-z] follows collation and lets non-ASCII
+# letters and digits through.
+is_repository() {
+    local LC_ALL=C
+    [[ $1 =~ ^[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+$ ]]
+}
+is_repository "${ISO_REPOSITORY:-}" || { echo "ISO_REPOSITORY is not a repository name: ${ISO_REPOSITORY:-unset}" >&2; exit 2; }
 
 if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ -n ${UPDATE_TO:-} && -n ${UPDATE_REPOSITORY:-} ]] || { echo "UPDATE_TO and UPDATE_REPOSITORY go together" >&2; exit 2; }
