@@ -1,6 +1,6 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 2, approved by the maintainer on 2026-10-23 (#755).** Revision 1 was approved by
+Status: **revision 3, decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it.** Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
@@ -56,6 +56,14 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-05: the toolkit's identifiers renamed to Sal (ADR-0134), name only,
   approved by the maintainer with #977.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
+
+**Changes in revision 3** (ADR-0135, 2026-11-05):
+
+- The status line and this list.
+- OS5, the list of what the compositor provides: cosmic-workspaces is replaced in 1.1.
+- OS19's lead-in, section 6 step 4, decision 28 and section 8: the own compositor replaces
+  cosmic-comp in release 1.1; release 1.0 ships it as the default session, with cosmic-comp's
+  session as the second choice.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each milestone reads them
@@ -307,7 +315,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
-  is replaced in 1.0 by `athanor-overview` (decision 28).
+  is replaced in 1.1 by `athanor-overview` (decision 28, ADR-0135), and runs until then only in
+  cosmic-comp's session.
   Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
   process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
@@ -408,11 +417,12 @@ survive their compositor, so its end ends the session and greetd shows the greet
 SN6, SN15). A console run checks in the compositor's log, at the start and after each resume, that
 libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 
-**OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
-(section 6, step 4) when each of the following holds, recorded in the pull request that takes
+**OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.1
+(section 6, step 4; ADR-0135) when each of the following holds, recorded in the pull request that takes
 cosmic-comp's session off the greeter, which also waits for the overview and the window
 switcher on Alt+Tab (decision 28). Decision 28 makes it the default session before then, on
-the parts of them it names, recorded in the pull request that makes it the default session:
+the parts of them it names, recorded in the pull request that makes it the default session, and
+release 1.0 ships it so, with cosmic-comp's session as the second choice (ADR-0135):
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
    `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
@@ -643,8 +653,9 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    the laptop, each with the harnesses of OS9 it needs; then revision 2 of this document with
    their measurements.
 3. The rest of the harnesses of OS9.
-4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
-   the GTK4 shell unchanged on top. Its acceptance is OS19: every surface 1.0 carries
+4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.1, with
+   the GTK4 shell unchanged on top; release 1.0 ships it as the default session of decision 28,
+   with cosmic-comp's as the second choice (ADR-0135). Its acceptance is OS19: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
@@ -764,7 +775,7 @@ amendment's audit:
     "No fallback when the preview fails"). The own compositor becomes the image's default session before
     OS19 holds in full, in a pull request that records the evidence of each condition below.
     cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full and
-    the overview and the window switcher on Alt+Tab have come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
+    the overview and the window switcher on Alt+Tab have come, which release 1.1 waits for (release 1.0 ships with both sessions, ADR-0135), and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
       under the own compositor, each started by a supervisor inside the logind
@@ -925,14 +936,15 @@ amendment's audit:
       chosen again, and the switch's pull request names the loss.
 
     The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
-    an item of OS19: it follows the switch, and cosmic-workspaces' retirement moves from 1.1 to 1.0
-    with it (`release-1.0.md`), and release 1.0 waits for it and for the window switcher on Alt+Tab.
+    an item of OS19: it follows the switch, and cosmic-workspaces' retirement goes with it, in 1.1
+    (`release-1.0.md`, ADR-0135), and release 1.1 waits for it and for the window switcher on
+    Alt+Tab; release 1.0 ships without either (ADR-0135).
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
     own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
     and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
     step 5 are amended to say so in the first pull request of the overview's implementation
-    (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    (`release-1.0.md`, section 3, the work moved to 1.1). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -1184,12 +1196,14 @@ compositor and that the own compositor did not yet offer:
 - **Stage 1 of the toolkit runs beside the compositor** (decision 12): the widgets the surfaces
   need are written anyway, but the gallery, the guide, the rustdoc and the other widgets take the
   maintainer's time from the compositor, for which release 1.0 waits (decision 5).
-- **Release 1.0 waits for the compositor** (decision 5): its date follows the compositor's
-  acceptance, a defect of the hardware matrix found late moves it, and until then each Fedora
-  rebase ships as a release 0.x.
+- **Release 1.0 waits for the compositor** (decision 5): its date follows the conditions under
+  which decision 28 makes the compositor the default session, held on the 1.0 build, and the
+  full acceptance follows in 1.1 (ADR-0135); a defect of the hardware matrix found late moves
+  it, and until then each Fedora rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
-- **Release 1.0 also waits for the overview and the window switcher on Alt+Tab** (decision 28).
+- **Release 1.1 waits for the overview and the window switcher on Alt+Tab** (decision 28);
+  release 1.0 ships without them (ADR-0135).
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.
