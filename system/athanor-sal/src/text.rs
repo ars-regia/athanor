@@ -1,6 +1,7 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
 use crate::widget::Rect;
+use parley::fontique::Script;
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, GenericFamily, Layout, LayoutContext,
     PlainEditor, StyleProperty,
@@ -10,7 +11,6 @@ use parley::{
 pub type Brush = [u8; 4];
 
 /// The font database and the shaping scratch space, shared by every widget of a [`crate::Ui`].
-#[derive(Default)]
 pub struct TextContext {
     /// The fonts the system offers.
     pub fonts: FontContext,
@@ -18,7 +18,32 @@ pub struct TextContext {
     pub layouts: LayoutContext<Brush>,
 }
 
+impl Default for TextContext {
+    fn default() -> Self {
+        Self::new(FontContext::default())
+    }
+}
+
 impl TextContext {
+    /// A context on `fonts`, whose sans-serif family starts with the font the locale draws Latin
+    /// text with. Fontconfig orders sans-serif by the locale's language, so under Arabic it starts
+    /// with an Arabic font that has no Latin letters. Parley sizes every line by at least its
+    /// family's first font, the strut of CSS 2 § 10.8, and a Latin line under that locale took
+    /// the Arabic font's ascent, descent and leading. Glyphs from the fonts after the first still
+    /// grow the line, so Arabic text keeps its own height.
+    fn new(mut fonts: FontContext) -> Self {
+        let latin = Script::from_bytes(*b"Latn");
+        let collection = &mut fonts.collection;
+        let primary: Vec<_> = collection.fallback_families(latin).take(1).collect();
+        // Fontique serves a collection's own generic families before the system's, which follow
+        // in fontconfig's order; with no Latin font the system's order stays as it is.
+        collection.set_generic_families(GenericFamily::SansSerif, primary.into_iter());
+        Self {
+            fonts,
+            layouts: LayoutContext::new(),
+        }
+    }
+
     /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start.
     pub fn layout(&mut self, text: &str, size: f32, rtl: bool) -> Layout<Brush> {
         let mut builder = self
@@ -449,6 +474,22 @@ mod tests {
         let line = field.caret_line(cx).0;
         let x = field.caret(cx, 1.0).map_or(f64::NAN, |c| c.x0);
         (index, line, x)
+    }
+
+    #[test]
+    fn a_latin_line_is_as_tall_under_arabic_as_under_english() {
+        // The sans-serif family as fontconfig orders it under en_US and under ar_EG.
+        let height = |order: [&str; 2]| {
+            let mut fonts = FontContext::default();
+            let ids = order.map(|name| fonts.collection.family_id(name).expect("installed"));
+            let sans = GenericFamily::SansSerif;
+            fonts.collection.set_generic_families(sans, ids.into_iter());
+            let mut cx = TextContext::new(fonts);
+            cx.layout("Keyboard layout", 15.0, true).height()
+        };
+        let english = height(["Noto Sans", "Noto Sans Arabic"]);
+        assert_eq!(height(["Noto Sans Arabic", "Noto Sans"]), english);
+        assert!(english > 0.0);
     }
 
     #[test]
