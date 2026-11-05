@@ -2,6 +2,7 @@
 //! check and of the two requests is tested with fakes. Every message matched here was
 //! recorded by spike U1 against bootc 1.16.11, skopeo 1.22.2 and containers/image 5.39.
 use athanor_trust_state::ErrorCode;
+use serde::de::IgnoredAny;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use std::io::Read as _;
@@ -269,11 +270,14 @@ const SKOPEO: &str = "/usr/bin/skopeo";
 const OSTREE: &str = "/usr/bin/ostree";
 const RPM_OSTREE: &str = "/usr/bin/rpm-ostree";
 const BUSCTL: &str = "/usr/bin/busctl";
+const PRLIMIT: &str = "/usr/bin/prlimit";
 pub const ATTACHMENTS_POLICY: &str = "/usr/share/athanor/containers/attachments-policy.json";
 
 /// How long each `skopeo` call of an attachment fetch may run: the bound
 /// `forge/scripts/registry_probe.sh` gives a registry read.
 const FETCH_TIME: Duration = Duration::from_secs(30);
+/// How much of a bounded call's error text is read, for the journal and [`classify`].
+const STDERR_CAP: u64 = 64 << 10;
 
 /// What one attachment fetch may bring into the store: the caps of the verifier that reads the
 /// object, and the time each call may take.
@@ -281,45 +285,71 @@ const FETCH_TIME: Duration = Duration::from_secs(30);
 struct Bounds {
     manifest: u64,
     blob: u64,
+    layers: usize,
     time: Duration,
 }
 
-/// The members of an attachment's manifest the fetch bounds before it copies anything.
+/// An attachment's manifest, with the members cosign writes and no other. skopeo reads it with
+/// Go's encoding/json, which matches member names regardless of case, so an unknown member such
+/// as `LAYERS` or `Manifests` could be the one skopeo copies.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[allow(dead_code)]
 struct AttachmentManifest {
+    schema_version: Option<IgnoredAny>,
+    media_type: Option<IgnoredAny>,
     config: Blob,
     layers: Vec<Blob>,
-    /// Present in an index, whose instances skopeo would fetch beyond this manifest.
-    manifests: Option<serde::de::IgnoredAny>,
+    annotations: Option<IgnoredAny>,
 }
 
+/// A descriptor of an attachment's manifest. `urls`, which would send skopeo to another server,
+/// is not one of its members.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[allow(dead_code)]
 struct Blob {
+    media_type: Option<IgnoredAny>,
+    digest: Option<IgnoredAny>,
     size: u64,
+    annotations: Option<IgnoredAny>,
 }
 
-/// Copies `<repository>:sha256-<hex>.<suffix>` into `dest` under the attachments policy. The
-/// manifest is read first, within `bounds.manifest`, and nothing is copied when it is an index or
-/// names a blob above `bounds.blob`, which the verifier would not read (#658). The copy names the
-/// digest of the manifest read, so the registry cannot serve it another one. Each call is killed
-/// past `bounds.time`.
+/// Copies `<repository>:sha256-<hex>.<suffix>` into `dest` under the attachments policy, within
+/// bounds (#658). The manifest is read first, within `bounds.manifest`, and not copied when it has
+/// a member cosign does not write, more than `bounds.layers` layers, or a descriptor that declares
+/// more than `bounds.blob`. A registry can serve a blob larger than its descriptor declares, so the
+/// copy runs with `RLIMIT_FSIZE` at `bounds.manifest`, the largest file `dir:` has to write. The
+/// copy names the digest of the manifest read, so the registry cannot serve it another one. Each
+/// call is killed past `bounds.time`.
 fn fetch_attachment(skopeo: &str, repository: &str, digest: &str, suffix: &str, dest: &Path, bounds: Bounds) -> Result<(), Failure> {
     let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
     let host = host_of(repository);
     let tagged = format!("docker://{repository}:sha256-{hex}.{suffix}");
-    let raw = run_bounded(skopeo, &["inspect", "--raw", &tagged], host.clone(), Some(bounds.manifest), bounds.time)?;
+    let raw = run_bounded(skopeo, &["inspect", "--raw", &tagged], host.clone(), Some(bounds.manifest), bounds.time).map_err(|(failure, _)| failure)?;
     let out_of_bounds = Failure { code: ErrorCode::Registry, host: host.clone() };
-    let Ok(manifest) = serde_json::from_slice::<AttachmentManifest>(&raw) else {
-        tracing::warn!(%tagged, "the attachment's manifest is not an image manifest; nothing is copied");
-        return Err(out_of_bounds);
+    let manifest = match serde_json::from_slice::<AttachmentManifest>(&raw) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            tracing::warn!(%tagged, %err, "the attachment's manifest is not one cosign writes; it is not copied");
+            return Err(out_of_bounds);
+        }
     };
-    if manifest.manifests.is_some() || std::iter::once(&manifest.config).chain(&manifest.layers).any(|blob| blob.size > bounds.blob) {
-        tracing::warn!(%tagged, cap = bounds.blob, "the attachment is an index or names a blob above the verifier's cap; nothing is copied");
+    if manifest.layers.len() > bounds.layers || std::iter::once(&manifest.config).chain(&manifest.layers).any(|blob| blob.size > bounds.blob) {
+        tracing::warn!(%tagged, layers = manifest.layers.len(), cap = bounds.blob, "the attachment's manifest exceeds the verifier's caps; it is not copied");
         return Err(out_of_bounds);
     }
     let pinned = format!("docker://{repository}@sha256:{}", hex::encode(Sha256::digest(&raw)));
     let dest = format!("dir:{}", dest.display());
-    run_bounded(skopeo, &["copy", "--policy", ATTACHMENTS_POLICY, &pinned, &dest], host, None, bounds.time).map(drop)
+    let fsize = format!("--fsize={}", bounds.manifest);
+    run_bounded(PRLIMIT, &[fsize.as_str(), "--", skopeo, "copy", "--policy", ATTACHMENTS_POLICY, &pinned, &dest], host, None, bounds.time).map(drop).map_err(|(failure, stderr)| {
+        // EFBIG, as Go and coreutils word it: a blob larger than the limit, whatever it declared.
+        if stderr.to_ascii_lowercase().contains("file too large") {
+            out_of_bounds
+        } else {
+            failure
+        }
+    })
 }
 
 fn run(program: &str, args: &[&str], host: Option<String>) -> Result<String, Failure> {
@@ -346,45 +376,50 @@ fn failed(program: &str, status: ExitStatus, stderr: &[u8], host: Option<String>
     (Failure { code, host }, stderr.into_owned())
 }
 
-/// Like [`run`], within two bounds: the call is killed once it has run for `time`, and an
-/// output longer than `cap` bytes is refused and read no further. `None` discards the output.
-fn run_bounded(program: &str, args: &[&str], host: Option<String>, cap: Option<u64>, time: Duration) -> Result<Vec<u8>, Failure> {
-    let internal = || Failure { code: ErrorCode::Internal, host: None };
+/// Like [`run_with_stderr`], within bounds: the call is killed once it has run for `time`, an
+/// output longer than `cap` bytes is refused and read no further, and the error text is read up
+/// to [`STDERR_CAP`]. `None` discards the output.
+fn run_bounded(program: &str, args: &[&str], host: Option<String>, cap: Option<u64>, time: Duration) -> Result<Vec<u8>, (Failure, String)> {
+    let internal = || (Failure { code: ErrorCode::Internal, host: None }, String::new());
     let stdout = if cap.is_some() { Stdio::piped() } else { Stdio::null() };
     let mut child = Command::new(program).args(args).env("LC_ALL", "C").stdin(Stdio::null()).stdout(stdout).stderr(Stdio::piped()).spawn().map_err(|_| internal())?;
     let limit = cap.map_or(0, |cap| cap.saturating_add(1));
     let stdout = child.stdout.take().map(|pipe| std::thread::spawn(move || read_all(pipe.take(limit))));
-    let stderr = child.stderr.take().map(|pipe| std::thread::spawn(move || read_all(pipe)));
+    let stderr = child.stderr.take().map(|pipe| std::thread::spawn(move || read_all(pipe.take(STDERR_CAP))));
     let deadline = Instant::now() + time;
     let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
+        let waited = child.try_wait();
+        match &waited {
+            Ok(Some(status)) => break Some(*status),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
+            // Past the limit, or its state unreadable: the call is ended and reaped either way.
+            _ => {
                 if let Err(err) = child.kill() {
-                    tracing::warn!(program, %err, "cannot kill a call past its time limit");
+                    tracing::warn!(program, %err, "cannot kill a bounded call");
                 }
-                child.wait().map_err(|_| internal())?;
+                let reaped = child.wait();
+                if waited.is_err() || reaped.is_err() {
+                    return Err(internal());
+                }
                 break None;
             }
-            Err(_) => return Err(internal()),
         }
     };
-    // Both pipes close when the call ends, so neither reader outlives it.
+    // Both pipes close when the call ends, and each reader stops at its cap, so neither outlives it.
     let joined = |reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>| reader.map_or(Ok(Vec::new()), |reader| reader.join().map_err(|_| internal())?.map_err(|_| internal()));
     let (stdout, stderr) = (joined(stdout)?, joined(stderr)?);
     if cap.is_some_and(|cap| stdout.len() as u64 > cap) {
         tracing::warn!(program, ?cap, "the output exceeds its cap; the call is refused");
-        return Err(Failure { code: ErrorCode::Registry, host });
+        return Err((Failure { code: ErrorCode::Registry, host }, String::new()));
     }
     let Some(status) = status else {
         tracing::warn!(program, ?time, "the call exceeded its time limit and was killed");
-        return Err(Failure { code: ErrorCode::Network, host });
+        return Err((Failure { code: ErrorCode::Network, host }, String::new()));
     };
     if status.success() {
         Ok(stdout)
     } else {
-        Err(failed(program, status, &stderr, host).0)
+        Err(failed(program, status, &stderr, host))
     }
 }
 
@@ -448,12 +483,12 @@ impl Tools for System {
     }
 
     fn fetch_signature(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, time: FETCH_TIME };
+        let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time: FETCH_TIME };
         fetch_attachment(SKOPEO, repository, digest, "sig", dest, bounds)
     }
 
     fn fetch_attestation(&self, repository: &str, digest: &str, dest: &Path) -> Result<(), Failure> {
-        let bounds = Bounds { manifest: crate::attestation::MAX_MANIFEST, blob: crate::attestation::MAX_PAYLOAD, time: FETCH_TIME };
+        let bounds = Bounds { manifest: crate::attestation::MAX_MANIFEST, blob: crate::attestation::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time: FETCH_TIME };
         fetch_attachment(SKOPEO, repository, digest, "att", dest, bounds)
     }
 
@@ -616,7 +651,6 @@ mod tests {
 
     impl Stub {
         fn new(test: &str, served: &[u8], then: &str) -> Stub {
-            use std::os::unix::fs::PermissionsExt as _;
             let dir = std::env::temp_dir().join(format!("athanor-update-fetch-{}-{test}", std::process::id()));
             // A directory left by an earlier run of the same test, or none.
             std::fs::remove_dir_all(&dir).ok();
@@ -624,13 +658,16 @@ mod tests {
             std::fs::write(dir.join("served"), served).expect("served");
             let d = dir.display();
             let script = format!("#!/bin/sh\ncase \"$1\" in\ninspect) exec cat '{d}/served' ;;\ncopy) echo \"$@\" > '{d}/copied'; mkdir -p '{d}/store'; echo blob > '{d}/store/blob'; {then} ;;\nesac\n");
-            std::fs::write(dir.join("skopeo"), script).expect("stub");
-            std::fs::set_permissions(dir.join("skopeo"), std::fs::Permissions::from_mode(0o755)).expect("chmod");
+            // The executable is written by a child process: a write descriptor of it open in this
+            // one could leak into a concurrent test's fork and fail its exec with ETXTBSY.
+            std::fs::write(dir.join("skopeo.in"), script).expect("stub");
+            let installed = Command::new("install").args(["-m", "0755"]).arg(dir.join("skopeo.in")).arg(dir.join("skopeo")).status().expect("install");
+            assert!(installed.success(), "install");
             Stub { dir }
         }
 
         fn fetch(&self, time: Duration) -> Result<(), Failure> {
-            let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, time };
+            let bounds = Bounds { manifest: crate::sigobj::MAX_MANIFEST, blob: crate::sigobj::MAX_PAYLOAD, layers: crate::attestation::MAX_LAYERS, time };
             fetch_attachment(self.dir.join("skopeo").to_str().expect("utf-8"), REPO, DIGEST, "sig", &self.dir.join("store"), bounds)
         }
 
@@ -671,13 +708,13 @@ mod tests {
     }
 
     #[test]
-    fn a_blob_above_the_verifiers_cap_is_refused_before_anything_is_copied() {
+    fn a_declared_blob_above_the_verifiers_cap_is_refused_before_the_copy() {
         let above = crate::sigobj::MAX_PAYLOAD + 1;
         let index = r#"{"schemaVersion":2,"config":{"size":2},"layers":[],"manifests":[{"digest":"sha256:0","size":2}]}"#.to_owned();
         for (case, served) in [("layer", manifest(233, above)), ("config", manifest(above, 300)), ("index", index), ("garbage", "not json".to_owned())] {
             let stub = Stub::new(case, served.as_bytes(), "true");
             assert_eq!(stub.fetch(Duration::from_secs(10)), Err(refused()), "{case}");
-            assert!(!stub.copied(), "{case}: nothing reaches the store");
+            assert!(!stub.copied(), "{case}: the copy does not run");
         }
     }
 
@@ -689,6 +726,59 @@ mod tests {
         let stub = Stub::new("manifest", &served, "true");
         assert_eq!(stub.fetch(Duration::from_secs(10)), Err(refused()));
         assert!(!stub.copied());
+    }
+
+    fn with_layers(count: usize) -> String {
+        let mut manifest: serde_json::Value = serde_json::from_str(&manifest(233, 300)).expect("json");
+        manifest["layers"] = serde_json::Value::Array(vec![manifest["layers"][0].clone(); count]);
+        manifest.to_string()
+    }
+
+    #[test]
+    fn a_member_cosign_does_not_write_is_refused_whatever_its_case() {
+        let manifest = manifest(233, 300);
+        let open = manifest.strip_suffix('}').expect("object");
+        let big = r#"[{"mediaType":"application/octet-stream","digest":"sha256:0","size":300000}]"#;
+        for (case, served) in [
+            ("upper-layers", format!(r#"{open},"LAYERS":{big}}}"#)),
+            ("capital-manifests", format!(r#"{open},"Manifests":{big}}}"#)),
+            ("upper-size", manifest.replacen(r#""size":300"#, r#""size":300,"SIZE":300000"#, 1)),
+            ("urls", manifest.replacen(r#""size":300"#, r#""size":300,"urls":["https://elsewhere.example/blob"]"#, 1)),
+            ("duplicate-layers", format!(r#"{open},"layers":{big}}}"#)),
+        ] {
+            assert_ne!(served, manifest, "{case}");
+            let stub = Stub::new(case, served.as_bytes(), "true");
+            assert_eq!(stub.fetch(Duration::from_secs(10)), Err(refused()), "{case}");
+            assert!(!stub.copied(), "{case}: the copy does not run");
+        }
+    }
+
+    #[test]
+    fn more_layers_than_the_verifier_reads_are_refused() {
+        let at = Stub::new("layers-at", with_layers(crate::attestation::MAX_LAYERS).as_bytes(), "true");
+        assert_eq!(at.fetch(Duration::from_secs(10)), Ok(()));
+        let above = Stub::new("layers-above", with_layers(crate::attestation::MAX_LAYERS + 1).as_bytes(), "true");
+        assert_eq!(above.fetch(Duration::from_secs(10)), Err(refused()));
+        assert!(!above.copied());
+    }
+
+    #[test]
+    fn a_blob_larger_than_it_declared_is_cut_at_the_file_size_limit() {
+        // The copy writes past the limit, as skopeo does for a blob whose descriptor declares less
+        // than it serves; SIGXFSZ is ignored, as Go ignores it, so the write fails with EFBIG.
+        let over = crate::sigobj::MAX_MANIFEST + 1;
+        let stub = Stub::new("fsize", manifest(233, 300).as_bytes(), &format!(r#"trap '' XFSZ; exec head -c {over} /dev/zero > "${{5#dir:}}/blob""#));
+        assert_eq!(stub.fetch(Duration::from_secs(10)), Err(refused()));
+        let written = std::fs::metadata(stub.dir.join("store/blob")).expect("blob").len();
+        assert_eq!(written, crate::sigobj::MAX_MANIFEST, "nothing written past the limit");
+    }
+
+    #[test]
+    fn the_error_text_of_a_bounded_call_is_read_to_its_cap() {
+        let stub = Stub::new("stderr", b"", "head -c 10000000 /dev/zero >&2; exit 1");
+        let skopeo = stub.dir.join("skopeo");
+        let (_, stderr) = run_bounded(skopeo.to_str().expect("utf-8"), &["copy"], None, None, Duration::from_secs(10)).expect_err("fails");
+        assert!(stderr.len() as u64 <= STDERR_CAP, "{} bytes", stderr.len());
     }
 
     #[test]

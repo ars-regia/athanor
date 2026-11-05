@@ -27,7 +27,7 @@ pub const STATEMENT_TYPES: [&str; 2] = ["https://in-toto.io/Statement/v0.1", "ht
 pub(crate) const MAX_MANIFEST: u64 = 1 << 20;
 pub(crate) const MAX_PAYLOAD: u64 = 64 << 10;
 /// Layers past this many make the object of the feature class unread.
-const MAX_LAYERS: usize = 64;
+pub(crate) const MAX_LAYERS: usize = 64;
 /// Bounds of the advisory ids a security verdict carries: ADR-0127 gives them no format.
 const MAX_ADVISORIES: usize = 1024;
 const MAX_ADVISORY_LEN: usize = 64;

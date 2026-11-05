@@ -12,7 +12,7 @@ URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
 BuildRequires:  dbus-daemon
-Requires:       bootc skopeo ostree systemd polkit containers-common
+Requires:       bootc skopeo ostree systemd polkit containers-common util-linux
 
 %description
 Checks for, verifies, downloads and applies Athanor system image updates, never without
@@ -75,10 +75,12 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 
 %changelog
 * Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
-- The fetch of a signature or attestation attachment reads its manifest first, within the
-  verifier's manifest cap, and copies nothing when the manifest is an index or names a blob
-  above the verifier's payload cap; the copy names the digest of the manifest read, and each
-  skopeo call is killed after 30 seconds (#658).
+- The fetch of a signature or attestation attachment is bounded (#658). It reads the
+  manifest first, up to 1 MiB, and does not copy an object whose manifest has a member cosign
+  does not write, more than 64 layers, or a descriptor that declares more than 64 KiB. The copy
+  names the digest of the manifest read and runs under prlimit(1) with a file size limit of
+  1 MiB, so a blob larger than it declared is cut there and the fetch fails. Each skopeo call
+  is killed after 30 seconds. Requires util-linux for prlimit.
 
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Each check removes the stored signature objects as it does the release attestations,
