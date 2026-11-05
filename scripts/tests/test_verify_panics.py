@@ -91,7 +91,7 @@ class PanickingMacrosTest(unittest.TestCase):
         with (
             mock.patch.object(verify, "rust_files", lambda: [pathlib.Path("a.rs")]),
             mock.patch.object(verify, "read", lambda p: src),
-            mock.patch.object(verify, "BUDGET", {k: 0 for k in MACROS}),
+            mock.patch.object(verify, "BUDGET", {k: 0 for k in {*verify.BUDGET, *MACROS}}),
         ):
             res = verify.check_panics()
         return sorted(p.split(": ")[1].split(" over")[0] for p in res.problems)
@@ -112,6 +112,52 @@ class PanickingMacrosTest(unittest.TestCase):
             "fn g() { // assert!(a)\n}\n"
         )
         self.assertEqual(self.counts(src), [])
+
+    def test_text_that_is_not_a_call_counts_zero(self):
+        src = (
+            'fn a() { let s = "x.unwrap() assert!(x)"; }\n'
+            'fn b() { let s = r#"panic!(\\"q\\") .expect("#; let t = r"todo!(x)"; }\n'
+            'fn c() { let s = b"unreachable!(x)"; let e = "\\" .unwrap()"; }\n'
+            "fn d() { let q = '\"'; let e = '\\''; } // assert!(x)\n"
+            "/* assert!(x) /* nested .unwrap() */ still .expect( */\n"
+            "fn e() {}\n"
+        )
+        self.assertEqual(self.counts(src), [])
+
+    def test_raw_strings_and_character_escapes_are_lexed(self):
+        # Each case lexes differently under the plain-string rule: a raw string keeps its inner
+        # `"` and ends at no backslash, and an escaped `'\"'` does not open a string.
+        cases = (
+            ('fn a() { let s = r#"a"b.unwrap()"#; }\n', []),
+            ('fn a() { let s = r"C:\\"; x.unwrap(); }\n', [".unwrap()"]),
+            ("fn a() { let q = '\\\"'; x.unwrap(); let s = \"a\"; }\n", [".unwrap()"]),
+        )
+        for src, want in cases:
+            with self.subTest(src=src):
+                self.assertEqual(self.counts(src), want)
+
+    def test_a_url_in_a_string_does_not_hide_the_call_after_it(self):
+        # The old `split("//")` cut the line at the `//` of the URL and missed the unwrap.
+        src = 'fn a() { let u = "http://x"; x.unwrap(); }\n'
+        self.assertEqual(self.counts(src), [".unwrap()"])
+
+    def test_code_after_literals_and_comments_still_counts(self):
+        src = "fn a() { let q = '\"'; /* /* */ x.unwrap() */ assert!(\"m\"); }\n"
+        self.assertEqual(self.counts(src), ["assert!("])
+        for tail, key in (("x.unwrap()", ".unwrap()"), ("x.expect(1)", ".expect("), ("panic!(1)", "panic!(")):
+            with self.subTest(tail=tail):
+                src = f"fn a() {{ let s = '\"'; /* /* */ q.unwrap() */ {tail}; }}\n"
+                self.assertEqual(self.counts(src), [key])
+
+    def test_a_macro_rules_body_counts_where_it_panics(self):
+        src = "macro_rules! m { () => { assert!(x) } }\n"
+        self.assertEqual(self.counts(src), ["assert!("])
+
+    def test_without_literals_keeps_line_numbers(self):
+        src = 'let a = "x\ny"; /* a\nb */ let b = 1;\n'
+        out = verify.without_literals(src)
+        self.assertEqual(out.count("\n"), src.count("\n"))
+        self.assertEqual(len(out), len(src))
 
 
 MACROS = (
