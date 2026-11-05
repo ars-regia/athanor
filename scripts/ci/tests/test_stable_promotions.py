@@ -43,11 +43,12 @@ def bundle(promotion):
     )
 
 
-def plan(run, digest, promotion_run):
+def plan(run, digest, promotion_run, day, previous):
     return {
         "run_id": run,
         "trigger": f"https://github.com/{REPO}/actions/runs/{promotion_run}",
-        "images": [{"name": "athanor-system", "digest": digest}],
+        "day": day,
+        "images": [{"name": "athanor-system", "digest": digest, "previous_stable": previous}],
     }
 
 
@@ -72,6 +73,7 @@ class StablePromotions(unittest.TestCase):
                 f"{IMAGE}:stable": D1,
                 f"{IMAGE}:stable-previous": D2,
                 f"{IMAGE}:stable-20261024": D1,
+                f"{IMAGE}:stable-20261017": D2,
             },
             "list": {
                 IMAGE: [
@@ -90,10 +92,10 @@ class StablePromotions(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def promotion(self, run, promotion_run, digest, approved=True, trigger_run=None):
+    def promotion(self, run, promotion_run, digest, approved=True, trigger_run=None, day="20261024", previous=None):
         """A bundle in the evidence registry; approved: the promote job succeeded in `release`."""
         path = self.dir / f"{run}-{promotion_run}.tar"
-        path.write_bytes(bundle(plan(run, digest, trigger_run or promotion_run)))
+        path.write_bytes(bundle(plan(run, digest, trigger_run or promotion_run, day, previous)))
         tag = f"{run}-{promotion_run}"
         self.fx["list"][EVID].append(tag)
         self.fx["bundles"][f"{EVID}:{tag}"] = str(path)
@@ -120,79 +122,114 @@ class StablePromotions(unittest.TestCase):
             env=self.environ,
         )
 
-    def test_digests_with_an_approved_record_pass(self):
-        self.promotion(10, 20, D1)
-        self.promotion(5, 6, D2)
+    def chain(self):
+        """The matching chain: D2 promoted on the 17th, then D1 on the 24th over it."""
+        self.promotion(5, 6, D2, day="20261017")
+        self.promotion(10, 20, D1, previous=D2)
+
+    def tag(self, name, digest, listed=True):
+        self.fx["tags"][f"{IMAGE}:{name}"] = digest
+        if listed:
+            self.fx["list"][IMAGE].append(name)
+
+    def fails(self, *texts):
+        r = self.check()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        for text in texts:
+            self.assertIn(text, r.stderr)
+        return r
+
+    def test_the_matching_chain_passes(self):
+        self.chain()
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn(
-            f"athanor-system:stable-20261024: {D1} has a promotion record", r.stdout
-        )
+        self.assertIn("follow promotion run 20", r.stdout)
 
     def test_a_stable_with_no_record_fails_and_names_the_digest(self):
-        self.promotion(5, 6, D2)
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn(f"athanor-system:stable: {D1} has no promotion record", r.stderr)
-        self.assertNotIn(f"stable-previous: {D2}", r.stderr)
+        self.promotion(5, 6, D2, day="20261017")
+        self.fails(f"athanor-system:stable: {D1}, but the newest promotion (run 6) set {D2}")
 
-    def test_a_plan_whose_promote_job_never_ran_in_release_is_no_record(self):
-        self.promotion(10, 20, D1, approved=False)
-        self.promotion(5, 6, D2)
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn(f"athanor-system:stable: {D1} has no promotion record", r.stderr)
-        self.assertIn("did not succeed in the environment release", r.stderr)
+    def test_an_image_with_no_record_and_a_stable_fails_and_names_the_digest(self):
+        self.fails(f"athanor-system:stable: {D1} has no promotion record")
 
-    def test_a_bundle_that_names_another_run_is_no_record(self):
-        self.promotion(10, 20, D1, trigger_run=99)
-        self.promotion(5, 6, D2)
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("not promotion run 20", r.stderr)
-
-    def test_a_bundle_whose_signature_does_not_verify_is_no_record(self):
-        self.promotion(10, 20, D1)
-        self.fx["cosign_ok"] = False
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("does not verify", r.stderr)
-
-    def test_an_unreadable_registry_fails(self):
-        self.promotion(10, 20, D1)
-        self.fx["errors"] = [f"{IMAGE}:stable-previous"]
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("unreadable, so not checked", r.stderr)
-
-    def test_an_unreadable_bundle_fails(self):
-        self.promotion(10, 20, D1)
-        pathlib.Path(self.fx["bundles"][f"{EVID}:10-20"]).write_bytes(b"not a tar")
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("unreadable, so not checked", r.stderr)
-
-    def test_an_unreadable_github_api_fails(self):
-        self.promotion(10, 20, D1)
-        self.fx["errors"] = ["deployments"]
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("unreadable, so not checked", r.stderr)
-
-    def test_a_tag_that_does_not_exist_is_skipped(self):
-        del self.fx["tags"][f"{IMAGE}:stable-previous"]
-        self.promotion(10, 20, D1)
+    def test_an_image_never_promoted_is_skipped(self):
+        for name in ("stable", "stable-previous", "stable-20261024", "stable-20261017"):
+            del self.fx["tags"][f"{IMAGE}:{name}"]
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("stable-previous: no such tag", r.stdout)
+        self.assertIn("never promoted", r.stdout)
 
-    def test_the_newest_dated_tag_is_the_one_checked(self):
-        self.fx["tags"][f"{IMAGE}:stable-20261024"] = "sha256:" + "3" * 64
-        self.promotion(10, 20, D1)
-        self.promotion(5, 6, D2)
-        r = self.check()
-        self.assertEqual(r.returncode, 1)
-        self.assertIn("stable-20261024: sha256:" + "3" * 64, r.stderr)
+    def test_a_rollback_to_an_older_recorded_digest_fails(self):
+        self.chain()
+        self.tag("stable", D2, listed=False)
+        self.fails(f"athanor-system:stable: {D2}, but the newest promotion (run 20) set {D1}")
+
+    def test_a_stable_previous_out_of_step_fails_with_what_to_do(self):
+        self.chain()
+        self.tag("stable-previous", D1, listed=False)
+        self.fails(f"athanor-system:stable-previous: {D1}, but the newest promotion (run 20) recorded {D2}", "re-run its failed job")
+
+    def test_a_promote_that_stopped_after_the_day_tag_fails_and_says_so(self):
+        self.chain()
+        self.tag("stable-20261030", D2)
+        self.promotion(30, 40, D2, previous=D1, day="20261030", approved=False)
+        self.fails(f"athanor-system:stable-20261030: {D2}, but no promotion record has that day", "re-run its failed job")
+
+    def test_a_missing_stable_with_a_record_fails(self):
+        self.chain()
+        del self.fx["tags"][f"{IMAGE}:stable"]
+        self.fails(f"athanor-system:stable: missing, but the newest promotion (run 20) set {D1}")
+
+    def test_a_missing_stable_previous_with_a_record_fails(self):
+        self.chain()
+        del self.fx["tags"][f"{IMAGE}:stable-previous"]
+        self.fails("athanor-system:stable-previous: missing")
+
+    def test_a_future_dated_tag_fails(self):
+        self.chain()
+        self.tag("stable-99991231", D1)
+        self.fails("athanor-system:stable-99991231: not a date, or a date in the future")
+
+    def test_an_invalid_date_cannot_hide_the_real_newest_tag(self):
+        self.chain()
+        self.tag("stable-99999999", D1)
+        self.tag("stable-20261024", D2, listed=False)
+        self.fails("athanor-system:stable-99999999: not a date", f"athanor-system:stable-20261024: {D2}, but the last promotion of that day (run 20) set {D1}")
+
+    def test_the_newest_dated_tag_must_be_the_last_record_of_its_day(self):
+        self.chain()
+        self.tag("stable-20261024", D2, listed=False)
+        self.fails(f"athanor-system:stable-20261024: {D2}, but the last promotion of that day (run 20) set {D1}")
+
+    def test_a_plan_whose_promote_job_never_ran_in_release_is_no_record(self):
+        self.promotion(5, 6, D2, day="20261017")
+        self.promotion(10, 20, D1, approved=False, previous=D2)
+        self.fails("did not succeed in the environment release", "athanor-system:stable: " + D1)
+
+    def test_a_bundle_that_names_another_run_is_no_record(self):
+        self.promotion(5, 6, D2, day="20261017")
+        self.promotion(10, 20, D1, trigger_run=99, previous=D2)
+        self.fails("not promotion run 20")
+
+    def test_a_bundle_whose_signature_does_not_verify_is_no_record(self):
+        self.chain()
+        self.fx["cosign_ok"] = False
+        self.fails("does not verify")
+
+    def test_an_unreadable_registry_fails(self):
+        self.chain()
+        self.fx["errors"] = [f"{IMAGE}:stable-previous"]
+        self.fails("unreadable, so not checked")
+
+    def test_an_unreadable_bundle_fails(self):
+        self.chain()
+        pathlib.Path(self.fx["bundles"][f"{EVID}:10-20"]).write_bytes(b"not a tar")
+        self.fails("unreadable, so not checked")
+
+    def test_an_unreadable_github_api_fails(self):
+        self.chain()
+        self.fx["errors"] = ["deployments"]
+        self.fails("unreadable, so not checked")
 
     def test_no_registry_owner_is_assumed(self):
         del self.environ["REGISTRY"]

@@ -3,9 +3,13 @@
 
 The GITHUB_TOKEN of any run with `packages: write` can push a GHCR tag, so `skopeo copy` can
 put an already signed digest on `:stable` and skip the evidence, the dwell and the `release`
-approval. This reads, for each system image repository, the digest of `:stable`,
-`:stable-previous` and the newest `:stable-<YYYYMMDD>`, and fails, naming the digest, when it
-has no promotion record.
+approval. This reads, for each system image repository, `:stable`, `:stable-previous` and the
+newest `:stable-<YYYYMMDD>`, and fails, naming the digest, unless the chain of the newest
+promotion record holds: `:stable` is its digest (an older recorded digest copied back is a
+rollback no promotion made), `:stable-previous` its `previous_stable`, and the newest dated
+tag the digest of the last record of that day. A dated tag that is no date, or lies in the
+future, fails (promote.sh never writes one). Once an image has a record, a missing tag fails;
+an image with no record and no `:stable` is skipped.
 
 A promotion record is the `promotion.json` of an evidence bundle in the registry off GitHub
 (`$EVIDENCE_REGISTRY/athanor-evidence:<build run>-<promotion run>`, system/evidence-bundle.sh)
@@ -25,6 +29,7 @@ cosign and bash on PATH. Read-only.
 """
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 import pathlib
@@ -135,8 +140,8 @@ class Release:
 
 
 def records(evidence_repo, release):
-    """{(image name, digest)} named by the verified, approved promotion bundles."""
-    named = set()
+    """The verified, approved promotions as dicts, oldest promotion run first."""
+    found = []
     for tag in sorted(tags(evidence_repo)):
         m = re.fullmatch(r"(\d+)-(\d+)", tag)
         if not m:
@@ -144,84 +149,101 @@ def records(evidence_repo, release):
         with tempfile.TemporaryDirectory() as tmp:
             tree = fetch_bundle(f"{evidence_repo}:{tag}", pathlib.Path(tmp))
             v = subprocess.run(
-                [
-                    "bash",
-                    str(ROOT / "system/evidence-bundle.sh"),
-                    "verify-dir",
-                    str(tree),
-                    str(tree),
-                ],
+                ["bash", str(ROOT / "system/evidence-bundle.sh"), "verify-dir", str(tree), str(tree)],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             if v.returncode != 0:
-                print(
-                    f"{tag}: not a record, the bundle does not verify: {v.stderr.strip()}",
-                    file=sys.stderr,
-                )
+                print(f"{tag}: not a record, the bundle does not verify: {v.stderr.strip()}", file=sys.stderr)
                 continue
             try:
                 plan = json.loads((tree / "promotion.json").read_text())
             except (OSError, ValueError) as e:
-                raise Unreadable(
-                    f"{tag}: promotion.json of a verified bundle is unreadable: {e}"
-                ) from e
+                raise Unreadable(f"{tag}: promotion.json of a verified bundle is unreadable: {e}") from e
         if not str(plan.get("trigger", "")).endswith(f"/actions/runs/{m[2]}"):
-            print(
-                f"{tag}: not a record, its trigger is {plan.get('trigger')!r}, not promotion run {m[2]}",
-                file=sys.stderr,
-            )
+            print(f"{tag}: not a record, its trigger is {plan.get('trigger')!r}, not promotion run {m[2]}", file=sys.stderr)
         elif not release.promoted(m[2]):
-            print(
-                f"{tag}: not a record, the promote job of run {m[2]} did not succeed in the environment {ENVIRONMENT}",
-                file=sys.stderr,
-            )
+            print(f"{tag}: not a record, the promote job of run {m[2]} did not succeed in the environment {ENVIRONMENT}", file=sys.stderr)
         else:
-            named.update((i["name"], i["digest"]) for i in plan["images"])
-    return named
+            found.append({"run": int(m[2]), "day": plan.get("day"), "images": {i["name"]: i for i in plan["images"]}})
+    return sorted(found, key=lambda r: r["run"])
+
+
+def valid_day(tag):
+    """The date of a dated tag that is a real date, not in the future; None otherwise."""
+    try:
+        day = datetime.strptime(tag.removeprefix("stable-"), "%Y%m%d").date()
+    except ValueError:
+        return None
+    return day if day <= datetime.now(timezone.utc).date() else None
+
+
+def check_image(name, repo, found):
+    """The failures of one image, as lines; empty when its tags are the newest record's chain."""
+    mine = [r for r in found if name in r["images"]]
+    stable = tag_digest(repo, "stable")
+    if not mine:
+        if stable is None:
+            print(f"{name}: never promoted, no :stable")
+            return []
+        return [f"{name}:stable: {stable} has no promotion record from a promote job that ran in the environment {ENVIRONMENT}"]
+    newest = mine[-1]
+    want = newest["images"][name]
+    bad = []
+    stopped = (
+        "; a promote that stopped between its copies leaves the tags out of step: re-run its failed job, "
+        "otherwise a tag was moved from outside"
+    )
+    if stable != want["digest"]:
+        bad.append(
+            f"{name}:stable: {stable or 'missing'}, but the newest promotion (run {newest['run']}) set {want['digest']}: "
+            "a rollback or a copy no promotion made, or a promote still running"
+        )
+    previous = want.get("previous_stable")
+    if previous:
+        have = tag_digest(repo, "stable-previous")
+        if have != previous:
+            bad.append(f"{name}:stable-previous: {have or 'missing'}, but the newest promotion (run {newest['run']}) recorded {previous}{stopped}")
+    dated = {t: valid_day(t) for t in tags(repo) if re.fullmatch(r"stable-\d{8}", t)}
+    for t, day in sorted(dated.items()):
+        if day is None:
+            bad.append(f"{name}:{t}: not a date, or a date in the future; promote.sh never writes one")
+    valid = {t: d for t, d in dated.items() if d}
+    if valid:
+        top = max(valid, key=valid.get)
+        last = [r for r in mine if r["day"] == top.removeprefix("stable-")]
+        have = tag_digest(repo, top)
+        if not last:
+            bad.append(f"{name}:{top}: {have}, but no promotion record has that day{stopped}")
+        elif have != last[-1]["images"][name]["digest"]:
+            bad.append(f"{name}:{top}: {have}, but the last promotion of that day (run {last[-1]['run']}) set {last[-1]['images'][name]['digest']}{stopped}")
+    if not bad:
+        print(f"{name}: :stable, :stable-previous and {max(valid, key=valid.get) if valid else 'no dated tag'} follow promotion run {newest['run']}")
+    return bad
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument(
-        "--image",
-        action="append",
-        help="image name to check (default: the system images)",
-    )
+    ap.add_argument("--image", action="append", help="image name to check (default: the system images)")
     args = ap.parse_args()
     owner = os.environ.get("GITHUB_REPOSITORY_OWNER", "").lower()
     registry = os.environ.get("REGISTRY") or (f"{os.environ.get('REGISTRY_HOST') or 'ghcr.io'}/{owner}" if owner else "")
     evidence = os.environ.get("EVIDENCE_REGISTRY", "")
     gh_repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not (registry and evidence and gh_repo):
-        print(
-            "set REGISTRY (or GITHUB_REPOSITORY_OWNER), EVIDENCE_REGISTRY and GITHUB_REPOSITORY",
-            file=sys.stderr,
-        )
+        print("set REGISTRY (or GITHUB_REPOSITORY_OWNER), EVIDENCE_REGISTRY and GITHUB_REPOSITORY", file=sys.stderr)
         return 2
     try:
-        named = records(f"{evidence}/{EVIDENCE_IMAGE}", Release(gh_repo))
-        bad = 0
+        found = records(f"{evidence}/{EVIDENCE_IMAGE}", Release(gh_repo))
+        bad = []
         for name in args.image or IMAGES:
-            repo = f"{registry}/{name}"
-            dated = sorted(t for t in tags(repo) if re.fullmatch(r"stable-\d{8}", t))
-            for tag in ("stable", "stable-previous", *dated[-1:]):
-                digest = tag_digest(repo, tag)
-                if digest is None:
-                    print(f"{name}:{tag}: no such tag, nothing to check")
-                elif (name, digest) in named:
-                    print(f"{name}:{tag}: {digest} has a promotion record")
-                else:
-                    bad += 1
-                    print(
-                        f"{name}:{tag}: {digest} has no promotion record from a promote job that ran in "
-                        f"the environment {ENVIRONMENT}",
-                        file=sys.stderr,
-                    )
+            bad += check_image(name, f"{registry}/{name}", found)
     except Unreadable as e:
         print(f"unreadable, so not checked: {e}", file=sys.stderr)
         return 1
+    for line in bad:
+        print(line, file=sys.stderr)
     return 1 if bad else 0
 
 
