@@ -81,7 +81,10 @@ EXPECTED_DIFFERENCES = {}
 # toolkit's scroll draws only an indicator, which takes no input, and publishes no node for it; its
 # scroll view says how far it is scrolled. The maintainer decided on 2026-11-05 (#982) that a scroll
 # bar of the reference, with its subtree, has no counterpart in a transcript that holds no scroll bar.
+# The rule holds only for the gallery's pages it names, so that a scroll bar the toolkit should
+# publish elsewhere still fails as missing.
 INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer, 2026-11-05, #982)"
+INDICATOR_PAGES = {"lists"}
 
 
 def in_scroll_bar(nodes):
@@ -155,9 +158,10 @@ def same_role(a, b):
     return a == b or any(a in group and b in group for group in SAME_ROLE)
 
 
-def compare(reference, transcript, exempt=None):
+def compare(reference, transcript, exempt=None, indicator=False):
     """Returns (lines, failures): a verdict per element of the reference, and the failures.
-    `exempt` maps the name of an element decision 28 hides to its (cause, issue)."""
+    `exempt` maps the name of an element decision 28 hides to its (cause, issue); `indicator`
+    applies the scroll-indicator rule of INDICATOR_PAGES."""
     exempt = exempt or {}
     candidates = spoken(transcript)
     lines, failures = [], []
@@ -169,7 +173,7 @@ def compare(reference, transcript, exempt=None):
         for name in sorted(set(exempt) - {ref["name"] for ref in spoken(reference)})
     ]
     bars = set()
-    if not any(node["role"] == "scroll bar" for node in transcript):
+    if indicator and not any(node["role"] == "scroll bar" for node in transcript):
         bars = in_scroll_bar(reference)
     for ref in spoken(reference):
         if id(ref) in bars:
@@ -247,7 +251,7 @@ def gallery_problems(references, transcripts, lang):
         reference, transcript = (
             json.loads(path.read_text(encoding="utf-8")) for path in paths.values()
         )
-        found, failed = compare(reference, transcript)
+        found, failed = compare(reference, transcript, indicator=page in INDICATOR_PAGES)
         lines += [f"{page}: {line}" for line in found]
         issue = EXPECTED_DIFFERENCES.get(page)
         if issue is None:

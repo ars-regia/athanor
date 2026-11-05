@@ -202,7 +202,10 @@ class CompareTest(unittest.TestCase):
             at(1, "label", "Row 2"),
         ]
         transcript = [at(0, "scroll pane", ""), at(1, "label", "Row 1"), at(1, "label", "Row 2")]
-        lines, failures = compare.compare(reference, transcript)
+        # Off the pages of INDICATOR_PAGES the missing scroll bar fails.
+        _, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, ["scroll bar '': missing", "panel '': missing"])
+        lines, failures = compare.compare(reference, transcript, indicator=True)
         self.assertEqual(failures, [])
         self.assertEqual(
             [line for line in lines if "no counterpart" in line],
@@ -213,8 +216,9 @@ class CompareTest(unittest.TestCase):
         )
         # A scroll bar the transcript holds is compared, its value with it.
         published = transcript + [at(1, "scroll bar", "", "5.0"), at(2, "panel", "", "0.0")]
-        _, failures = compare.compare(reference, published)
+        _, failures = compare.compare(reference, published, indicator=True)
         self.assertEqual(failures, ["scroll bar '': value '5.0', expected '0.0'"])
+        self.assertEqual(compare.INDICATOR_PAGES, {"lists"})
 
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
