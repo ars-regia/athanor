@@ -120,7 +120,8 @@ jobs:
     name: Point stable at the run
     needs: [plan]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The old promote and iso jobs had 30 minutes each; this job does both (ADR-0136).
+    timeout-minutes: 60
     environment: release
     permissions:
       contents: read
