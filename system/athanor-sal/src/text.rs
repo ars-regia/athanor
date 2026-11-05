@@ -1,11 +1,12 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
 use crate::widget::Rect;
-use parley::fontique::Script;
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, GenericFamily, Layout, LayoutContext,
     PlainEditor, StyleProperty,
 };
+
+mod fontconfig;
 
 /// Parley's brush type for our layouts: the colour is chosen when drawing, not when shaping.
 pub type Brush = [u8; 4];
@@ -25,19 +26,29 @@ impl Default for TextContext {
 }
 
 impl TextContext {
-    /// A context on `fonts`, whose sans-serif family starts with the font the locale draws Latin
-    /// text with. Fontconfig orders sans-serif by the locale's language, so under Arabic it starts
-    /// with an Arabic font that has no Latin letters. Parley sizes every line by at least its
-    /// family's first font, the strut of CSS 2 § 10.8, and a Latin line under that locale took
-    /// the Arabic font's ascent, descent and leading. Glyphs from the fonts after the first still
-    /// grow the line, so Arabic text keeps its own height.
+    /// A context on `fonts`, whose sans-serif family starts with the font GTK draws Latin text
+    /// with. Fontconfig orders sans-serif by the locale's language, so under Arabic or Hebrew it
+    /// starts with a font of that script without Latin letters (Noto Sans Arabic, Droid Sans
+    /// Hebrew). Parley sizes every line by at least its family's first font, the strut of CSS 2
+    /// § 10.8, so a Latin line took that font's ascent, descent and leading. Pango sorts
+    /// sans-serif for `en` and draws Latin with the first font that has the letters: Noto Sans
+    /// under ar_EG, he_IL and ja_JP on the image, Vazirmatn under fa_IR. That font now leads.
+    /// Glyphs from the fonts after it still grow the line, so Arabic text keeps its own height.
     fn new(mut fonts: FontContext) -> Self {
-        let latin = Script::from_bytes(*b"Latn");
         let collection = &mut fonts.collection;
-        let primary: Vec<_> = collection.fallback_families(latin).take(1).collect();
+        let sorted = fontconfig::sans_serif_for_english();
+        let latin = sorted
+            .as_deref()
+            .and_then(|fonts| fontconfig::first_latin(fonts.iter().map(|(f, l)| (f.as_str(), *l))))
+            .and_then(|family| collection.family_id(family));
         // Fontique serves a collection's own generic families before the system's, which follow
-        // in fontconfig's order; with no Latin font the system's order stays as it is.
-        collection.set_generic_families(GenericFamily::SansSerif, primary.into_iter());
+        // in fontconfig's order for the locale; without a Latin font that order stays as it is.
+        match latin {
+            Some(id) => collection.set_generic_families(GenericFamily::SansSerif, [id].into_iter()),
+            None => eprintln!(
+                "athanor-sal: fontconfig named no sans-serif font for Latin text; lines keep the locale's order"
+            ),
+        }
         Self {
             fonts,
             layouts: LayoutContext::new(),
@@ -476,20 +487,40 @@ mod tests {
         (index, line, x)
     }
 
+    /// Run by `a_latin_line_is_as_tall_under_arabic_and_hebrew_as_under_english` in a process of
+    /// its own per locale: fontconfig reads the locale once per process.
+    const IN_THIS_LOCALE: &str = "text::tests::a_latin_line_in_this_locale";
+
     #[test]
-    fn a_latin_line_is_as_tall_under_arabic_as_under_english() {
-        // The sans-serif family as fontconfig orders it under en_US and under ar_EG.
-        let height = |order: [&str; 2]| {
-            let mut fonts = FontContext::default();
-            let ids = order.map(|name| fonts.collection.family_id(name).expect("installed"));
-            let sans = GenericFamily::SansSerif;
-            fonts.collection.set_generic_families(sans, ids.into_iter());
-            let mut cx = TextContext::new(fonts);
-            cx.layout("Keyboard layout", 15.0, true).height()
-        };
-        let english = height(["Noto Sans", "Noto Sans Arabic"]);
-        assert_eq!(height(["Noto Sans Arabic", "Noto Sans"]), english);
-        assert!(english > 0.0);
+    #[ignore = "run by a_latin_line_is_as_tall_under_arabic_and_hebrew_as_under_english"]
+    fn a_latin_line_in_this_locale() {
+        let mut cx = TextContext::default();
+        let collection = &mut cx.fonts.collection;
+        let first = collection.generic_families(GenericFamily::SansSerif).next();
+        let family = first
+            .and_then(|id| collection.family_name(id))
+            .map(str::to_owned);
+        // GTK's Latin font in the rig and on the image, and its line at the theme's 15 px.
+        assert_eq!(family.as_deref(), Some("Noto Sans"));
+        assert_eq!(cx.layout("Keyboard layout", 15.0, true).height(), 20.0);
+    }
+
+    #[test]
+    fn a_latin_line_is_as_tall_under_arabic_and_hebrew_as_under_english() {
+        let test = std::env::current_exe().expect("the test binary");
+        for locale in ["en_US.UTF-8", "ar_EG.UTF-8", "he_IL.UTF-8"] {
+            let run = std::process::Command::new(&test)
+                .args(["--exact", IN_THIS_LOCALE, "--ignored", "--test-threads=1"])
+                .env("LANG", locale)
+                .env_remove("LC_ALL")
+                .env_remove("LC_CTYPE")
+                .env_remove("FC_LANG")
+                .output()
+                .expect("the test binary runs");
+            let stdout = String::from_utf8_lossy(&run.stdout);
+            assert!(run.status.success(), "{locale}: {stdout}");
+            assert!(stdout.contains("1 passed"), "{locale}: {stdout}");
+        }
     }
 
     #[test]
