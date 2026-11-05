@@ -329,6 +329,12 @@ def evaluate(facts, expect, contacts, tunnel_port):
                 state == "disabled" and got in ("masked", "absent")
             ):
                 fail("units", f"{unit} is {got}, declared {state}")
+    for unit in expect.get("units", {}).get("absent", []):
+        if unit in facts["units"]:
+            fail(
+                "units",
+                f"{unit} is installed ({facts['units'][unit]}), declared absent",
+            )
 
     reason = expect.get("trust", {}).get("reason")
     if facts["trust"].get("reason") != reason:

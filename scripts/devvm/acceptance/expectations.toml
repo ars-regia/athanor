@@ -68,8 +68,13 @@ features = ["with-faillock", "without-nullok"]
 faillock = { deny = 5, fail_interval = 900, unlock_time = 600 } # ADR-0090
 
 [units]
-masked = ["rpm-ostree-countme.timer"]
+# debug-shell.service is a root shell on tty9 without a password (doc_software.md, decision 1).
+masked = ["rpm-ostree-countme.timer", "debug-shell.service"]
 disabled = ["unbound-anchor.timer"]
+# Not installed: the QEMU guest agent answers the hypervisor as root, and the dev VM does not
+# add it either, so its absence here is the image's. sshd.service is not here: devvm.ks enables
+# it, and its state on a new install is the kickstarts' (system/tests/test_sshd_default.py).
+absent = ["qemu-guest-agent.service"]
 
 [trust]
 reason = "signature" # the channel under test is the signed :stable of the acceptance registry
