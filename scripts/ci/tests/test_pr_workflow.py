@@ -9,6 +9,7 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 PR = ROOT / ".github" / "workflows" / "pr.yml"
 SHELL = ROOT / ".github" / "workflows" / "shell-surfaces.yml"
+AUDIT = ROOT / ".github" / "workflows" / "rust-security-audit.yml"
 
 spec = importlib.util.spec_from_file_location("changes", ROOT / "scripts/ci/changes.py")
 changes = importlib.util.module_from_spec(spec)
@@ -73,6 +74,31 @@ class ShellAreaTest(unittest.TestCase):
         glob = "/" + "*" * 2
         as_area = {p[: -len(glob) + 1] if p.endswith(glob) else p for p in triggers["push"]["paths"]}
         self.assertEqual(as_area, set(changes.AREAS["shell"]))
+
+
+class RustAuditTest(unittest.TestCase):
+    """The Rust audit runs on a pull request only through pr.yml, when its area is selected,
+    and on a push to iso-v0 only for the paths of the same area."""
+
+    def test_no_pull_request_trigger_of_its_own(self):
+        triggers = yaml.safe_load(AUDIT.read_text())[True]
+        self.assertEqual(set(triggers), {"workflow_call", "schedule", "push"})
+        job = yaml.safe_load(PR.read_text())["jobs"]["rust_audit"]
+        self.assertEqual(job["uses"], "./.github/workflows/rust-security-audit.yml")
+
+    def test_push_filter_matches_the_rust_audit_area(self):
+        push = yaml.safe_load(AUDIT.read_text())[True]["push"]
+        self.assertEqual(push["branches"], ["iso-v0"])
+        any_dir = "*" * 2
+
+        def as_area(path):
+            if path.endswith("/" + any_dir):
+                return path[: -len(any_dir)]
+            if path.startswith(any_dir):
+                return path[len(any_dir) - 1 :]
+            return path
+
+        self.assertEqual({as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"]))
 
 
 if __name__ == "__main__":

@@ -15,6 +15,10 @@ on:
   workflow_run:
     workflows: [Pull Request, System Image Check]
     types: [completed]
+    # The head branches of the runs to follow: the branches BRANCH of bot_merge.py accepts,
+    # so a run of any other branch starts no run here (scripts/ci/tests/test_bot_merge_workflow.py).
+    # A cheap pre-filter only: the job's `if:` and bot_merge.py still check the branch.
+    branches: [chore/update-specs-zero-trust, "bump/system-**"]
 
 permissions:
   actions: read
