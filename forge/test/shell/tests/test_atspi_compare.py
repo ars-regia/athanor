@@ -3,6 +3,7 @@
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -143,6 +144,33 @@ class CompareTest(unittest.TestCase):
 
 
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/atspi"
+
+
+class GalleryTest(unittest.TestCase):
+    """rig.sh atspi gallery: one tree per page of cases.py gallery-pages, each compared with its
+    reference; a page with no reference or no transcript fails (#648)."""
+
+    def test_every_page_has_a_reference_in_both_languages(self):
+        for lang in ("en", "it"):
+            _, failures = compare.gallery_problems(GOLDEN, GOLDEN, lang)
+            self.assertEqual(failures, [], lang)
+
+    def test_a_page_without_its_reference_or_its_transcript_fails(self):
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                for folder in (references, transcripts):
+                    tree = [node("toggle button", page)]
+                    (Path(folder) / f"atspi-gallery-{page}-it.json").write_text(json.dumps(tree))
+            lines, failures = compare.gallery_problems(references, transcripts, "it")
+            self.assertEqual((len(lines), failures), (len(compare.GALLERY_PAGES), []))
+            (Path(references) / "atspi-gallery-choices-it.json").unlink()
+            (Path(transcripts) / "atspi-gallery-states-it.json").unlink()
+            _, failures = compare.gallery_problems(references, transcripts, "it")
+            self.assertEqual(len(failures), 2)
+            self.assertTrue(failures[0].startswith("choices: no reference "))
+            self.assertTrue(failures[1].startswith("states: no transcript "))
+            # The English trees are other files.
+            self.assertEqual(len(compare.gallery_problems(references, transcripts, "en")[1]), 12)
 
 
 class HiddenTest(unittest.TestCase):

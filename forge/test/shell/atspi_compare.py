@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 """atspi_compare.py <reference.json> <transcript.json> [--own-compositor <preset|-> <dock|-> <lang>]
+atspi_compare.py --gallery <reference dir> <transcript dir> <en|it>
 
 doc_own_stack.md, OS8: a surface moves from GTK4 to athanor-sal only when what a screen
 reader is told about it holds every name, role, state and value of the GTK version. Both files
@@ -12,6 +13,10 @@ button's "pressed" for "checked", is a note, not a failure.
 elements of the controls decision 28 of doc_own_stack.md hides there are exempt, each line
 naming the decision and the control's issue (golden_report.exemptions). An exempt element the
 transcript holds fails, and so does an exemption that names no element of the reference.
+
+--gallery compares the gallery's trees, one per page of cases.py gallery-pages, each in
+atspi-gallery-<page>[-it].json of both directories; a page with no reference or no transcript
+fails (gallery_problems).
 """
 
 import json
@@ -19,6 +24,7 @@ import sys
 from pathlib import Path
 
 from atspi_check import INTERACTIVE
+from cases import GALLERY_PAGES
 from golden_report import exemptions
 from orca_compare import switch_labels
 
@@ -165,19 +171,46 @@ def compare(reference, transcript, exempt=None):
     return lines, failures
 
 
+def gallery_problems(references, transcripts, lang):
+    """Returns (lines, failures) for the gallery's pages, each compared on its own and its lines
+    prefixed with the page; a page with no reference or no transcript is a failure."""
+    suffix = "" if lang == "en" else f"-{lang}"
+    lines, failures = [], []
+    for page in GALLERY_PAGES:
+        name = f"atspi-gallery-{page}{suffix}.json"
+        paths = {"reference": Path(references) / name, "transcript": Path(transcripts) / name}
+        absent = [f"{page}: no {what} {path}" for what, path in paths.items() if not path.is_file()]
+        if absent:
+            failures += absent
+            continue
+        reference, transcript = (
+            json.loads(path.read_text(encoding="utf-8")) for path in paths.values()
+        )
+        found, failed = compare(reference, transcript)
+        lines += [f"{page}: {line}" for line in found]
+        failures += [f"{page}: {line}" for line in failed]
+    return lines, failures
+
+
 def main(argv):
     own = argv[2:]
-    if len(argv) not in (2, 6) or (own and own[0] != "--own-compositor"):
+    if argv[:1] == ["--gallery"]:
+        if len(argv) != 4 or argv[3] not in ("en", "it"):
+            print(__doc__, file=sys.stderr)
+            return 2
+        lines, failures = gallery_problems(*argv[1:])
+    elif len(argv) not in (2, 6) or (own and own[0] != "--own-compositor"):
         print(__doc__, file=sys.stderr)
         return 2
-    reference, transcript = (
-        json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[:2]
-    )
-    exempt = {}
-    if own:
-        preset, dock, lang = (None if v == "-" else v for v in own[1:])
-        exempt = exemptions(preset, dock, lang)
-    lines, failures = compare(reference, transcript, exempt)
+    else:
+        reference, transcript = (
+            json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[:2]
+        )
+        exempt = {}
+        if own:
+            preset, dock, lang = (None if v == "-" else v for v in own[1:])
+            exempt = exemptions(preset, dock, lang)
+        lines, failures = compare(reference, transcript, exempt)
     for line in lines:
         print(line)
     for line in failures:

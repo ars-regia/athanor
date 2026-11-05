@@ -1,0 +1,1593 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "gallery_gtk.py",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "Gallery",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "label",
+  "name": "Pages",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Buttons",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Buttons",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Choices",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Choices",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Values",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Values",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Lists",
+  "states": [
+   "focusable",
+   "focused",
+   "pressed",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Lists",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Text",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Text",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "States",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "States",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "label",
+  "name": "Lists",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "scroll pane",
+  "name": "",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "list",
+  "name": "A list",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 1",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 2",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 3",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 4",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 5",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 6",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 7",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 8",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 9",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 10",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 11",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 12",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 13",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 14",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 15",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 16",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 17",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 18",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 19",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 20",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 21",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 22",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 23",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 24",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 25",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 26",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 27",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 28",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 29",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 30",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 31",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 32",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 33",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 34",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 35",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 36",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 37",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 38",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 39",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 40",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 41",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 42",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 43",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 44",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 45",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 46",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 47",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 48",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 49",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "list item",
+  "name": "",
+  "states": [
+   "focusable",
+   "selectable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "label",
+  "name": "Row 50",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "scroll bar",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": "0.0"
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": "0.0"
+ },
+ {
+  "depth": 2,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "label",
+  "name": "Gallery",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Minimize",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Close",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]

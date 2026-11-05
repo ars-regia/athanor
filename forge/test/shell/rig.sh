@@ -51,7 +51,7 @@
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
-#   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
+#   rig.sh atspi gallery [it]   each page's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
@@ -1154,21 +1154,27 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggles (six pages), a button, three toggles and a
-        # field, and the title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
-        # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
-        # hold all the reference holds, the GTK twin's, recorded (OS8).
-        # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
+        # One tree per page of cases.py gallery-pages, read with the gallery started on that page
+        # (--page): a hidden page exposes no node. Each holds the page toggles, at least one per
+        # page, the page's controls and, in the toolkit's, the title bar's two buttons.
+        # ATHANOR_GALLERY_BIN runs the GTK twin (forge/test/shell/gallery_gtk.py), or the toolkit's
+        # gallery by default; each page's transcript must hold all its reference holds, the GTK
+        # twin's, recorded (OS8), and a page with no transcript or no reference fails.
+        # To record them again, copy <out>/atspi-gallery-<page>[-it].json of a GTK run into golden/atspi/.
         bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-sal-gallery}
         if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-sal-gallery build-toolkit; fi
-        transcript=atspi-gallery${3:+-$3}.json
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 10" \
-            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
-            bash -c "$enable && exec $bin --lang ${3:-en}"
+        mapfile -t pages < <(python3 -B "$rig/cases.py" gallery-pages | cut -f1)
+        for page in "${pages[@]}"; do
+            transcript=atspi-gallery-$page${3:+-$3}.json
+            rm -f "$out/$transcript"
+            in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+                ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
+                RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} ${#pages[@]}" \
+                dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-gallery-$page" -- \
+                bash -c "$enable && exec $bin --page $page --lang ${3:-en}"
+        done
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
+            --gallery /repo/forge/test/shell/golden/atspi /out "${3:-en}"
         ;;
     toolkit-chooser)
         # The same 8 choices in athanor-sal's chooser, under athanor-sulphur, through
