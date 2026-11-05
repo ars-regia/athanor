@@ -15,7 +15,7 @@ spec.loader.exec_module(verify)
 OWN = verify.OWN_LICENCE
 CRATE = '[package]\nname = "x"\nversion = "1.0.0"\nlicense = "%s"\n'
 UPSTREAM = sorted(verify.UPSTREAM_SPECS)[0]
-TOOLKIT = "system/athanor-toolkit/Cargo.toml"
+TOOLKIT = "system/athanor-sal/Cargo.toml"
 
 
 def GREETER_ENTRIES():

@@ -87,7 +87,7 @@ fn read_paste<D: 'static>(
     mut done: impl FnMut(&mut D, String) + 'static,
 ) -> Result<(), String> {
     if let Some(old) = slot.take() {
-        eprintln!("athanor-toolkit: the paste not yet read gives way to the next");
+        eprintln!("athanor-sal: the paste not yet read gives way to the next");
         handle.remove(old.pipe);
         handle.remove(old.deadline);
     }
@@ -102,7 +102,7 @@ fn read_paste<D: 'static>(
         }
         match result {
             Ok(text) => done(data, text),
-            Err(error) => eprintln!("athanor-toolkit: nothing pasted: {error}"),
+            Err(error) => eprintln!("athanor-sal: nothing pasted: {error}"),
         }
         PostAction::Remove
     });
@@ -113,7 +113,7 @@ fn read_paste<D: 'static>(
             loop_handle.remove(late.pipe);
         }
         eprintln!(
-            "athanor-toolkit: nothing pasted: the clipboard's owner sent no whole text in {timeout:?}"
+            "athanor-sal: nothing pasted: the clipboard's owner sent no whole text in {timeout:?}"
         );
         TimeoutAction::Drop
     });
@@ -210,7 +210,7 @@ fn write_offer<D: 'static>(
             loop_handle.remove(deadline);
         }
         if let Err(error) = result {
-            eprintln!("athanor-toolkit: the clipboard's reader took no text: {error}");
+            eprintln!("athanor-sal: the clipboard's reader took no text: {error}");
         }
         PostAction::Remove
     });
@@ -219,7 +219,7 @@ fn write_offer<D: 'static>(
     let late = handle.insert_source(Timer::from_duration(timeout), move |_, _, _| {
         loop_handle.remove(write);
         eprintln!(
-            "athanor-toolkit: the clipboard's reader took no whole text in {timeout:?}, and its pipe is closed"
+            "athanor-sal: the clipboard's reader took no whole text in {timeout:?}, and its pipe is closed"
         );
         TimeoutAction::Drop
     });
@@ -295,11 +295,11 @@ impl App {
     fn copy(&mut self, text: String) -> bool {
         let clipboards = &mut self.clipboards;
         let (Some(manager), Some(device)) = (&clipboards.manager, &clipboards.device) else {
-            eprintln!("athanor-toolkit: nothing copied: the compositor has no clipboard");
+            eprintln!("athanor-sal: nothing copied: the compositor has no clipboard");
             return false;
         };
         let Some(serial) = self.shell.grab.serial() else {
-            eprintln!("athanor-toolkit: nothing copied: no key or button to copy with");
+            eprintln!("athanor-sal: nothing copied: no key or button to copy with");
             return false;
         };
         let source = manager.create_copy_paste_source(&self.shell.qh, MIMES);
@@ -329,7 +329,7 @@ impl App {
             return;
         };
         let Some(serial) = self.shell.grab.serial() else {
-            eprintln!("athanor-toolkit: nothing selected: no key or button to select with");
+            eprintln!("athanor-sal: nothing selected: no key or button to select with");
             return;
         };
         let source = manager.create_selection_source(&self.shell.qh, MIMES);
@@ -377,7 +377,7 @@ impl App {
         let pipe = match pipe {
             Some(Ok(pipe)) => pipe,
             Some(Err(error)) => {
-                eprintln!("athanor-toolkit: nothing pasted: {error}");
+                eprintln!("athanor-sal: nothing pasted: {error}");
                 return;
             }
             None => return,
@@ -391,7 +391,7 @@ impl App {
             move |app, text| app.pasted(id, widget, &text),
         );
         if let Err(error) = read {
-            eprintln!("athanor-toolkit: nothing pasted: {error}");
+            eprintln!("athanor-sal: nothing pasted: {error}");
         }
     }
 
@@ -412,7 +412,7 @@ impl App {
             return;
         };
         if let Err(error) = write_offer(&self.loop_handle, text, pipe, OFFER_TIMEOUT) {
-            eprintln!("athanor-toolkit: the clipboard's reader took no text: {error}");
+            eprintln!("athanor-sal: the clipboard's reader took no text: {error}");
         }
     }
 }

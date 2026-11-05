@@ -236,21 +236,21 @@ class AllowList(unittest.TestCase):
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
-            "system/athanor-toolkit/Cargo.toml", '[package]\nname = "athanor-toolkit"\n'
+            "system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n'
         )
         self.write(
-            "system/athanor-toolkit/src/lib.rs",
+            "system/athanor-sal/src/lib.rs",
             "pub fn surface() { s.set_layer(Layer::Top); }\n",
         )
         manifest = (
-            '[features]\ndefault = ["gtk"]\ngtk = []\ntoolkit = ["dep:athanor-toolkit"]\n'
-            '[dependencies]\nathanor-toolkit = { path = "../../../../system/athanor-toolkit", optional = true }\n'
+            '[features]\ndefault = ["gtk"]\ngtk = []\ntoolkit = ["dep:athanor-sal"]\n'
+            '[dependencies]\nathanor-sal = { path = "../../../../system/athanor-sal", optional = true }\n'
         )
         self.package(
             "athanor-dock",
             manifest,
             {
-                "src/main.rs": '#[cfg(feature = "toolkit")]\nuse athanor_toolkit::surface;\nfn main() {}\n'
+                "src/main.rs": '#[cfg(feature = "toolkit")]\nuse athanor_sal::surface;\nfn main() {}\n'
             },
         )
         self.assertEqual(self.problems(), [])
@@ -258,7 +258,7 @@ class AllowList(unittest.TestCase):
         self.package(
             "athanor-dock",
             manifest.replace('default = ["gtk"]', 'default = ["gtk", "toolkit"]'),
-            {"src/main.rs": "use athanor_toolkit::surface;\nfn main() {}\n"},
+            {"src/main.rs": "use athanor_sal::surface;\nfn main() {}\n"},
         )
         self.assertEqual(len(self.problems()), 1)
 
@@ -908,20 +908,20 @@ class AllowList(unittest.TestCase):
 
     def test_a_spec_feature_of_a_dependency_enables_it(self):
         self.write(
-            "system/athanor-toolkit/Cargo.toml",
-            '[package]\nname = "athanor-toolkit"\n[features]\nedge = []\n',
+            "system/athanor-sal/Cargo.toml",
+            '[package]\nname = "athanor-sal"\n[features]\nedge = []\n',
         )
         self.write(
-            "system/athanor-toolkit/src/lib.rs",
+            "system/athanor-sal/src/lib.rs",
             "pub fn surface() { s.set_layer(Layer::Top); }\n",
         )
         self.package(
             "athanor-dock",
-            '[dependencies]\nathanor-toolkit = { path = "../../../../system/athanor-toolkit", optional = true }\n',
-            {"src/main.rs": "use athanor_toolkit::surface;\nfn main() {}\n"},
+            '[dependencies]\nathanor-sal = { path = "../../../../system/athanor-sal", optional = true }\n',
+            {"src/main.rs": "use athanor_sal::surface;\nfn main() {}\n"},
         )
         self.assertEqual(self.problems(), [])
-        for flag in ("--features athanor-toolkit/edge",):
+        for flag in ("--features athanor-sal/edge",):
             with self.subTest(flag):
                 self.write(
                     "forge/specs/athanor-dock/athanor-dock.spec",

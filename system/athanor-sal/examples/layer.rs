@@ -2,11 +2,11 @@
 //! the rig's check of the driver's layer surfaces as outputs come, go and change scale (the dock
 //! plan, task 3). Prints a line when a button is pressed.
 
-use athanor_toolkit::driver::{
+use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
     SurfaceId,
 };
-use athanor_toolkit::{Event, Kind, Theme, Ui};
+use athanor_sal::{Event, Kind, Theme, Ui};
 use std::process::ExitCode;
 
 struct Bars;
@@ -18,7 +18,7 @@ impl Application for Bars {
         ui.add(Ui::ROOT, Kind::Button(name));
         let mut options = LayerOptions::default();
         options.layer = Layer::Top;
-        options.namespace = "athanor-toolkit-layer".into();
+        options.namespace = "athanor-sal-layer".into();
         options.anchor = Anchor::BOTTOM;
         options.margin = [0, 0, 8, 0];
         options.keyboard = KeyboardInteractivity::OnDemand;
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
     match driver::run(Bars) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("athanor-toolkit-layer: {error}");
+            eprintln!("athanor-sal-layer: {error}");
             ExitCode::FAILURE
         }
     }

@@ -24,10 +24,10 @@ use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::Layout;
 use athanor_style::appearance::{self, Appearance};
-use athanor_toolkit::driver::{
+use athanor_sal::driver::{
     Anchor as Edges, Application, LayerOptions, OutputInfo, Shell, Side, SurfaceId,
 };
-use athanor_toolkit::{Event, IconTheme, Image, Kind, Rect, Ui, WidgetId};
+use athanor_sal::{Event, IconTheme, Image, Kind, Rect, Ui, WidgetId};
 use gio::glib;
 use gio::prelude::*;
 use gio_unix::DesktopAppInfo;

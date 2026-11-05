@@ -249,7 +249,7 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
 /// The whole tree of the visible widgets, as the adapter's first update and after every change.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
-    tree.toolkit_name = Some("athanor-toolkit".into());
+    tree.toolkit_name = Some("athanor-sal".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
     let shown = || ui.ids().filter(|&id| ui.is_visible(id));
     TreeUpdate {

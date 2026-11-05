@@ -4,11 +4,11 @@
 //! button. Prints the rectangles the check aims at, then a line when an item is activated, and
 //! one when the menu refuses a popup of its own (Shift+F10 on an item).
 
-use athanor_toolkit::driver::{
+use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell, Side,
     SurfaceId,
 };
-use athanor_toolkit::{Event, Kind, Rect, Theme, Ui, WidgetId};
+use athanor_sal::{Event, Kind, Rect, Theme, Ui, WidgetId};
 use std::process::ExitCode;
 
 /// The menu's widgets, laid out, and its first item.
@@ -56,7 +56,7 @@ impl Application for Dock {
         print("item", menu.widget(first).rect);
         let mut options = LayerOptions::default();
         options.layer = Layer::Top;
-        options.namespace = "athanor-toolkit-popup".into();
+        options.namespace = "athanor-sal-popup".into();
         options.anchor = Anchor::BOTTOM;
         options.keyboard = KeyboardInteractivity::OnDemand;
         Some((ui, options))
@@ -82,7 +82,7 @@ impl Application for Dock {
             }
             Kind::Button(_) => {
                 if let Err(error) = shell.open_popup(surface, id, menu().0, Side::Top) {
-                    eprintln!("athanor-toolkit-popup: {error}");
+                    eprintln!("athanor-sal-popup: {error}");
                 }
             }
             _ => {}
@@ -94,7 +94,7 @@ fn main() -> ExitCode {
     match driver::run(Dock::default()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("athanor-toolkit-popup: {error}");
+            eprintln!("athanor-sal-popup: {error}");
             ExitCode::FAILURE
         }
     }

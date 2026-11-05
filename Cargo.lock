@@ -470,9 +470,9 @@ dependencies = [
  "athanor-apps",
  "athanor-i18n",
  "athanor-layout",
+ "athanor-sal",
  "athanor-style",
  "athanor-sulphur-client",
- "athanor-toolkit",
  "athanor-unit",
  "gio",
  "gio-unix",
@@ -602,6 +602,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-sal"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_unix",
+ "athanor-i18n",
+ "parley",
+ "resvg",
+ "smithay-client-toolkit",
+ "vello_cpu",
+ "vello_gpu",
+ "wayland-backend",
+ "wayland-client",
+ "wgpu",
+]
+
+[[package]]
 name = "athanor-search"
 version = "1.0.0"
 dependencies = [
@@ -700,23 +717,6 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-scanner",
-]
-
-[[package]]
-name = "athanor-toolkit"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_unix",
- "athanor-i18n",
- "parley",
- "resvg",
- "smithay-client-toolkit",
- "vello_cpu",
- "vello_gpu",
- "wayland-backend",
- "wayland-client",
- "wgpu",
 ]
 
 [[package]]

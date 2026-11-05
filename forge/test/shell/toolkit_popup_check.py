@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""toolkit_popup_check.py - the dock plan, task 4: athanor-toolkit's popups against sway on its
+"""toolkit_popup_check.py - the dock plan, task 4: athanor-sal's popups against sway on its
 headless backend.
 
-Runs inside the rig. Starts sway, then `athanor-toolkit-popup` with WAYLAND_DEBUG: one layer
+Runs inside the rig. Starts sway, then `athanor-sal-popup` with WAYLAND_DEBUG: one layer
 surface along the bottom edge, holding a button with a menu and a tooltip. The rig has no pointer
-device, so `athanor-toolkit-pointer` adds a virtual one. From the client's own trace and output:
+device, so `athanor-sal-pointer` adds a virtual one. From the client's own trace and output:
 
 - resting on the button shows its tooltip, an `xdg_popup` of the layer surface without a grab,
   placed under the button's bounds grown by 4 pixels;
@@ -27,8 +27,8 @@ import sys
 import time
 from pathlib import Path
 
-CLIENT = "/out/bin/athanor-toolkit-popup"
-POINTER = "/out/bin/athanor-toolkit-pointer"
+CLIENT = "/out/bin/athanor-sal-popup"
+POINTER = "/out/bin/athanor-sal-pointer"
 TRACE = Path("/out/toolkit-popup.trace")
 OUTPUT = Path("/out/toolkit-popup.out")
 WIDTH, HEIGHT = 1280, 800
