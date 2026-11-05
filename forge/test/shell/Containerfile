@@ -47,6 +47,13 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
       adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
+# Three fonts of the image that have Latin letters beside their own script. Fontconfig's
+# fallback for Latin text takes PakType Naskh Basic under Arabic and Liberation Mono under
+# Hebrew, and Vazirmatn is GTK's Latin font under Persian: the toolkit's line-height test (#590)
+# needs them to tell the font GTK draws Latin with from that fallback.
+RUN dnf5 -y install --setopt=install_weak_deps=False \
+      paktype-naskh-basic-fonts vazirmatn-fonts liberation-mono-fonts \
+  && dnf5 clean all
 # athanor-compositor's headless soak (doc_own_stack.md, C1 task 2) draws eglgears_wayland on
 # llvmpipe beside a GTK4 client.
 RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
