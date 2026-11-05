@@ -166,12 +166,11 @@ impl<R: Renderer + ImportAll> Element for SurfaceElement<R> {
             return OpaqueRegions::default();
         }
         // The buffer is stretched over the element's whole pixels, as its damage is.
-        let size = self.inner.geometry(scale).size.to_f64();
-        let view = self.inner.view().dst.to_f64();
-        let ratio = Scale::from((size.w / view.w, size.h / view.h));
+        let size = self.inner.geometry(scale).size;
+        let view = self.inner.view().dst;
         self.opaque
             .iter()
-            .filter_map(|region| covered(*region, ratio))
+            .filter_map(|region| covered(*region, view, size))
             .collect()
     }
 
@@ -207,13 +206,37 @@ where
     }
 }
 
-/// The pixels `region` covers whole, at `ratio` pixels to a logical pixel: its start rounded up,
-/// its end down, and nothing when no pixel is left.
-fn covered(region: Rectangle<i32, Logical>, ratio: Scale<f64>) -> Option<Rectangle<i32, Physical>> {
-    let exact = region.to_f64().to_physical(ratio);
-    let start = exact.loc.to_i32_ceil();
-    let end = (exact.loc + exact.size).to_i32_floor();
-    (end.x > start.x && end.y > start.y).then(|| Rectangle::from_extremities(start, end))
+/// The pixels `region` covers whole when a surface of `view` logical pixels is stretched over
+/// `size` physical ones: its start rounded up, its end down, and nothing when no pixel is left.
+fn covered(
+    region: Rectangle<i32, Logical>,
+    view: Size<i32, Logical>,
+    size: Size<i32, Physical>,
+) -> Option<Rectangle<i32, Physical>> {
+    if view.w <= 0 || view.h <= 0 {
+        return None;
+    }
+    let end = region.loc + region.size;
+    let start = (
+        scaled(region.loc.x, view.w, size.w, true),
+        scaled(region.loc.y, view.h, size.h, true),
+    );
+    let end = (
+        scaled(end.x, view.w, size.w, false),
+        scaled(end.y, view.h, size.h, false),
+    );
+    (end.0 > start.0 && end.1 > start.1).then(|| Rectangle::from_extremities(start, end))
+}
+
+/// The physical edge of logical edge `at` of a surface `view` wide stretched over `size` pixels,
+/// rounded up or down. In integers: the ratio as a float, size / view, puts the far edge of a
+/// whole surface a rounding error short of `size`, and the floor then drops its last row.
+fn scaled(at: i32, view: i32, size: i32, up: bool) -> i32 {
+    let product = i64::from(at.clamp(0, view)) * i64::from(size);
+    let view = i64::from(view);
+    let rounding = if up { view - 1 } else { 0 };
+    // At most `size`, since the edge is clamped to the surface.
+    ((product + rounding) / view) as i32
 }
 
 /// The elements of `surface`'s tree, as `render_elements_from_surface_tree` makes them, each
@@ -1122,6 +1145,31 @@ mod tests {
 
     fn rectangle(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
         Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    /// A fullscreen surface on 1366x768 at scale 1.25 is 1093x614 logical pixels stretched over
+    /// the whole output: its opaque region covers every row and column, where the ratio as a
+    /// float, 768 / 614, put the bottom edge at 767.999 and lost the last row.
+    #[test]
+    fn a_whole_surface_stays_opaque_to_its_last_pixel() {
+        let view = Size::from((1093, 614));
+        let size = Size::from((1366, 768));
+        assert_eq!(
+            covered(rectangle(0, 0, 1093, 614), view, size),
+            Some(Rectangle::new((0, 0).into(), (1366, 768).into()))
+        );
+        // A region past the surface covers no more than the surface.
+        assert_eq!(
+            covered(rectangle(-5, -5, 1200, 700), view, size),
+            Some(Rectangle::new((0, 0).into(), (1366, 768).into()))
+        );
+        // Inside, an edge still rounds inward: logical 1 to 3 is physical 1.25 to 3.75.
+        let (view, size) = (Size::from((4, 4)), Size::from((5, 5)));
+        assert_eq!(
+            covered(rectangle(1, 1, 2, 2), view, size),
+            Some(Rectangle::new((2, 2).into(), (1, 1).into()))
+        );
+        assert_eq!(covered(rectangle(1, 1, 1, 1), view, size), None);
     }
 
     /// A shadow stays outside the frame; a tree past the margin, or past a quarter of a small
