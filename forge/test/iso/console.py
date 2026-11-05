@@ -326,17 +326,51 @@ KARG_PROBE_WAIT = 5.0
 # origin; a file read without a container reference follows no image and answers WRONG
 # with `none`. As with the other probes printf assembles the marker, so the echo of the
 # typed line cannot pass for the answer.
-ORIGIN_PROBE = (
-    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
-    b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
-    b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
-    b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
-    b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
-    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
-    b" esac; fi"
-)
+# The repository is the one the ISO was built from (ATHANOR_ISO_REPOSITORY, passed by
+# run_iso_test.sh): the signed :stable of any other repository answers WRONG (issue 462).
+REPOSITORY = re.compile(r"[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+")
+
+
+def origin_probe(repository: str) -> bytes:
+    """ORIGIN_PROBE for one repository. The name goes into a shell `case` pattern, so
+    only the characters of a repository name are accepted."""
+    if not REPOSITORY.fullmatch(repository):
+        raise ValueError(f"not a repository name: {repository!r}")
+    return (
+        b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+        b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
+        b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
+        b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
+        b" ostree-image-signed:docker://" + repository.encode() + b":stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+        b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
+        b" esac; fi"
+    )
+
+
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
+
+# Ask the guest which image it booted (issue 402). The comparison is on the layers, not on
+# the manifest digest `bootc status` reports: the ISO builder re-serialises the manifest
+# (the installed system's imageDigest is in no registry), and the config digest changes
+# with it, while the uncompressed layer digests (`rootfs.diff_ids`) do not. ostree-ext keeps
+# the image config in the booted commit's metadata, `ostree.container.image-config`; the
+# guest lists its diff_ids in order and answers one short line, BOOTED_LAYERS sha256:<hex>,
+# the digest of that list one id per line (the host computes the same from the registry
+# config). Nothing readable answers BOOTED_UNREADABLE. The grep does not depend on how
+# ostree quotes the string. As with the other probes printf assembles the marker.
+BOOTED_PROBE = (
+    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+    b' d=$(readlink -f "/sysroot$p");'
+    b" c=$(printf 'collaudo\\n' | sudo -S ostree show --repo=/sysroot/ostree/repo"
+    b' --print-metadata-key=ostree.container.image-config "$(basename "$d" | cut -d. -f1)");'
+    b" l=$(printf '%s\\n' \"$c\" | grep -o 'diff_ids[^]]*' | grep -o 'sha256:[0-9a-f]\\{64\\}');"
+    b' if [ -n "$l" ]; then printf \'BOOTED_%s sha256:%s\\n\' LAYERS'
+    b' "$(printf \'%s\\n\' "$l" | sha256sum | cut -d" " -f1)";'
+    b" else printf 'BOOTED_%s\\n' UNREADABLE; fi"
+)
+# A cmdline read, a symlink, a metadata read under sudo and one hash.
+BOOTED_PROBE_WAIT = 10.0
 
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
@@ -531,6 +565,10 @@ def main() -> int:
         print("usage: console.py SOCKET LOG PHASES MONITOR", file=sys.stderr)
         return 2
     sock_path, log_path, phase_path, monitor_path = sys.argv[1:5]
+    iso_repository = os.environ.get("ATHANOR_ISO_REPOSITORY", "")
+    if not REPOSITORY.fullmatch(iso_repository):
+        print(f"ATHANOR_ISO_REPOSITORY is not a repository name: {iso_repository!r}", file=sys.stderr)
+        return 2
     decided = DECIDED - {"settings-alive"} if HOLD else DECIDED
 
     for _ in range(180):
@@ -605,8 +643,12 @@ def main() -> int:
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
         note("karg-asked")
-        ask(ORIGIN_PROBE, ORIGIN_PROBE_WAIT)
+        ask(origin_probe(iso_repository), ORIGIN_PROBE_WAIT)
         note("origin-asked")
+        # The upgrade case boots an ISO whose layers the run does not know (HOLD).
+        if not HOLD:
+            ask(BOOTED_PROBE, BOOTED_PROBE_WAIT)
+            note("booted-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 

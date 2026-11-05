@@ -982,10 +982,12 @@ stage_podman() { # item 15
 }
 
 stage_probes() { # the runtime audit probes (issue #312), against expectations.toml
-  local facts=$ACC_STATE/probes-facts.json
+  local facts=$ACC_STATE/probes-facts.json signed
   guest_ssh python3 - collect < "$ACC_HERE/probes.py" > "$facts"
+  # The guest must boot the digest the registry serves, signed, for the reference it follows (#508).
+  signed=$(skopeo inspect --tls-verify=false --format '{{.Digest}}' "docker://$REPO:stable")
   # The verdict names each check; a failure stops the run, and the facts stay in $ACC_STATE.
-  python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" "$ACC_PORT" || die "FAIL  runtime probes (facts: $facts)"
+  python3 -B "$ACC_HERE/probes.py" check "$facts" "$ACC_HERE/expectations.toml" "$ROOT/forge/config/contacts.toml" "$ACC_PORT" "$REPO:stable" "$signed" || die "FAIL  runtime probes (facts: $facts)"
 }
 
 stage_report() {
