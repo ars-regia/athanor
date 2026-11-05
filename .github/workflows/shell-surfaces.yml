@@ -373,9 +373,15 @@ jobs:
         run: bash forge/test/shell/rig.sh atspi dock
       - name: Accessibility tree of the dock in Italian
         run: bash forge/test/shell/rig.sh atspi dock it
-      - name: Orca's speech on the dock against its transcript
+      - name: Build and test athanor-sulphur
+        run: bash forge/test/shell/rig.sh build-compositor
+      - name: Orca's speech on the dock under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
         run: bash forge/test/shell/rig.sh orca dock
-      - name: Orca's speech on the dock in Italian against its transcript
+      - name: Orca's speech on the dock in Italian under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
         run: bash forge/test/shell/rig.sh orca dock it
       - name: Openers, running windows, pinning, the knob and presets live, and memory
         run: bash forge/test/shell/rig.sh dock-e2e
