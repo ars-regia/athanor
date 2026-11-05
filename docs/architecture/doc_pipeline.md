@@ -32,7 +32,9 @@
   Amended 2026-11-01 (#655), by the maintainer's decision: PL55 takes the Azoth
   kernel out of the Fedora half, requires a `release-class.toml` file for a security fix of
   a package Athanor builds, and has `candidate` check that file for the kernel.
-  Amended 2026-11-05, approved by the maintainer with the pull request that makes the change:
+  Amended 2026-11-05 (#401), approved by the maintainer with the pull request that makes the
+  change: PL42 names the daily check of the evidence copies off GitHub.
+  Also amended 2026-11-05, approved by the maintainer with the pull request that makes the change:
   PL51 runs the `alert` action in a last job of each scheduled workflow, on a GitHub-hosted
   runner, rather than as the last step of each job, since a job whose self-hosted runner is
   lost never runs its last step (Kernel Weekly, 2026-11-01). Only `kernel-weekly.yml` carries
@@ -1008,7 +1010,9 @@ identity), since the bundle exists only at promotion, long after the release's s
 jobs ended; promotion therefore holds no key. Each promotion also copies the bundle to an OCI registry
 off GitHub named by the variable `EVIDENCE_REGISTRY`, which has no default: unset, promotion
 fails closed (ADR-0106 item 4). In release 0.3 that copy is the only store; the GitHub Release
-follows in 0.5 (ADR-0106 item 7).
+follows in 0.5 (ADR-0106 item 7). The daily job `evidence-copies` of `maintenance.yml`
+(#401, `system/check_evidence_copies.py`) pulls the copy of every promotion and verifies it
+against the plan on its GitHub Release, so a deleted or altered copy fails the next run.
 
 Known gaps, documented in `docs/compliance/` rather than hidden: full wipe (LUKS
 crypto-erase) after 1.0 (ADR-0076), the harmonised standards still in draft (ETSI EN
