@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        14%{?dist}
+Release:        15%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -12,7 +12,9 @@ URL:            https://github.com/ars-regia/athanor
 
 BuildRequires:  rust cargo gcc systemd-rpm-macros
 BuildRequires:  dbus-daemon
-Requires:       bootc skopeo ostree systemd polkit containers-common
+# prlimit: the %check bounds a stub skopeo with the real one.
+BuildRequires:  util-linux
+Requires:       bootc skopeo ostree systemd polkit containers-common util-linux
 
 %description
 Checks for, verifies, downloads and applies Athanor system image updates, never without
@@ -74,6 +76,18 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
+- The fetch of a signature or attestation attachment is bounded (#658). It reads the
+  manifest first, up to 1 MiB, and does not copy an object whose manifest has a member cosign
+  does not write, more than 64 layers, or a descriptor that declares more than 64 KiB. The copy
+  names the digest of the manifest read and runs under prlimit(1) with a file size limit of
+  64 KiB, or of the manifest's size when it is larger, so a blob larger than it declared is cut
+  there and the fetch fails. The copy passes --remove-signatures, so it does not also copy the
+  signatures registries.d attaches to the attachment itself, whose layer count nothing bounds.
+  It therefore writes at most the manifest, the config and 64 layers under that limit: about
+  4 MiB for a manifest of 64 KiB or less, 66 MiB at most. Each skopeo call is killed after 30
+  seconds. Requires util-linux for prlimit.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Each check removes the stored signature objects as it does the release attestations,
   keeping those of the booted, staged, rollback and candidate digests (#666).
