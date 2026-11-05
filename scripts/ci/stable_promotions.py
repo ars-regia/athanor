@@ -184,10 +184,13 @@ def check_image(name, repo, found):
     mine = [r for r in found if name in r["images"]]
     stable = tag_digest(repo, "stable")
     if not mine:
-        if stable is None:
-            print(f"{name}: never promoted, no :stable")
-            return []
-        return [f"{name}:stable: {stable} has no promotion record from a promote job that ran in the environment {ENVIRONMENT}"]
+        # No record: any of the tags is a copy no promotion made.
+        present = ["stable", "stable-previous", *(x for x in tags(repo) if re.fullmatch(r"stable-\d{8}", x))]
+        seen = {x: tag_digest(repo, x) for x in dict.fromkeys(present)}
+        seen = {x: d for x, d in seen.items() if d}
+        if not seen:
+            print(f"{name}: never promoted, no :stable, :stable-previous or dated tag")
+        return [f"{name}:{x}: {d} has no promotion record from a promote job that ran in the environment {ENVIRONMENT}" for x, d in seen.items()]
     newest = mine[-1]
     want = newest["images"][name]
     bad = []
@@ -201,8 +204,13 @@ def check_image(name, repo, found):
             "a rollback or a copy no promotion made, or a promote still running"
         )
     previous = want.get("previous_stable")
-    if previous:
-        have = tag_digest(repo, "stable-previous")
+    have = tag_digest(repo, "stable-previous")
+    if not previous:
+        # The first promotion of an image has no :stable to keep, and promote.sh writes
+        # :stable-previous only from one.
+        if have:
+            bad.append(f"{name}:stable-previous: {have}, but the newest promotion (run {newest['run']}) recorded no previous stable{stopped}")
+    else:
         if have != previous:
             bad.append(f"{name}:stable-previous: {have or 'missing'}, but the newest promotion (run {newest['run']}) recorded {previous}{stopped}")
     dated = {t: valid_day(t) for t in tags(repo) if re.fullmatch(r"stable-\d{8}", t)}

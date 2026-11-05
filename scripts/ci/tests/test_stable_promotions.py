@@ -159,6 +159,30 @@ class StablePromotions(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("never promoted", r.stdout)
 
+    def test_a_forged_stable_previous_fails_when_the_newest_record_has_none(self):
+        self.promotion(5, 6, D2, day="20261024")
+        self.tag("stable", D2, listed=False)
+        self.tag("stable-previous", D1, listed=False)
+        self.fails(f"athanor-system:stable-previous: {D1}, but the newest promotion (run 6) recorded no previous stable")
+
+    def test_no_stable_previous_is_right_when_the_newest_record_has_none(self):
+        self.promotion(5, 6, D2, day="20261024")
+        self.tag("stable", D2, listed=False)
+        self.tag("stable-20261024", D2, listed=False)
+        del self.fx["tags"][f"{IMAGE}:stable-previous"]
+        r = self.check()
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_an_image_with_no_record_fails_on_a_lone_stable_previous(self):
+        for name in ("stable", "stable-20261024", "stable-20261017"):
+            del self.fx["tags"][f"{IMAGE}:{name}"]
+        self.fails(f"athanor-system:stable-previous: {D2} has no promotion record")
+
+    def test_an_image_with_no_record_fails_on_a_lone_dated_tag(self):
+        for name in ("stable", "stable-previous", "stable-20261017"):
+            del self.fx["tags"][f"{IMAGE}:{name}"]
+        self.fails(f"athanor-system:stable-20261024: {D1} has no promotion record")
+
     def test_a_rollback_to_an_older_recorded_digest_fails(self):
         self.chain()
         self.tag("stable", D2, listed=False)
