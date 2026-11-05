@@ -165,10 +165,11 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node
         }
     };
-    if widget.is_focusable() {
+    let sensitive = ui.is_sensitive(id);
+    if widget.is_focusable() && sensitive {
         node.add_action(Action::Focus);
     }
-    if widget.disabled {
+    if !sensitive {
         node.set_disabled();
     }
     if let Some(expanded) = widget.expanded {
@@ -280,12 +281,15 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 }
 
 impl Ui {
-    /// Carries out an assistive technology's request on the widget it names.
+    /// Carries out an assistive technology's request on the widget it names, unless it is
+    /// hidden or insensitive.
     pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
         let id = u32::try_from(request.target_node.0)
             .ok()
             .map(WidgetId)
-            .filter(|&id| id.index() < self.len() && self.is_visible(id))?;
+            .filter(|&id| {
+                id.index() < self.len() && self.is_visible(id) && self.is_sensitive(id)
+            })?;
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             (Action::Focus, _) => {
@@ -835,6 +839,49 @@ mod tests {
             data: None,
         };
         assert_eq!(menu.do_action(&click), None);
+    }
+
+    #[test]
+    fn an_insensitive_widget_and_its_children_read_as_unavailable_and_refuse_every_action() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let group = ui.add(Ui::ROOT, Kind::Group("Group".into()));
+        let button = ui.add(group, Kind::Button("Button".into()));
+        let field = ui.field(group, "Name", "a");
+        let slider = ui
+            .slider(group, "Volume", 0.0, 10.0, 1.0, 5.0)
+            .expect("a valid range");
+        ui.layout();
+        ui.set_sensitive(group, false);
+        for id in [group, button, field, slider] {
+            let n = node(&ui, id, 1.0);
+            assert!(n.is_disabled(), "{id:?} reads as unavailable");
+            assert!(!n.supports_action(Action::Focus), "{id:?} offers no focus");
+        }
+        let request = |action, target, data| ActionRequest {
+            action,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: node_id(target),
+            data,
+        };
+        assert_eq!(ui.do_action(&request(Action::Click, button, None)), None);
+        assert_eq!(ui.do_action(&request(Action::Focus, button, None)), None);
+        assert_eq!(ui.focus(), None);
+        assert_eq!(
+            ui.do_action(&request(Action::Increment, slider, None)),
+            None
+        );
+        let text = Some(ActionData::Value("b".into()));
+        assert_eq!(ui.do_action(&request(Action::SetValue, field, text)), None);
+        assert_eq!(
+            (ui.value(slider), ui.field_text(field).as_deref()),
+            (Some(5.0), Some("a"))
+        );
+
+        ui.set_sensitive(group, true);
+        assert!(!node(&ui, button, 1.0).is_disabled());
+        assert!(node(&ui, button, 1.0).supports_action(Action::Focus));
+        let click = request(Action::Click, button, None);
+        assert_eq!(ui.do_action(&click), Some(Event::Clicked(button)));
     }
 
     #[test]

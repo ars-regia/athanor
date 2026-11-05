@@ -5,6 +5,7 @@ Choices toggle button not pressed.
 Values toggle button not pressed.
 Lists toggle button not pressed.
 Text toggle button not pressed.
+States toggle button not pressed.
 A button button.
 One toggle button pressed.
 Two toggle button not pressed.
@@ -17,6 +18,7 @@ Choices toggle button pressed.
 Values toggle button not pressed.
 Lists toggle button not pressed.
 Text toggle button not pressed.
+States toggle button not pressed.
 Option one check box checked.
 Option two check box not checked.
 A switch check box checked.
@@ -26,18 +28,26 @@ Gallery
 Values toggle button pressed.
 Lists toggle button not pressed.
 Text toggle button not pressed.
+States toggle button not pressed.
 A slider horizontal slider 50 50 percent.
 Screen reader off.
 Screen reader on.
 Gallery
 Lists toggle button pressed.
 Text toggle button not pressed.
+States toggle button not pressed.
 A list List with 50 items
 Row 1.
 Screen reader off.
 Screen reader on.
 Gallery
 Text toggle button pressed.
+States toggle button not pressed.
 Notes text.
 The caret starts here.
+Screen reader off.
+Screen reader on.
+Gallery
+States toggle button pressed.
+Enable the button check box not checked.
 Screen reader off.

@@ -4,17 +4,19 @@
 
 use crate::widget::{Key, Kind, Ui, WidgetId};
 
-/// The visible, focusable widgets in logical order: the tree, depth first. A list is one stop,
-/// on its focused row, else its selected row, else its first.
+/// The visible, sensitive, focusable widgets in logical order: the tree, depth first. A list is
+/// one stop, on its focused row, else its selected row, else its first; its insensitive rows
+/// are none.
 pub fn chain(ui: &Ui) -> Vec<WidgetId> {
     let mut out = Vec::new();
     let mut stack = vec![Ui::ROOT];
     while let Some(id) = stack.pop() {
-        if !ui.widget(id).visible {
+        if !ui.widget(id).visible || !ui.widget(id).sensitive {
             continue;
         }
         if let Kind::List { selected, .. } = ui.widget(id).kind {
-            let rows = ui.visible_children(id);
+            let mut rows = ui.visible_children(id);
+            rows.retain(|&r| ui.widget(r).sensitive);
             let stop = [ui.focus(), selected]
                 .into_iter()
                 .flatten()

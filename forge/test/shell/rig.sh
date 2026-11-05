@@ -211,6 +211,10 @@ capture_greeter() {
             /repo/forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/po/athanor-greeter-ui.pot /out/pseudo-rtl.po
         msgfmt -o /out/locale/rtl.mo /out/pseudo-rtl.po'
     stage_greeter_icons
+    # The password field's caret blinks, so a capture shows it or not by the moment it is taken
+    # (#955): the seed holds GTK's cursor-blink off, and the caret stays steady in every case.
+    mkdir -p "$out/seed-greeter"
+    echo "org.gnome.desktop.interface cursor-blink false" > "$out/seed-greeter.gsettings"
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         override=()
@@ -218,7 +222,7 @@ capture_greeter() {
             override=(ATHANOR_I18N_CATALOG="/out/locale/$catalog")
         fi
         in_rig "$(rig_image)" "${with_account[@]}" env ATHANOR_GREETER_VARIANT="$variant" RIG_LOCALE="$locale" \
-            RIG_DATA_OVERLAY=/out/greeter-icons "${override[@]}" \
+            RIG_DATA_OVERLAY=/out/greeter-icons RIG_CONFIG_SEED=/out/seed-greeter "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1920 1080 "$scale" "$tag" -- \
             python3 /repo/forge/test/shell/bar_session.py --client athanor-greeter-ui "${session_unit[@]}"
     done < <(python3 -B "$rig/cases.py" greeter)
@@ -1167,7 +1171,7 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggles (five pages), a button, three toggles and a
+        # The gallery's first page: the page toggles (six pages), a button, three toggles and a
         # field, and the title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
         # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
         # hold all the reference holds, the GTK twin's, recorded (OS8).

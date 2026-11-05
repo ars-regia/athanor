@@ -5,7 +5,7 @@ use crate::text::Brush;
 use crate::driver::Side;
 use crate::theme::Rgba;
 use crate::widget::{
-    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui,
+    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui, WidgetId,
     WindowButton,
 };
 use parley::{Layout, PositionedLayoutItem};
@@ -42,6 +42,10 @@ pub trait Canvas {
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
     fn pop_clip(&mut self);
+    /// Draws what follows at `opacity`, from 0 to 1, until the matching [`Canvas::pop_layer`].
+    fn push_opacity_layer(&mut self, opacity: f32);
+    /// Ends the innermost layer.
+    fn pop_layer(&mut self);
     /// Fills a run of glyphs of one font and size, hinted.
     fn glyphs(
         &mut self,
@@ -100,6 +104,12 @@ macro_rules! canvas {
             fn pop_clip(&mut self) {
                 <$canvas>::pop_clip(self);
             }
+            fn push_opacity_layer(&mut self, opacity: f32) {
+                <$canvas>::push_opacity_layer(self, opacity);
+            }
+            fn pop_layer(&mut self) {
+                <$canvas>::pop_layer(self);
+            }
             fn glyphs(
                 &mut self,
                 resources: &mut $resources,
@@ -151,9 +161,8 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 
 /// How much of its text colour a hovered control's fill takes.
 const HOVER: f32 = 0.05;
-/// How much of its text colour a disabled item's label keeps, over the background: half, as
-/// Adwaita's insensitive widgets.
-const DISABLED: f32 = 0.5;
+/// How much of its opacity an insensitive widget keeps: half, as Adwaita's.
+const INSENSITIVE: f32 = 0.5;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
@@ -254,9 +263,19 @@ pub fn paint<C: Canvas>(
     ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
 
     let (focus, hover) = (ui.focus, ui.hovered());
-    for id in ui.ids() {
-        if !ui.is_visible(id) {
-            continue;
+    let order = paint_order(ui);
+    // The insensitive subtree being drawn in its layer, and where it starts in `order`.
+    let mut faint: Option<(WidgetId, usize)> = None;
+    for (n, &(id, root)) in order.iter().enumerate() {
+        if faint.map(|(r, _)| r) != root {
+            if let Some((_, start)) = faint.take() {
+                indicators(ui, ctx, order[start..n].iter().map(|&(w, _)| w));
+                ctx.pop_layer();
+            }
+            if let Some(root) = root {
+                ctx.push_opacity_layer(INSENSITIVE);
+                faint = Some((root, n));
+            }
         }
         // Inside a scroll, only what its viewport, rounded, shows.
         let clip = ui.clip(id);
@@ -356,8 +375,7 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer, and
-            // faint when the item is disabled.
+            // A flat row with its label at the start edge, filled only under the pointer.
             Kind::MenuItem(_) => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
@@ -370,12 +388,7 @@ pub fn paint<C: Canvas>(
                         r.x + t.padding
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
-                    let ink = if widget.disabled {
-                        mix(t.background, t.text, DISABLED)
-                    } else {
-                        t.text
-                    };
-                    draw_text(ctx, resources, layout, at, ink)?;
+                    draw_text(ctx, resources, layout, at, t.text)?;
                 }
             }
             Kind::TitleBar => {
@@ -591,13 +604,45 @@ pub fn paint<C: Canvas>(
             ctx.pop_clip();
         }
     }
+    if let Some((_, start)) = faint {
+        indicators(ui, ctx, order[start..].iter().map(|&(w, _)| w));
+        ctx.pop_layer();
+    }
+    let sensitive = order.iter().filter(|&&(_, root)| root.is_none());
+    indicators(ui, ctx, sensitive.map(|&(w, _)| w));
+    Ok(())
+}
+
+/// The visible widgets in the order they are drawn, each with the topmost insensitive widget
+/// above it or itself: the order of the tree, but with the subtree of each such widget in one
+/// run, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
+/// insensitive widget and everything under it as one group.
+fn paint_order(ui: &Ui) -> Vec<(WidgetId, Option<WidgetId>)> {
+    // A parent comes before its children in the arena.
+    let mut faint: Vec<Option<WidgetId>> = Vec::with_capacity(ui.len());
     for id in ui.ids() {
+        let widget = &ui.widgets[id];
+        let above = widget.parent.and_then(|p| faint[p.index()]);
+        faint.push(above.or((!widget.sensitive).then_some(id)));
+    }
+    let mut order: Vec<_> = ui
+        .ids()
+        .filter(|&id| ui.is_visible(id))
+        .map(|id| (id, faint[id.index()]))
+        .collect();
+    // Stable: each subtree keeps the order of the tree, and starts where its root stood.
+    order.sort_by_key(|&(id, root)| root.unwrap_or(id));
+    order
+}
+
+/// Draws the indicators of the scrolls among `ids` whose content overflows them.
+fn indicators<C: Canvas>(ui: &Ui, ctx: &mut C, ids: impl Iterator<Item = WidgetId>) {
+    for id in ids {
         if let Some(bar) = scroll_indicator(ui, id) {
-            ctx.set_paint(color(t.border));
+            ctx.set_paint(color(ui.theme.border));
             ctx.fill_path(&rounded(bar, 0.0, bar.w / 2.0));
         }
     }
-    Ok(())
 }
 
 /// How much of the accent a selected list row's fill takes.
@@ -738,6 +783,75 @@ mod tests {
             ui.pointer_leave();
             assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn an_insensitive_container_is_drawn_as_one_layer_with_its_scroll_indicator(
+    ) -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Sensitive", crate::Theme::default(), false);
+        // An island far from the background, so that a second layer over its fill would show.
+        ui.theme.island = Rgba::rgb(0x20, 0x20, 0x20);
+        let island = ui.island(crate::Ui::ROOT, true, [0.0; 4]);
+        let button = ui.add(island, crate::Kind::Button("Files".into()));
+        let scroll = ui.scroll(island, 40.0);
+        for n in 0..6 {
+            ui.add(scroll, crate::Kind::Button(format!("Row {n}")));
+        }
+        ui.set_sensitive(island, false);
+        // Insensitive inside an insensitive island: no layer of its own.
+        ui.set_sensitive(button, false);
+        let faint = render(&mut ui, 1.0)?;
+        let t = ui.theme.clone();
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(faint.width()) * y as usize + x as usize);
+            faint.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let near =
+            |got: &[u8], want: Rgba| got.iter().zip(want.0).all(|(&a, b)| a.abs_diff(b) <= 1);
+        // The button covers the island's fill: half of it over the window's background, as GTK
+        // draws an insensitive widget's whole subtree at half its opacity.
+        let r = ui.widget(button).rect;
+        let fill = at(r.x + 4.0, r.y + r.h / 2.0);
+        let half = mix(t.background, t.surface, INSENSITIVE);
+        assert!(near(&fill, half), "{fill:?} is not {half:?}");
+        let bar = scroll_indicator(&ui, scroll).expect("the rows overflow the scroll");
+        let ink = at(bar.x + bar.w / 2.0, bar.y + bar.h / 2.0);
+        let half = mix(t.background, t.border, INSENSITIVE);
+        assert!(near(&ink, half), "the indicator {ink:?} is not {half:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn an_insensitive_widget_is_drawn_at_half_its_opacity() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Sensitive", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
+        let plain = render(&mut ui, 1.0)?;
+        ui.set_sensitive(button, false);
+        let faint = render(&mut ui, 1.0)?;
+        let r = ui.widget(button).rect;
+        let at = |p: &Pixmap| {
+            let i =
+                4 * (usize::from(p.width()) * (r.y + r.h / 2.0) as usize + (r.x + 4.0) as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let t = &ui.theme;
+        assert_eq!(at(&plain), t.surface.0.to_vec());
+        // Half the button's fill over the window's background, give or take the rounding.
+        let half = mix(t.background, t.surface, INSENSITIVE).0;
+        let off = at(&faint)
+            .iter()
+            .zip(half)
+            .map(|(&a, b)| a.abs_diff(b))
+            .max();
+        assert!(
+            off.is_some_and(|d| d <= 1),
+            "{:?} is not {half:?}",
+            at(&faint)
+        );
+        assert_ne!(hash(&faint), hash(&plain));
+        ui.set_sensitive(button, true);
+        assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         Ok(())
     }
 

@@ -90,6 +90,26 @@ class HiddenFailuresTest(unittest.TestCase):
         self.assertEqual(verify.hidden_failures("echo $'it\\'s' # 2>/dev/null"), [])
         self.assertEqual(verify.scan_shell("echo $'a\\'<<EOF'\nrun 2>/dev/null\n"), ([2], 0))
 
+    def test_a_kill_probe_is_not_a_hidden_failure(self):
+        for line in ('kill -0 "$pid" 2> /dev/null', "kill -0 $pid 2>/dev/null && x",
+                     "! kill -0 '$p' 2> /dev/null", "until kill -0 1 2> /dev/null; do :; done",
+                     "if kill -0 \"$p\" 2>/dev/null; then", "while kill -0 $p 2>/dev/null; do",
+                     "a && ! kill -0 \"${p}\" 2>/dev/null", "x; kill -0 12 2>/dev/null"):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [])
+        for line in ('kill "$pid" 2> /dev/null', 'kill -0 "$pid" > /dev/null 2>&1',
+                     'kill -0 "$pid" 2> /dev/null || true', "kill -9 $pid 2> /dev/null",
+                     "kill -0 $(x 2>/dev/null) 2>/dev/null", "kill -0 `x 2>/dev/null` 2>/dev/null",
+                     "echo kill -0 $p 2>/dev/null", "my-kill -0 $p 2>/dev/null",
+                     "sudo kill -0 $p 2>/dev/null", "kill -0 $(x 2>/dev/null)",
+                     'kill -0 "$a" "$b" 2> /dev/null'):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [1])
+
+    def test_a_probe_in_a_guest_string_or_a_workflow_is_not_counted(self):
+        self.assertEqual(verify.guest_failures('A = b"kill -0 $p 2>/dev/null;"\n'), ([], []))
+        self.assertEqual(verify.workflow_failures("        kill -0 $p 2>/dev/null"), [])
+
     def test_comments_are_ignored(self):
         text = "# run a 2>/dev/null || true\nrun b # not 2> /dev/null\n    # || true\n"
         self.assertEqual(verify.hidden_failures(text), [])
