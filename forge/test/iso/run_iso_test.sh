@@ -71,7 +71,7 @@ fi
 if [[ -n $iso_digest ]]; then
     # The layer ids of the image the ISO was built from, one per line, in order: the registry
     # answers for the digest, so a pushed image is what is compared, not a tag.
-    config=$(skopeo inspect --config "docker://${ISO_REPOSITORY}@${iso_digest}")
+    config=$(bash "${here}/../../scripts/retry.sh" skopeo inspect --config "docker://${ISO_REPOSITORY}@${iso_digest}")
     ids=$(jq -r '.rootfs.diff_ids[]' <<< "$config")
     [[ -n $ids ]] || { echo "the config of ${ISO_REPOSITORY}@${iso_digest} lists no layers" >&2; exit 2; }
     iso_layers=sha256:$(sha256sum <<< "$ids" | cut -d' ' -f1)
